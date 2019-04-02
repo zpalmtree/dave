@@ -50,6 +50,8 @@ function main() {
         }
     });
 
+    client.on('error', console.error);
+
     client.login(config.token)
           .catch((err) => {
               console.error(err);
