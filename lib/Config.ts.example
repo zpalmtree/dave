@@ -1,0 +1,5 @@
+class Config {
+    public token: string = 'Enter your token here';
+}
+
+export let config = new Config();
