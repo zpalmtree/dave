@@ -36,6 +36,10 @@ Modify `src/Config.ts`
 
 `yarn install`
 
+## Compilation
+
+`yarn build`
+
 ## Running
 
 `yarn start`
