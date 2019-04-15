@@ -1,5 +1,9 @@
 class Config {
+    /* Discord token */
     public token: string = 'Enter your token here';
+
+    /* Prefix for bot, e.g. $roll */
+    public prefix: string = '$';
 }
 
 export let config = new Config();
