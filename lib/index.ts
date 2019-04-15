@@ -31,10 +31,7 @@ function main() {
         const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length);
 
         switch (command) {
-            case 'roll': {
-                handleRoll(msg);
-                break;
-            }
+            case 'roll':
             case 'reroll': {
                 handleRoll(msg);
                 break;

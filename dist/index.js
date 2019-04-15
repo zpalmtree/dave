@@ -30,10 +30,7 @@ function main() {
         /* Get the actual command after the prefix is removed */
         const command = tmp.substring(tmp.indexOf(Config_1.config.prefix) + 1, tmp.length);
         switch (command) {
-            case 'roll': {
-                handleRoll(msg);
-                break;
-            }
+            case 'roll':
             case 'reroll': {
                 handleRoll(msg);
                 break;
@@ -48,6 +45,7 @@ function main() {
             }
         }
     });
+    client.on('error', console.error);
     client.login(Config_1.config.token)
         .catch((err) => {
         console.error(err);
