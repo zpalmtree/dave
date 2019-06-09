@@ -15,7 +15,7 @@ const Config_1 = require("./Config");
 const util_1 = require("util");
 const readFile = util_1.promisify(fs.readFile);
 const writeFile = util_1.promisify(fs.writeFile);
-const fit = '508753891689496576';
+const fit = '579918539830460417';
 function main() {
     const client = new discord_js_1.Client();
     client.on('ready', () => {
@@ -132,6 +132,10 @@ function handleQuote(msg) {
 function handleSuggest(msg, suggestion) {
     return __awaiter(this, void 0, void 0, function* () {
         if (msg.channel.id !== fit) {
+            return;
+        }
+        if (msg.author.bot) {
+            msg.reply('FUUUUUUUUUUUUUUU');
             return;
         }
         if (!suggestion || suggestion.length <= 1) {
