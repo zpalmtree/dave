@@ -74,7 +74,7 @@ function handleFortune(msg: Message): void {
         'Better not tell you now',
         'Outlook good',
         'Very Bad Luck',
-        'Your fortune: Godly Luck ',
+        'Godly Luck ',
     ];
 
     var fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
