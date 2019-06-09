@@ -44,6 +44,10 @@ function main() {
                 handleSuggest(msg, args.join(' '));
                 break;
             }
+            case 'fortune': {
+                handleFortune(msg);
+                break;
+            }
         }
     });
 
@@ -54,6 +58,28 @@ function main() {
               console.error(err);
               main();
     });
+}
+
+function handleFortune(msg: Message): void {
+    const fortunes: string[] = [
+        'Reply hazy, try again',
+        'Excellent Luck',
+        'Good Luck',
+        'Average Luck',
+        'Bad Luck',
+        'Good news will come to you by mail',
+        '（　´_ゝ`）ﾌｰﾝ',
+        'ｷﾀ━━━━━━(ﾟ∀ﾟ)━━━━━━ !!!!',
+        'You will meet a dark handsome stranger',
+        'Better not tell you now',
+        'Outlook good',
+        'Very Bad Luck',
+        'Your fortune: Godly Luck ',
+    ];
+
+    var fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
+
+    msg.reply(`Your fortune: ${fortune}`);
 }
 
 function handleRoll(msg: Message): void {
