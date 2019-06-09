@@ -10,7 +10,7 @@ import { promisify } from 'util';
 const readFile = promisify(fs.readFile);
 const writeFile = promisify(fs.writeFile);
 
-const fit = '508753891689496576';
+const fit = '579918539830460417';
 
 function main() {
     const client = new Client();
@@ -148,6 +148,11 @@ async function handleQuote(msg: Message): Promise<void> {
 
 async function handleSuggest(msg: Message, suggestion: string | undefined): Promise<void> {
     if (msg.channel.id !== fit) {
+        return;
+    }
+
+    if (msg.author.bot) {
+        msg.reply('FUUUUUUUUUUUUUUU');
         return;
     }
 
