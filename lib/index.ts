@@ -95,7 +95,7 @@ function handleFortune(msg: Message): void {
 
 function handleMath(msg: Message, args: string): void {
     try {
-        msg.reply(eval(args));
+        msg.reply(eval(args).toString());
     } catch (err) {
         msg.reply('Bad mathematical expression: ' + err.toString());
     }
