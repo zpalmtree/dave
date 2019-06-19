@@ -52,6 +52,10 @@ function main() {
                 handleFortune(msg);
                 break;
             }
+            case 'math': {
+                handleMath(msg, args.join(' '));
+                break;
+            }
         }
     });
     client.on('error', console.error);
@@ -79,6 +83,14 @@ function handleFortune(msg) {
     ];
     var fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
     msg.reply(`Your fortune: ${fortune}`);
+}
+function handleMath(msg, args) {
+    try {
+        msg.reply(mathjs_1.eval(args));
+    }
+    catch (err) {
+        msg.reply('Bad mathematical expression: ' + err.toString());
+    }
 }
 /* Rolls the die given. E.g. diceRoll(6) gives a number from 1-6 */
 function diceRoll(die) {
