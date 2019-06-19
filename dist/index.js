@@ -122,14 +122,13 @@ function handleDiceRoll(msg, args) {
             result = mathjs_1.eval(expression);
         }
         catch (err) {
-            msg.reply(badRoll);
+            msg.reply('Bad mathematical expression: ' + err.toString());
             return;
         }
     }
     if (numDice !== 1 || mathExpression !== undefined) {
         response += ' = ' + result.toString();
     }
-    console.log(response);
     msg.reply(response);
 }
 function handleRoll(msg, args) {

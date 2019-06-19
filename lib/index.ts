@@ -144,7 +144,7 @@ function handleDiceRoll(msg: Message, args: string): void {
             response += mathExpression;
             result = eval(expression);
         } catch (err) {
-            msg.reply(badRoll);
+            msg.reply('Bad mathematical expression: ' + err.toString());
             return;
         }
     }
