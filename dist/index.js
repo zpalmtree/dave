@@ -11,11 +11,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require("fs");
 const path = require("path");
 const discord_js_1 = require("discord.js");
-const Config_1 = require("./Config");
 const util_1 = require("util");
+const mathjs_1 = require("mathjs");
+const Config_1 = require("./Config");
 const readFile = util_1.promisify(fs.readFile);
 const writeFile = util_1.promisify(fs.writeFile);
 const fit = '579918539830460417';
+/* Optional number of rolls (for example 5d20), 'd', (to indicate a roll),
+   one or more numbers - the dice to roll - then zero or more chars for an
+   optional mathematical expression (for example, d20 + 3) */
+const rollRegex = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 function main() {
     const client = new discord_js_1.Client();
     client.on('ready', () => {
@@ -32,7 +37,7 @@ function main() {
         switch (command) {
             case 'roll':
             case 'reroll': {
-                handleRoll(msg);
+                handleRoll(msg, args.join(' '));
                 break;
             }
             case 'quote': {
@@ -75,7 +80,65 @@ function handleFortune(msg) {
     var fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
     msg.reply(`Your fortune: ${fortune}`);
 }
-function handleRoll(msg) {
+/* Rolls the die given. E.g. diceRoll(6) gives a number from 1-6 */
+function diceRoll(die) {
+    return Math.ceil(Math.random() * die);
+}
+function handleDiceRoll(msg, args) {
+    const badRoll = 'Invalid roll. Examples: 5d20, d8 + 3, 10d10 * 2';
+    let [, numDiceStr, dieStr, mathExpression] = rollRegex.exec(args) || [undefined, undefined, undefined, undefined];
+    if (mathExpression !== undefined && mathExpression.trim() === '') {
+        mathExpression = undefined;
+    }
+    let numDice = Number(numDiceStr);
+    let die = Number(dieStr);
+    if (numDiceStr === undefined || numDice < 1) {
+        numDice = 1;
+    }
+    if (numDice > 100) {
+        msg.reply("Can't roll more than 100 dice!");
+        return;
+    }
+    if (dieStr === undefined || Number.isNaN(numDice) || Number.isNaN(die)) {
+        msg.reply(badRoll);
+        return;
+    }
+    let response = `Roll ${args}: ${mathExpression === undefined ? '' : '('}`;
+    let result = 0;
+    for (let i = 0; i < numDice; i++) {
+        const rollResult = diceRoll(die);
+        result += rollResult;
+        response += rollResult.toString();
+        /* Don't add a '+' if we're on the last iteration */
+        if (i !== numDice - 1) {
+            response += ' + ';
+        }
+    }
+    if (mathExpression !== undefined) {
+        response += ')';
+        try {
+            const expression = result.toString() + mathExpression;
+            response += mathExpression;
+            result = mathjs_1.eval(expression);
+        }
+        catch (err) {
+            msg.reply(badRoll);
+            return;
+        }
+    }
+    if (numDice !== 1 || mathExpression !== undefined) {
+        response += ' = ' + result.toString();
+    }
+    console.log(response);
+    msg.reply(response);
+}
+function handleRoll(msg, args) {
+    args = args.trim();
+    /* Is it a dice roll - d + number, for example, d20, 5d20, d6 + 3 */
+    if (/d\d/.test(args)) {
+        handleDiceRoll(msg, args);
+        return;
+    }
     const dubsReaction = dubsType(msg.id);
     msg.reply(`Your post number is: ${msg.id} ${dubsReaction}`);
 }

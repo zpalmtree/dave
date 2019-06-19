@@ -18,6 +18,8 @@
     "typescript": "^3.4.1"
   },
   "dependencies": {
-    "discord.js": "^11.4.2"
+    "@types/mathjs": "^5.0.1",
+    "discord.js": "^11.4.2",
+    "mathjs": "^6.0.2"
   }
 }
