@@ -1,11 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { Message, Client } from 'discord.js';
+import request = require('request-promise-native');
+
+import { Message, Client, Attachment } from 'discord.js';
 
 import { promisify } from 'util';
 
-import { eval } from 'mathjs';
+import { evaluate } from 'mathjs';
 
 import { config } from './Config';
 
@@ -18,6 +20,192 @@ const fit = '579918539830460417';
    one or more numbers - the dice to roll - then zero or more chars for an
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
+
+const breeds: any = {
+  "affenpinscher": [],
+  "african": [],
+  "airedale": [],
+  "akita": [],
+  "appenzeller": [],
+  "basenji": [],
+  "beagle": [],
+  "bluetick": [],
+  "borzoi": [],
+  "bouvier": [],
+  "boxer": [],
+  "brabancon": [],
+  "briard": [],
+  "bulldog": [
+    "boston",
+    "english",
+    "french"
+  ],
+  "bullterrier": [
+    "staffordshire"
+  ],
+  "cairn": [],
+  "cattledog": [
+    "australian"
+  ],
+  "chihuahua": [],
+  "chow": [],
+  "clumber": [],
+  "cockapoo": [],
+  "collie": [
+    "border"
+  ],
+  "coonhound": [],
+  "corgi": [
+    "cardigan"
+  ],
+  "cotondetulear": [],
+  "dachshund": [],
+  "dalmatian": [],
+  "dane": [
+    "great"
+  ],
+  "deerhound": [
+    "scottish"
+  ],
+  "dhole": [],
+  "dingo": [],
+  "doberman": [],
+  "elkhound": [
+    "norwegian"
+  ],
+  "entlebucher": [],
+  "eskimo": [],
+  "frise": [
+    "bichon"
+  ],
+  "germanshepherd": [],
+  "greyhound": [
+    "italian"
+  ],
+  "groenendael": [],
+  "hound": [
+    "afghan",
+    "basset",
+    "blood",
+    "english",
+    "ibizan",
+    "walker"
+  ],
+  "husky": [],
+  "keeshond": [],
+  "kelpie": [],
+  "komondor": [],
+  "kuvasz": [],
+  "labrador": [],
+  "leonberg": [],
+  "lhasa": [],
+  "malamute": [],
+  "malinois": [],
+  "maltese": [],
+  "mastiff": [
+    "bull",
+    "english",
+    "tibetan"
+  ],
+  "mexicanhairless": [],
+  "mix": [],
+  "mountain": [
+    "bernese",
+    "swiss"
+  ],
+  "newfoundland": [],
+  "otterhound": [],
+  "papillon": [],
+  "pekinese": [],
+  "pembroke": [],
+  "pinscher": [
+    "miniature"
+  ],
+  "pointer": [
+    "german",
+    "germanlonghair"
+  ],
+  "pomeranian": [],
+  "poodle": [
+    "miniature",
+    "standard",
+    "toy"
+  ],
+  "pug": [],
+  "puggle": [],
+  "pyrenees": [],
+  "redbone": [],
+  "retriever": [
+    "chesapeake",
+    "curly",
+    "flatcoated",
+    "golden"
+  ],
+  "ridgeback": [
+    "rhodesian"
+  ],
+  "rottweiler": [],
+  "saluki": [],
+  "samoyed": [],
+  "schipperke": [],
+  "schnauzer": [
+    "giant",
+    "miniature"
+  ],
+  "setter": [
+    "english",
+    "gordon",
+    "irish"
+  ],
+  "sheepdog": [
+    "english",
+    "shetland"
+  ],
+  "shiba": [],
+  "shihtzu": [],
+  "spaniel": [
+    "blenheim",
+    "brittany",
+    "cocker",
+    "irish",
+    "japanese",
+    "sussex",
+    "welsh"
+  ],
+  "springer": [
+    "english"
+  ],
+  "stbernard": [],
+  "terrier": [
+    "american",
+    "australian",
+    "bedlington",
+    "border",
+    "dandie",
+    "fox",
+    "irish",
+    "kerryblue",
+    "lakeland",
+    "norfolk",
+    "norwich",
+    "patterdale",
+    "russell",
+    "scottish",
+    "sealyham",
+    "silky",
+    "tibetan",
+    "toy",
+    "westhighland",
+    "wheaten",
+    "yorkshire"
+  ],
+  "vizsla": [],
+  "weimaraner": [],
+  "whippet": [],
+  "wolfhound": [
+    "irish"
+  ]
+};
 
 function main() {
     const client = new Client();
@@ -59,6 +247,10 @@ function main() {
                 handleMath(msg, args.join(' '));
                 break;
             }
+            case 'doggo': {
+                handleDoggo(msg, args);
+                break;
+            }
         }
     });
 
@@ -95,7 +287,7 @@ function handleFortune(msg: Message): void {
 
 function handleMath(msg: Message, args: string): void {
     try {
-        msg.reply(eval(args).toString());
+        msg.reply(evaluate(args).toString());
     } catch (err) {
         msg.reply('Bad mathematical expression: ' + err.toString());
     }
@@ -154,7 +346,7 @@ function handleDiceRoll(msg: Message, args: string): void {
         try {
             const expression: string = result.toString() + mathExpression;
             response += mathExpression;
-            result = eval(expression);
+            result = evaluate(expression);
         } catch (err) {
             msg.reply('Bad mathematical expression: ' + err.toString());
             return;
@@ -293,6 +485,70 @@ async function handleSuggest(msg: Message, suggestion: string | undefined): Prom
     await writeQuotes('quotes.json', JSON.stringify(quotes, null, 4));
 
     addReaction('t_ok', msg);
+}
+
+async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
+    let mainBreed: string = '';
+    let subBreed: string = '';
+
+    if (breed.length === 2) {
+        let [ x, y ] = breed;
+
+        x = x.trim().toLowerCase();
+        y = y.trim().toLowerCase();
+
+        if (breeds.hasOwnProperty(x)) {
+            mainBreed = x;
+        } else if (breeds.hasOwnProperty(y)) {
+            mainBreed = y;
+        } else {
+            msg.reply('Unknown breed/sub-breed: ' + x + ' ' + y);
+        }
+
+        if (breeds[mainBreed].includes(x)) {
+            subBreed = x;
+        } else if (breeds[mainBreed].includes(y)) {
+            subBreed = y;
+        } else {
+            msg.reply('Unknown breed/sub-breed: ' + x + ' ' + y);
+        }
+    } else if (breed.length === 1) {
+        let [ x ] = breed;
+
+        x = x.trim().toLowerCase();
+
+        if (breeds.hasOwnProperty(x)) {
+            mainBreed = x;
+        }  else {
+            msg.reply('Unknown breed: ' + x);
+        }
+    }
+
+    const url: string = mainBreed !== '' && subBreed !== ''
+        ? `https://dog.ceo/api/breed/${mainBreed}/${subBreed}/images/random`
+        : mainBreed !== ''
+            ? `https://dog.ceo/api/breed/${mainBreed}/images/random`
+            : 'https://dog.ceo/api/breeds/image/random';
+
+    try {
+        const data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url,
+            json: true,
+        });
+
+        if (data.status !== 'success' || !data.message) {
+            msg.reply(`Failed to get doggo pic :( [ ${JSON.stringify(data)} ]`);
+            return;
+        }
+
+        const attachment = new Attachment(data.message);
+
+        msg.channel.send(attachment);
+    } catch (err) {
+        msg.reply(`Failed to get doggo pic :( [ ${err.toString()} ]`);
+    }
 }
 
 function addReaction(emoji: string, message: Message): void {
