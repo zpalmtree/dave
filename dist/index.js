@@ -210,6 +210,7 @@ const breeds = {
 function main() {
     const client = new discord_js_1.Client();
     client.on('ready', () => {
+        console.log(getBreeds());
         console.log('Logged in');
     });
     client.on('message', (msg) => {
@@ -442,14 +443,10 @@ function handleSuggest(msg, suggestion) {
 function getBreeds() {
     const doggos = [];
     Object.keys(breeds).forEach((key) => {
-        if (breeds[key].length > 0) {
-            breeds[key].forEach((subBreed) => {
-                doggos.push(`${subBreed} ${key}`);
-            });
-        }
-        else {
-            doggos.push(key);
-        }
+        doggos.push(key);
+        breeds[key].forEach((subBreed) => {
+            doggos.push(`${subBreed} ${key}`);
+        });
     });
     return doggos.sort((a, b) => {
         return a.localeCompare(b);
@@ -470,7 +467,7 @@ function handleDoggo(msg, breed) {
                 mainBreed = y;
             }
             else {
-                msg.reply('Unknown breed. Available breeds: https://pastebin.com/p4PHVWj0');
+                msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
             }
             if (breeds[mainBreed].includes(x)) {
                 subBreed = x;
@@ -479,7 +476,7 @@ function handleDoggo(msg, breed) {
                 subBreed = y;
             }
             else {
-                msg.reply('Unknown breed. Available breeds: https://pastebin.com/p4PHVWj0');
+                msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
             }
         }
         else if (breed.length === 1) {
@@ -489,7 +486,7 @@ function handleDoggo(msg, breed) {
                 mainBreed = x;
             }
             else {
-                msg.reply('Unknown breed. Available breeds: https://pastebin.com/p4PHVWj0');
+                msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
             }
         }
         const url = mainBreed !== '' && subBreed !== ''
