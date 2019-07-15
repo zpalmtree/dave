@@ -487,6 +487,24 @@ async function handleSuggest(msg: Message, suggestion: string | undefined): Prom
     addReaction('t_ok', msg);
 }
 
+function getBreeds() {
+    const doggos: string[] = [];
+
+    Object.keys(breeds).forEach((key) => {
+        if (breeds[key].length > 0) {
+            breeds[key].forEach((subBreed: any) => {
+                doggos.push(`${subBreed} ${key}`);
+            });
+        } else {
+            doggos.push(key);
+        }
+    });
+
+    return doggos.sort((a, b) => {
+        return a.localeCompare(b);
+    }).join('\n');
+}
+
 async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
     let mainBreed: string = '';
     let subBreed: string = '';
@@ -502,7 +520,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         } else if (breeds.hasOwnProperty(y)) {
             mainBreed = y;
         } else {
-            msg.reply('Unknown breed/sub-breed: ' + x + ' ' + y);
+            msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
         }
 
         if (breeds[mainBreed].includes(x)) {
@@ -510,7 +528,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         } else if (breeds[mainBreed].includes(y)) {
             subBreed = y;
         } else {
-            msg.reply('Unknown breed/sub-breed: ' + x + ' ' + y);
+            msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
         }
     } else if (breed.length === 1) {
         let [ x ] = breed;
@@ -520,7 +538,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         if (breeds.hasOwnProperty(x)) {
             mainBreed = x;
         }  else {
-            msg.reply('Unknown breed: ' + x);
+            msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
         }
     }
 
