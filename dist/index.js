@@ -207,10 +207,10 @@ const breeds = {
         "irish"
     ]
 };
+const doggoBreedLink = 'https://pastebin.com/BS8JKb7V';
 function main() {
     const client = new discord_js_1.Client();
     client.on('ready', () => {
-        console.log(getBreeds());
         console.log('Logged in');
     });
     client.on('message', (msg) => {
@@ -456,19 +456,21 @@ function handleDoggo(msg, breed) {
     return __awaiter(this, void 0, void 0, function* () {
         let mainBreed = '';
         let subBreed = '';
-        if (breed.length === 2) {
-            let [x, y] = breed;
-            x = x.trim().toLowerCase();
-            y = y.trim().toLowerCase();
+        let [x, y] = breed;
+        x = x ? x.trim().toLowerCase() : '';
+        y = y ? y.trim().toLowerCase() : '';
+        if (x) {
             if (breeds.hasOwnProperty(x)) {
                 mainBreed = x;
             }
-            else if (breeds.hasOwnProperty(y)) {
+            else if (y && breeds.hasOwnProperty(y)) {
                 mainBreed = y;
             }
             else {
-                msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
+                msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
             }
+        }
+        if (mainBreed !== '' && y) {
             if (breeds[mainBreed].includes(x)) {
                 subBreed = x;
             }
@@ -476,17 +478,7 @@ function handleDoggo(msg, breed) {
                 subBreed = y;
             }
             else {
-                msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
-            }
-        }
-        else if (breed.length === 1) {
-            let [x] = breed;
-            x = x.trim().toLowerCase();
-            if (breeds.hasOwnProperty(x)) {
-                mainBreed = x;
-            }
-            else {
-                msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
+                msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
             }
         }
         const url = mainBreed !== '' && subBreed !== ''

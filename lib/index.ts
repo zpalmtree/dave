@@ -509,20 +509,22 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
     let mainBreed: string = '';
     let subBreed: string = '';
 
-    if (breed.length === 2) {
-        let [ x, y ] = breed;
+    let [ x, y ] = breed;
 
-        x = x.trim().toLowerCase();
-        y = y.trim().toLowerCase();
+    x = x ? x.trim().toLowerCase() : '';
+    y = y ? y.trim().toLowerCase() : '';
 
+    if (x) {
         if (breeds.hasOwnProperty(x)) {
             mainBreed = x;
-        } else if (breeds.hasOwnProperty(y)) {
+        } else if (y && breeds.hasOwnProperty(y)) {
             mainBreed = y;
         } else {
             msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
         }
+    }
 
+    if (mainBreed !== '' && y) {
         if (breeds[mainBreed].includes(x)) {
             subBreed = x;
         } else if (breeds[mainBreed].includes(y)) {
@@ -530,18 +532,6 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         } else {
             msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
         }
-    } else if (breed.length === 1) {
-        let [ x ] = breed;
-
-        x = x.trim().toLowerCase();
-
-        if (breeds.hasOwnProperty(x)) {
-            mainBreed = x;
-        }  else {
-            msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
-        }
-    } else if (breed.length > 2) {
-        msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
     }
 
     const url: string = mainBreed !== '' && subBreed !== ''
