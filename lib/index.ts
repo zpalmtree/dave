@@ -207,6 +207,8 @@ const breeds: any = {
   ]
 };
 
+const doggoBreedLink = 'https://pastebin.com/BS8JKb7V';
+
 function main() {
     const client = new Client();
 
@@ -491,13 +493,11 @@ function getBreeds() {
     const doggos: string[] = [];
 
     Object.keys(breeds).forEach((key) => {
-        if (breeds[key].length > 0) {
-            breeds[key].forEach((subBreed: any) => {
-                doggos.push(`${subBreed} ${key}`);
-            });
-        } else {
-            doggos.push(key);
-        }
+        doggos.push(key);
+
+        breeds[key].forEach((subBreed: any) => {
+            doggos.push(`${subBreed} ${key}`);
+        });
     });
 
     return doggos.sort((a, b) => {
@@ -520,7 +520,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         } else if (breeds.hasOwnProperty(y)) {
             mainBreed = y;
         } else {
-            msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
+            msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
         }
 
         if (breeds[mainBreed].includes(x)) {
@@ -528,7 +528,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         } else if (breeds[mainBreed].includes(y)) {
             subBreed = y;
         } else {
-            msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
+            msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
         }
     } else if (breed.length === 1) {
         let [ x ] = breed;
@@ -538,8 +538,10 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
         if (breeds.hasOwnProperty(x)) {
             mainBreed = x;
         }  else {
-            msg.reply('Unknown breed. Available breeds: <https://pastebin.com/p4PHVWj0>');
+            msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
         }
+    } else if (breed.length > 2) {
+        msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
     }
 
     const url: string = mainBreed !== '' && subBreed !== ''
