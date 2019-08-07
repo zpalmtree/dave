@@ -1,9 +1,18 @@
 class Config {
     /* Discord token */
-    public token: string = 'Enter your token here';
+    public token: string = 'enter token here';
 
     /* Prefix for bot, e.g. $roll */
     public prefix: string = '$';
+
+    /* Used for accessing the cat api */
+    public catApiKey: string = 'enter api key here';
+
+    public fit: string = 'enter channel here';
+
+    public doggoBreedLink: string = 'https://pastebin.com/BS8JKb7V';
+
+    public kittyBreedLink: string = 'https://pastebin.com/0iCzvPJq';
 }
 
 export let config = new Config();

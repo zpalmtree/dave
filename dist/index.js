@@ -10,204 +10,22 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require("fs");
 const path = require("path");
+const querystring_1 = require("querystring");
 const request = require("request-promise-native");
 const discord_js_1 = require("discord.js");
 const util_1 = require("util");
 const mathjs_1 = require("mathjs");
 const Config_1 = require("./Config");
+const Cats_1 = require("./Cats");
+const Dogs_1 = require("./Dogs");
+const Fortunes_1 = require("./Fortunes");
+const Dubs_1 = require("./Dubs");
 const readFile = util_1.promisify(fs.readFile);
 const writeFile = util_1.promisify(fs.writeFile);
-const fit = '579918539830460417';
 /* Optional number of rolls (for example 5d20), 'd', (to indicate a roll),
    one or more numbers - the dice to roll - then zero or more chars for an
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
-const breeds = {
-    "affenpinscher": [],
-    "african": [],
-    "airedale": [],
-    "akita": [],
-    "appenzeller": [],
-    "basenji": [],
-    "beagle": [],
-    "bluetick": [],
-    "borzoi": [],
-    "bouvier": [],
-    "boxer": [],
-    "brabancon": [],
-    "briard": [],
-    "bulldog": [
-        "boston",
-        "english",
-        "french"
-    ],
-    "bullterrier": [
-        "staffordshire"
-    ],
-    "cairn": [],
-    "cattledog": [
-        "australian"
-    ],
-    "chihuahua": [],
-    "chow": [],
-    "clumber": [],
-    "cockapoo": [],
-    "collie": [
-        "border"
-    ],
-    "coonhound": [],
-    "corgi": [
-        "cardigan"
-    ],
-    "cotondetulear": [],
-    "dachshund": [],
-    "dalmatian": [],
-    "dane": [
-        "great"
-    ],
-    "deerhound": [
-        "scottish"
-    ],
-    "dhole": [],
-    "dingo": [],
-    "doberman": [],
-    "elkhound": [
-        "norwegian"
-    ],
-    "entlebucher": [],
-    "eskimo": [],
-    "frise": [
-        "bichon"
-    ],
-    "germanshepherd": [],
-    "greyhound": [
-        "italian"
-    ],
-    "groenendael": [],
-    "hound": [
-        "afghan",
-        "basset",
-        "blood",
-        "english",
-        "ibizan",
-        "walker"
-    ],
-    "husky": [],
-    "keeshond": [],
-    "kelpie": [],
-    "komondor": [],
-    "kuvasz": [],
-    "labrador": [],
-    "leonberg": [],
-    "lhasa": [],
-    "malamute": [],
-    "malinois": [],
-    "maltese": [],
-    "mastiff": [
-        "bull",
-        "english",
-        "tibetan"
-    ],
-    "mexicanhairless": [],
-    "mix": [],
-    "mountain": [
-        "bernese",
-        "swiss"
-    ],
-    "newfoundland": [],
-    "otterhound": [],
-    "papillon": [],
-    "pekinese": [],
-    "pembroke": [],
-    "pinscher": [
-        "miniature"
-    ],
-    "pointer": [
-        "german",
-        "germanlonghair"
-    ],
-    "pomeranian": [],
-    "poodle": [
-        "miniature",
-        "standard",
-        "toy"
-    ],
-    "pug": [],
-    "puggle": [],
-    "pyrenees": [],
-    "redbone": [],
-    "retriever": [
-        "chesapeake",
-        "curly",
-        "flatcoated",
-        "golden"
-    ],
-    "ridgeback": [
-        "rhodesian"
-    ],
-    "rottweiler": [],
-    "saluki": [],
-    "samoyed": [],
-    "schipperke": [],
-    "schnauzer": [
-        "giant",
-        "miniature"
-    ],
-    "setter": [
-        "english",
-        "gordon",
-        "irish"
-    ],
-    "sheepdog": [
-        "english",
-        "shetland"
-    ],
-    "shiba": [],
-    "shihtzu": [],
-    "spaniel": [
-        "blenheim",
-        "brittany",
-        "cocker",
-        "irish",
-        "japanese",
-        "sussex",
-        "welsh"
-    ],
-    "springer": [
-        "english"
-    ],
-    "stbernard": [],
-    "terrier": [
-        "american",
-        "australian",
-        "bedlington",
-        "border",
-        "dandie",
-        "fox",
-        "irish",
-        "kerryblue",
-        "lakeland",
-        "norfolk",
-        "norwich",
-        "patterdale",
-        "russell",
-        "scottish",
-        "sealyham",
-        "silky",
-        "tibetan",
-        "toy",
-        "westhighland",
-        "wheaten",
-        "yorkshire"
-    ],
-    "vizsla": [],
-    "weimaraner": [],
-    "whippet": [],
-    "wolfhound": [
-        "irish"
-    ]
-};
-const doggoBreedLink = 'https://pastebin.com/BS8JKb7V';
 function main() {
     const client = new discord_js_1.Client();
     client.on('ready', () => {
@@ -247,6 +65,10 @@ function main() {
                 handleDoggo(msg, args);
                 break;
             }
+            case 'kitty': {
+                handleKitty(msg, args.join(' '));
+                break;
+            }
         }
     });
     client.on('error', console.error);
@@ -257,22 +79,7 @@ function main() {
     });
 }
 function handleFortune(msg) {
-    const fortunes = [
-        'Reply hazy, try again',
-        'Excellent Luck',
-        'Good Luck',
-        'Average Luck',
-        'Bad Luck',
-        'Good news will come to you by mail',
-        '（　´_ゝ`）ﾌｰﾝ',
-        'ｷﾀ━━━━━━(ﾟ∀ﾟ)━━━━━━ !!!!',
-        'You will meet a dark handsome stranger',
-        'Better not tell you now',
-        'Outlook good',
-        'Very Bad Luck',
-        'Godly Luck ',
-    ];
-    var fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
+    var fortune = Fortunes_1.fortunes[Math.floor(Math.random() * Fortunes_1.fortunes.length)];
     msg.reply(`Your fortune: ${fortune}`);
 }
 function handleMath(msg, args) {
@@ -364,21 +171,12 @@ function dubsType(roll) {
         }
         return '';
     }
-    const dubTypes = [
-        '\\~\\~ nice dubs \\~\\~',
-        '\\*\\* sick trips \\*\\*',
-        '## !QUADS! ##',
-        '\\\\ !!QUINTS!! //',
-        '!!!! SEXTUPLES !!!!',
-        '!!!!! SEPTUPLES !!!!!',
-        '!!!!!!!! BLESSED OCTS !!!!!!!!',
-    ];
     /* Start at dubs */
     const index = numRepeatingDigits - 2;
-    if (index >= dubTypes.length) {
+    if (index >= Dubs_1.dubTypes.length) {
         return 'OFF THE FUCKING CHARTS';
     }
-    return dubTypes[index];
+    return Dubs_1.dubTypes[index];
 }
 function readQuotes(filepath) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -405,7 +203,7 @@ function writeQuotes(filepath, quotes) {
 }
 function handleQuote(msg) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (msg.channel.id !== fit) {
+        if (msg.channel.id !== Config_1.config.fit) {
             return;
         }
         const [success, quotes] = yield readQuotes('./quotes.json');
@@ -419,7 +217,7 @@ function handleQuote(msg) {
 }
 function handleSuggest(msg, suggestion) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (msg.channel.id !== fit) {
+        if (msg.channel.id !== Config_1.config.fit) {
             return;
         }
         if (msg.author.bot) {
@@ -440,17 +238,38 @@ function handleSuggest(msg, suggestion) {
         addReaction('t_ok', msg);
     });
 }
-function getBreeds() {
-    const doggos = [];
-    Object.keys(breeds).forEach((key) => {
-        doggos.push(key);
-        breeds[key].forEach((subBreed) => {
-            doggos.push(`${subBreed} ${key}`);
-        });
+function handleKitty(msg, args) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const breed = args.trim().toLowerCase();
+        const breedId = Cats_1.catBreeds.find((x) => x.name.toLowerCase() === breed);
+        if (breed !== '' && breedId === undefined) {
+            msg.reply(`Unknown breed. Available breeds: <${Config_1.config.kittyBreedLink}>`);
+        }
+        let kittyParams = {
+            limit: 1,
+            mime_types: 'jpg,png',
+            breed_id: breedId ? breedId.id : '',
+        };
+        const url = `https://api.thecatapi.com/v1/images/search?${querystring_1.stringify(kittyParams)}`;
+        try {
+            const data = yield request({
+                method: 'GET',
+                timeout: 10 * 1000,
+                url,
+                json: true,
+            });
+            if (!data || data.length < 1 || !data[0].url) {
+                msg.reply(`Failed to get kitty pic :( [ ${JSON.stringify(data)} ]`);
+                return;
+            }
+            console.log(JSON.stringify(data[0], null, 4));
+            const attachment = new discord_js_1.Attachment(data[0].url);
+            msg.channel.send(attachment);
+        }
+        catch (err) {
+            msg.reply(`Failed to get kitty pic :( [ ${err.toString()} ]`);
+        }
     });
-    return doggos.sort((a, b) => {
-        return a.localeCompare(b);
-    }).join('\n');
 }
 function handleDoggo(msg, breed) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -460,25 +279,25 @@ function handleDoggo(msg, breed) {
         x = x ? x.trim().toLowerCase() : '';
         y = y ? y.trim().toLowerCase() : '';
         if (x) {
-            if (breeds.hasOwnProperty(x)) {
+            if (Dogs_1.dogBreeds.hasOwnProperty(x)) {
                 mainBreed = x;
             }
-            else if (y && breeds.hasOwnProperty(y)) {
+            else if (y && Dogs_1.dogBreeds.hasOwnProperty(y)) {
                 mainBreed = y;
             }
             else {
-                msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
+                msg.reply(`Unknown breed. Available breeds: <${Config_1.config.doggoBreedLink}>`);
             }
         }
         if (mainBreed !== '' && y) {
-            if (breeds[mainBreed].includes(x)) {
+            if (Dogs_1.dogBreeds[mainBreed].includes(x)) {
                 subBreed = x;
             }
-            else if (breeds[mainBreed].includes(y)) {
+            else if (Dogs_1.dogBreeds[mainBreed].includes(y)) {
                 subBreed = y;
             }
             else {
-                msg.reply(`Unknown breed. Available breeds: <${doggoBreedLink}>`);
+                msg.reply(`Unknown breed. Available breeds: <${Config_1.config.doggoBreedLink}>`);
             }
         }
         const url = mainBreed !== '' && subBreed !== ''
