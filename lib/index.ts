@@ -331,8 +331,6 @@ async function handleKitty(msg: Message, args: string): Promise<void> {
             return;
         }
 
-        console.log(JSON.stringify(data[0], null, 4));
-
         const attachment = new Attachment(data[0].url);
 
         msg.channel.send(attachment);
