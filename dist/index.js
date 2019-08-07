@@ -26,53 +26,62 @@ const writeFile = util_1.promisify(fs.writeFile);
    one or more numbers - the dice to roll - then zero or more chars for an
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
+function handleMessage(msg) {
+    if (!msg.content.startsWith(Config_1.config.prefix)) {
+        return;
+    }
+    /* Get the command with prefix, and any args */
+    const [tmp, ...args] = msg.content.split(' ');
+    /* Get the actual command after the prefix is removed */
+    const command = tmp.substring(tmp.indexOf(Config_1.config.prefix) + 1, tmp.length);
+    switch (command) {
+        case 'roll':
+        case 'reroll': {
+            handleRoll(msg, args.join(' '));
+            break;
+        }
+        case 'quote': {
+            handleQuote(msg);
+            break;
+        }
+        case 'suggest': {
+            handleSuggest(msg, args.join(' '));
+            break;
+        }
+        case 'fortune': {
+            handleFortune(msg);
+            break;
+        }
+        case 'math': {
+            handleMath(msg, args.join(' '));
+            break;
+        }
+        case 'doggo': {
+            handleDoggo(msg, args);
+            break;
+        }
+        case 'kitty': {
+            handleKitty(msg, args.join(' '));
+            break;
+        }
+        case 'help': {
+            handleHelp(msg);
+            break;
+        }
+    }
+}
 function main() {
     const client = new discord_js_1.Client();
     client.on('ready', () => {
         console.log('Logged in');
     });
     client.on('message', (msg) => {
-        if (!msg.content.startsWith(Config_1.config.prefix)) {
-            return;
+        try {
+            handleMessage(msg);
+            /* Usually discord permissions errors */
         }
-        /* Get the command with prefix, and any args */
-        const [tmp, ...args] = msg.content.split(' ');
-        /* Get the actual command after the prefix is removed */
-        const command = tmp.substring(tmp.indexOf(Config_1.config.prefix) + 1, tmp.length);
-        switch (command) {
-            case 'roll':
-            case 'reroll': {
-                handleRoll(msg, args.join(' '));
-                break;
-            }
-            case 'quote': {
-                handleQuote(msg);
-                break;
-            }
-            case 'suggest': {
-                handleSuggest(msg, args.join(' '));
-                break;
-            }
-            case 'fortune': {
-                handleFortune(msg);
-                break;
-            }
-            case 'math': {
-                handleMath(msg, args.join(' '));
-                break;
-            }
-            case 'doggo': {
-                handleDoggo(msg, args);
-                break;
-            }
-            case 'kitty': {
-                handleKitty(msg, args.join(' '));
-                break;
-            }
-            case 'help': {
-                handleHelp(msg);
-                break;
-            }
+        catch (err) {
+            console.error('Caught error: ' + err.toString());
         }
     });
     client.on('error', console.error);
@@ -278,7 +287,6 @@ function handleKitty(msg, args) {
                 msg.reply(`Failed to get kitty pic :( [ ${JSON.stringify(data)} ]`);
                 return;
             }
-            console.log(JSON.stringify(data[0], null, 4));
             const attachment = new discord_js_1.Attachment(data[0].url);
             msg.channel.send(attachment);
         }
