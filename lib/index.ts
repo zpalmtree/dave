@@ -74,6 +74,10 @@ function main() {
                 handleKitty(msg, args.join(' '));
                 break;
             }
+            case 'help': {
+                handleHelp(msg);
+                break;
+            }
         }
     });
 
@@ -165,6 +169,19 @@ function handleDiceRoll(msg: Message, args: string): void {
     }
 
     msg.reply(response);
+}
+
+function handleHelp(msg: Message): void {
+    msg.reply(`
+\`\`\`
+$roll:      Gets your post number and its repeating digits
+$reroll:    Alias of $roll for convenience
+$fortune:   Gets your fortune
+$doggo:     Gets a random dog pic
+$kitty:     Gets a random cat pic
+$help:      Displays this help
+\`\`\`
+    `);
 }
 
 function handleRoll(msg: Message, args: string): void {
