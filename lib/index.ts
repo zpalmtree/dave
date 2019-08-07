@@ -26,6 +26,54 @@ const writeFile = promisify(fs.writeFile);
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
+function handleMessage(msg: Message) {
+    if (!msg.content.startsWith(config.prefix)) {
+        return;
+    }
+
+    /* Get the command with prefix, and any args */
+    const [ tmp, ...args ] = msg.content.split(' ');
+
+    /* Get the actual command after the prefix is removed */
+    const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length);
+
+    switch (command) {
+        case 'roll':
+        case 'reroll': {
+            handleRoll(msg, args.join(' '));
+            break;
+        }
+        case 'quote': {
+            handleQuote(msg);
+            break;
+        }
+        case 'suggest': {
+            handleSuggest(msg, args.join(' '));
+            break;
+        }
+        case 'fortune': {
+            handleFortune(msg);
+            break;
+        }
+        case 'math': {
+            handleMath(msg, args.join(' '));
+            break;
+        }
+        case 'doggo': {
+            handleDoggo(msg, args);
+            break;
+        }
+        case 'kitty': {
+            handleKitty(msg, args.join(' '));
+            break;
+        }
+        case 'help': {
+            handleHelp(msg);
+            break;
+        }
+    }
+}
+
 function main() {
     const client = new Client();
 
@@ -33,54 +81,15 @@ function main() {
         console.log('Logged in');
     });
 
-    client.on('message', (msg: Message) => {
-        if (!msg.content.startsWith(config.prefix)) {
-            return;
-        }
-
-        /* Get the command with prefix, and any args */
-        const [ tmp, ...args ] = msg.content.split(' ');
-
-        /* Get the actual command after the prefix is removed */
-        const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length);
-
-        switch (command) {
-            case 'roll':
-            case 'reroll': {
-                handleRoll(msg, args.join(' '));
-                break;
-            }
-            case 'quote': {
-                handleQuote(msg);
-                break;
-            }
-            case 'suggest': {
-                handleSuggest(msg, args.join(' '));
-                break;
-            }
-            case 'fortune': {
-                handleFortune(msg);
-                break;
-            }
-            case 'math': {
-                handleMath(msg, args.join(' '));
-                break;
-            }
-            case 'doggo': {
-                handleDoggo(msg, args);
-                break;
-            }
-            case 'kitty': {
-                handleKitty(msg, args.join(' '));
-                break;
-            }
-            case 'help': {
-                handleHelp(msg);
-                break;
-            }
+    client.on('message', (msg) => {
+        try {
+            handleMessage(msg);
+        /* Usually discord permissions errors */
+        } catch (err) {
+            console.error('Caught error: ' + err.toString());
         }
     });
-
+            
     client.on('error', console.error);
 
     client.login(config.token)
