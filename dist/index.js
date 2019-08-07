@@ -69,6 +69,10 @@ function main() {
                 handleKitty(msg, args.join(' '));
                 break;
             }
+            case 'help': {
+                handleHelp(msg);
+                break;
+            }
         }
     });
     client.on('error', console.error);
@@ -140,6 +144,18 @@ function handleDiceRoll(msg, args) {
         response += ' = ' + result.toString();
     }
     msg.reply(response);
+}
+function handleHelp(msg) {
+    msg.reply(`
+\`\`\`
+$roll:      Gets your post number and its repeating digits
+$reroll:    Alias of $roll for convenience
+$fortune:   Gets your fortune
+$doggo:     Gets a random dog pic
+$kitty:     Gets a random cat pic
+$help:      Displays this help
+\`\`\`
+    `);
 }
 function handleRoll(msg, args) {
     args = args.trim();
