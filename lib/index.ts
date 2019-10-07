@@ -26,6 +26,11 @@ const writeFile = promisify(fs.writeFile);
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
+interface Quote {
+    quote: string;
+    timestamp: number;
+}
+
 function handleMessage(msg: Message) {
     if (!msg.content.startsWith(config.prefix)) {
         return;
@@ -244,10 +249,10 @@ function dubsType(roll: string): string {
     return dubTypes[index];
 }
 
-async function readQuotes(filepath: string): Promise<[boolean, string[]]> {
+async function readQuotes(filepath: string): Promise<[boolean, Quote[]]> {
     try {
         const data: string = await readFile(path.join(__dirname, filepath), { encoding: 'utf8' });
-        const quotes: string[] = JSON.parse(data);
+        const quotes: Quote[] = JSON.parse(data);
 
         return [true, quotes];
     } catch (err) {
@@ -276,9 +281,13 @@ async function handleQuote(msg: Message): Promise<void> {
         return;
     }
 
-    const randomQuote: string = quotes[Math.floor(Math.random() * quotes.length)];
+    const { quote, timestamp } = quotes[Math.floor(Math.random() * quotes.length)];
 
-    msg.channel.send(randomQuote);
+    if (timestamp !== 0) {
+        msg.channel.send(`${quote} - ${new Date(timestamp).toDateString()}`);
+    } else {
+        msg.channel.send(quote);
+    }
 }
 
 async function handleSuggest(msg: Message, suggestion: string | undefined): Promise<void> {
@@ -303,7 +312,12 @@ async function handleSuggest(msg: Message, suggestion: string | undefined): Prom
         return;
     }
 
-    quotes.push(suggestion);
+    const newQuote: Quote = {
+        quote: suggestion,
+        timestamp: Date.now(),
+    };
+
+    quotes.push(newQuote);
 
     await writeQuotes('quotes.json', JSON.stringify(quotes, null, 4));
 
