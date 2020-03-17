@@ -5,7 +5,7 @@ import { stringify } from 'querystring';
 
 import request = require('request-promise-native');
 
-import { Message, Client, Attachment, TextChannel, User } from 'discord.js';
+import { Message, Client, TextChannel, User, MessageEmbed, MessageAttachment } from 'discord.js';
 
 import { promisify } from 'util';
 
@@ -80,6 +80,10 @@ function handleMessage(msg: Message) {
             archive(msg.channel as TextChannel, msg.author);
             break;
         }
+        case 'chinked': {
+            chinked(msg, args.join(' '));
+            break;
+        }
     }
 }
 
@@ -92,7 +96,7 @@ function main() {
 
     client.on('message', (msg) => {
         try {
-            handleMessage(msg);
+            handleMessage(msg as Message);
         /* Usually discord permissions errors */
         } catch (err) {
             console.error('Caught error: ' + err.toString());
@@ -358,7 +362,7 @@ async function handleKitty(msg: Message, args: string): Promise<void> {
             return;
         }
 
-        const attachment = new Attachment(data[0].url);
+        const attachment = new MessageAttachment(data[0].url);
 
         msg.channel.send(attachment);
     } catch (err) {
@@ -414,7 +418,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
             return;
         }
 
-        const attachment = new Attachment(data.message);
+        const attachment = new MessageAttachment(data.message);
 
         msg.channel.send(attachment);
     } catch (err) {
@@ -424,7 +428,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
 
 function addReaction(emoji: string, message: Message): void {
     /* Find the reaction */
-    const reaction = message.guild.emojis.find((val) => val.name === emoji);
+    const reaction = message.guild!.emojis.resolveIdentifier(emoji);
 
     /* Couldn't find the reaction */
     if (!reaction) {
@@ -438,7 +442,7 @@ function addReaction(emoji: string, message: Message): void {
 
 async function archive(channel: TextChannel, author: User): Promise<void> {
     if (author.id !== '354701063955152898') {
-        author.sendMessage('nice try sweaty this is for admins only');
+        author.send('nice try sweaty this is for admins only');
         return;
     }
 
@@ -453,7 +457,7 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
             const firstMessage = messages.length === 0 ? undefined : messages[0].id;
 
             /* Fetch messages, convert to array and sort by timestamp, oldest first */
-            messages = (await channel.fetchMessages({ before: firstMessage })).array().sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+            messages = (await channel.messages.fetch({ before: firstMessage })).array().sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
             console.log(`[${new Date(messages.length > 0 ? messages[0].createdTimestamp : 0).toUTCString()}] Collected ${messageInfo.length} messages`);
 
@@ -481,6 +485,36 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
     console.log('Finished collecting messages.');
 
     channel.send(`Finished archiving post history, saved to ${filename} :ok_hand:`);
+}
+
+async function chinked(msg: Message, country: string): Promise<void> {
+    country = country.trim().toLowerCase();
+
+    if (country !== '') {
+    } else {
+        try {
+            const data = await request({
+                method: 'GET',
+                timeout: 10 * 1000,
+                url: 'https://coronavirus-19-api.herokuapp.com/all',
+                json: true,
+            });
+
+            const embed = new MessageEmbed()
+                .setColor('#C8102E')
+                .setTitle('Coronavirus statistics')
+                .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+                .addFields(
+                    { name: 'Cases', value: data.cases },
+                    { name: 'Deaths', value: data.deaths },
+                    { name: 'Recovered', value: data.recovered },
+                );
+
+            msg.reply(embed);
+        } catch (err) {
+            msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+        }
+    }
 }
 
 main();
