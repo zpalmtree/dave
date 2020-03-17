@@ -5,7 +5,7 @@ import { stringify } from 'querystring';
 
 import request = require('request-promise-native');
 
-import { Message, Client, Attachment } from 'discord.js';
+import { Message, Client, Attachment, TextChannel, User } from 'discord.js';
 
 import { promisify } from 'util';
 
@@ -74,6 +74,10 @@ function handleMessage(msg: Message) {
         }
         case 'help': {
             handleHelp(msg);
+            break;
+        }
+        case 'archive': {
+            archive(msg.channel as TextChannel, msg.author);
             break;
         }
     }
@@ -284,7 +288,7 @@ async function handleQuote(msg: Message): Promise<void> {
     const { quote, timestamp } = quotes[Math.floor(Math.random() * quotes.length)];
 
     if (timestamp !== 0) {
-        msg.channel.send(`${quote} - ${new Date(timestamp).toDateString()}`);
+        msg.channel.send(`${quote} - ${new Date(timestamp).toISOString().slice(0, 10)}`);
     } else {
         msg.channel.send(quote);
     }
@@ -430,6 +434,53 @@ function addReaction(emoji: string, message: Message): void {
 
     /* Add the reaction */
     message.react(reaction).catch(console.error);
+}
+
+async function archive(channel: TextChannel, author: User): Promise<void> {
+    if (author.id !== '354701063955152898') {
+        author.sendMessage('nice try sweaty this is for admins only');
+        return;
+    }
+
+    channel.send('Archiving post history. I\'ll let you know when I\'ve finished!');
+
+    let messageInfo = [];
+
+    let messages: Message[] = [];
+
+    try {
+        do {
+            const firstMessage = messages.length === 0 ? undefined : messages[0].id;
+
+            /* Fetch messages, convert to array and sort by timestamp, oldest first */
+            messages = (await channel.fetchMessages({ before: firstMessage })).array().sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+            console.log(`[${new Date(messages.length > 0 ? messages[0].createdTimestamp : 0).toUTCString()}] Collected ${messageInfo.length} messages`);
+
+            for (const message of messages) {
+                messageInfo.unshift({
+                    timestamp: message.createdTimestamp,
+                    authorID: message.author.id,
+                    authorName: message.author.username,
+                    content: message.content,
+                    image: message.attachments.size > 0 ? message.attachments.array().map((x) => x.url).join(', ') : '',
+                });
+            }
+        } while (messages.length > 0);
+    } catch (err) {
+        console.log('err: ' + err.toString());
+    }
+
+    messageInfo = messageInfo.sort((a, b) => a.timestamp - b.timestamp);
+
+    const channelName = channel.guild.name + '_' + channel.name;
+    const filename = `${channelName}_archive_${new Date().toLocaleString()}`.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.json'; 
+
+    await writeFile(path.join(__dirname, filename), JSON.stringify(messageInfo, null, 4));
+
+    console.log('Finished collecting messages.');
+
+    channel.send(`Finished archiving post history, saved to ${filename} :ok_hand:`);
 }
 
 main();
