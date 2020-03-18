@@ -512,7 +512,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                             { name: 'New Cases Today', value: countryData.todayCases },
                             { name: 'Deaths Today', value: countryData.todayDeaths },
                         )
-                        .setFooter('Data source', 'https://www.worldometers.info/coronavirus/');
+                        .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
                     msg.reply(embed);
 
