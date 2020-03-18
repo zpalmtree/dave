@@ -522,7 +522,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                         )
                         .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
-                    msg.reply(embed);
+                    msg.channel.send(embed);
 
                     return;
                 }
@@ -552,7 +552,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 )
                 .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
-            msg.reply(embed);
+            msg.channel.send(embed);
         } catch (err) {
             msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
         }
