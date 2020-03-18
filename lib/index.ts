@@ -506,6 +506,12 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 json: true,
             });
 
+            /* List countries available */
+            if (country === 'countries') {
+                msg.reply('Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', '));
+                return;
+            }
+
             for (const countryData of data) {
                 if (countryData.country.toLowerCase() === country) {
                     const embed = new MessageEmbed()
@@ -528,7 +534,8 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 }
             }
 
-            msg.reply('Unknown country, try one of the following: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', '));
+            msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries`);
+
         } catch (err) {
             msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
         }
