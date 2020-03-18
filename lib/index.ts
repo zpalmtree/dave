@@ -491,6 +491,39 @@ async function chinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
     if (country !== '') {
+        try {
+            const data = await request({
+                method: 'GET',
+                timeout: 10 * 1000,
+                url: 'https://coronavirus-19-api.herokuapp.com/countries',
+                json: true,
+            });
+
+            for (const countryData of data) {
+                if (countryData.country.toLowerCase() === country) {
+                    const embed = new MessageEmbed()
+                        .setColor('#C8102E')
+                        .setTitle('Coronavirus statistics, ' + countryData.country)
+                        .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+                        .addFields(
+                            { name: 'Cases', value: countryData.cases },
+                            { name: 'Deaths', value: countryData.deaths },
+                            { name: 'Recovered', value: countryData.recovered },
+                            { name: 'New Cases Today', value: countryData.todayCases },
+                            { name: 'Deaths Today', value: countryData.todayDeaths },
+                        )
+                        .setFooter('Data source', 'https://www.worldometers.info/coronavirus/');
+
+                    msg.reply(embed);
+
+                    return;
+                }
+            }
+
+            msg.reply('Unknown country, try one of the following: ' + data.map((x: any) => x.country).join(', '));
+        } catch (err) {
+            msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+        }
     } else {
         try {
             const data = await request({
@@ -508,7 +541,8 @@ async function chinked(msg: Message, country: string): Promise<void> {
                     { name: 'Cases', value: data.cases },
                     { name: 'Deaths', value: data.deaths },
                     { name: 'Recovered', value: data.recovered },
-                );
+                )
+                .setFooter('Data source', 'https://www.worldometers.info/coronavirus/');
 
             msg.reply(embed);
         } catch (err) {
