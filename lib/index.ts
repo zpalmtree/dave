@@ -528,7 +528,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 }
             }
 
-            msg.reply('Unknown country, try one of the following: ' + data.map((x: any) => x.country).join(', '));
+            msg.reply('Unknown country, try one of the following: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', '));
         } catch (err) {
             msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
         }
