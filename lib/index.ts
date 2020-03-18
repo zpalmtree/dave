@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as moment from 'moment';
 
 import { stringify } from 'querystring';
 
@@ -502,7 +503,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: 'https://coronavirus-19-api.herokuapp.com/countries',
+                url: 'https://corona.lmao.ninja/countries',
                 json: true,
             });
 
@@ -521,7 +522,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                         .addFields(
                             { name: 'Cases', value: countryData.cases, inline: true },
                             { name: 'Deaths', value: countryData.deaths, inline: true, },
-                            { name: 'Active', value: countryData.active, inline: true, },
+                            { name: 'Active', value: countryData.cases - countryData.recovered - countryData.deaths, inline: true, },
                             { name: 'Cases Today', value: countryData.todayCases, inline: true },
                             { name: 'Deaths Today', value: countryData.todayDeaths, inline: true },
                             { name: 'Recovered', value: countryData.recovered, inline: true },
@@ -544,7 +545,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: 'https://coronavirus-19-api.herokuapp.com/all',
+                url: 'https://corona.lmao.ninja/all',
                 json: true,
             });
 
@@ -554,8 +555,9 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
                 .addFields(
                     { name: 'Cases', value: data.cases },
+                    { name: 'Active', value: data.cases - data.recovered - data.deaths },
                     { name: 'Deaths', value: data.deaths },
-                    { name: 'Recovered', value: data.recovered },
+                    { name: 'Last Updated', value: moment(data.updated).fromNow() },
                 )
                 .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
