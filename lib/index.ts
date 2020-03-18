@@ -336,7 +336,7 @@ async function handleSuggest(msg: Message, suggestion: string | undefined): Prom
 
     await writeQuotes('quotes.json', JSON.stringify(quotes, null, 4));
 
-    addReaction('t_ok', msg);
+    addReaction('579921155578658837', msg);
 }
 
 async function handleKitty(msg: Message, args: string): Promise<void> {
@@ -435,7 +435,7 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
 
 function addReaction(emoji: string, message: Message): void {
     /* Find the reaction */
-    const reaction = message.guild!.emojis.resolveIdentifier(emoji);
+    const reaction = message.guild!.emojis.resolve(emoji);
 
     /* Couldn't find the reaction */
     if (!reaction) {
