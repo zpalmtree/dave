@@ -80,6 +80,12 @@ function handleMessage(msg: Message) {
             archive(msg.channel as TextChannel, msg.author);
             break;
         }
+        case 'chinaids': 
+        case 'kungflu':
+        case 'corona':
+        case 'coronavirus':
+        case 'covid-19':
+        case 'chinese virus':
         case 'chinked': {
             chinked(msg, args.join(' '));
             break;
@@ -202,6 +208,7 @@ $fortune:   Gets your fortune
 $doggo:     Gets a random dog pic
 $kitty:     Gets a random cat pic
 $help:      Displays this help
+$chinked:   Displays coronavirus statistics
 \`\`\`
     `);
 }
