@@ -553,6 +553,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 .setColor('#C8102E')
                 .setTitle('Coronavirus statistics')
                 .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+                .setImage('http://144.202.28.97/linear.png')
                 .addFields(
                     { name: 'Cases', value: data.cases },
                     { name: 'Active', value: data.cases - data.recovered - data.deaths },
