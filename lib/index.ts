@@ -503,7 +503,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: 'https://corona.lmao.ninja/countries',
+                url: '127.0.0.1:7531/countries',
                 json: true,
             });
 
@@ -545,7 +545,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: 'https://corona.lmao.ninja/all',
+                url: '127.0.0.1:7531/all',
                 json: true,
             });
 
