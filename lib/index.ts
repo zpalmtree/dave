@@ -566,14 +566,12 @@ async function chinked(msg: Message, country: string): Promise<void> {
     if (country !== '') {
         try {
             /* Did they specify a state? */
-            const endpoint = states.map((x) => x.toLowerCase()).includes(country)
-                ? '/states'
-                : '/countries';
+            const isState: boolean = states.map((x) => x.toLowerCase()).includes(country);
 
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: host + endpoint,
+                url: host + (isState ? '/states' : '/countries'),
                 json: true,
             });
 
@@ -588,7 +586,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
 
             for (const countryData of data) {
                 /* So we can treat the two endpoints the same in the below code */
-                if (countryData.state) {
+                if (isState) {
                     countryData.country = countryData.state;
                 }
 
@@ -596,7 +594,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                     const embed = new MessageEmbed()
                         .setColor('#C8102E')
                         .setTitle('Coronavirus statistics, ' + countryData.country)
-                        .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+                        .setThumbnail(isState ? 'https://i.imgur.com/FnbQwqQ.png' : countryData.countryInfo.flag)
                         .addFields(
                             { name: 'Cases', value: countryData.cases, inline: true },
                             { name: 'Deaths', value: countryData.deaths, inline: true, },
@@ -606,6 +604,10 @@ async function chinked(msg: Message, country: string): Promise<void> {
                             { name: 'Recovered', value: countryData.recovered, inline: true },
                         )
                         .setFooter('Data source: https://www.worldometers.info/coronavirus/');
+
+                    if (!isState) {
+                        embed.addField('Cases per million citizens', countryData.casesPerOneMillion);
+                    }
 
                     msg.channel.send(embed);
 
