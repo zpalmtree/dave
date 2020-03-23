@@ -639,7 +639,8 @@ async function chinked(msg: Message, country: string): Promise<void> {
                         .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
                     if (!isState) {
-                        embed.addField('Percentage of population infected', 100 * (countryData.casesPerOneMillion / 1_000_000));
+                        const percentage = 100 * (countryData.casesPerOneMillion / 1_000_000);
+                        embed.addField('Percentage of population infected', percentage + '%');
                     }
 
                     msg.channel.send(embed);
