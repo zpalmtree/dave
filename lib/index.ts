@@ -557,6 +557,18 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
     channel.send(`Finished archiving post history, saved to ${filename} :ok_hand:`);
 }
 
+function chunk(arr: string, len: number) {
+    const chunks = []
+    let i = 0;
+    const n = arr.length;
+
+    while (i < n) {
+        chunks.push(arr.slice(i, i += len));
+    }
+
+    return chunks;
+}
+
 async function chinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
@@ -578,10 +590,30 @@ async function chinked(msg: Message, country: string): Promise<void> {
 
             /* List countries available */
             if (country === 'countries') {
-                msg.reply('Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', '));
+                const countries = 'Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', ');
+
+                /* Discord message limit */
+                if (countries.length > 2000) {
+                    /* This splits in the middle of words, but we don't give a shit */
+                    for (const message of chunk(countries, 1700)) {
+                        msg.channel.send(message);
+                    }
+                } else {
+                    msg.reply(countries);
+                }
+
                 return;
             } else if (country === 'states') {
-                msg.reply('Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', '));
+                const stateData = 'Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', ');
+
+                if (stateData.length > 2000) {
+                    for (const message of chunk(stateData, 1700)) {
+                        msg.channel.send(message);
+                    }
+                } else {
+                    msg.reply(stateData);
+                }
+
                 return;
             }
 
