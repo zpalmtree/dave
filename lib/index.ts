@@ -573,8 +573,8 @@ async function chinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
     /* Replace with https://corona.lmao.ninja if you don't want to run locally */
-    //const host = 'http://127.0.0.1:7531';
-    const host = 'https://corona.lmao.ninja';
+    const host = 'http://127.0.0.1:7531';
+    //const host = 'https://corona.lmao.ninja';
 
     if (country !== '') {
         try {
@@ -639,7 +639,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                         .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
                     if (!isState) {
-                        const percentage = 100 * (countryData.casesPerOneMillion / 1_000_000);
+                        const percentage = (100 * (countryData.casesPerOneMillion / 1_000_000)).toFixed(5);
                         embed.addField('Percentage of population infected', percentage + '%');
                     }
 
