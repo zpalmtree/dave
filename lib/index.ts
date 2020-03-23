@@ -86,7 +86,8 @@ function handleMessage(msg: Message) {
         case 'corona':
         case 'coronavirus':
         case 'covid-19':
-        case 'chinese virus':
+        case 'chinesevirus':
+        case 'chinavirus':
         case 'chinked': {
             chinked(msg, args.join(' '));
             break;
@@ -126,6 +127,13 @@ function handleFortune(msg: Message): void {
 }
 
 function handleMath(msg: Message, args: string): void {
+    const niggers = ['100607191337164800'];
+
+    if (niggers.includes(msg.author.id)) {
+        msg.reply('FUCK YOU YOU STUPID NIGGER');
+        return;
+    }
+
     try {
         msg.reply(evaluate(args).toString());
     } catch (err) {
@@ -553,7 +561,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 .setColor('#C8102E')
                 .setTitle('Coronavirus statistics')
                 .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-                .setImage('http://144.202.28.97/linear.png')
+                //.setImage('http://144.202.28.97/linear.png')
                 .addFields(
                     { name: 'Cases', value: data.cases },
                     { name: 'Active', value: data.cases - data.recovered - data.deaths },
