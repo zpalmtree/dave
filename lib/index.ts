@@ -561,7 +561,8 @@ async function chinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
     /* Replace with https://corona.lmao.ninja if you don't want to run locally */
-    const host = 'http://127.0.0.1:7531';
+    //const host = 'http://127.0.0.1:7531';
+    const host = 'https://corona.lmao.ninja';
 
     if (country !== '') {
         try {
@@ -594,7 +595,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                     const embed = new MessageEmbed()
                         .setColor('#C8102E')
                         .setTitle('Coronavirus statistics, ' + countryData.country)
-                        .setThumbnail(isState ? 'https://i.imgur.com/FnbQwqQ.png' : countryData.countryInfo.flag)
+                        .setThumbnail((isState || countryData.countryInfo.flag.endsWith('unknow.png')) ? 'https://i.imgur.com/FnbQwqQ.png' : countryData.countryInfo.flag)
                         .addFields(
                             { name: 'Cases', value: countryData.cases, inline: true },
                             { name: 'Deaths', value: countryData.deaths, inline: true, },
