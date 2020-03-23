@@ -27,6 +27,60 @@ const writeFile = promisify(fs.writeFile);
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
+const states = [
+    "New York",
+    "Washington",
+    "New Jersey",
+    "California",
+    "Illinois",
+    "Michigan",
+    "Florida",
+    "Louisiana",
+    "Texas",
+    "Massachusetts",
+    "Georgia",
+    "Colorado",
+    "Tennessee",
+    "Pennsylvania",
+    "Wisconsin",
+    "Ohio",
+    "Connecticut",
+    "North Carolina",
+    "Indiana",
+    "Mississippi",
+    "Maryland",
+    "Virginia",
+    "South Carolina",
+    "Nevada",
+    "Utah",
+    "Minnesota",
+    "Arkansas",
+    "Oregon",
+    "Alabama",
+    "Arizona",
+    "Missouri",
+    "District of Columbia",
+    "Kentucky",
+    "Iowa",
+    "Maine",
+    "Rhode Island",
+    "New Hampshire",
+    "Oklahoma",
+    "New Mexico",
+    "Kansas",
+    "Delaware",
+    "Hawaii",
+    "Vermont",
+    "Idaho",
+    "Nebraska",
+    "Montana",
+    "Alaska",
+    "North Dakota",
+    "Wyoming",
+    "South Dakota",
+    "West Virginia",
+];
+
 interface Quote {
     quote: string;
     timestamp: number;
@@ -506,12 +560,20 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
 async function chinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
+    /* Replace with https://corona.lmao.ninja if you don't want to run locally */
+    const host = 'http://127.0.0.1:7531';
+
     if (country !== '') {
         try {
+            /* Did they specify a state? */
+            const endpoint = states.map((x) => x.toLowerCase()).includes(country)
+                ? '/states'
+                : '/countries';
+
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: 'http://127.0.0.1:7531/countries',
+                url: host + endpoint,
                 json: true,
             });
 
@@ -519,9 +581,17 @@ async function chinked(msg: Message, country: string): Promise<void> {
             if (country === 'countries') {
                 msg.reply('Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', '));
                 return;
+            } else if (country === 'states') {
+                msg.reply('Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', '));
+                return;
             }
 
             for (const countryData of data) {
+                /* So we can treat the two endpoints the same in the below code */
+                if (countryData.state) {
+                    countryData.country = countryData.state;
+                }
+
                 if (countryData.country.toLowerCase() === country) {
                     const embed = new MessageEmbed()
                         .setColor('#C8102E')
@@ -543,7 +613,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 }
             }
 
-            msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries`);
+            msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
 
         } catch (err) {
             msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
@@ -553,7 +623,7 @@ async function chinked(msg: Message, country: string): Promise<void> {
             const data = await request({
                 method: 'GET',
                 timeout: 10 * 1000,
-                url: 'http://127.0.0.1:7531/all',
+                url: host + '/all',
                 json: true,
             });
 
