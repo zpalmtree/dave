@@ -631,10 +631,10 @@ async function chinked(msg: Message, country: string): Promise<void> {
                         .addFields(
                             { name: 'Cases', value: countryData.cases, inline: true },
                             { name: 'Deaths', value: countryData.deaths, inline: true, },
-                            { name: 'Active', value: countryData.cases - countryData.recovered - countryData.deaths, inline: true, },
+                            { name: 'Active', value: countryData.active, inline: true, },
                             { name: 'Cases Today', value: countryData.todayCases, inline: true },
                             { name: 'Deaths Today', value: countryData.todayDeaths, inline: true },
-                            { name: 'Recovered', value: countryData.recovered, inline: true },
+                            { name: 'Recovered', value: countryData.recovered || (countryData.cases - countryData.active - countryData.deaths), inline: true },
                         )
                         .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
