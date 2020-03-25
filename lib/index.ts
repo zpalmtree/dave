@@ -570,6 +570,11 @@ function chunk(arr: string, len: number) {
 }
 
 async function chinked(msg: Message, country: string): Promise<void> {
+    if (msg.author.id === '677089580494749707') {
+        msg.reply('You have been deemed too autistic to use this bot. Kindly fuck off. Thanks!');
+        return;
+    }
+
     country = country.trim().toLowerCase();
 
     /* Replace with https://corona.lmao.ninja if you don't want to run locally */
