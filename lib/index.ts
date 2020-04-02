@@ -634,18 +634,16 @@ async function chinked(msg: Message, country: string): Promise<void> {
                         .setTitle('Coronavirus statistics, ' + countryData.country)
                         .setThumbnail((isState || countryData.countryInfo.flag.endsWith('unknow.png')) ? 'https://i.imgur.com/FnbQwqQ.png' : countryData.countryInfo.flag)
                         .addFields(
-                            { name: 'Cases', value: countryData.cases, inline: true },
-                            { name: 'Deaths', value: countryData.deaths, inline: true, },
-                            { name: 'Active', value: countryData.active, inline: true, },
-                            { name: 'Cases Today', value: countryData.todayCases, inline: true },
-                            { name: 'Deaths Today', value: countryData.todayDeaths, inline: true },
-                            { name: 'Recovered', value: countryData.recovered || (countryData.cases - countryData.active - countryData.deaths), inline: true },
+                            { name: 'Cases', value: `${countryData.cases} (+${countryData.todayCases})`, inline: !isState },
+                            { name: 'Deaths', value: `${countryData.deaths} (+${countryData.todayDeaths})`, inline: !isState, },
+                            { name: 'Active', value: countryData.active, inline: !isState, },
+                            { name: 'Recovered', value: countryData.recovered || (countryData.cases - countryData.active - countryData.deaths), inline: !isState },
                         )
-                        .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
                     if (!isState) {
                         const percentage = (100 * (countryData.casesPerOneMillion / 1_000_000)).toFixed(5);
-                        embed.addField('Percentage of population infected', percentage + '%');
+                        embed.addField('Percentage Infected', percentage + '%', true);
+                        embed.addField('Last Updated', moment(data.update).fromNow(), true);
                     }
 
                     msg.channel.send(embed);
@@ -672,14 +670,12 @@ async function chinked(msg: Message, country: string): Promise<void> {
                 .setColor('#C8102E')
                 .setTitle('Coronavirus statistics')
                 .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-                //.setImage('http://144.202.28.97/linear.png')
                 .addFields(
                     { name: 'Cases', value: data.cases },
                     { name: 'Active', value: data.cases - data.recovered - data.deaths },
                     { name: 'Deaths', value: data.deaths },
                     { name: 'Last Updated', value: moment(data.updated).fromNow() },
                 )
-                .setFooter('Data source: https://www.worldometers.info/coronavirus/');
 
             msg.channel.send(embed);
         } catch (err) {
