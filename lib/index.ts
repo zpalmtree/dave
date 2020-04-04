@@ -585,23 +585,33 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
             .addFields(
                 { 
                     name: 'Cases',
-                    value: data.cases,
-                    inline: false,
-                },
-                { 
-                    name: 'Active',
-                    value: data.cases - data.recovered - data.deaths,
-                    inline: false,
+                    value: `${data.cases} (+${data.todayCases})`,
+                    inline: true,
                 },
                 { 
                     name: 'Deaths',
-                    value: data.deaths,
-                    inline: false,
+                    value: `${data.deaths} (+${data.todayDeaths})`,
+                    inline: true,
+                },
+                { 
+                    name: 'Active',
+                    value: data.active,
+                    inline: true,
+                },
+                {
+                    name: 'Recovered',
+                    value: data.recovered,
+                    inline: true,
+                },
+                {
+                    name: 'Percentage Infected',
+                    value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(5) + '%',
+                    inline: true,
                 },
                 { 
                     name: 'Last Updated',
                     value: moment(data.updated).fromNow(),
-                    inline: false,
+                    inline: true,
                 },
             );
 
