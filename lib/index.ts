@@ -558,7 +558,7 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
 }
 
 function chunk(arr: string, len: number) {
-    const chunks = []
+    const chunks = [];
     let i = 0;
     const n = arr.length;
 
@@ -569,117 +569,217 @@ function chunk(arr: string, len: number) {
     return chunks;
 }
 
-async function chinked(msg: Message, country: string): Promise<void> {
-    if (msg.author.id === '677089580494749707') {
-        msg.reply('You have been deemed too autistic to use this bot. Kindly fuck off. Thanks!');
-        return;
+async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
+    try {
+        const data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url: host + '/all',
+            json: true,
+        });
+
+        const embed = new MessageEmbed()
+            .setColor('#C8102E')
+            .setTitle('Coronavirus statistics')
+            .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+            .addFields(
+                { 
+                    name: 'Cases',
+                    value: data.cases,
+                    inline: false,
+                },
+                { 
+                    name: 'Active',
+                    value: data.cases - data.recovered - data.deaths,
+                    inline: false,
+                },
+                { 
+                    name: 'Deaths',
+                    value: data.deaths,
+                    inline: false,
+                },
+                { 
+                    name: 'Last Updated',
+                    value: moment(data.updated).fromNow(),
+                    inline: false,
+                },
+            );
+
+        msg.channel.send(embed);
+    } catch (err) {
+        msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
     }
+}
 
-    country = country.trim().toLowerCase();
+async function getChinkedCountryData(msg: Message, country: string, host: string): Promise<void> {
+    try {
+        const countryData = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url: `${host}/countries/${country}`,
+            json: true,
+        });
 
-    /* Replace with https://corona.lmao.ninja if you don't want to run locally */
-    const host = 'http://127.0.0.1:7531';
-    //const host = 'https://corona.lmao.ninja';
-
-    if (country !== '') {
-        try {
-            /* Did they specify a state? */
-            const isState: boolean = states.map((x) => x.toLowerCase()).includes(country);
-
-            const data = await request({
-                method: 'GET',
-                timeout: 10 * 1000,
-                url: host + (isState ? '/states' : '/countries'),
-                json: true,
-            });
-
-            /* List countries available */
-            if (country === 'countries') {
-                const countries = 'Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', ');
-
-                /* Discord message limit */
-                if (countries.length > 2000) {
-                    /* This splits in the middle of words, but we don't give a shit */
-                    for (const message of chunk(countries, 1700)) {
-                        msg.channel.send(message);
-                    }
-                } else {
-                    msg.reply(countries);
+        const embed = new MessageEmbed()
+            .setColor('#C8102E')
+            .setTitle('Coronavirus statistics, ' + countryData.country)
+            .setThumbnail(countryData.countryInfo.flag)
+            .addFields(
+                { 
+                    name: 'Cases',
+                    value: `${countryData.cases} (+${countryData.todayCases})`,
+                    inline: true,
+                },
+                {
+                    name: 'Deaths',
+                    value: `${countryData.deaths} (+${countryData.todayDeaths})`,
+                    inline: true,
+                },
+                {
+                    name: 'Active',
+                    value: countryData.active,
+                    inline: true,
+                },
+                {
+                    name: 'Recovered',
+                    value: countryData.recovered,
+                    inline: true,
+                },
+                {
+                    name: 'Percentage Infected',
+                    value: (100 * (countryData.casesPerOneMillion / 1_000_000)).toFixed(5) + '%',
+                    inline: true,
+                },
+                {
+                    name: 'Last Updated',
+                    value: moment(countryData.updated).fromNow(),
+                    inline: true,
                 }
+            );
 
-                return;
-            } else if (country === 'states') {
-                const stateData = 'Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', ');
+        msg.channel.send(embed);
 
-                if (stateData.length > 2000) {
-                    for (const message of chunk(stateData, 1700)) {
-                        msg.channel.send(message);
-                    }
-                } else {
-                    msg.reply(stateData);
-                }
-
-                return;
-            }
-
-            for (const countryData of data) {
-                /* So we can treat the two endpoints the same in the below code */
-                if (isState) {
-                    countryData.country = countryData.state;
-                }
-
-                if (countryData.country.toLowerCase() === country) {
-                    const embed = new MessageEmbed()
-                        .setColor('#C8102E')
-                        .setTitle('Coronavirus statistics, ' + countryData.country)
-                        .setThumbnail((isState || countryData.countryInfo.flag.endsWith('unknow.png')) ? 'https://i.imgur.com/FnbQwqQ.png' : countryData.countryInfo.flag)
-                        .addFields(
-                            { name: 'Cases', value: `${countryData.cases} (+${countryData.todayCases})`, inline: !isState },
-                            { name: 'Deaths', value: `${countryData.deaths} (+${countryData.todayDeaths})`, inline: !isState, },
-                            { name: 'Active', value: countryData.active, inline: !isState, },
-                            { name: 'Recovered', value: countryData.recovered || (countryData.cases - countryData.active - countryData.deaths), inline: !isState },
-                        )
-
-                    if (!isState) {
-                        const percentage = (100 * (countryData.casesPerOneMillion / 1_000_000)).toFixed(5);
-                        embed.addField('Percentage Infected', percentage + '%', true);
-                        embed.addField('Last Updated', moment(data.update).fromNow(), true);
-                    }
-
-                    msg.channel.send(embed);
-
-                    return;
-                }
-            }
-
+    } catch (err) {
+        if (err.statusCode === 404) {
             msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
-
-        } catch (err) {
+        } else {
             msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
         }
+    }
+}
+
+async function getChinkedStateData(msg: Message, state: string, host: string): Promise<void> {
+    try {
+        const data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url: `${host}/states`,
+            json: true,
+        });
+
+        for (const stateData of data) {
+            if (stateData.state.toLowerCase() === state) {
+                const embed = new MessageEmbed()
+                    .setColor('#C8102E')
+                    .setTitle(`Coronavirus statistics, ${stateData.state}`)
+                    .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+                    .addFields(
+                        {
+                            name: 'Cases',
+                            value: `${stateData.cases} (+${stateData.todayCases})`,
+                            inline: false,
+                        },
+                        {
+                            name: 'Deaths',
+                            value: `${stateData.deaths} (+${stateData.todayDeaths})`,
+                            inline: false,
+                        },
+                        {
+                            name: 'Active',
+                            value: stateData.active,
+                            inline: false,
+                        },
+                        {
+                            name: 'Recovered',
+                            value: stateData.cases - stateData.active - stateData.deaths,
+                            inline: false,
+                        },
+                    );
+
+                msg.channel.send(embed);
+
+                return;
+            }
+        }
+    } catch (err) {
+        msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+    }
+}
+
+async function getChinkedCountries(msg: Message, host: string): Promise<void> {
+    try {
+        const data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url: host + '/countries',
+            json: true,
+        });
+
+        const countries = 'Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', ');
+
+        /* Discord message limit */
+        if (countries.length > 2000) {
+            /* This splits in the middle of words, but we don't give a shit */
+            for (const message of chunk(countries, 1700)) {
+                msg.channel.send(message);
+            }
+        } else {
+            msg.reply(countries);
+        }
+    } catch (err) {
+        msg.reply(`Failed to get countries :( [ ${err.toString()} ]`);
+    }
+}
+
+async function getChinkedStates(msg: Message): Promise<void> {
+    const stateData = 'Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', ');
+
+    if (stateData.length > 2000) {
+        for (const message of chunk(stateData, 1700)) {
+            msg.channel.send(message);
+        }
     } else {
-        try {
-            const data = await request({
-                method: 'GET',
-                timeout: 10 * 1000,
-                url: host + '/all',
-                json: true,
-            });
+        msg.reply(stateData);
+    }
+}
 
-            const embed = new MessageEmbed()
-                .setColor('#C8102E')
-                .setTitle('Coronavirus statistics')
-                .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-                .addFields(
-                    { name: 'Cases', value: data.cases },
-                    { name: 'Active', value: data.cases - data.recovered - data.deaths },
-                    { name: 'Deaths', value: data.deaths },
-                    { name: 'Last Updated', value: moment(data.updated).fromNow() },
-                )
+async function chinked(msg: Message, country: string): Promise<void> {
+    country = country.trim().toLowerCase();
 
-            msg.channel.send(embed);
-        } catch (err) {
-            msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+    const runningLocally = true;
+    const host = runningLocally ? 'http://127.0.0.1:7531' : 'https://corona.lmao.ninja';
+
+    switch(country) {
+        case '': {
+            getChinkedWorldData(msg, host);
+            break;
+        }
+        case 'countries': {
+            getChinkedCountries(msg, host);
+            break;
+        }
+        case 'states': {
+            getChinkedStates(msg);
+            break;
+        }
+        default: {
+            if (states.map((x) => x.toLowerCase()).includes(country)) {
+                getChinkedStateData(msg, country, host);
+            } else {
+                getChinkedCountryData(msg, country, host);
+            }
+
+            break;
         }
     }
 }
