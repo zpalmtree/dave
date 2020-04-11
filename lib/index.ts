@@ -574,7 +574,7 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
         const data = await request({
             method: 'GET',
             timeout: 10 * 1000,
-            url: host + '/all',
+            url: host + '/v2/all',
             json: true,
         });
 
@@ -626,7 +626,7 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
         const countryData = await request({
             method: 'GET',
             timeout: 10 * 1000,
-            url: `${host}/countries/${country}`,
+            url: `${host}/v2/countries/${country}`,
             json: true,
         });
 
@@ -731,7 +731,7 @@ async function getChinkedCountries(msg: Message, host: string): Promise<void> {
         const data = await request({
             method: 'GET',
             timeout: 10 * 1000,
-            url: host + '/countries',
+            url: host + '/v2/countries',
             json: true,
         });
 
