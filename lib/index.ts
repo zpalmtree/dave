@@ -766,7 +766,7 @@ async function getChinkedStates(msg: Message): Promise<void> {
 async function chinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
-    const runningLocally = true;
+    const runningLocally = false;
     const host = runningLocally ? 'http://127.0.0.1:7531' : 'https://corona.lmao.ninja';
 
     switch(country) {
