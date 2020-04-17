@@ -683,7 +683,7 @@ async function getChinkedStateData(msg: Message, state: string, host: string): P
         const data = await request({
             method: 'GET',
             timeout: 10 * 1000,
-            url: `${host}/states`,
+            url: `${host}/v2/states`,
             json: true,
         });
 
