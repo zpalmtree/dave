@@ -91,6 +91,10 @@ function handleMessage(msg: Message) {
         return;
     }
 
+    if (msg.author.bot) {
+        return;
+    }
+
     /* Get the command with prefix, and any args */
     const [ tmp, ...args ] = msg.content.split(' ');
 
