@@ -181,7 +181,8 @@ function handleFortune(msg: Message): void {
 }
 
 function handleMath(msg: Message, args: string): void {
-    const niggers = ['100607191337164800'];
+    // xaz, extra
+    const niggers = ['100607191337164800', '388037798772473859'];
 
     if (niggers.includes(msg.author.id)) {
         msg.reply('FUCK YOU YOU STUPID NIGGER');
