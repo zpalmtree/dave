@@ -1,27 +1,18 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as moment from 'moment';
-
-import { stringify } from 'querystring';
-
-import request = require('request-promise-native');
-
 import { Message, Client, TextChannel, User, MessageEmbed, MessageAttachment } from 'discord.js';
-
+import * as fs from 'fs';
+import { evaluate } from 'mathjs';
+import * as moment from 'moment';
+import * as path from 'path';
+import { stringify } from 'querystring';
+import request = require('request-promise-native');
 import { promisify } from 'util';
 
-import { evaluate } from 'mathjs';
-
-import { config } from './Config';
-
 import { catBreeds } from './Cats';
+import { config } from './Config';
 import { dogBreeds } from './Dogs';
-import { fortunes } from './Fortunes';
+import { renderDot, renderDotGraph } from './Dot';
 import { dubTypes } from './Dubs';
-
-import { renderDotGraph, renderDot } from './Dot';
-
-import * as convert from 'xml-js';
+import { fortunes } from './Fortunes';
 
 const readFile = promisify(fs.readFile);
 const writeFile = promisify(fs.writeFile);
@@ -30,6 +21,13 @@ const writeFile = promisify(fs.writeFile);
    one or more numbers - the dice to roll - then zero or more chars for an
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
+const timeRegex: RegExp = new RegExp(/^([0-9]+)([dhms])/, 'i');
+const timeUnits = {
+    d: 86400,
+    h: 3600,
+    m: 60,
+    s: 1
+};
 
 const states = [
     "New York",
@@ -155,7 +153,7 @@ function handleMessage(msg: Message) {
             break;
         }
         case 'dot': {
-            dotpost(msg, args.join(' '));
+            dotpost(msg, args[0]);
             break;
         }
     }
@@ -808,16 +806,24 @@ async function chinked(msg: Message, country: string): Promise<void> {
     }
 }
 
-async function dotpost(msg: Message, timespan: string): Promise<void> {
+async function dotpost(msg: Message, arg: string): Promise<void> {
     try {
-        const [ dotGraph, [ currentDotValue, dot ] ] = await Promise.all([
-            renderDotGraph(),
+        let [timeString, num, unit] = timeRegex.exec(arg) || ['24h', 24, 'h'];
+        let timeSpan: number = Number(num) * (timeUnits as any)[unit];
+        // clamp timespan to 24h
+        if (timeSpan > 86400) {
+            timeSpan = 86400;
+            timeString = '24h';
+        }
+
+        const [dotGraph, [currentDotValue, dot]] = await Promise.all([
+            renderDotGraph(timeSpan * -1),
             renderDot(),
         ]);
 
         const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
         const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
-
+        
         const embed = new MessageEmbed()
             .setColor('#C8102E')
             .attachFiles([dotAttachment, dotGraphAttachment])
@@ -826,13 +832,19 @@ async function dotpost(msg: Message, timespan: string): Promise<void> {
             .setImage('attachment://dot-graph.png')
             .addFields(
                 { 
-                    name: 'Current Network Variance',
+                    name: 'Network Variance',
                     value: `${Math.floor(currentDotValue * 100)}%`,
-                    inline: true,
+                    inline: true
+                },
+                {
+                    name: 'Timespan',
+                    value: timeString,
+                    inline: true
                 }
             );
 
         msg.channel.send(embed);
+
     } catch (err) {
         msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
     }
