@@ -5,11 +5,14 @@ import request = require('request-promise-native');
 
 // dot autism, shitty code follows. enjoy.
 
-export const dot_w = 120;
-export const dot_h = 120;
+const dotWidth = 120;
+const dotHeight = 120;
+
+const dotGraphWidth = 325;
+const dotGraphHeight = 120;
 
 const shadowBlur = 2.75;
-export const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dot_w}' height='${dot_h}' style='opacity:0.7'>
+const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}' style='opacity:0.7'>
     <defs>
         <filter id='fh'>
             <feGaussianBlur in='SourceGraphic' stdDeviation='${shadowBlur} ${shadowBlur}' />
@@ -38,7 +41,7 @@ const colors: any[] = [
 let dotImages: any[] = [];
 
 for (let i = 0; i < colors.length; i++) {
-    let dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' id='svgel${i}' preserveAspectRatio='xMidYMid meet' width='${dot_w}' height='${dot_h}'>
+    let dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' id='svgel${i}' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}'>
         <defs>
             <filter id='f1'>
                 <feGaussianBlur in='SourceGraphic' stdDeviation='9 3' />
@@ -62,8 +65,8 @@ for (let i = 0; i < colors.length; i++) {
     </svg>`;
 
     let img = new Image();
-    img.width = dot_w;
-    img.height = dot_h;
+    img.width = dotWidth;
+    img.height = dotHeight;
     img.onload = () => dotImages[i] = img;
     img.src = `data:image/svg+xml;base64,${Buffer.from(dotSvg).toString('base64')}`;
 }
@@ -103,12 +106,12 @@ export async function renderDot(): Promise<[number, Canvas]> {
         }
     }
 
-    const dotCanvas = createCanvas(dot_w, dot_h);
+    const dotCanvas = createCanvas(dotWidth, dotHeight);
     const dotContext = dotCanvas.getContext('2d');
 
     const shadowImage = new Image();
-    shadowImage.width = dot_w;
-    shadowImage.height = dot_h;
+    shadowImage.width = dotWidth;
+    shadowImage.height = dotHeight;
     shadowImage.src = `data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`;
 
     dotContext.fillStyle = 'rgba(255, 255, 255, 0)';
@@ -137,27 +140,25 @@ export async function renderDotGraph(): Promise<Canvas> {
     /* 1d */
     const timespan = -86400;
 
-    const cw = 325;
-    const ch = 120;
-    const inv_ch = 1.0 / ch;
+    const inv_ch = 1.0 / dotGraphHeight;
     const shadowOffset = 10;
 
-    var canvasShadow = createCanvas(cw, ch+shadowOffset*2);
-    var canvas = createCanvas(cw, ch);
+    var canvasShadow = createCanvas(dotGraphWidth, dotGraphHeight+shadowOffset*2);
+    var canvas = createCanvas(dotGraphWidth, dotGraphHeight);
     var contextShadow = canvasShadow.getContext('2d');
     var context = canvas.getContext('2d');
-    var outCanvas = createCanvas(cw, ch+shadowOffset*2);
+    var outCanvas = createCanvas(dotGraphWidth, dotGraphHeight+shadowOffset*2);
     var outContext = outCanvas.getContext("2d");
 
     const dotXML = await request({
         method: 'GET',
         timeout: 10000,
-        url: `http://global-mind.org/gcpdot/gcpgraph.php?pixels=${cw}&seconds=${timespan}`,
+        url: `http://global-mind.org/gcpdot/gcpgraph.php?pixels=${dotGraphWidth}&seconds=${timespan}`,
     });
 
     const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
 
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${cw}' height='${ch}'>
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotGraphWidth}' height='${dotGraphHeight}'>
         <defs>
             <linearGradient id='g' x1='0%' y1='0%' x2='0%' y2='100%'>
                 <stop offset='0%'   style='stop-color:#FF00FF; stop-opacity:1'/>
@@ -180,11 +181,11 @@ export async function renderDotGraph(): Promise<Canvas> {
     bgImage.onload = () => context.drawImage(bgImage, 0, 0);
     bgImage.src = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 
-    const imgBuffer = context.getImageData(0, 0, cw, ch);
+    const imgBuffer = context.getImageData(0, 0, dotGraphWidth, dotGraphHeight);
 
-    for (let y = 0; y < ch; y++) {
-        for (let x = 0; x < cw; x++) {
-            imgBuffer.data[(y * cw + x) * 4 + 3] = 0;
+    for (let y = 0; y < dotGraphHeight; y++) {
+        for (let x = 0; x < dotGraphWidth; x++) {
+            imgBuffer.data[(y * dotGraphWidth + x) * 4 + 3] = 0;
         }
     }
 
@@ -202,8 +203,8 @@ export async function renderDotGraph(): Promise<Canvas> {
             }
         }
 
-        for (let y = Math.floor(graphData[i].top * ch); y < graphData[i].bottom * ch; y++) {
-            const ys = y / ch;
+        for (let y = Math.floor(graphData[i].top * dotGraphHeight); y < graphData[i].bottom * dotGraphHeight; y++) {
+            const ys = y / dotGraphHeight;
             let a = 0;
 
             if (ys > graphData[i].q1 && ys <= graphData[i].q3 || (graphData[i].bottom - graphData[i].top) < inv_ch * 1.5) {
