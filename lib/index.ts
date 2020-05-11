@@ -821,7 +821,7 @@ async function dotpost(msg: Message, timespan: string): Promise<void> {
         const embed = new MessageEmbed()
             .setColor('#C8102E')
             .attachFiles([dotAttachment, dotGraphAttachment])
-            .setTitle('Global Conciousness Project Doot')
+            .setTitle('Global Conciousness Project Dot')
             .setThumbnail('attachment://dot.png')
             .setImage('attachment://dot-graph.png')
             .addFields(
