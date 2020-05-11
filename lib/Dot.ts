@@ -1,9 +1,6 @@
 import { Canvas, Image, createCanvas } from 'canvas';
 import { xml2json } from 'xml-js';
-
 import request = require('request-promise-native');
-
-// dot autism, shitty code follows. enjoy.
 
 const dotWidth = 120;
 const dotHeight = 120;
@@ -21,57 +18,79 @@ const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='
     <circle filter='url(#fh)' fill='black' cx='50%' cy='49%' r='45%'/>
 </svg>`;
 
-const colors: any[] = [
-	{color1: '#CDCDCD', color2: '#505050'},
-	{color1: '#FFA8C0', color2: '#FF0064'},
-	{color1: '#FF1E1E', color2: '#840607'},
-	{color1: '#FFB82E', color2: '#C95E00'},
-	{color1: '#FFD517', color2: '#C69000'},
-	{color1: '#FFFA40', color2: '#C6C300'},
-	{color1: '#F9FA00', color2: '#B0CC00'},
-	{color1: '#AEFA00', color2: '#88C200'},
-	{color1: '#64FA64', color2: '#00A700'},
-	{color1: '#64FAAB', color2: '#00B5C9'},
-	{color1: '#ACF2FF', color2: '#21BCF1'},
-	{color1: '#0EEEFF', color2: '#0786E1'},
-	{color1: '#24CBFD', color2: '#0000FF'},
-	{color1: '#5655CA', color2: '#2400A0'}
+const colors: {color1: string, color2: string}[] = [
+    {color1: '#CDCDCD', color2: '#505050'},
+    {color1: '#FFA8C0', color2: '#FF0064'},
+    {color1: '#FF1E1E', color2: '#840607'},
+    {color1: '#FFB82E', color2: '#C95E00'},
+    {color1: '#FFD517', color2: '#C69000'},
+    {color1: '#FFFA40', color2: '#C6C300'},
+    {color1: '#F9FA00', color2: '#B0CC00'},
+    {color1: '#AEFA00', color2: '#88C200'},
+    {color1: '#64FA64', color2: '#00A700'},
+    {color1: '#64FAAB', color2: '#00B5C9'},
+    {color1: '#ACF2FF', color2: '#21BCF1'},
+    {color1: '#0EEEFF', color2: '#0786E1'},
+    {color1: '#24CBFD', color2: '#0000FF'},
+    {color1: '#5655CA', color2: '#2400A0'}
 ];
 
-let dotImages: any[] = [];
+var dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}'>
+    <defs>
+        <filter id='f1'>
+            <feGaussianBlur in='SourceGraphic' stdDeviation='9 3' />
+        </filter>
+        <radialGradient id='highlight' cy='5%' r='50%' gradientTransform='translate(-0.25 0) scale(1.5 1)'>
+            <stop offset='10%' stop-color='white' stop-opacity='100'/>
+            <stop offset='100%' stop-color='white' stop-opacity='0'/>
+        </radialGradient>
+        <radialGradient id='grad' cy='92%' r='60%' gradientTransform='translate(-0.2 0) scale(1.4 1)'>
+            <stop offset='0%' stop-color='$$COLOR1$$'/>
+            <stop offset='100%' stop-color='$$COLOR2$$'/>
+        </radialGradient>
+    </defs>
+    <circle fill='url(#grad)' cx='50%' cy='45%' r='45%'/>
+    <clipPath id='ic'>
+        <circle cx='50%' cy='40%' r='37%' />
+    </clipPath>
+    <g filter='url(#f1)'>
+        <circle fill='url(#highlight)' cx='50%' cy='50%' r='48%' clip-path='url(#ic)' />
+    </g>
+</svg>`;
+
+var graphSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotGraphWidth}' height='${dotGraphHeight}'>
+    <defs>
+        <linearGradient id='g' x1='0%' y1='0%' x2='0%' y2='100%'>
+            <stop offset='0%' style='stop-color:#FF00FF;stop-opacity:1'/>
+            <stop offset='1%' style='stop-color:#FF0000;stop-opacity:1'/>
+            <stop offset='3.5%' style='stop-color:#FF4000;stop-opacity:1'/>
+            <stop offset='6%' style='stop-color:#FF7500;stop-opacity:1'/>
+            <stop offset='11%' style='stop-color:#FFB000;stop-opacity:1'/>
+            <stop offset='22%' style='stop-color:#FFFF00;stop-opacity:1'/>
+            <stop offset='50%' style='stop-color:#00df00;stop-opacity:1'/>
+            <stop offset='90%' style='stop-color:#00df00;stop-opacity:1'/>
+            <stop offset='94%' style='stop-color:#00EEFF;stop-opacity:1'/>
+            <stop offset='99%' style='stop-color:#0034F4;stop-opacity:1'/>
+            <stop offset='100%' style='stop-color:#440088;stop-opacity:1'/>
+        </linearGradient>
+    </defs>
+    <rect width='100%' height='100%' fill='url(#g)'/>
+</svg>`;
+
+// generate dot color stops
+let dotImages: Image[] = [];
 
 for (let i = 0; i < colors.length; i++) {
-    let dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' id='svgel${i}' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}'>
-        <defs>
-            <filter id='f1'>
-                <feGaussianBlur in='SourceGraphic' stdDeviation='9 3' />
-            </filter>
-            <radialGradient id='highlight' cy='5%' r='50%' gradientTransform='translate(-0.25 0) scale(1.5 1)'>
-                <stop offset='10%' stop-color='white' stop-opacity='100'/>
-                <stop offset='100%' stop-color='white' stop-opacity='0'/>
-            </radialGradient>
-            <radialGradient id='grad' cy='92%' r='60%' gradientTransform='translate(-0.2 0) scale(1.4 1)'>
-                <stop offset='0%' stop-color='${colors[i].color1}'/>
-                <stop offset='100%' stop-color='${colors[i].color2}'/>
-            </radialGradient>
-        </defs>
-        <circle fill='url(#grad)' cx='50%' cy='45%' r='45%'/>
-        <clipPath id='ic'>
-            <circle cx='50%' cy='40%' r='37%' />
-        </clipPath>
-        <g filter='url(#f1)'>
-            <circle fill='url(#highlight)' cx='50%' cy='50%' r='48%' clip-path='url(#ic)' />
-        </g>
-    </svg>`;
+    let svg = dotSvg.replace('$$COLOR1$$', colors[i].color1).replace('$$COLOR2$$', colors[i].color2);
 
     let img = new Image();
     img.width = dotWidth;
     img.height = dotHeight;
     img.onload = () => dotImages[i] = img;
-    img.src = `data:image/svg+xml;base64,${Buffer.from(dotSvg).toString('base64')}`;
+    img.src = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 }
 
-const dotColors: any[] = [
+var dotColors: {tail: number, mc: Image}[] = [
     {tail: 0.00,    mc: dotImages[1]},
     {tail: 0.01,    mc: dotImages[2]},
     {tail: 0.05,    mc: dotImages[3]},
@@ -97,25 +116,20 @@ export async function renderDot(): Promise<[number, Canvas]> {
     const dotData = JSON.parse(xml2json(dotXML)).elements[0].elements;
 
     const serverTime = dotData[0].elements[0].text;
-    let currentDotValue: number = 0;
 
     /* Server sends back a full minute of data, we only need the current second */
-    for (const item of dotData[1].elements) {
-        if (item.attributes.t === serverTime) {
-            currentDotValue = Number(item.elements[0].text);
-        }
-    }
+    const currentDotValue = Number(dotData[1].elements.find((item: any) => {
+        return item.attributes.t === serverTime
+    }).elements[0].text);
 
     const dotCanvas = createCanvas(dotWidth, dotHeight);
     const dotContext = dotCanvas.getContext('2d');
 
+    /* Generate dot drop shadow */
     const shadowImage = new Image();
     shadowImage.width = dotWidth;
     shadowImage.height = dotHeight;
     shadowImage.src = `data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`;
-
-    dotContext.fillStyle = 'rgba(255, 255, 255, 0)';
-    dotContext.globalAlpha = 1.0;
     dotContext.drawImage(shadowImage, 0, 0);
 
     for (let i = 0; i < dotColors.length - 1; i++) {
@@ -136,10 +150,7 @@ export async function renderDot(): Promise<[number, Canvas]> {
     return [ currentDotValue, dotCanvas ];
 };
 
-export async function renderDotGraph(): Promise<Canvas> {
-    /* 1d */
-    const timespan = -86400;
-
+export async function renderDotGraph(timespan: number): Promise<Canvas> {
     const inv_ch = 1.0 / dotGraphHeight;
     const shadowOffset = 10;
 
@@ -158,28 +169,9 @@ export async function renderDotGraph(): Promise<Canvas> {
 
     const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
 
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotGraphWidth}' height='${dotGraphHeight}'>
-        <defs>
-            <linearGradient id='g' x1='0%' y1='0%' x2='0%' y2='100%'>
-                <stop offset='0%'   style='stop-color:#FF00FF; stop-opacity:1'/>
-                <stop offset='1%'   style='stop-color:#FF0000; stop-opacity:1'/>
-                <stop offset='3.5%' style='stop-color:#FF4000; stop-opacity:1'/>
-                <stop offset='6%'   style='stop-color:#FF7500; stop-opacity:1'/>
-                <stop offset='11%'  style='stop-color:#FFB000; stop-opacity:1'/>
-                <stop offset='22%'  style='stop-color:#FFFF00; stop-opacity:1'/>
-                <stop offset='50%'  style='stop-color:#00df00; stop-opacity:1'/>
-                <stop offset='90%'  style='stop-color:#00df00; stop-opacity:1'/>
-                <stop offset='94%'  style='stop-color:#00EEFF; stop-opacity:1'/>
-                <stop offset='99%'  style='stop-color:#0034F4; stop-opacity:1'/>
-                <stop offset='100%' style='stop-color:#440088; stop-opacity:1'/>
-            </linearGradient>
-        </defs>
-        <rect width='100%' height='100%' fill='url(#g)'/>
-    </svg>`;
-
     const bgImage = new Image();
     bgImage.onload = () => context.drawImage(bgImage, 0, 0);
-    bgImage.src = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    bgImage.src = `data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`;
 
     const imgBuffer = context.getImageData(0, 0, dotGraphWidth, dotGraphHeight);
 
@@ -189,44 +181,41 @@ export async function renderDotGraph(): Promise<Canvas> {
         }
     }
 
-    const imgShadowBuffer = contextShadow.createImageData(bgImage.width + shadowOffset * 2, bgImage.height + shadowOffset * 2);
+    const imgShadowBuffer = contextShadow.createImageData(bgImage.width, bgImage.height + shadowOffset * 2);
 
     for (let i = 0; i < graphData.length; i++) {
-        graphData[i].top = Number(graphData[i].attributes.t);
-        graphData[i].bottom = Number(graphData[i].attributes.b);
-        graphData[i].q1 = Number(graphData[i].attributes.q1);
-        graphData[i].q3 = Number(graphData[i].attributes.q3);
+        let top = Number(graphData[i].attributes.t);
+        let bottom = Number(graphData[i].attributes.b);
+        let q1 = Number(graphData[i].attributes.q1);
+        let q3 = Number(graphData[i].attributes.q3);
 
-        if ((graphData[i].bottom - graphData[i].top) < inv_ch) {
-            if (graphData[i].top > 0.5) {
-                graphData[i].top -= inv_ch;
+        if ((bottom - top) < inv_ch) {
+            if (top > 0.5) {
+                top -= inv_ch;
             }
         }
 
-        for (let y = Math.floor(graphData[i].top * dotGraphHeight); y < graphData[i].bottom * dotGraphHeight; y++) {
+        for (let y = Math.floor(top * dotGraphHeight); y < bottom * dotGraphHeight; y++) {
             const ys = y / dotGraphHeight;
             let a = 0;
 
-            if (ys > graphData[i].q1 && ys <= graphData[i].q3 || (graphData[i].bottom - graphData[i].top) < inv_ch * 1.5) {
+            if (ys > q1 && ys <= q3 || (bottom - top) < inv_ch * 1.5) {
                 a = 1;
-            } else if (ys > graphData[i].top && ys <= graphData[i].q1) {
-                a = (ys - graphData[i].top) / (graphData[i].q1 - graphData[i].top);
-            } else if (ys > graphData[i].q3 && ys <= graphData[i].bottom) {
-                a = (graphData[i].bottom - ys) / (graphData[i].bottom - graphData[i].q3);
+            } else if (ys > top && ys <= q1) {
+                a = (ys - top) / (q1 - top);
+            } else if (ys > q3 && ys <= bottom) {
+                a = (bottom - ys) / (bottom - q3);
             }
 
             imgBuffer.data[(i + y * bgImage.width) * 4 + 3] = 255 * a;
-            imgShadowBuffer.data[(i + (y + shadowOffset * 2) * (bgImage.width + shadowOffset * 2)) * 4 + 3] = Math.pow(a, 0.75) * 255;
+            imgShadowBuffer.data[(i + (y + shadowOffset * 2) * (bgImage.width)) * 4 + 3] = Math.pow(a, 0.75) * 255;
         }
     }
 
     // blur the shadow
-    stackBlurCanvasAlpha(imgShadowBuffer.data, bgImage.width + shadowOffset * 2, bgImage.height + shadowOffset * 2, 6);
+    stackBlurCanvasAlpha(imgShadowBuffer.data, bgImage.width, bgImage.height + shadowOffset * 2, 6);
 
-    contextShadow.globalAlpha = 1.0;
-    contextShadow.putImageData(imgShadowBuffer, shadowOffset, shadowOffset);
-
-    context.globalAlpha = 1.0;
+    contextShadow.putImageData(imgShadowBuffer, 0, shadowOffset);
     context.putImageData(imgBuffer, 0, 0);
 
     outContext.fillStyle = '#525252';
