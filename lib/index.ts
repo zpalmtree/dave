@@ -31,6 +31,15 @@ const writeFile = promisify(fs.writeFile);
    optional mathematical expression (for example, d20 + 3) */
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
+/* Optional timespan for dot graph (for example 30m, 5s, 20h) */
+const timeRegex: RegExp = new RegExp(/^([0-9]+)([dhms])/, 'i');
+const timeUnits = {
+    d: 86400,
+    h: 3600,
+    m: 60,
+    s: 1
+};
+
 const states = [
     "New York",
     "Washington",
@@ -808,10 +817,18 @@ async function chinked(msg: Message, country: string): Promise<void> {
     }
 }
 
-async function dotpost(msg: Message, timespan: string): Promise<void> {
+async function dotpost(msg: Message, arg: string): Promise<void> {
     try {
+        let [timeString, num, unit] = timeRegex.exec(arg) || ['24h', 24, 'h'];
+        let timeSpan: number = Number(num) * (timeUnits as any)[unit];
+        // clamp timespan to 24h
+        if (timeSpan > 86400) {
+            timeSpan = 86400;
+            timeString = '24h';
+        }
+
         const [ dotGraph, [ currentDotValue, dot ] ] = await Promise.all([
-            renderDotGraph(),
+            renderDotGraph(timeSpan * -1),
             renderDot(),
         ]);
 
@@ -826,9 +843,14 @@ async function dotpost(msg: Message, timespan: string): Promise<void> {
             .setImage('attachment://dot-graph.png')
             .addFields(
                 { 
-                    name: 'Current Network Variance',
+                    name: 'Network Variance',
                     value: `${Math.floor(currentDotValue * 100)}%`,
                     inline: true,
+                },
+                {
+                    name: 'Timespan',
+                    value: timeString,
+                    inline: true
                 }
             );
 
