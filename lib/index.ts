@@ -810,8 +810,10 @@ async function chinked(msg: Message, country: string): Promise<void> {
 
 async function dotpost(msg: Message, timespan: string): Promise<void> {
     try {
-        const dotGraph = await renderDotGraph();
-        const [ currentDotValue, dot ] = await renderDot();
+        const [ dotGraph, [ currentDotValue, dot ] ] = await Promise.all([
+            renderDotGraph(),
+            renderDot(),
+        ]);
 
         const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
         const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
@@ -819,7 +821,7 @@ async function dotpost(msg: Message, timespan: string): Promise<void> {
         const embed = new MessageEmbed()
             .setColor('#C8102E')
             .attachFiles([dotAttachment, dotGraphAttachment])
-            .setTitle('Global Conciousness Project Dot')
+            .setTitle('Global Conciousness Project Doot')
             .setThumbnail('attachment://dot.png')
             .setImage('attachment://dot-graph.png')
             .addFields(
