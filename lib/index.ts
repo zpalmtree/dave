@@ -19,6 +19,10 @@ import { dogBreeds } from './Dogs';
 import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
 
+import { renderDotGraph, renderDot } from './Dot';
+
+import * as convert from 'xml-js';
+
 const readFile = promisify(fs.readFile);
 const writeFile = promisify(fs.writeFile);
 
@@ -150,6 +154,10 @@ function handleMessage(msg: Message) {
             chinked(msg, args.join(' '));
             break;
         }
+        case 'dot': {
+            dotpost(msg, args.join(' '));
+            break;
+        }
     }
 }
 
@@ -277,6 +285,7 @@ $doggo:     Gets a random dog pic
 $kitty:     Gets a random cat pic
 $help:      Displays this help
 $chinked:   Displays coronavirus statistics
+$dot:       Dot bot post dot
 \`\`\`
     `);
 }
@@ -796,6 +805,34 @@ async function chinked(msg: Message, country: string): Promise<void> {
 
             break;
         }
+    }
+}
+
+async function dotpost(msg: Message, timespan: string): Promise<void> {
+    try {
+        const dotGraph = await renderDotGraph();
+        const [ currentDotValue, dot ] = await renderDot();
+
+        const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
+        const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
+
+        const embed = new MessageEmbed()
+            .setColor('#C8102E')
+            .attachFiles([dotAttachment, dotGraphAttachment])
+            .setTitle('Global Conciousness Project Dot')
+            .setThumbnail('attachment://dot.png')
+            .setImage('attachment://dot-graph.png')
+            .addFields(
+                { 
+                    name: 'Current Network Variance',
+                    value: `${Math.floor(currentDotValue * 100)}%`,
+                    inline: true,
+                }
+            );
+
+        msg.channel.send(embed);
+    } catch (err) {
+        msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
     }
 }
 
