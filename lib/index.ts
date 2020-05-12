@@ -894,7 +894,7 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
         .setImage('attachment://dot-graph.png')
         .addFields(
             { 
-                name: 'Current Network Variance',
+                name: 'Network Variance',
                 value: `${Math.floor(currentDotValue * 100)}%`,
                 inline: true
             },
