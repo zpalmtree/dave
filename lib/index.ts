@@ -824,18 +824,56 @@ async function chinked(msg: Message, country: string): Promise<void> {
 
 async function dotpost(msg: Message, arg: string): Promise<void> {
     try {
-        let [timeString, num, unit] = timeRegex.exec(arg) || ['24h', 24, 'h'];
-        let timeSpan: number = Number(num) * (timeUnits as any)[unit];
-        // clamp timespan to 24h
-        if (timeSpan > 86400) {
-            timeSpan = 86400;
-            timeString = '24h';
+        if (arg.toLowerCase() === 'help') {
+            printDotHelp(msg);
+            return;
         }
 
-        const [ dotGraph, [ currentDotValue, dot ] ] = await Promise.all([
+        let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
+        let timeSpan: number = Number(num) * (timeUnits as any)[unit];
+        // clamp timespan to 24h
+        if (timeSpan > 86400*7 || timeSpan <= 0) {
+            timeSpan = 86400*7;
+            timeString = '1w';
+        }
+
+        const [ [ domainVariance, dotGraph ], [ currentDotValue, dot ] ] = await Promise.all([
             renderDotGraph(timeSpan * -1),
             renderDot(),
         ]);
+
+        const x: number = currentDotValue;
+        let description: string = '';
+        switch (true) {
+            case (x < 0.05): {
+                description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
+                break;
+            }
+            case (x < 0.1): {
+                description = 'Strongly increased network variance. May be chance fluctuation.';
+                break;
+            }
+            case (x < 0.4): {
+                description = 'Slightly increased network variance. Probably chance fluctuation.';
+                break;
+            }
+            case (x < 0.9): {
+                description = 'Normally random network variance. This is average or expected behavior.';
+                break;
+            }
+            case (x < 0.95): {
+                description = 'Small network variance. Probably chance fluctuation.';
+                break;
+            }
+            case (x < 1.0): {
+                description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
+                break;
+            }
+            default: {
+                description = 'What the heck?';
+                break;
+            }
+        }
 
         const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
         const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
@@ -848,14 +886,25 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
             .setImage('attachment://dot-graph.png')
             .addFields(
                 { 
-                    name: 'Network Variance',
+                    name: 'Current Network Variance',
                     value: `${Math.floor(currentDotValue * 100)}%`,
-                    inline: true,
+                    inline: true
                 },
+                /* removed because BORING, add it back if you want idc */
+                // {
+                //     name: 'Domain Variance',
+                //     value: `${Math.floor(domainVariance * 100)}%`,
+                //     inline: true
+                // },
                 {
                     name: 'Timespan',
-                    value: timeString,
+                    value: timeString.toString().replace(/^0+/, ''),
                     inline: true
+                },
+                {
+                    name: 'Description',
+                    value: description,
+                    inline: false
                 }
             );
 
@@ -863,6 +912,10 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
     } catch (err) {
         msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
     }
+}
+
+function printDotHelp(msg: Message): void {
+    msg.reply('the Global Consciousness Project collects random numbers from around the world. These numbers are available on the GCP website. This website downloads those numbers once a minute and performs sophisticated analysis on these random numbers to see how coherent they are. That is, we compute how random the random numbers coming from the eggs really are. The theory is that the Global Consciousness of all Beings of the Planet affect these random numbers... Maybe they aren\'t quite as random as we thought. \n\nThe probability time window is one and two hours; with the display showing the more coherent of the two. For more information on the algorithm you can read about it on the GCP Basic Science page (http://global-mind.org/science2.html#hypothesis)');
 }
 
 main();
