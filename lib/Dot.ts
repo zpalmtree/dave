@@ -150,7 +150,7 @@ export async function renderDot(): Promise<[number, Canvas]> {
     return [ currentDotValue, dotCanvas ];
 };
 
-export async function renderDotGraph(timespan: number): Promise<Canvas> {
+export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
     const inv_ch = 1.0 / dotGraphHeight;
     const shadowOffset = 10;
 
@@ -215,6 +215,15 @@ export async function renderDotGraph(timespan: number): Promise<Canvas> {
     // blur the shadow
     stackBlurCanvasAlpha(imgShadowBuffer.data, bgImage.width, bgImage.height + shadowOffset * 2, 6);
 
+    // calculate variance
+    let sum: number = 0;
+    graphData.map((x: any) => sum += Number(x.attributes.a));
+
+    const mean: number = sum / graphData.length;
+    let numerator = 0;
+    graphData.map((y: any) => numerator += Math.pow(Number(y.attributes.a) - mean, 2));
+    const variance = numerator / (graphData.length - 1);
+
     contextShadow.putImageData(imgShadowBuffer, 0, shadowOffset);
     context.putImageData(imgBuffer, 0, 0);
 
@@ -223,7 +232,7 @@ export async function renderDotGraph(timespan: number): Promise<Canvas> {
     outContext.drawImage(canvasShadow, 0, 0);
     outContext.drawImage(canvas, 0, shadowOffset);
 
-    return outCanvas;
+    return [ variance, outCanvas ];
 }
 
 // the following code is a bunch of util garbo for doing gaussian blur
