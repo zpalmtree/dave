@@ -210,6 +210,11 @@ function handleMath(msg: Message, args: string): void {
         return;
     }
 
+    if (args.includes('isPrime')) {
+        msg.reply(Math.random() < 0.5 ? 'true' : 'false');
+        return;
+    }
+
     try {
         msg.reply(evaluate(args).toString());
     } catch (err) {
