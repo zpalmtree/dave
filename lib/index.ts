@@ -160,7 +160,7 @@ function handleMessage(msg: Message) {
             archive(msg.channel as TextChannel, msg.author);
             break;
         }
-        case 'chinaids': 
+        case 'chinaids':
         case 'kungflu':
         case 'corona':
         case 'coronavirus':
@@ -173,6 +173,10 @@ function handleMessage(msg: Message) {
         }
         case 'dot': {
             dotpost(msg, args.join(' '));
+            break;
+        }
+        case 'pizza': {
+            handlePizza(msg, args.join(' '));
             break;
         }
     }
@@ -193,7 +197,7 @@ function main() {
             console.error('Caught error: ' + err.toString());
         }
     });
-            
+
     client.on('error', console.error);
 
     client.login(config.token)
@@ -584,7 +588,7 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
     messageInfo = messageInfo.sort((a, b) => a.timestamp - b.timestamp);
 
     const channelName = channel.guild.name + '_' + channel.name;
-    const filename = `${channelName}_archive_${new Date().toLocaleString()}`.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.json'; 
+    const filename = `${channelName}_archive_${new Date().toLocaleString()}`.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.json';
 
     await writeFile(path.join(__dirname, filename), JSON.stringify(messageInfo, null, 4));
 
@@ -619,17 +623,17 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
             .setTitle('Coronavirus statistics')
             .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
             .addFields(
-                { 
+                {
                     name: 'Cases',
                     value: `${data.cases} (+${data.todayCases})`,
                     inline: true,
                 },
-                { 
+                {
                     name: 'Deaths',
                     value: `${data.deaths} (+${data.todayDeaths})`,
                     inline: true,
                 },
-                { 
+                {
                     name: 'Active',
                     value: data.active,
                     inline: true,
@@ -644,7 +648,7 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
                     value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(5) + '%',
                     inline: true,
                 },
-                { 
+                {
                     name: 'Last Updated',
                     value: moment(data.updated).fromNow(),
                     inline: true,
@@ -671,7 +675,7 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
             .setTitle('Coronavirus statistics, ' + countryData.country)
             .setThumbnail(countryData.countryInfo.flag)
             .addFields(
-                { 
+                {
                     name: 'Cases',
                     value: `${countryData.cases} (+${countryData.todayCases})`,
                     inline: true,
@@ -893,7 +897,7 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
         .setThumbnail('attachment://dot.png')
         .setImage('attachment://dot-graph.png')
         .addFields(
-            { 
+            {
                 name: 'Network Variance',
                 value: `${Math.floor(currentDotValue * 100)}%`,
                 inline: true
@@ -915,18 +919,43 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
 
 function printDotHelp(msg: Message): void {
     msg.reply(
-        'The Global Consciousness Project collects random numbers from ' + 
+        'The Global Consciousness Project collects random numbers from ' +
         'around the world. These numbers are available on the GCP website. ' +
-        'This website downloads those numbers once a minute and performs ' + 
+        'This website downloads those numbers once a minute and performs ' +
         'sophisticated analysis on these random numbers to see how coherent ' +
         'they are. That is, we compute how random the random numbers coming ' +
-        'from the eggs really are. The theory is that the Global Consciousness ' + 
+        'from the eggs really are. The theory is that the Global Consciousness ' +
         'of all Beings of the Planet affect these random numbers... Maybe ' +
         'they aren\'t quite as random as we thought.\n\nThe probability time ' +
-        'window is one and two hours; with the display showing the more ' + 
+        'window is one and two hours; with the display showing the more ' +
         'coherent of the two. For more information on the algorithm you can ' +
         'read about it on the GCP Basic Science page ' +
         '(<http://global-mind.org/science2.html#hypothesis>)');
+}
+
+async function handlePizza(msg: Message, args: string): Promise<void> {
+    try {
+        // seems to loop around to page 0 if given a page > final page
+        const finalPage = 9;
+        const index = Math.floor(Math.random() * (finalPage + 1));
+        const data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url: `https://api.imgur.com/3/gallery/r/pizza/top/all/${index}`,
+            json: true,
+            headers: {
+                'Authorization': 'Client-ID de8a61d6a484c39',
+            }
+        });
+
+        const pizza = data.data[Math.floor(Math.random() * data.data.length)];
+
+        const attachment = new MessageAttachment(pizza.link);
+
+        msg.channel.send(attachment);
+    } catch (err) {
+        msg.reply(`Failed to get pizza pic :( [ ${err.toString()} ]`);
+    }
 }
 
 main();
