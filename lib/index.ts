@@ -176,7 +176,11 @@ function handleMessage(msg: Message) {
             break;
         }
         case 'pizza': {
-            handlePizza(msg, args.join(' '));
+            handleImgur(msg, 'r/pizza');
+            break;
+        }
+        case 'turtle': {
+            handleImgur(msg, 'r/turtle');
             break;
         }
     }
@@ -933,7 +937,7 @@ function printDotHelp(msg: Message): void {
         '(<http://global-mind.org/science2.html#hypothesis>)');
 }
 
-async function handlePizza(msg: Message, args: string): Promise<void> {
+async function handleImgur(msg: Message, gallery: string): Promise<void> {
     try {
         // seems to loop around to page 0 if given a page > final page
         const finalPage = 9;
@@ -941,20 +945,30 @@ async function handlePizza(msg: Message, args: string): Promise<void> {
         const data = await request({
             method: 'GET',
             timeout: 10 * 1000,
-            url: `https://api.imgur.com/3/gallery/r/pizza/top/all/${index}`,
+            url: `https://api.imgur.com/3/gallery/${gallery}/top/all/${index}`,
             json: true,
             headers: {
                 'Authorization': 'Client-ID de8a61d6a484c39',
             }
         });
 
-        const pizza = data.data[Math.floor(Math.random() * data.data.length)];
+        const image = data.data[Math.floor(Math.random() * data.data.length)];
 
-        const attachment = new MessageAttachment(pizza.link);
+        if (image.type === 'image/jpeg') {
+            if (!image.link.endsWith('.jpg')) {
+                image.link += '.jpg';
+            }
+        } else {
+            console.log(image.type);
+        }
 
-        msg.channel.send(attachment);
+        const embed = new MessageEmbed()
+            .setImage(image.link)
+            .setTitle(image.title || '');
+
+        msg.channel.send(embed);
     } catch (err) {
-        msg.reply(`Failed to get pizza pic :( [ ${err.toString()} ]`);
+        msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
     }
 }
 
