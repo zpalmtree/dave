@@ -960,15 +960,14 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
             return;
         }
 
-        if (image.type === 'image/jpeg') {
-            if (!image.link.endsWith('.jpg')) {
-                image.link += '.jpg';
-            }
-        }
+        const embed = new MessageEmbed().setTitle(image.title);
 
-        const embed = new MessageEmbed()
-            .setImage(image.link)
-            .setTitle(image.title || '');
+        if (image.is_album) {
+            embed.setImage(image.images[0].link);
+            embed.setFooter(`See ${image.images.length - 1} more images at ${image.link}`);
+        } else {
+            embed.setImage(image.link);
+        }
 
         msg.channel.send(embed);
     } catch (err) {
