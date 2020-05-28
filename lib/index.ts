@@ -952,7 +952,7 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
             }
         });
 
-        const image = data.data[Math.floor(Math.random() * data.data.length)];
+        let image = data.data[Math.floor(Math.random() * data.data.length)];
 
         if (image === undefined) {
             console.log('Got fucked up image: ' + JSON.stringify(data.data, null, 4));
