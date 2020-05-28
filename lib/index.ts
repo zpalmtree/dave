@@ -952,9 +952,12 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
             }
         });
 
-        const image = data.data[Math.floor(Math.random() * data.data.length)];
+        const images = data.data.filter((img) => img.size > 0);
+
+        const image = images[Math.floor(Math.random() * images.length)];
 
         console.log(JSON.stringify(data, null, 4) + '\n\n');
+        console.log(index);
 
         if (image == undefined) {
             return;
