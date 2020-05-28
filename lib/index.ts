@@ -952,13 +952,9 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
             }
         });
 
-        let image = data.data[Math.floor(Math.random() * data.data.length)];
+        const image = data.data[Math.floor(Math.random() * data.data.length)];
 
-        if (image === undefined) {
-            console.log('Got fucked up image: ' + JSON.stringify(data, null, 4));
-            // try once more
-            image = data.data[Math.floor(Math.random() * data.data.length)];
-        }
+        console.log(JSON.stringify(data, null, 4) + '\n\n');
 
         if (image == undefined) {
             return;
@@ -968,8 +964,6 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
             if (!image.link.endsWith('.jpg')) {
                 image.link += '.jpg';
             }
-        } else {
-            console.log(image.type);
         }
 
         const embed = new MessageEmbed()
