@@ -956,20 +956,23 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
 
         const image = images[Math.floor(Math.random() * images.length)];
 
-        console.log(JSON.stringify(data, null, 4) + '\n\n');
-        console.log(index);
-
         if (image == undefined) {
             return;
         }
 
         const embed = new MessageEmbed().setTitle(image.title);
 
+        const url = image.is_album
+            ? image.images[0].link
+            : image.link;
+
+        embed.attachFiles([url]);
+        embed.setImage(`attachment://${new URL(image.link).pathname.substr(1)}`);
+
         if (image.is_album) {
-            embed.setImage(image.images[0].link);
             embed.setFooter(`See ${image.images.length - 1} more images at ${image.link}`);
         } else {
-            embed.setImage(image.link);
+            embed.setFooter(url);
         }
 
         msg.channel.send(embed);
