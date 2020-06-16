@@ -940,7 +940,11 @@ function printDotHelp(msg: Message): void {
 async function handleImgur(msg: Message, gallery: string): Promise<void> {
     try {
         // seems to loop around to page 0 if given a page > final page
-        const finalPage = 9;
+        const finalPage = {
+            'r/pizza': 9,
+            'r/turtle': 7,
+        }[gallery];
+
         const index = Math.floor(Math.random() * (finalPage + 1));
         const data = await request({
             method: 'GET',
