@@ -711,6 +711,10 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
                 }
             );
 
+        if (countryData.country === 'UK') {
+            embed.setFooter('Results from the UK should not be considered accurate. See https://www.cebm.net/covid-19/why-no-one-can-ever-recover-from-covid-19-in-england-a-statistical-anomaly/');
+        }
+
         msg.channel.send(embed);
 
     } catch (err) {
@@ -940,10 +944,10 @@ function printDotHelp(msg: Message): void {
 async function handleImgur(msg: Message, gallery: string): Promise<void> {
     try {
         // seems to loop around to page 0 if given a page > final page
-        const finalPage = {
+        const finalPage = ({
             'r/pizza': 9,
             'r/turtle': 7,
-        }[gallery];
+        } as any)[gallery];
 
         const index = Math.floor(Math.random() * (finalPage + 1));
         const data = await request({
