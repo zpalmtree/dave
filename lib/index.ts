@@ -322,7 +322,7 @@ $dot:       Dot bot post dot
 
 function handleRoll(msg: Message, args: string): void {
     if (msg.member) {
-        if (msg.member.roles.cache.find((role) => role.name === 'Lil bitches')) {
+        if (msg.member.roles.cache.find((role) => role.name === 'Lil bitch')) {
             msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
             return;
         }
