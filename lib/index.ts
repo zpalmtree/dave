@@ -321,6 +321,13 @@ $dot:       Dot bot post dot
 }
 
 function handleRoll(msg: Message, args: string): void {
+    if (msg.member) {
+        if (msg.member.roles.cache.find((role) => role.name === 'Lil bitches')) {
+            msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
+            return;
+        }
+    }
+
     args = args.trim();
 
     /* Is it a dice roll - d + number, for example, d20, 5d20, d6 + 3 */
