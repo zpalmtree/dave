@@ -32,11 +32,16 @@ const writeFile = promisify(fs.writeFile);
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
 /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
-const timeRegex: RegExp = new RegExp(/^([0-9]+)([YMWdhms])/, 'i');
-const timeUnits = {
-    Y: 31536000,
-    M: 2592000
-    W: 604800,
+const timeRegex: RegExp = new RegExp(/^([0-9]+)([dhms])/, 'i');
+
+interface TimeUnits {
+    d: number;
+    h: number;
+    m: number;
+    s: number;
+};
+
+const timeUnits: TimeUnits = {
     d: 86400,
     h: 3600,
     m: 60,
@@ -155,7 +160,7 @@ function handleMessage(msg: Message) {
             archive(msg.channel as TextChannel, msg.author);
             break;
         }
-        case 'chinaids': 
+        case 'chinaids':
         case 'kungflu':
         case 'corona':
         case 'coronavirus':
@@ -168,6 +173,14 @@ function handleMessage(msg: Message) {
         }
         case 'dot': {
             dotpost(msg, args.join(' '));
+            break;
+        }
+        case 'pizza': {
+            handleImgur(msg, 'r/pizza');
+            break;
+        }
+        case 'turtle': {
+            handleImgur(msg, 'r/turtle');
             break;
         }
     }
@@ -188,7 +201,7 @@ function main() {
             console.error('Caught error: ' + err.toString());
         }
     });
-            
+
     client.on('error', console.error);
 
     client.login(config.token)
@@ -308,6 +321,13 @@ $dot:       Dot bot post dot
 }
 
 function handleRoll(msg: Message, args: string): void {
+    if (msg.member) {
+        if (msg.member.roles.cache.find((role) => role.name === 'Lil bitch')) {
+            msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
+            return;
+        }
+    }
+
     args = args.trim();
 
     /* Is it a dice roll - d + number, for example, d20, 5d20, d6 + 3 */
@@ -579,7 +599,7 @@ async function archive(channel: TextChannel, author: User): Promise<void> {
     messageInfo = messageInfo.sort((a, b) => a.timestamp - b.timestamp);
 
     const channelName = channel.guild.name + '_' + channel.name;
-    const filename = `${channelName}_archive_${new Date().toLocaleString()}`.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.json'; 
+    const filename = `${channelName}_archive_${new Date().toLocaleString()}`.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.json';
 
     await writeFile(path.join(__dirname, filename), JSON.stringify(messageInfo, null, 4));
 
@@ -614,17 +634,17 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
             .setTitle('Coronavirus statistics')
             .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
             .addFields(
-                { 
+                {
                     name: 'Cases',
                     value: `${data.cases} (+${data.todayCases})`,
                     inline: true,
                 },
-                { 
+                {
                     name: 'Deaths',
                     value: `${data.deaths} (+${data.todayDeaths})`,
                     inline: true,
                 },
-                { 
+                {
                     name: 'Active',
                     value: data.active,
                     inline: true,
@@ -639,7 +659,7 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
                     value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(5) + '%',
                     inline: true,
                 },
-                { 
+                {
                     name: 'Last Updated',
                     value: moment(data.updated).fromNow(),
                     inline: true,
@@ -666,7 +686,7 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
             .setTitle('Coronavirus statistics, ' + countryData.country)
             .setThumbnail(countryData.countryInfo.flag)
             .addFields(
-                { 
+                {
                     name: 'Cases',
                     value: `${countryData.cases} (+${countryData.todayCases})`,
                     inline: true,
@@ -697,6 +717,10 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
                     inline: true,
                 }
             );
+
+        if (countryData.country === 'UK') {
+            embed.setFooter('Results from the UK should not be considered accurate. See https://www.cebm.net/covid-19/why-no-one-can-ever-recover-from-covid-19-in-england-a-statistical-anomaly/');
+        }
 
         msg.channel.send(embed);
 
@@ -826,99 +850,150 @@ async function chinked(msg: Message, country: string): Promise<void> {
 }
 
 async function dotpost(msg: Message, arg: string): Promise<void> {
+    if (arg.toLowerCase() === 'help') {
+        printDotHelp(msg);
+        return;
+    }
+
+    let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
+    let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
+
+    /* Timespan cannot be larger than 7 days */
+    if (timeSpan > 86400 * 7) {
+        timeSpan = 86400 * 7;
+        timeString = '1w';
+    } else if (timeSpan <= 0) {
+        timeSpan = 86400;
+        timeString = '1d';
+    }
+
+    let dotGraph;
+    let currentDotValue = 0;
+    let dot;
+
     try {
-        if (arg.toLowerCase() === 'help') {
-            printDotHelp(msg);
-            return;
-        }
-
-        let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
-        let timeSpan: number = Number(num) * (timeUnits as any)[unit];
-        // clamp timespan to 1 week
-        // if (timeSpan > 86400*7 || timeSpan <= 0) {
-        //     timeSpan = 86400*7;
-        //     timeString = '1w';
-        // }
-
-        const [ [ domainVariance, dotGraph ], [ currentDotValue, dot ] ] = await Promise.all([
+        [ [ , dotGraph ], [ currentDotValue, dot ] ] = await Promise.all([
             renderDotGraph(timeSpan * -1),
             renderDot(),
         ]);
-
-        const x: number = currentDotValue;
-        let description: string = '';
-        switch (true) {
-            case (x < 0.05): {
-                description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
-                break;
-            }
-            case (x < 0.1): {
-                description = 'Strongly increased network variance. May be chance fluctuation.';
-                break;
-            }
-            case (x < 0.4): {
-                description = 'Slightly increased network variance. Probably chance fluctuation.';
-                break;
-            }
-            case (x < 0.9): {
-                description = 'Normally random network variance. This is average or expected behavior.';
-                break;
-            }
-            case (x < 0.95): {
-                description = 'Small network variance. Probably chance fluctuation.';
-                break;
-            }
-            case (x < 1.0): {
-                description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
-                break;
-            }
-            default: {
-                description = 'What the heck?';
-                break;
-            }
-        }
-
-        const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
-        const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
-
-        const embed = new MessageEmbed()
-            .setColor('#C8102E')
-            .attachFiles([dotAttachment, dotGraphAttachment])
-            .setTitle('Global Consciousness Project Dot')
-            .setThumbnail('attachment://dot.png')
-            .setImage('attachment://dot-graph.png')
-            .addFields(
-                { 
-                    name: 'Current Network Variance',
-                    value: `${Math.floor(currentDotValue * 100)}%`,
-                    inline: true
-                },
-                /* removed because BORING, add it back if you want idc */
-                // {
-                //     name: 'Domain Variance',
-                //     value: `${Math.floor(domainVariance * 100)}%`,
-                //     inline: true
-                // },
-                {
-                    name: 'Timespan',
-                    value: timeString.toString().replace(/^0+/, ''),
-                    inline: true
-                },
-                {
-                    name: 'Description',
-                    value: description,
-                    inline: false
-                }
-            );
-
-        msg.channel.send(embed);
     } catch (err) {
         msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
+        return;
     }
+
+    let description: string = '';
+
+    if (currentDotValue < 0.05) {
+        description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
+    }
+    else if (currentDotValue < 0.1) {
+        description = 'Strongly increased network variance. May be chance fluctuation.';
+    }
+    else if (currentDotValue < 0.4) {
+        description = 'Slightly increased network variance. Probably chance fluctuation.';
+    }
+    else if (currentDotValue < 0.9) {
+        description = 'Normally random network variance. This is average or expected behavior.';
+    }
+    else if (currentDotValue < 0.95) {
+        description = 'Small network variance. Probably chance fluctuation.';
+    }
+    else if (currentDotValue <= 1.0) {
+        description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
+    }
+
+    const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
+    const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
+
+    const embed = new MessageEmbed()
+        .setColor('#C8102E')
+        .attachFiles([dotAttachment, dotGraphAttachment])
+        .setTitle('Global Conciousness Project Dot')
+        .setThumbnail('attachment://dot.png')
+        .setImage('attachment://dot-graph.png')
+        .addFields(
+            {
+                name: 'Network Variance',
+                value: `${Math.floor(currentDotValue * 100)}%`,
+                inline: true
+            },
+            {
+                name: 'Timespan',
+                value: timeString.toString().replace(/^0+/, ''),
+                inline: true
+            },
+            {
+                name: 'Description',
+                value: description,
+                inline: false
+            }
+        );
+
+    msg.channel.send(embed);
 }
 
 function printDotHelp(msg: Message): void {
-    msg.reply('the Global Consciousness Project collects random numbers from around the world. These numbers are available on the GCP website. This website downloads those numbers once a minute and performs sophisticated analysis on these random numbers to see how coherent they are. That is, we compute how random the random numbers coming from the eggs really are. The theory is that the Global Consciousness of all Beings of the Planet affect these random numbers... Maybe they aren\'t quite as random as we thought. \n\nThe probability time window is one and two hours; with the display showing the more coherent of the two. For more information on the algorithm you can read about it on the GCP Basic Science page (http://global-mind.org/science2.html#hypothesis)');
+    msg.reply(
+        'The Global Consciousness Project collects random numbers from ' +
+        'around the world. These numbers are available on the GCP website. ' +
+        'This website downloads those numbers once a minute and performs ' +
+        'sophisticated analysis on these random numbers to see how coherent ' +
+        'they are. That is, we compute how random the random numbers coming ' +
+        'from the eggs really are. The theory is that the Global Consciousness ' +
+        'of all Beings of the Planet affect these random numbers... Maybe ' +
+        'they aren\'t quite as random as we thought.\n\nThe probability time ' +
+        'window is one and two hours; with the display showing the more ' +
+        'coherent of the two. For more information on the algorithm you can ' +
+        'read about it on the GCP Basic Science page ' +
+        '(<http://global-mind.org/science2.html#hypothesis>)');
+}
+
+async function handleImgur(msg: Message, gallery: string): Promise<void> {
+    try {
+        // seems to loop around to page 0 if given a page > final page
+        const finalPage = ({
+            'r/pizza': 9,
+            'r/turtle': 7,
+        } as any)[gallery];
+
+        const index = Math.floor(Math.random() * (finalPage + 1));
+        const data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url: `https://api.imgur.com/3/gallery/${gallery}/top/all/${index}`,
+            json: true,
+            headers: {
+                'Authorization': 'Client-ID de8a61d6a484c39',
+            }
+        });
+
+        const images = data.data.filter((img: any) => img.size > 0);
+
+        const image = images[Math.floor(Math.random() * images.length)];
+
+        if (image == undefined) {
+            return;
+        }
+
+        const embed = new MessageEmbed().setTitle(image.title);
+
+        const url = image.is_album
+            ? image.images[0].link
+            : image.link;
+
+        embed.attachFiles([url]);
+        embed.setImage(`attachment://${new URL(image.link).pathname.substr(1)}`);
+
+        if (image.is_album) {
+            embed.setFooter(`See ${image.images.length - 1} more images at ${image.link}`);
+        } else {
+            embed.setFooter(url);
+        }
+
+        msg.channel.send(embed);
+    } catch (err) {
+        msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
+    }
 }
 
 main();
