@@ -32,8 +32,11 @@ const writeFile = promisify(fs.writeFile);
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
 /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
-const timeRegex: RegExp = new RegExp(/^([0-9]+)([dhms])/, 'i');
+const timeRegex: RegExp = new RegExp(/^([0-9]+)([YMWdhms])/, 'i');
 const timeUnits = {
+    Y: 31536000,
+    M: 2592000
+    W: 604800,
     d: 86400,
     h: 3600,
     m: 60,
@@ -831,11 +834,11 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
 
         let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
         let timeSpan: number = Number(num) * (timeUnits as any)[unit];
-        // clamp timespan to 24h
-        if (timeSpan > 86400*7 || timeSpan <= 0) {
-            timeSpan = 86400*7;
-            timeString = '1w';
-        }
+        // clamp timespan to 1 week
+        // if (timeSpan > 86400*7 || timeSpan <= 0) {
+        //     timeSpan = 86400*7;
+        //     timeString = '1w';
+        // }
 
         const [ [ domainVariance, dotGraph ], [ currentDotValue, dot ] ] = await Promise.all([
             renderDotGraph(timeSpan * -1),
@@ -881,7 +884,7 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
         const embed = new MessageEmbed()
             .setColor('#C8102E')
             .attachFiles([dotAttachment, dotGraphAttachment])
-            .setTitle('Global Conciousness Project Dot')
+            .setTitle('Global Consciousness Project Dot')
             .setThumbnail('attachment://dot.png')
             .setImage('attachment://dot-graph.png')
             .addFields(
