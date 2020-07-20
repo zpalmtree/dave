@@ -32,9 +32,12 @@ const writeFile = promisify(fs.writeFile);
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
 /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
-const timeRegex: RegExp = new RegExp(/^([0-9]+)([dhms])/, 'i');
+const timeRegex: RegExp = new RegExp(/^([0-9]+)([YMWdhms])/, 'i');
 
 interface TimeUnits {
+    Y: number;
+    M: number;
+    W: number; 
     d: number;
     h: number;
     m: number;
@@ -42,6 +45,9 @@ interface TimeUnits {
 };
 
 const timeUnits: TimeUnits = {
+    Y: 31536000,
+    M: 2592000,
+    W: 604800,
     d: 86400,
     h: 3600,
     m: 60,
@@ -858,13 +864,14 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
     let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
     let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
 
-    /* Timespan cannot be larger than 7 days */
-    if (timeSpan > 86400 * 7) {
-        timeSpan = 86400 * 7;
+    /* Timespan cannot be larger than 498 days */
+    /* Default timespan is 24h */
+    if (timeSpan > 86400 * 498) {
+        timeSpan = 86400 * 498;
         timeString = '1w';
     } else if (timeSpan <= 0) {
         timeSpan = 86400;
-        timeString = '1d';
+        timeString = '24h';
     }
 
     let dotGraph;
@@ -908,7 +915,7 @@ async function dotpost(msg: Message, arg: string): Promise<void> {
     const embed = new MessageEmbed()
         .setColor('#C8102E')
         .attachFiles([dotAttachment, dotGraphAttachment])
-        .setTitle('Global Conciousness Project Dot')
+        .setTitle('Global Consciousness Project Dot')
         .setThumbnail('attachment://dot.png')
         .setImage('attachment://dot-graph.png')
         .addFields(
