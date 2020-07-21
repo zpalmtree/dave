@@ -32,16 +32,16 @@ const writeFile = promisify(fs.writeFile);
 const rollRegex: RegExp = new RegExp(/^(\d+)?d(\d+)(.*)$/, 'i');
 
 /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
-const timeRegex: RegExp = new RegExp(/^([0-9]+)([YMWdhms])/, 'i');
+const timeRegex: RegExp = new RegExp(/^([0-9]+)([YMWdhms])/);
 
 interface TimeUnits {
-    Y: number;
-    M: number;
-    W: number; 
-    d: number;
-    h: number;
-    m: number;
-    s: number;
+    Y: number;  // year
+    M: number;  // month
+    W: number;  // week
+    d: number;  // day
+    h: number;  // hour
+    m: number;  // minute
+    s: number;  // second
 };
 
 const timeUnits: TimeUnits = {
