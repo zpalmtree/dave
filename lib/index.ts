@@ -113,6 +113,15 @@ interface Quote {
     timestamp: number;
 }
 
+interface ScheduledWatch {
+    id: number;
+    title: string;
+    link: string;
+    time: Date;
+    attending: string[];
+    magnet?: string;
+}
+
 function handleMessage(msg: Message) {
     if (!msg.content.startsWith(config.prefix)) {
         return;
@@ -187,6 +196,10 @@ function handleMessage(msg: Message) {
         }
         case 'turtle': {
             handleImgur(msg, 'r/turtle');
+            break;
+        }
+        case 'watch': {
+            handleWatch(msg, args);
             break;
         }
     }
@@ -384,21 +397,25 @@ function dubsType(roll: string): string {
     return dubTypes[index];
 }
 
-async function readQuotes(filepath: string): Promise<[boolean, Quote[]]> {
+async function readJSON<T>(filepath: string): Promise<{ err: string | undefined, data: T[] }> {
     try {
         const data: string = await readFile(path.join(__dirname, filepath), { encoding: 'utf8' });
-        const quotes: Quote[] = JSON.parse(data);
 
-        return [true, quotes];
+        return {
+            err: undefined,
+            data: JSON.parse(data),
+        };
     } catch (err) {
-        console.log(err);
-        return [false, []];
+        return {
+            err: err.toString(),
+            data: [],
+        }
     }
 }
 
-async function writeQuotes(filepath: string, quotes: string): Promise<void> {
+async function writeJSON(filepath: string, data: any): Promise<void> {
     try {
-        await writeFile(path.join(__dirname, filepath), quotes);
+        await writeFile(path.join(__dirname, filepath), JSON.stringify(data, null, 4));
     } catch (err) {
         console.log(err);
     }
@@ -409,10 +426,10 @@ async function handleQuote(msg: Message): Promise<void> {
         return;
     }
 
-    const [success, quotes] = await readQuotes('./quotes.json');
+    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
 
-    if (!success) {
-        msg.reply('Crap, couldn\'t open the quotes file :(');
+    if (err) {
+        msg.reply(`Failed to read quotes :( [ ${err.toString()} ]`);
         return;
     }
 
@@ -440,10 +457,10 @@ async function handleSuggest(msg: Message, suggestion: string | undefined): Prom
         return;
     }
 
-    const [success, quotes] = await readQuotes('./quotes.json');
+    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
 
-    if (!success) {
-        msg.reply('Crap, couldn\'t open the quotes file :(');
+    if (err) {
+        msg.reply(`Failed to read quotes :( [ ${err.toString()} ]`);
         return;
     }
 
@@ -454,7 +471,7 @@ async function handleSuggest(msg: Message, suggestion: string | undefined): Prom
 
     quotes.push(newQuote);
 
-    await writeQuotes('quotes.json', JSON.stringify(quotes, null, 4));
+    await writeJSON('quotes.json', quotes);
 
     addReaction('579921155578658837', msg);
 }
@@ -1001,6 +1018,276 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
     } catch (err) {
         msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
     }
+}
+
+function removeOutdatedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
+    const newData = data.filter((watch) => {
+        /* Is the current time before the watch time + 3 hours. We keep entries
+         * which are < 3 hours outdated so people interested can see what the
+         * current viewers are watching */
+        return moment().isBefore(moment(watch.time).add(3, 'hours'))
+    });
+
+    /* Update the file if any entries have expired since we last checked */
+    if (newData.length !== data.length) {
+        writeJSON('watch.json', newData);
+    }
+
+    return newData;
+}
+
+function capitalize(str: string): string {
+    return str && str[0].toUpperCase() + str.slice(1);
+}
+
+async function displayScheduledWatches(msg: Message): Promise<void> {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+        return;
+    }
+
+    data = removeOutdatedWatches(data).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+    if (data.length === 0) {
+        msg.reply('Nothing has been scheduled to be watched yet! Use `$watch help` for more info');
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle('Scheduled Movies/Series To Watch')
+        .setFooter('Use $watch <movie id> to get more info including magnet link if given');
+
+    for (const watch of data) {
+        embed.addFields(
+            {
+                name: `ID: ${watch.id}`,
+                value: `[${watch.title}](${watch.link})`,
+                inline: true,
+            },
+            {
+                name: 'Time',
+                value: `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`,
+                inline: true,
+            },
+            {
+                name: 'Attending',
+                value: watch.attending.map((user) => {
+                    const userObj = msg.guild!.members.cache.get(user)
+
+                    if (userObj !== undefined) {
+                        return userObj.displayName;
+                    }
+
+                    return `Unknown User <@${user}>`;
+                }).join(', '),
+                inline: true,
+            },
+        );
+    }
+
+    msg.channel.send(embed);
+}
+
+async function displayWatchHelp(msg: Message): Promise<void> {
+    const embed = new MessageEmbed()
+        .setTitle('Scheduled Movie / Series Bot Help')
+        .addFields(
+            {
+                name: 'List all movies/series scheduled to watch',
+                value: '`$watch`',
+            },
+            {
+                name: 'Find more info about a specific movie',
+                value: '`$watch <id>`, for example, `$watch 1`',
+            },
+            {
+                name: 'Schedule a new movie/series to be watched',
+                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM TIMEZONE> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 GMT`'
+            }
+        );
+
+    msg.channel.send(embed);
+}
+
+async function displayWatchById(msg: Message, id: string): Promise<void> {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+        return;
+    }
+
+    data = removeOutdatedWatches(data);
+
+    if (data.length === 0) {
+        msg.reply('Nothing has been scheduled to be watched yet!');
+        return;
+    }
+
+    const watch = data.find((watch) => watch.id === Number(id));
+
+    if (watch === undefined) {
+        msg.reply(`Could not find movie ID "${id}".`);
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle(watch.title)
+        .setFooter('React with 👍 if you want to attend this movie night')
+
+    embed.addFields(
+        {
+            name: 'Time',
+            value: `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`,
+        },
+        {
+            name: 'Attending',
+            value: watch.attending.map((user) => {
+                const userObj = msg.guild!.members.cache.get(user);
+
+                if (userObj !== undefined) {
+                    return userObj.displayName;
+                }
+
+                return `Unknown User <@${user}>`;
+            }).join(', '),
+        },
+        {
+            name: 'IMDB Link',
+            value: watch.link,
+        },
+    );
+
+    if (watch.magnet) {
+        embed.addField('Magnet', watch.magnet);
+    }
+
+    const sentMessage = await msg.channel.send(embed);
+
+    await sentMessage.react('👍');
+
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
+        return reaction.emoji.name === '👍' && !user.bot;
+    }, { time: 30000 });
+
+    collector.on('collect', (reaction, user) => {
+        msg.channel.send(`<@${user.id}> You have signed up to watch ${watch.title}!`);
+    });
+
+    collector.on('end', async (allReactions) => {
+        const reactions = allReactions.find((reaction) => reaction.emoji.name === '👍');
+
+        if (reactions === undefined) {
+            return;
+        }
+
+        const users = await reactions.users.fetch();
+
+        updateWatchAttendees(users.array().map((user) => user.id), id, msg);
+    });
+}
+
+async function updateWatchAttendees(reactions: string[], id: string, msg: Message) {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to store new movie attendees: [ ${err.toString()} ]`);
+        return;
+    }
+
+    const index = data.findIndex((watch) => watch.id === Number(id));
+
+    if (index === -1) {
+        msg.reply('Failed to store new movie attendees, could not find movie in database');
+        return;
+    }
+
+    /* Set will remove any duplicates if they have already signed up */
+    const newAttendees = [...new Set(data[index].attending.concat(reactions))];
+
+    data[index].attending = newAttendees;
+
+    writeJSON('watch.json', data);
+}
+
+async function scheduleWatch(msg: Message, title: string, imdbLink: string, time: string, magnet?: string) {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+        return;
+    }
+
+    const maxID = data.map((x) => x.id).sort((a, b) => b - a)[0] || 0;
+
+    data.push({
+        id: maxID + 1,
+        title,
+        link: imdbLink,
+        time: moment(time).toDate(),
+        attending: [msg.author.id],
+        magnet,
+    });
+
+    writeJSON('watch.json', data);
+
+    msg.reply(`${title} has been successfully scheduled for ${moment(time).format('dddd, MMMM Do, HH:mm')} UTC!`);
+}
+
+async function handleWatch(msg: Message, args: string[]): Promise<void> {
+    /* No args, display scheduled things to watch */
+    if (args.length === 0) {
+        await displayScheduledWatches(msg);
+        return;
+    }
+
+    if (args.length === 1 && args[0] === 'help') {
+        await displayWatchHelp(msg);
+        return;
+    }
+
+    if (args.length === 1) {
+        await displayWatchById(msg, args[0]);
+        return;
+    }
+
+    const regex = /(\S+) (https:\/\/.*imdb\.com\/\S+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d (?:\w\w\w))(magnet:\?.+)?/;
+
+    const results = regex.exec(args.join(' '));
+
+    if (results) {
+        const [ , title, imdbLink, time, magnet ] = results;
+
+        if (!moment(time).isValid()) {
+            msg.reply(`Failed to parse date/time "${time}"`);
+            return;
+        }
+
+        await scheduleWatch(msg, title, imdbLink, time, magnet);
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle('Invalid Input')
+        .setDescription('Sorry, your input was invalid. Please try one of the following options.')
+        .addFields(
+            {
+                name: 'List all movies/series scheduled to watch',
+                value: '`$watch`',
+            },
+            {
+                name: 'Find more info about a specific movie',
+                value: '`$watch <id>`, for example, `$watch 1`',
+            },
+            {
+                name: 'Schedule a new movie/series to be watched',
+                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM TIMEZONE> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 GMT`'
+            }
+        );
+
+    msg.channel.send(embed);
 }
 
 main();
