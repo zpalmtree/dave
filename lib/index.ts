@@ -1057,7 +1057,7 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
 
     const embed = new MessageEmbed()
         .setTitle('Scheduled Movies/Series To Watch')
-        .setFooter('Use $watch <movie id> to get more info including magnet link if given');
+        .setFooter('Use $watch <movie id> to view more info and sign up to watch');
 
     for (const watch of data) {
         embed.addFields(
@@ -1166,7 +1166,7 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
 
     const sentMessage = await msg.channel.send(embed);
 
-    awaitWatchReactions(sentMessage, watch.title, id);
+    awaitWatchReactions(sentMessage, watch.title, id, watch.attending, 1);
 }
 
 async function updateWatchAttendees(reactions: string[], id: number, msg: Message) {
@@ -1217,13 +1217,28 @@ async function scheduleWatch(msg: Message, title: string, imdbLink: string, time
         .setTitle(title)
         .setDescription(`${title} has been successfully scheduled for ${moment(time).format('dddd, MMMM Do, HH:mm')} UTC!`)
         .setFooter('React with 👍 if you want to attend this movie night')
+        .addFields(
+            {
+                name: 'Attending',
+                value: [msg.author.id].map((user) => {
+                    const userObj = msg.guild!.members.cache.get(user)
+
+                    if (userObj !== undefined) {
+                        return userObj.displayName;
+                    }
+
+                    return `Unknown User <@${user}>`;
+                }).join(', '),
+                inline: true,
+            },
+        );
 
     const sentMessage = await msg.channel.send(embed);
 
-    awaitWatchReactions(sentMessage, title, maxID + 1);
+    awaitWatchReactions(sentMessage, title, maxID + 1, [msg.author.id], 1);
 }
 
-async function awaitWatchReactions(msg: Message, title: string, id: number) {
+async function awaitWatchReactions(msg: Message, title: string, id: number, attending: string[], attendingFieldIndex: number) {
     await msg.react('👍');
 
     const collector = msg.createReactionCollector((reaction, user) => {
@@ -1231,7 +1246,25 @@ async function awaitWatchReactions(msg: Message, title: string, id: number) {
     }, { time: 30000 });
 
     collector.on('collect', (reaction, user) => {
-        msg.channel.send(`<@${user.id}> You have signed up to watch ${title}!`);
+        const embed = new MessageEmbed(msg.embeds[0]);
+
+        attending.push(user.id);
+
+        embed.spliceFields(attendingFieldIndex, 1, {
+            name: 'Attending',
+            value: [...new Set(attending)].map((user) => {
+                const userObj = msg.guild!.members.cache.get(user)
+
+                if (userObj !== undefined) {
+                    return userObj.displayName;
+                }
+
+                return `Unknown User <@${user}>`;
+            }).join(', '),
+            inline: true,
+        });
+
+        msg.edit(embed);
     });
 
     collector.on('end', async (allReactions) => {
