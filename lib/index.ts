@@ -1111,7 +1111,7 @@ async function displayWatchHelp(msg: Message): Promise<void> {
     msg.channel.send(embed);
 }
 
-async function displayWatchById(msg: Message, id: string): Promise<void> {
+async function displayWatchById(msg: Message, id: number): Promise<void> {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
@@ -1166,30 +1166,10 @@ async function displayWatchById(msg: Message, id: string): Promise<void> {
 
     const sentMessage = await msg.channel.send(embed);
 
-    await sentMessage.react('👍');
-
-    const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return reaction.emoji.name === '👍' && !user.bot;
-    }, { time: 30000 });
-
-    collector.on('collect', (reaction, user) => {
-        msg.channel.send(`<@${user.id}> You have signed up to watch ${watch.title}!`);
-    });
-
-    collector.on('end', async (allReactions) => {
-        const reactions = allReactions.find((reaction) => reaction.emoji.name === '👍');
-
-        if (reactions === undefined) {
-            return;
-        }
-
-        const users = await reactions.users.fetch();
-
-        updateWatchAttendees(users.array().map((user) => user.id), id, msg);
-    });
+    awaitWatchReactions(sentMessage, watch.title, id);
 }
 
-async function updateWatchAttendees(reactions: string[], id: string, msg: Message) {
+async function updateWatchAttendees(reactions: string[], id: number, msg: Message) {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
@@ -1233,7 +1213,38 @@ async function scheduleWatch(msg: Message, title: string, imdbLink: string, time
 
     writeJSON('watch.json', data);
 
-    msg.reply(`${title} has been successfully scheduled for ${moment(time).format('dddd, MMMM Do, HH:mm')} UTC!`);
+    const embed = new MessageEmbed()
+        .setTitle(title)
+        .setDescription(`${title} has been successfully scheduled for ${moment(time).format('dddd, MMMM Do, HH:mm')} UTC!`)
+        .setFooter('React with 👍 if you want to attend this movie night')
+
+    const sentMessage = await msg.channel.send(embed);
+
+    awaitWatchReactions(sentMessage, title, maxID + 1);
+}
+
+async function awaitWatchReactions(msg: Message, title: string, id: number) {
+    await msg.react('👍');
+
+    const collector = msg.createReactionCollector((reaction, user) => {
+        return reaction.emoji.name === '👍' && !user.bot;
+    }, { time: 30000 });
+
+    collector.on('collect', (reaction, user) => {
+        msg.channel.send(`<@${user.id}> You have signed up to watch ${title}!`);
+    });
+
+    collector.on('end', async (allReactions) => {
+        const reactions = allReactions.find((reaction) => reaction.emoji.name === '👍');
+
+        if (reactions === undefined) {
+            return;
+        }
+
+        const users = await reactions.users.fetch();
+
+        updateWatchAttendees(users.array().map((user) => user.id), id, msg);
+    });
 }
 
 async function handleWatch(msg: Message, args: string[]): Promise<void> {
@@ -1249,7 +1260,7 @@ async function handleWatch(msg: Message, args: string[]): Promise<void> {
     }
 
     if (args.length === 1) {
-        await displayWatchById(msg, args[0]);
+        await displayWatchById(msg, Number(args[0]));
         return;
     }
 
