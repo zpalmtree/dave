@@ -1068,7 +1068,10 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
             },
             {
                 name: 'Time',
-                value: `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`,
+                /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
+                value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
+                    ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`
+                    : moment(watch.time).format('dddd, MMMM Do, HH:mm') + ' UTC',
                 inline: true,
             },
             {
@@ -1140,7 +1143,10 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
     embed.addFields(
         {
             name: 'Time',
-            value: `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`,
+            /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
+            value: moment().add(6, 'hours').isAfter(moment(watch.time))
+                ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`
+                : moment(watch.time).format('dddd, MMMM Do, HH:mm') + ' UTC',
         },
         {
             name: 'Attending',
