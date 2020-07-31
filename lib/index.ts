@@ -237,8 +237,7 @@ function handleFortune(msg: Message): void {
 }
 
 function handleMath(msg: Message, args: string): void {
-    // xaz, extra
-    const niggers = ['100607191337164800', '388037798772473859'];
+    const niggers: string[] = [];
 
     if (niggers.includes(msg.author.id)) {
         msg.reply('FUCK YOU YOU STUPID NIGGER');
@@ -1022,10 +1021,14 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
 
 function removeOutdatedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
     const newData = data.filter((watch) => {
-        /* Is the current time before the watch time + 3 hours. We keep entries
-         * which are < 3 hours outdated so people interested can see what the
-         * current viewers are watching */
-        return moment().isBefore(moment(watch.time).add(3, 'hours'))
+        /* Has more than 3 hours passed since the scheduled watch time? */
+        const movieHasNotFinished = moment(watch.time).add(3, 'hours').isAfter(moment());
+
+        if (!movieHasNotFinished) {
+            console.log(`Removing movie ${watch.title}, it is in the past.`);
+        }
+
+        return movieHasNotFinished;
     });
 
     /* Update the file if any entries have expired since we last checked */
@@ -1249,7 +1252,7 @@ async function awaitWatchReactions(msg: Message, title: string, id: number, atte
 
     const collector = msg.createReactionCollector((reaction, user) => {
         return reaction.emoji.name === '👍' && !user.bot;
-    }, { time: 30000 });
+    }, { time: 3000000 });
 
     collector.on('collect', (reaction, user) => {
         const embed = new MessageEmbed(msg.embeds[0]);
@@ -1271,18 +1274,8 @@ async function awaitWatchReactions(msg: Message, title: string, id: number, atte
         });
 
         msg.edit(embed);
-    });
 
-    collector.on('end', async (allReactions) => {
-        const reactions = allReactions.find((reaction) => reaction.emoji.name === '👍');
-
-        if (reactions === undefined) {
-            return;
-        }
-
-        const users = await reactions.users.fetch();
-
-        updateWatchAttendees(users.array().map((user) => user.id), id, msg);
+        updateWatchAttendees([user.id], id, msg);
     });
 }
 
