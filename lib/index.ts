@@ -1073,8 +1073,8 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
                 name: 'Time',
                 /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
                 value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                    ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`
-                    : moment(watch.time).format('dddd, MMMM Do, HH:mm') + ' UTC',
+                    ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
+                    : moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
                 inline: true,
             },
             {
@@ -1147,9 +1147,9 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
         {
             name: 'Time',
             /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-            value: moment().add(6, 'hours').isAfter(moment(watch.time))
-                ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).format('HH:mm')} UTC`
-                : moment(watch.time).format('dddd, MMMM Do, HH:mm') + ' UTC',
+            value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
+                ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
+                : moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
         },
         {
             name: 'Attending',
@@ -1224,7 +1224,7 @@ async function scheduleWatch(msg: Message, title: string, imdbLink: string, time
 
     const embed = new MessageEmbed()
         .setTitle(title)
-        .setDescription(`${title} has been successfully scheduled for ${moment(time).format('dddd, MMMM Do, HH:mm')} UTC!`)
+        .setDescription(`${title} has been successfully scheduled for ${moment(time).utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
         .setFooter('React with 👍 if you want to attend this movie night')
         .addFields(
             {
