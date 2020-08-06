@@ -198,7 +198,8 @@ function handleMessage(msg: Message) {
             handleImgur(msg, 'r/turtle');
             break;
         }
-        case 'watch': {
+        case 'watch':
+        case 'movie': {
             handleWatch(msg, args);
             break;
         }
@@ -328,7 +329,12 @@ function handleDiceRoll(msg: Message, args: string): void {
 }
 
 function handleHelp(msg: Message): void {
-    msg.reply(`
+    const fitCommands =
+`$movie:     Displays scheduled movies to be watched
+$quote:     Gets a random quote
+$suggest:   Suggest a new quote`;
+
+    const message = `
 \`\`\`
 $roll:      Gets your post number and its repeating digits
 $reroll:    Alias of $roll for convenience
@@ -338,8 +344,11 @@ $kitty:     Gets a random cat pic
 $help:      Displays this help
 $chinked:   Displays coronavirus statistics
 $dot:       Dot bot post dot
+${msg.channel.id === config.fit ? fitCommands : ''}
 \`\`\`
-    `);
+`;
+
+    msg.reply(message);
 }
 
 function handleRoll(msg: Message, args: string): void {
@@ -1284,6 +1293,10 @@ async function awaitWatchReactions(msg: Message, title: string, id: number, atte
 }
 
 async function handleWatch(msg: Message, args: string[]): Promise<void> {
+    if (msg.channel.id !== config.fit) {
+        return;
+    }
+
     /* No args, display scheduled things to watch */
     if (args.length === 0) {
         await displayScheduledWatches(msg);
