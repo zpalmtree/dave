@@ -1313,7 +1313,7 @@ async function handleWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const regex = /(\S+) (https:\/\/.*imdb\.com\/\S+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d))( ? magnet:\?.+)?/;
+    const regex = /(\S+) (https:\/\/.*imdb\.com\/\S+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d)) ?(magnet:\?.+)?/;
 
     const results = regex.exec(args.join(' '));
 
