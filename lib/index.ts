@@ -202,6 +202,10 @@ function handleMessage(msg: Message) {
             handleWatch(msg, args);
             break;
         }
+        case 'time': {
+            handleTime(msg, args.join(' '));
+            break;
+        }
     }
 }
 
@@ -1296,7 +1300,7 @@ async function handleWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const regex = /(\S+) (https:\/\/.*imdb\.com\/\S+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d (?:\w\w\w)) (magnet:\?.+)?/;
+    const regex = /(\S+) (https:\/\/.*imdb\.com\/\S+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d))( ? magnet:\?.+)?/;
 
     const results = regex.exec(args.join(' '));
 
@@ -1326,11 +1330,21 @@ async function handleWatch(msg: Message, args: string[]): Promise<void> {
             },
             {
                 name: 'Schedule a new movie/series to be watched',
-                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM TIMEZONE> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 GMT`'
+                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM TIMEZONE> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 -08:00`'
             }
         );
 
     msg.channel.send(embed);
+}
+
+function handleTime(msg: Message, args: string) {
+    let offset: string | number = -6;
+
+    if (args.length > 0) {
+        offset = args;
+    }
+
+    msg.reply(`The current time is ${moment().utcOffset(offset).format('HH:mm Z')}`);
 }
 
 main();
