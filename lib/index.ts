@@ -1106,8 +1106,8 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
                 name: 'Time',
                 /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
                 value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                    ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
-                    : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
+                    ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
+                    : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`,
                 inline: true,
             },
             {
@@ -1181,8 +1181,8 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
             name: 'Time',
             /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
             value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
-                : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
+                ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
+                : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`,
         },
         {
             name: 'Attending',
