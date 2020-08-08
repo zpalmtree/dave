@@ -339,7 +339,7 @@ function canAccessCommand(msg: Message): boolean {
         return true;
     }
 
-    addReaction(❌, msg);
+    addReaction('❌', msg);
 
     return false;
 }
