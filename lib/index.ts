@@ -1106,8 +1106,8 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
                 name: 'Time',
                 /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
                 value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                    ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
-                    : moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
+                    ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
+                    : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
                 inline: true,
             },
             {
@@ -1143,7 +1143,7 @@ async function displayWatchHelp(msg: Message): Promise<void> {
             },
             {
                 name: 'Schedule a new movie/series to be watched',
-                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM TIMEZONE> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 -08:00`'
+                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM UTC OFFSET> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 -08:00`'
             }
         );
 
@@ -1181,8 +1181,8 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
             name: 'Time',
             /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
             value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                ? `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
-                : moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
+                ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST',
+                : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`
         },
         {
             name: 'Attending',
@@ -1371,7 +1371,7 @@ async function handleWatch(msg: Message, args: string[]): Promise<void> {
 }
 
 function handleTime(msg: Message, args: string) {
-    let offset: string | number = -6;
+    let offset: string | number = 0;
 
     if (args.length > 0) {
         offset = args;
