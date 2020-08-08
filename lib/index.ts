@@ -599,17 +599,21 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
 }
 
 function addReaction(emoji: string, message: Message): void {
-    /* Find the reaction */
-    const reaction = message.guild!.emojis.resolve(emoji);
+    try {
+        msg.react(emoji);
+    } catch (err) {
+        /* Find the reaction */
+        const reaction = message.guild!.emojis.resolve(emoji);
 
-    /* Couldn't find the reaction */
-    if (!reaction) {
-        console.error(`Failed to find emoji: ${emoji} on the server!`);
-        return;
+        /* Couldn't find the reaction */
+        if (!reaction) {
+            console.error(`Failed to find emoji: ${emoji} on the server!`);
+            return;
+        }
+
+        /* Add the reaction */
+        message.react(reaction).catch(console.error);
     }
-
-    /* Add the reaction */
-    message.react(reaction).catch(console.error);
 }
 
 async function archive(channel: TextChannel, author: User): Promise<void> {
