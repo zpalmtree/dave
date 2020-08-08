@@ -217,6 +217,10 @@ function main() {
 
     client.on('ready', () => {
         console.log('Logged in');
+
+        client.channels.fetch(config.fit)
+            .then((fit) => handleWatchNotifications(fit as TextChannel))
+            .catch((err) => { console.error(`Failed to find fit channel: ${err.toString()}`); });
     });
 
     client.on('message', (msg) => {
@@ -1374,6 +1378,36 @@ function handleTime(msg: Message, args: string) {
     }
 
     msg.reply(`The current time is ${moment().utcOffset(offset).format('HH:mm Z')}`);
+}
+
+async function handleWatchNotifications(channel: TextChannel) {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        setTimeout(handleWatchNotifications, config.watchPollInterval);
+        return;
+    }
+
+    for (const watch of data) {
+        const eightHourReminder = moment(watch.time).subtract(8, 'hours');
+        const fifteenMinuteReminder = moment(watch.time).subtract(15, 'minutes');
+
+        /* Get our watch 'window' */
+        const nMinsAgo = moment().subtract(config.watchPollInterval / 2, 'milliseconds');
+        const nMinsAhead = moment().add(config.watchPollInterval / 2, 'milliseconds');
+
+        const mention = watch.attending.map((x) => `<@${x}>`).join(', ');
+
+        if (eightHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
+            channel.send(`${mention}, reminder, you are watching ${watch.title} in 8 hours (${moment(watch.time).format('HH:mm Z')})`);
+        }
+
+        if (fifteenMinuteReminder.isBetween(nMinsAgo, nMinsAhead)) {
+            channel.send(`${mention}, reminder, you are watching ${watch.title} ${moment(watch.time).fromNow()}`);
+        }
+    }
+
+    setTimeout(handleWatchNotifications, config.watchPollInterval);
 }
 
 main();

@@ -13,6 +13,8 @@ class Config {
     public doggoBreedLink: string = 'https://pastebin.com/BS8JKb7V';
 
     public kittyBreedLink: string = 'https://pastebin.com/0iCzvPJq';
+
+    public watchPollInterval: number = 10000;
 }
 
 export let config = new Config();
