@@ -1396,10 +1396,10 @@ async function handleWatchNotifications(channel: TextChannel) {
         const nMinsAgo = moment().subtract(config.watchPollInterval / 2, 'milliseconds');
         const nMinsAhead = moment().add(config.watchPollInterval / 2, 'milliseconds');
 
-        const mention = watch.attending.map((x) => `<@${x}>`).join(', ');
+        const mention = watch.attending.map((x) => `<@${x}>`).join(' ');
 
         if (eightHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
-            channel.send(`${mention}, reminder, you are watching ${watch.title} in 8 hours (${moment(watch.time).format('HH:mm Z')})`);
+            channel.send(`${mention}, reminder, you are watching ${watch.title} in 8 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
         }
 
         if (fifteenMinuteReminder.isBetween(nMinsAgo, nMinsAhead)) {
