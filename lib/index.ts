@@ -339,7 +339,7 @@ function canAccessCommand(msg: Message): boolean {
         return true;
     }
 
-    addReaction('❌', msg);
+    msg.react('❌');
 
     return false;
 }
@@ -599,21 +599,17 @@ async function handleDoggo(msg: Message, breed: string[]): Promise<void> {
 }
 
 function addReaction(emoji: string, message: Message): void {
-    try {
-        msg.react(emoji);
-    } catch (err) {
-        /* Find the reaction */
-        const reaction = message.guild!.emojis.resolve(emoji);
+    /* Find the reaction */
+    const reaction = message.guild!.emojis.resolve(emoji);
 
-        /* Couldn't find the reaction */
-        if (!reaction) {
-            console.error(`Failed to find emoji: ${emoji} on the server!`);
-            return;
-        }
-
-        /* Add the reaction */
-        message.react(reaction).catch(console.error);
+    /* Couldn't find the reaction */
+    if (!reaction) {
+        console.error(`Failed to find emoji: ${emoji} on the server!`);
+        return;
     }
+
+    /* Add the reaction */
+    message.react(reaction).catch(console.error);
 }
 
 async function archive(channel: TextChannel, author: User): Promise<void> {
