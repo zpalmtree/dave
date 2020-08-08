@@ -23,6 +23,8 @@ import { renderDotGraph, renderDot } from './Dot';
 
 import * as convert from 'xml-js';
 
+const god = '354701063955152898';
+
 const readFile = promisify(fs.readFile);
 const writeFile = promisify(fs.writeFile);
 
@@ -328,6 +330,20 @@ function handleDiceRoll(msg: Message, args: string): void {
     msg.reply(response);
 }
 
+function canAccessCommand(msg: Message): boolean {
+    if (msg.channel.id === config.fit) {
+        return true;
+    }
+
+    if (msg.author.id === god) {
+        return true;
+    }
+
+    addReaction(':x:', msg);
+
+    return false;
+}
+
 function handleHelp(msg: Message): void {
     const fitCommands =
 `$movie:     Displays scheduled movies to be watched
@@ -434,7 +450,7 @@ async function writeJSON(filepath: string, data: any): Promise<void> {
 }
 
 async function handleQuote(msg: Message): Promise<void> {
-    if (msg.channel.id !== config.fit) {
+    if (!canAccessCommand(msg)) {
         return;
     }
 
@@ -455,7 +471,7 @@ async function handleQuote(msg: Message): Promise<void> {
 }
 
 async function handleSuggest(msg: Message, suggestion: string | undefined): Promise<void> {
-    if (msg.channel.id !== config.fit) {
+    if (!canAccessCommand(msg)) {
         return;
     }
 
@@ -1293,7 +1309,7 @@ async function awaitWatchReactions(msg: Message, title: string, id: number, atte
 }
 
 async function handleWatch(msg: Message, args: string[]): Promise<void> {
-    if (msg.channel.id !== config.fit) {
+    if (!canAccessCommand(msg)) {
         return;
     }
 
