@@ -373,7 +373,7 @@ ${msg.channel.id === config.fit ? fitCommands : ''}
 
 function handleRoll(msg: Message, args: string): void {
     if (msg.member) {
-        if (msg.member.roles.cache.find((role) => role.name === 'Lil bitch')) {
+        if (msg.member.roles.cache.find((role) => role.name === 'Baby Boy')) {
             msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
             return;
         }
