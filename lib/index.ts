@@ -1386,7 +1386,7 @@ async function handleWatchNotifications(channel: TextChannel) {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
-        setTimeout(() => handleWatchNotifications(channel), config.watchPollInterval);
+        setTimeout(handleWatchNotifications, config.watchPollInterval, channel);
         return;
     }
 
@@ -1417,7 +1417,7 @@ async function handleWatchNotifications(channel: TextChannel) {
         }
     }
 
-    setTimeout(() => handleWatchNotifications(channel), config.watchPollInterval);
+    setTimeout(handleWatchNotifications, config.watchPollInterval, channel);
 }
 
 main();
