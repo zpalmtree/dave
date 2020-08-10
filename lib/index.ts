@@ -209,6 +209,10 @@ function handleMessage(msg: Message) {
             handleTime(msg, args.join(' '));
             break;
         }
+        case 'timer': {
+            handleTimer(msg, args);
+            break;
+        }
     }
 }
 
@@ -1418,6 +1422,38 @@ async function handleWatchNotifications(channel: TextChannel) {
     }
 
     setTimeout(handleWatchNotifications, config.watchPollInterval, channel);
+}
+
+async function handleTimer(msg: Message, args: string[]) {
+    const regex = /^(?:(\d{1,2})h)?(?:(\d{1,2})m)?(?: (.+))?$/;
+
+    const results = regex.exec(args.join(' '));
+
+    if (!results) {
+        msg.reply('Failed to parse input, try `$timer 5m coffee` or `$timer 5h10m`');
+        return;
+    }
+
+    const [, hours, minutes, description ] = results;
+
+    const totalTimeMinutes = (Number(minutes) || 0) + ((Number(hours) || 0) * 60);
+
+    if (totalTimeMinutes > 60 * 24) {
+        msg.reply('Timers longer than 24 hours are not supported.');
+        return;
+    }
+
+    console.log(`Scheduled timer: hours: ${hours}, minutes: ${minutes}, description: ${description}`);
+
+    setTimeout(() => {
+        if (description) {
+            msg.reply(`Your ${description} timer has elapsed.`);
+        } else {
+            msg.reply(`Your timer has elapsed.`);
+        }
+    }, totalTimeMinutes * 60 * 1000);
+
+    await msg.react('👍');
 }
 
 main();
