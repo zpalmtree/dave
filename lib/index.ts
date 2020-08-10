@@ -368,6 +368,7 @@ $kitty:     Gets a random cat pic
 $help:      Displays this help
 $chinked:   Displays coronavirus statistics
 $dot:       Dot bot post dot
+$timer:     Set a timer
 ${msg.channel.id === config.fit ? fitCommands : ''}
 \`\`\`
 `;
@@ -1430,7 +1431,7 @@ async function handleTimer(msg: Message, args: string[]) {
     const results = regex.exec(args.join(' '));
 
     if (!results) {
-        msg.reply('Failed to parse input, try `$timer 5m coffee` or `$timer 5h10m`');
+        msg.reply('Failed to parse input, try `$timer 5m coffee` or `$timer 5h10m`. Max 24h timers.');
         return;
     }
 
