@@ -1416,7 +1416,7 @@ async function handleWatchNotifications(channel: TextChannel) {
 }
 
 async function handleTimer(msg: Message, args: string[]) {
-    const regex = /^(?:(\d{1,2})h)?(?:(\d{1,2})m)?(?: (.+))?$/;
+    const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 
     const results = regex.exec(args.join(' '));
 
@@ -1425,16 +1425,18 @@ async function handleTimer(msg: Message, args: string[]) {
         return;
     }
 
-    const [, hours, minutes, description ] = results;
+    const [, hours=0, minutes=0, seconds=0, description ] = results;
 
-    const totalTimeMinutes = (Number(minutes) || 0) + ((Number(hours) || 0) * 60);
+    const totalTimeSeconds = Number(seconds)
+                           + Number(minutes) * 60
+                           + Number(hours) * 60;
 
-    if (totalTimeMinutes > 60 * 24) {
+    if (totalTimeSeconds > 60 * 60 * 24) {
         msg.reply('Timers longer than 24 hours are not supported.');
         return;
     }
 
-    console.log(`Scheduled timer: hours: ${hours}, minutes: ${minutes}, description: ${description}`);
+    console.log(`Scheduled timer: hours: ${hours}, minutes: ${minutes}, seconds: ${seconds}, description: ${description}`);
 
     setTimeout(() => {
         if (description) {
@@ -1442,7 +1444,7 @@ async function handleTimer(msg: Message, args: string[]) {
         } else {
             msg.reply(`Your timer has elapsed.`);
         }
-    }, totalTimeMinutes * 60 * 1000);
+    }, totalTimeSeconds * 1000);
 
     await msg.react('👍');
 }
