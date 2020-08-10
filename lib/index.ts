@@ -1386,8 +1386,6 @@ function handleTime(msg: Message, args: string) {
 }
 
 async function handleWatchNotifications(channel: TextChannel) {
-    console.log(`Watch handler fired at ${moment().format('HH:mm')}`);
-
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
@@ -1405,19 +1403,11 @@ async function handleWatchNotifications(channel: TextChannel) {
 
         const mention = watch.attending.map((x) => `<@${x}>`).join(' ');
 
-        console.log(`Checking notifications for ${watch.title}`);
-        console.log(`nMinsAgo: ${nMinsAgo.format('HH:mm')}`);
-        console.log(`nMinsAhead: ${nMinsAhead.format('HH:mm')}`);
-        console.log(`eightHourReminder: ${eightHourReminder.format('HH:mm')}`);
-        console.log(`fifteenMinuteReminder: ${fifteenMinuteReminder.format('HH:mm')}`);
-
         if (eightHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
-            console.log('Sending 8 hour reminder');
             channel.send(`${mention}, reminder, you are watching ${watch.title} in 8 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
         }
 
         if (fifteenMinuteReminder.isBetween(nMinsAgo, nMinsAhead)) {
-            console.log('Sending 15 minute reminder');
             channel.send(`${mention}, reminder, you are watching ${watch.title} ${moment(watch.time).fromNow()}`);
         }
     }
