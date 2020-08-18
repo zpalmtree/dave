@@ -177,12 +177,8 @@ function handleMessage(msg: Message) {
             archive(msg.channel as TextChannel, msg.author);
             break;
         }
-        case 'chinaids':
-        case 'kungflu':
         case 'corona':
         case 'coronavirus':
-        case 'covid-19':
-        case 'chinesevirus':
         case 'chinavirus':
         case 'chinked': {
             chinked(msg, args.join(' '));
