@@ -1063,13 +1063,7 @@ async function handleImgur(msg: Message, gallery: string): Promise<void> {
 function removeOutdatedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
     const newData = data.filter((watch) => {
         /* Has more than 3 hours passed since the scheduled watch time? */
-        const movieHasNotFinished = moment(watch.time).add(3, 'hours').isAfter(moment());
-
-        if (!movieHasNotFinished) {
-            console.log(`Removing movie ${watch.title}, it is in the past.`);
-        }
-
-        return movieHasNotFinished;
+        return moment(watch.time).add(3, 'hours').isAfter(moment());
     });
 
     /* Update the file if any entries have expired since we last checked */
@@ -1438,8 +1432,6 @@ async function handleTimer(msg: Message, args: string[]) {
         msg.reply('Timers longer than 24 hours are not supported.');
         return;
     }
-
-    console.log(`Scheduled timer: hours: ${hours}, minutes: ${minutes}, seconds: ${seconds}, description: ${description}`);
 
     setTimeout(() => {
         if (description) {
