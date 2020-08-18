@@ -209,6 +209,10 @@ function handleMessage(msg: Message) {
             handleTimer(msg, args);
             break;
         }
+        case 'countdown': {
+            handleCountdown(msg, args.join(' '));
+            break;
+        }
     }
 }
 
@@ -352,7 +356,8 @@ function handleHelp(msg: Message): void {
     const fitCommands =
 `$movie:     Displays scheduled movies to be watched
 $quote:     Gets a random quote
-$suggest:   Suggest a new quote`;
+$suggest:   Suggest a new quote
+$timer:     Set a timer to remind you of something`;
 
     const message = `
 \`\`\`
@@ -364,7 +369,9 @@ $kitty:     Gets a random cat pic
 $help:      Displays this help
 $chinked:   Displays coronavirus statistics
 $dot:       Dot bot post dot
-$timer:     Set a timer
+$timer:     Set a timer to remind you of something
+$countdown: Perform a countdown
+$time:      Get the time in a specific UTC offset
 ${msg.channel.id === config.fit ? fitCommands : ''}
 \`\`\`
 `;
@@ -1443,6 +1450,49 @@ async function handleTimer(msg: Message, args: string[]) {
     }, totalTimeSeconds * 1000);
 
     await msg.react('👍');
+}
+
+async function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function handleCountdown(msg: Message, args: string) {
+    if (args === '') {
+        args = '3';
+    }
+
+    let secs = Number(args);
+
+    if (Number.isNaN(secs)) {
+        msg.reply('Invalid input, try `$countdown` or `$countdown 5`');
+        return;
+    }
+
+    if (secs > 120) {
+        msg.reply('Countdowns longer than 120 are not supported.');
+        return;
+    }
+
+    if (secs < 1) {
+        msg.reply('Countdowns less than 1 are not supported.');
+        return;
+    }
+
+    const sentMessage = await msg.channel.send(secs.toString());
+
+    while (secs > 0) {
+        secs--;
+
+        const message = secs === 0
+            ? 'Lets jam!'
+            : secs.toString();
+
+        /* Need to be careful not to hit API limits. Can only perform 5 actions
+         * in 5 seconds. Experienced limiting with 1200ms delay. */
+        await sleep(1500);
+
+        sentMessage.edit(message);
+    }
 }
 
 main();
