@@ -1145,7 +1145,7 @@ export async function handleCountdown(msg: Message, args: string) {
 export async function handlePurge(msg: Message) {
     const embed = new MessageEmbed()
         .setTitle('Message Deletion')
-        .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take serveral hours.')
+        .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take several hours.')
         .setFooter('React with 👍 to confirm the deletion');
 
     const sentMessage = await msg.channel.send(embed);
