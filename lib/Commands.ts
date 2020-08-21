@@ -1142,3 +1142,56 @@ export async function handleCountdown(msg: Message, args: string) {
     }
 }
 
+export async function handlePurge(msg: Message) {
+    const embed = new MessageEmbed()
+        .setTitle('Message Deletion')
+        .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take serveral hours.')
+        .setFooter('React with 👍 to confirm the deletion');
+
+    const sentMessage = await msg.channel.send(embed);
+
+    await sentMessage.react('👍');
+
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
+        return reaction.emoji.name === '👍' && user.id === msg.author.id
+    }, { time: 3000000 });
+
+    let inProgress = false;
+
+    collector.on('collect', async (reaction, user) => {
+        if (inProgress) {
+            return;
+        }
+
+        if (user.id !== msg.author.id) {
+            return;
+        }
+
+        inProgress = true;
+
+        let messages: Message[] = [];
+
+        let i = 0;
+
+        try {
+            do {
+                const firstMessage = messages.length === 0 ? undefined : messages[0].id;
+
+                /* Fetch messages, convert to array and sort by timestamp, oldest first */
+                messages = (await msg.channel.messages.fetch({ before: firstMessage })).array().sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+                for (const message of messages) {
+                    if (message.author.id === msg.author.id) {
+                        await message.delete();
+                        console.log(`Deleted message ${i} for ${msg.author.id}`);
+                        i++;
+                    }
+                }
+            } while (messages.length > 0);
+        } catch (err) {
+            console.log('err: ' + err.toString());
+        }
+
+        msg.channel.send(`Message deletion for <@${msg.author.id}> complete`);
+    });
+}

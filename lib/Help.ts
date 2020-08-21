@@ -323,3 +323,18 @@ export function handleCountdownHelp(msg: Message): void {
 
     msg.channel.send(embed);
 }
+
+export function handlePurgeHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$purge')
+        .setDescription('Delete every message you have made in this channel')
+        .addFields(
+            {
+                name: 'Example',
+                value: '`$purge`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}
