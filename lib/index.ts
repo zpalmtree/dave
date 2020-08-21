@@ -193,7 +193,39 @@ const commands: Command[] = [
         helpFunction: handleCountdownHelp,
         description: 'Perform a countdown',
     },
+    {
+        aliases: ['purge'],
+        argsFormat: Args.DontNeed,
+        hidden: true,
+        implementation: handlePurge,
+        description: 'Perform a message purge',
+    },
 ]
+
+async function handlePurge(msg: Message) {
+    let messages: Message[] = [];
+
+    let i = 0;
+
+    try {
+        do {
+            const firstMessage = messages.length === 0 ? undefined : messages[0].id;
+
+            /* Fetch messages, convert to array and sort by timestamp, oldest first */
+            messages = (await msg.channel.messages.fetch({ before: firstMessage })).array().sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+            for (const message of messages) {
+                if (['388916188715155467'].includes(message.author.id)) {
+                    i++;
+                    console.log(`Deleted message ${i}`);
+                    await message.delete();
+                }
+            }
+        } while (messages.length > 0);
+    } catch (err) {
+        console.log('err: ' + err.toString());
+    }
+}
 
 function handleMessage(msg: Message) {
     if (!msg.content.startsWith(config.prefix)) {
