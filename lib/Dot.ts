@@ -111,6 +111,8 @@ export async function renderDot(): Promise<[number, Canvas]> {
         method: 'GET',
         timeout: 10000,
         url: 'http://gcpdot.com/gcpindex.php',
+    }).catch((err) => {
+        throw err;
     });
 
     const dotData = JSON.parse(xml2json(dotXML)).elements[0].elements;
@@ -165,6 +167,8 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
         method: 'GET',
         timeout: 10000,
         url: `http://global-mind.org/gcpdot/gcpgraph.php?pixels=${dotGraphWidth}&seconds=${timespan}`,
+    }).catch((err) => {
+        throw err;
     });
 
     const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
