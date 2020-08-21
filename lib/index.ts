@@ -202,6 +202,7 @@ const commands: Command[] = [
         implementation: handlePurge,
         helpFunction: handlePurgeHelp,
         description: 'Delete all your messages in a channel',
+        disabled: true,
     },
 ]
 
@@ -221,6 +222,10 @@ function handleMessage(msg: Message) {
     const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length);
 
     for (const c of commands) {
+        if (c.disabled) {
+            continue;
+        }
+
         if (c.aliases.includes(command)) {
             if (c.hidden) {
                 if (!canAccessCommand(msg, true)) {

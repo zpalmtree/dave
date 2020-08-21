@@ -40,6 +40,9 @@ export interface Command {
 
     /* A description of the command for help strings */
     description?: string;
+
+    /* If the command is disabled */
+    disabled?: boolean;
 }
 
 export enum Args {
