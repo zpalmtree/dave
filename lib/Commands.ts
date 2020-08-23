@@ -851,14 +851,9 @@ async function displayAllWatches(msg: Message): Promise<void> {
     for (const watch of data) {
         embed.addFields(
             {
-                name: watch.title,
-                value: watch.link,
-                inline: true,
-            },
-            {
-                name: 'Date',
-                value: moment(watch.time).utcOffset(-6).format('YYYY-mm-dd'),
-                inline: true,
+                name: moment(watch.time).utcOffset(-6).format('YYYY-MM-DD'),
+                value: `[${watch.title}(${watch.link})]`,
+                inline: false,
             },
         );
     }
