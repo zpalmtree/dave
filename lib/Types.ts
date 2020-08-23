@@ -14,12 +14,26 @@ export interface Quote {
 }
 
 export interface ScheduledWatch {
+    /* Id of the watch */
     id: number;
+
+    /* Title of the watch */
     title: string;
+
+    /* IMDB link */
     link: string;
+
+    /* Date of the watch */
     time: Date;
+
+    /* Discord IDs attending */
     attending: string[];
+
+    /* Magnet link to download */
     magnet?: string;
+
+    /* Has it completed */
+    complete: boolean;
 }
 
 export interface Command {

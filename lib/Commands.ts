@@ -762,18 +762,18 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-function removeOutdatedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
-    const newData = data.filter((watch) => {
+function getUncompletedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
+    const newData = data.map((watch) => {
         /* Has more than 3 hours passed since the scheduled watch time? */
-        return moment(watch.time).add(3, 'hours').isAfter(moment());
+        watch.complete = !moment(watch.time).add(3, 'hours').isAfter(moment());
+        return watch;
     });
 
-    /* Update the file if any entries have expired since we last checked */
-    if (newData.length !== data.length) {
-        writeJSON('watch.json', newData);
-    }
+    writeJSON('watch.json', newData);
 
-    return newData;
+    return newData.filter((watch) => {
+        return !watch.complete
+    });
 }
 
 async function displayScheduledWatches(msg: Message): Promise<void> {
@@ -784,7 +784,7 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
         return;
     }
 
-    data = removeOutdatedWatches(data).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    data = getUncompletedWatches(data).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
     if (data.length === 0) {
         msg.reply('Nothing has been scheduled to be watched yet! Use `$watch help` for more info');
@@ -829,27 +829,6 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
     msg.channel.send(embed);
 }
 
-async function displayWatchHelp(msg: Message): Promise<void> {
-    const embed = new MessageEmbed()
-        .setTitle('Scheduled Movie / Series Bot Help')
-        .addFields(
-            {
-                name: 'List all movies/series scheduled to watch',
-                value: '`$watch`',
-            },
-            {
-                name: 'Find more info about a specific movie',
-                value: '`$watch <id>`, for example, `$watch 1`',
-            },
-            {
-                name: 'Schedule a new movie/series to be watched',
-                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM UTC OFFSET> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 -08:00`'
-            }
-        );
-
-    msg.channel.send(embed);
-}
-
 async function displayWatchById(msg: Message, id: number): Promise<void> {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
@@ -858,7 +837,7 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
         return;
     }
 
-    data = removeOutdatedWatches(data);
+    data = getUncompletedWatches(data);
 
     if (data.length === 0) {
         msg.reply('Nothing has been scheduled to be watched yet!');
@@ -908,10 +887,10 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
 
     const sentMessage = await msg.channel.send(embed);
 
-    awaitWatchReactions(sentMessage, watch.title, id, watch.attending, 1);
+    awaitWatchReactions(sentMessage, watch.title, id, new Set(watch.attending), 1);
 }
 
-async function updateWatchAttendees(reactions: string[], id: number, msg: Message) {
+async function updateWatchAttendees(attending: Set<string>, id: number, msg: Message) {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
@@ -926,10 +905,7 @@ async function updateWatchAttendees(reactions: string[], id: number, msg: Messag
         return;
     }
 
-    /* Set will remove any duplicates if they have already signed up */
-    const newAttendees = [...new Set(data[index].attending.concat(reactions))];
-
-    data[index].attending = newAttendees;
+    data[index].attending = [...attending];
 
     writeJSON('watch.json', data);
 }
@@ -951,6 +927,7 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
         time: moment(time).toDate(),
         attending: [msg.author.id],
         magnet,
+        complete: false,
     });
 
     writeJSON('watch.json', data);
@@ -977,24 +954,35 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
 
     const sentMessage = await msg.channel.send(embed);
 
-    awaitWatchReactions(sentMessage, title, maxID + 1, [msg.author.id], 1);
+    awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 1);
 }
 
-async function awaitWatchReactions(msg: Message, title: string, id: number, attending: string[], attendingFieldIndex: number) {
+async function awaitWatchReactions(
+    msg: Message,
+    title: string,
+    id: number,
+    attending: Set<string>,
+    attendingFieldIndex: number) {
+
     await msg.react('👍');
+    await msg.react('👎');
 
     const collector = msg.createReactionCollector((reaction, user) => {
-        return reaction.emoji.name === '👍' && !user.bot;
+        return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 3000000 });
 
     collector.on('collect', (reaction, user) => {
         const embed = new MessageEmbed(msg.embeds[0]);
 
-        attending.push(user.id);
+        if (reaction.emoji.name === '👍') {
+            attending.add(user.id);
+        } else {
+            attending.delete(user.id);
+        }
 
         embed.spliceFields(attendingFieldIndex, 1, {
             name: 'Attending',
-            value: [...new Set(attending)].map((user) => {
+            value: [...attending].map((user) => {
                 const userObj = msg.guild!.members.cache.get(user)
 
                 if (userObj !== undefined) {
@@ -1008,7 +996,7 @@ async function awaitWatchReactions(msg: Message, title: string, id: number, atte
 
         msg.edit(embed);
 
-        updateWatchAttendees([user.id], id, msg);
+        updateWatchAttendees(attending, id, msg);
     });
 }
 
