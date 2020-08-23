@@ -234,10 +234,10 @@ export function handleTurtleHelp(msg: Message): void {
     msg.channel.send(embed);
 }
 
-export function handleWatchHelp(msg: Message): void {
+export function handleWatchHelp(msg: Message, description?: string): void {
     const embed = new MessageEmbed()
         .setTitle('$watch')
-        .setDescription('Schedule a movie to watch or view scheduled movies')
+        .setDescription(description || 'Schedule a movie to watch or view scheduled movies')
         .addFields(
             {
                 name: 'List all movies/series scheduled to watch',
@@ -252,6 +252,11 @@ export function handleWatchHelp(msg: Message): void {
             {
                 name: 'Find more info about a specific movie',
                 value: '`$watch 1`',
+                inline: false,
+            },
+            {
+                name: 'View previously seen movies',
+                value: '`$watch history`',
                 inline: false,
             },
         );

@@ -25,6 +25,7 @@ import { catBreeds } from './Cats';
 import { dogBreeds } from './Dogs';
 import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
+import { handleWatchHelp } from './Help';
 
 import {
     renderDotGraph,
@@ -829,6 +830,43 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
     msg.channel.send(embed);
 }
 
+async function displayAllWatches(msg: Message): Promise<void> {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+        return;
+    }
+
+    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+    if (data.length === 0) {
+        msg.reply('Nothing has been watched before!');
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle('Previously Watched Movies/Series');
+
+    for (const watch of data) {
+        embed.addFields(
+            {
+                name: watch.title,
+                value: watch.link,
+                inline: true,
+            },
+            {
+                name: 'Date',
+                value: moment(watch.time).utcOffset(-6).format('YYYY-mm-dd'),
+                inline: true,
+            },
+        );
+    }
+
+    msg.channel.send(embed);
+}
+
+
 async function displayWatchById(msg: Message, id: number): Promise<void> {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
@@ -1008,7 +1046,12 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
     }
 
     if (args.length === 1) {
-        await displayWatchById(msg, Number(args[0]));
+        if (args[0] === 'history') {
+            displayAllWatches(msg);
+        } else {
+            displayWatchById(msg, Number(args[0]));
+        }
+
         return;
     }
 
@@ -1028,25 +1071,7 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed()
-        .setTitle('Invalid Input')
-        .setDescription('Sorry, your input was invalid. Please try one of the following options.')
-        .addFields(
-            {
-                name: 'List all movies/series scheduled to watch',
-                value: '`$watch`',
-            },
-            {
-                name: 'Find more info about a specific movie',
-                value: '`$watch <id>`, for example, `$watch 1`',
-            },
-            {
-                name: 'Schedule a new movie/series to be watched',
-                value: '`$watch <title> <IMDB link> <YYYY/MM/DD HH:MM TIMEZONE> <Optional Magnet Link>`, for example, `$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 -08:00`'
-            }
-        );
-
-    msg.channel.send(embed);
+    handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
 }
 
 export function handleTime(msg: Message, args: string) {
