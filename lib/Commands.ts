@@ -922,17 +922,21 @@ async function deleteWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const watch = data.findIndex((watch) => watch.id === Number(id));
+    const index = data.findIndex((watch) => watch.id === Number(id));
 
-    if (watch === -1) {
+    if (index === -1) {
         msg.reply(`Could not find movie ID "${id}".`);
         return;
     }
 
+    const title = data[index].title;
+
     /* Remove watch */
-    data.splice(watch, 1);
+    data.splice(index, 1);
 
     writeJSON('watch.json', data);
+
+    msg.reply(`Successfully deleted scheduled watch ${title}`);
 }
 
 async function displayWatchById(msg: Message, id: number): Promise<void> {
