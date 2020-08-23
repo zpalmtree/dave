@@ -67,3 +67,11 @@ export function capitalize(str: string): string {
 export async function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+export function haveRole(msg: Message, role: string): boolean {
+    if (!msg.member) {
+        return false;
+    }
+
+    return msg.member.roles.cache.some((r) => r.name === role);
+}

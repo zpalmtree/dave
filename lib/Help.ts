@@ -259,6 +259,16 @@ export function handleWatchHelp(msg: Message, description?: string): void {
                 value: '`$watch history`',
                 inline: false,
             },
+            {
+                name: 'Delete a scheduled movie (mod only)',
+                value: '`$watch delete 1`',
+                inline: false,
+            },
+            {
+                name: 'Add a magnet link for a movie',
+                value: '`$watch addmagnet 1 magnet:?xt=urn:btih:e5f8d9251b8ca1f285b8474da1aa72844d830ca1&dn=Being%20John%20Malkovich%20(1999)%20Criterion%20(1080p%20BluRay%20x265%20HEVC%2010bit%20AAC%205.1%20Tigole)&tr=udp%3a%2f%2ftracker.torrent.eu.org%3a451%2fannounce&tr=udp%3a%2f%2fexplodie.org%3a6969%2fannounce&tr=udp%3a%2f%2ftracker.opentrackr.org%3a1337%2fannounce&tr=udp%3a%2f%2ftracker.zer0day.to%3a1337%2fannounce&tr=udp%3a%2f%2ftracker.leechers-paradise.org%3a6969%2fannounce&tr=udp%3a%2f%2fcoppersurfer.tk%3a6969%2fannounce`',
+                inline: false,
+            },
         );
 
     msg.channel.send(embed);

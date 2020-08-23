@@ -38,7 +38,8 @@ import {
     addReaction,
     chunk,
     capitalize,
-    sleep
+    sleep,
+    haveRole,
 } from './Utilities';
 
 import {
@@ -210,11 +211,9 @@ export function handleDiceRoll(msg: Message, args: string): void {
 }
 
 export function handleRoll(msg: Message, args: string): void {
-    if (msg.member) {
-        if (msg.member.roles.cache.find((role) => role.name === 'Baby Boy')) {
-            msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
-            return;
-        }
+    if (haveRole(msg, 'Baby Boy')) {
+        msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
+        return;
     }
 
     args = args.trim();
@@ -861,6 +860,80 @@ async function displayAllWatches(msg: Message): Promise<void> {
     msg.channel.send(embed);
 }
 
+async function addMagnet(msg: Message, args: string[]): Promise<void> {
+    if (args.length < 2) {
+        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        return;
+    }
+
+    const id = Number(args[0]);
+
+    if (Number.isNaN(id)) {
+        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        return;
+    }
+
+    if (!/magnet:\?.+/.test(args[1])) {
+        handleWatchHelp(msg, 'Input does not look like a magnet link. Please try one of the following options.');
+        return;
+    }
+
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+        return;
+    }
+
+    const index = data.findIndex((watch) => watch.id === Number(id));
+
+    if (index === -1) {
+        msg.reply(`Could not find movie ID "${id}".`);
+        return;
+    }
+
+    data[index].magnet = args[1];
+
+    writeJSON('watch.json', data);
+}
+
+async function deleteWatch(msg: Message, args: string[]): Promise<void> {
+    if (!haveRole(msg, 'Mod')) {
+        msg.reply('You must be a Mod to use this feature.');
+        return;
+    }
+
+    if (args.length === 0) {
+        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        return;
+    }
+
+    const id = Number(args[0]);
+
+    if (Number.isNaN(id)) {
+        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        return;
+    }
+
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+        return;
+    }
+
+    const watch = data.findIndex((watch) => watch.id === Number(id));
+
+    if (watch === -1) {
+        msg.reply(`Could not find movie ID "${id}".`);
+        return;
+    }
+
+    /* Remove watch */
+    data.splice(watch, 1);
+
+    writeJSON('watch.json', data);
+}
 
 async function displayWatchById(msg: Message, id: number): Promise<void> {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
@@ -1040,13 +1113,25 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    if (args.length === 1) {
-        if (args[0] === 'history') {
-            displayAllWatches(msg);
-        } else {
-            displayWatchById(msg, Number(args[0]));
+    if (args.length >= 1) {
+        switch (args[0]) {
+            case 'history': {
+                displayAllWatches(msg);
+                return;
+            }
+            case 'addmagnet': {
+                addMagnet(msg, args.slice(1));
+                return;
+            }
+            case 'delete': {
+                deleteWatch(msg, args.slice(1));
+                return;
+            }
         }
+    }
 
+    if (args.length === 1) {
+        displayWatchById(msg, Number(args[0]));
         return;
     }
 
