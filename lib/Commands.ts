@@ -924,7 +924,7 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
         id: maxID + 1,
         title,
         link: imdbLink,
-        time: moment(time).toDate(),
+        time: moment(time, 'YYYY-MM-DD hh:mm ZZ').toDate(),
         attending: [msg.author.id],
         magnet,
         complete: false,
@@ -934,7 +934,7 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
 
     const embed = new MessageEmbed()
         .setTitle(title)
-        .setDescription(`${title} has been successfully scheduled for ${moment(time).utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
+        .setDescription(`${title} has been successfully scheduled for ${moment(time, 'YYYY-MM-DD hh:mm ZZ').utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
         .setFooter('React with 👍 if you want to attend this movie night')
         .addFields(
             {
@@ -1019,7 +1019,7 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
     if (results) {
         const [ , title, imdbLink, time, magnet ] = results;
 
-        if (!moment(time).isValid()) {
+        if (!moment(time, 'YYYY-MM-DD hh:mm ZZ').isValid()) {
             msg.reply(`Failed to parse date/time "${time}"`);
             return;
         }
