@@ -895,6 +895,8 @@ async function addMagnet(msg: Message, args: string[]): Promise<void> {
     data[index].magnet = args[1];
 
     writeJSON('watch.json', data);
+
+    msg.reply(`Successfully added/updated magnet for ${data[index].title}`);
 }
 
 async function deleteWatch(msg: Message, args: string[]): Promise<void> {
