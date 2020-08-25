@@ -1148,7 +1148,7 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
     if (results) {
         const [ , title, imdbLink, time, magnet ] = results;
 
-        if (!moment(time, 'YYYY-MM-DD hh:mm ZZ').isValid()) {
+        if (!moment(time, 'YYYY/MM/DD hh:mm ZZ').isValid()) {
             msg.reply(`Failed to parse date/time "${time}"`);
             return;
         }
