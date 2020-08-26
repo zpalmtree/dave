@@ -934,12 +934,12 @@ async function removeWatchById(id: number): Promise<string> {
         return `Could not find movie ID ${id}".`;
     }
 
+    const title = data[index].title;
+
     /* Remove watch */
     data.splice(index, 1);
 
     writeJSON('watch.json', data);
-
-    const title = data[index].title;
 
     return `Successfully deleted scheduled watch ${title}`;
 }
