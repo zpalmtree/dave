@@ -1069,7 +1069,7 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
 
     const sentMessage = await msg.channel.send(embed);
 
-    awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 1);
+    awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 0);
 }
 
 async function awaitWatchReactions(
