@@ -917,28 +917,31 @@ async function deleteWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
+    const watchDeletionResponse = await removeWatchById(id);
+    msg.channel.send(watchDeletionResponse);
+}
+
+async function removeWatchById(id: number): Promise<string> {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
-        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
-        return;
+        return "Failed to read watch list: " + err.toString();
     }
 
-    const index = data.findIndex((watch) => watch.id === Number(id));
+    const index = data.findIndex((watch) => watch.id === id);
 
     if (index === -1) {
-        msg.reply(`Could not find movie ID "${id}".`);
-        return;
+        return `Could not find movie ID ${id}".`;
     }
-
-    const title = data[index].title;
 
     /* Remove watch */
     data.splice(index, 1);
 
     writeJSON('watch.json', data);
 
-    msg.reply(`Successfully deleted scheduled watch ${title}`);
+    const title = data[index].title;
+
+    return `Successfully deleted scheduled watch ${title}`;
 }
 
 async function displayWatchById(msg: Message, id: number): Promise<void> {
@@ -1083,13 +1086,21 @@ async function awaitWatchReactions(
         return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 3000000 });
 
-    collector.on('collect', (reaction, user) => {
+    collector.on('collect', async (reaction, user) => {
         const embed = new MessageEmbed(msg.embeds[0]);
 
         if (reaction.emoji.name === '👍') {
             attending.add(user.id);
         } else {
             attending.delete(user.id);
+        }
+
+        if (attending.size === 0) {
+            msg.channel.send('All attendees removed! Cancelling watch.');
+            collector.stop();
+            const watchDeletionResponse = await removeWatchById(id);
+            msg.channel.send(watchDeletionResponse);
+            return;
         }
 
         embed.spliceFields(attendingFieldIndex, 1, {
