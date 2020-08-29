@@ -762,7 +762,16 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-function getUncompletedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
+async function readWatchJSON(): Promise<{ err: string | undefined, data: ScheduledWatch[] }> {
+    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+
+    if (err) {
+        return {
+            err,
+            data: [],
+        };
+    }
+
     const newData = data.map((watch) => {
         /* Has more than 3 hours passed since the scheduled watch time? */
         watch.complete = !moment(watch.time).add(3, 'hours').isAfter(moment());
@@ -771,20 +780,21 @@ function getUncompletedWatches(data: ScheduledWatch[]): ScheduledWatch[] {
 
     writeJSON('watch.json', newData);
 
-    return newData.filter((watch) => {
-        return !watch.complete
-    });
+    return {
+        err: undefined,
+        data: newData
+    };
 }
 
 async function displayScheduledWatches(msg: Message): Promise<void> {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    let { err, data } = await readWatchJSON();
 
     if (err) {
         msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
         return;
     }
 
-    data = getUncompletedWatches(data).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
     if (data.length === 0) {
         msg.reply('Nothing has been scheduled to be watched yet! Use `$watch help` for more info');
@@ -796,6 +806,10 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
         .setFooter('Use $watch <movie id> to view more info and sign up to watch');
 
     for (const watch of data) {
+        if (watch.complete) {
+            continue;
+        }
+
         embed.addFields(
             {
                 name: `ID: ${watch.id}`,
@@ -830,7 +844,7 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
 }
 
 async function displayAllWatches(msg: Message): Promise<void> {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    let { err, data } = await readWatchJSON();
 
     if (err) {
         msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
@@ -848,6 +862,10 @@ async function displayAllWatches(msg: Message): Promise<void> {
         .setTitle('Previously Watched Movies/Series');
 
     for (const watch of data) {
+        if (!data.complete) {
+            continue;
+        }
+
         embed.addFields(
             {
                 name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
@@ -878,33 +896,40 @@ async function addMagnet(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    const watch = await getWatchById(Number(id));
+
+    if (typeof watch === 'string') {
+        msg.reply(watch);
+        return;
+    }
+
+    watch.data[watch.index].magnet = args[1];
+
+    writeJSON('watch.json', watch.data);
+
+    msg.reply(`Successfully added/updated magnet for ${watch.data[watch.index].title}`);
+}
+
+async function getWatchById(id: number): Promise<{ data: ScheduledWatch[], index: number } | string> {
+    let { err, data } = await readWatchJSON();
 
     if (err) {
-        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
-        return;
+        return `Failed to read watch list: ${err.toString()}`;
     }
 
-    const index = data.findIndex((watch) => watch.id === Number(id));
+    const index = data.findIndex((watch) => watch.id === id);
 
     if (index === -1) {
-        msg.reply(`Could not find movie ID "${id}".`);
-        return;
+        return `Could not find movie ID "${id}".`;
     }
 
-    data[index].magnet = args[1];
-
-    writeJSON('watch.json', data);
-
-    msg.reply(`Successfully added/updated magnet for ${data[index].title}`);
+    return {
+        data,
+        index,
+    };
 }
 
 async function deleteWatch(msg: Message, args: string[]): Promise<void> {
-    if (!haveRole(msg, 'Mod')) {
-        msg.reply('You must be a Mod to use this feature.');
-        return;
-    }
-
     if (args.length === 0) {
         handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
         return;
@@ -917,54 +942,58 @@ async function deleteWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const watchDeletionResponse = await removeWatchById(id);
-    msg.channel.send(watchDeletionResponse);
+    const watch = await getWatchById(id);
+
+    if (typeof watch === 'string') {
+        msg.reply(watch);
+        return;
+    }
+
+    const movie = watch.data[watch.index];
+
+    const areOnlyAttendee = movie.attending.length === 1 && movie.attending[0] === msg.author.id;
+
+    if (!areOnlyAttendee && !haveRole(msg, 'Mod')) {
+        msg.reply('You must be the only watch attendee, or be a mod, to remove a movie');
+        return;
+    }
+
+    const title = movie.title;
+
+    /* Remove watch */
+    watch.data.splice(watch.index, 1);
+
+    writeJSON('watch.json', watch.data);
+
+    msg.reply(`Successfully deleted scheduled watch ${title}`);
 }
 
 async function removeWatchById(id: number): Promise<string> {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    const watch = await getWatchById(id);
 
-    if (err) {
-        return "Failed to read watch list: " + err.toString();
+    if (typeof watch === 'string') {
+        return watch;
     }
 
-    const index = data.findIndex((watch) => watch.id === id);
-
-    if (index === -1) {
-        return `Could not find movie ID ${id}".`;
-    }
-
-    const title = data[index].title;
+    const title = watch.data[watch.index].title;
 
     /* Remove watch */
-    data.splice(index, 1);
+    watch.data.splice(watch.index, 1);
 
-    writeJSON('watch.json', data);
+    writeJSON('watch.json', watch.data);
 
     return `Successfully deleted scheduled watch ${title}`;
 }
 
 async function displayWatchById(msg: Message, id: number): Promise<void> {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    const watchData = await getWatchById(Number(id));
 
-    if (err) {
-        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
+    if (typeof watchData === 'string') {
+        msg.reply(watchData);
         return;
     }
 
-    data = getUncompletedWatches(data);
-
-    if (data.length === 0) {
-        msg.reply('Nothing has been scheduled to be watched yet!');
-        return;
-    }
-
-    const watch = data.find((watch) => watch.id === Number(id));
-
-    if (watch === undefined) {
-        msg.reply(`Could not find movie ID "${id}".`);
-        return;
-    }
+    const watch = watchData.data[watchData.index];
 
     const embed = new MessageEmbed()
         .setTitle(watch.title)
@@ -1006,27 +1035,20 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
 }
 
 async function updateWatchAttendees(attending: Set<string>, id: number, msg: Message) {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    const watch = await getWatchById(id);
 
-    if (err) {
-        msg.reply(`Failed to store new movie attendees: [ ${err.toString()} ]`);
+    if (typeof watch === 'string') {
+        msg.reply(watch);
         return;
     }
 
-    const index = data.findIndex((watch) => watch.id === Number(id));
+    watch.data[watch.index].attending = [...attending];
 
-    if (index === -1) {
-        msg.reply('Failed to store new movie attendees, could not find movie in database');
-        return;
-    }
-
-    data[index].attending = [...attending];
-
-    writeJSON('watch.json', data);
+    writeJSON('watch.json', watch.data);
 }
 
 export async function scheduleWatch(msg: Message, title: string, imdbLink: string, time: string, magnet?: string) {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+    let { err, data } = await readWatchJSON();
 
     if (err) {
         msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
