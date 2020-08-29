@@ -862,7 +862,7 @@ async function displayAllWatches(msg: Message): Promise<void> {
         .setTitle('Previously Watched Movies/Series');
 
     for (const watch of data) {
-        if (!data.complete) {
+        if (!watch.complete) {
             continue;
         }
 
