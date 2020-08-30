@@ -931,9 +931,9 @@ async function updateTime(msg: Message, args: string[]): Promise<void> {
         } else {
             msg.reply(`Successfully updated time for ${watch.title}`);
         }
+    } else {
+        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
     }
-
-    handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
 }
 
 async function getWatchById(id: number): Promise<{ data: ScheduledWatch[], index: number } | string> {
