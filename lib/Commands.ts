@@ -762,7 +762,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-async function readWatchJSON(): Promise<{ err: string | undefined, data: ScheduledWatch[] }> {
+async function readWatchJSON(update: boolean = false): Promise<{ err: string | undefined, data: ScheduledWatch[] }> {
     let { err, data } = await readJSON<ScheduledWatch>('watch.json');
 
     if (err) {
@@ -778,7 +778,9 @@ async function readWatchJSON(): Promise<{ err: string | undefined, data: Schedul
         return watch;
     });
 
-    writeJSON('watch.json', newData);
+    if (update) {
+        writeJSON('watch.json', newData);
+    }
 
     return {
         err: undefined,
@@ -787,7 +789,7 @@ async function readWatchJSON(): Promise<{ err: string | undefined, data: Schedul
 }
 
 async function displayScheduledWatches(msg: Message): Promise<void> {
-    let { err, data } = await readWatchJSON();
+    let { err, data } = await readWatchJSON(true);
 
     if (err) {
         msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
@@ -844,7 +846,7 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
 }
 
 async function displayAllWatches(msg: Message): Promise<void> {
-    let { err, data } = await readWatchJSON();
+    let { err, data } = await readWatchJSON(true);
 
     if (err) {
         msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
