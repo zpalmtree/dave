@@ -898,18 +898,42 @@ async function addMagnet(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const watch = await getWatchById(Number(id));
+    const watch = await updateWatchById(Number(id), {
+        magnet: args[1],
+    });
 
     if (typeof watch === 'string') {
         msg.reply(watch);
-        return;
+    } else {
+        msg.reply(`Successfully added/updated magnet for ${watch.title}`);
+    }
+}
+
+async function updateTime(msg: Message, args: string[]): Promise<void> {
+    const regex = /(\d+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d))/;
+
+    const results = regex.exec(args.join(' '));
+
+    if (results) {
+        const [ , id, time ] = results;
+
+        if (!moment(time, 'YYYY/MM/DD hh:mm ZZ').isValid()) {
+            msg.reply(`Failed to parse date/time "${time}"`);
+            return;
+        }
+
+        const watch = await updateWatchById(Number(id), {
+            time: moment(time, 'YYYY/MM/DD hh:mm ZZ'),
+        });
+
+        if (typeof watch === 'string') {
+            msg.reply(watch);
+        } else {
+            msg.reply(`Successfully updated time for ${watch.title}`);
+        }
     }
 
-    watch.data[watch.index].magnet = args[1];
-
-    writeJSON('watch.json', watch.data);
-
-    msg.reply(`Successfully added/updated magnet for ${watch.data[watch.index].title}`);
+    handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
 }
 
 async function getWatchById(id: number): Promise<{ data: ScheduledWatch[], index: number } | string> {
@@ -929,6 +953,25 @@ async function getWatchById(id: number): Promise<{ data: ScheduledWatch[], index
         data,
         index,
     };
+}
+
+async function updateWatchById(id: number, fields: any): Promise<string | ScheduledWatch> {
+    const watch = await getWatchById(id);
+
+    if (typeof watch === 'string') {
+        return watch;
+    }
+
+    const newWatch = {
+        ...watch.data[watch.index],
+        ...fields,
+    };
+
+    watch.data[watch.index] = newWatch;
+
+    writeJSON('watch.json', watch.data);
+
+    return newWatch;
 }
 
 async function deleteWatch(msg: Message, args: string[]): Promise<void> {
@@ -1036,19 +1079,6 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
     awaitWatchReactions(sentMessage, watch.title, id, new Set(watch.attending), 1);
 }
 
-async function updateWatchAttendees(attending: Set<string>, id: number, msg: Message) {
-    const watch = await getWatchById(id);
-
-    if (typeof watch === 'string') {
-        msg.reply(watch);
-        return;
-    }
-
-    watch.data[watch.index].attending = [...attending];
-
-    writeJSON('watch.json', watch.data);
-}
-
 export async function scheduleWatch(msg: Message, title: string, imdbLink: string, time: string, magnet?: string) {
     let { err, data } = await readWatchJSON();
 
@@ -1143,7 +1173,13 @@ async function awaitWatchReactions(
 
         msg.edit(embed);
 
-        updateWatchAttendees(attending, id, msg);
+        const err = await updateWatchById(id, {
+            attending: [...attending],
+        });
+
+        if (typeof err === 'string') {
+            msg.reply(err);
+        }
     });
 }
 
@@ -1166,6 +1202,10 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
             }
             case 'delete': {
                 deleteWatch(msg, args.slice(1));
+                return;
+            }
+            case 'updatetime': {
+                updateTime(msg, args.slice(1));
                 return;
             }
         }
