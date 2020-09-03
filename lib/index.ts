@@ -331,7 +331,7 @@ async function handleWatchNotifications(channel: TextChannel) {
     }
 
     for (const watch of data) {
-        const eightHourReminder = moment(watch.time).subtract(8, 'hours');
+        const fourHourReminder = moment(watch.time).subtract(4, 'hours');
         const fifteenMinuteReminder = moment(watch.time).subtract(15, 'minutes');
 
         /* Get our watch 'window' */
@@ -340,8 +340,8 @@ async function handleWatchNotifications(channel: TextChannel) {
 
         const mention = watch.attending.map((x) => `<@${x}>`).join(' ');
 
-        if (eightHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
-            channel.send(`${mention}, reminder, you are watching ${watch.title} in 8 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
+        if (fourHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
+            channel.send(`${mention}, reminder, you are watching ${watch.title} in 4 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
         }
 
         if (fifteenMinuteReminder.isBetween(nMinsAgo, nMinsAhead)) {
