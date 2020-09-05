@@ -1379,14 +1379,14 @@ export async function handleTranslate(msg: Message, args: string): Promise<void>
         });
 
         const embed = new MessageEmbed()
-            .setTitle(`${translate.languages[res.from.language.iso as any]} to English`)
-            .setDescription(res.text);
+            .setDescription(`${translate.languages[res.from.language.iso as any]} to English`)
+            .setTitle(res.text);
 
         if (res.from.text.value !== '') {
             embed.setFooter(`Did you mean "${res.from.text.value}"?`);
         }
 
-        msg.reply(embed);
+        msg.channel.send(embed);
 
     } catch (err) {
         msg.reply(`Failed to translate: ${err}`);
