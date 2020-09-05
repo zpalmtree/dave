@@ -11,6 +11,9 @@
     "outDir": "./dist",
     "strict": true,
     "baseUrl": "./lib",
-    "downlevelIteration": true
+    "downlevelIteration": true,
+    "paths": {
+        "@vitalets/google-translate-api": ["typings/google-translate-api"]
+    }
   }
 }

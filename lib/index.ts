@@ -33,6 +33,7 @@ import {
     handleTimer,
     handleCountdown,
     handlePurge,
+    handleTranslate,
 } from './Commands';
 
 import {
@@ -63,6 +64,7 @@ import {
     handleTimerHelp,
     handleCountdownHelp,
     handlePurgeHelp,
+    handleTranslateHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -203,6 +205,14 @@ const commands: Command[] = [
         helpFunction: handlePurgeHelp,
         description: 'Delete all your messages in a channel',
         disabled: true,
+    },
+    {
+        aliases: ['translate'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleTranslate,
+        helpFunction: handleTranslateHelp,
+        description: 'Translate text from another language to english',
     },
 ]
 
