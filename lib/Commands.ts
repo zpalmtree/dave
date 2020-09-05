@@ -4,6 +4,7 @@ import * as moment from 'moment';
 import * as convert from 'xml-js';
 
 import request = require('request-promise-native');
+import translate = require('@vitalets/google-translate-api');
 
 import { stringify } from 'querystring';
 
@@ -1368,4 +1369,26 @@ export async function handlePurge(msg: Message) {
 
         msg.channel.send(`Message deletion for <@${msg.author.id}> complete`);
     });
+}
+
+export async function handleTranslate(msg: Message, args: string): Promise<void> {
+    try {
+        const res = await translate(args, {
+            to: 'en',
+            client: 'gtx',
+        });
+
+        const embed = new MessageEmbed()
+            .setTitle(`${translate.languages[res.from.language.iso as any]} to English`)
+            .setDescription(res.text);
+
+        if (res.from.text.value !== '') {
+            embed.setFooter(`Did you mean "${res.from.text.value}"?`);
+        }
+
+        msg.reply(embed);
+
+    } catch (err) {
+        msg.reply(`Failed to translate: ${err}`);
+    }
 }

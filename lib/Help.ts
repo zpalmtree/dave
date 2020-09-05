@@ -363,3 +363,18 @@ export function handlePurgeHelp(msg: Message): void {
 
     msg.channel.send(embed);
 }
+
+export function handleTranslateHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$translate')
+        .setDescription('Translate text from another language to english')
+        .addFields(
+            {
+                name: 'Example',
+                value: '`$translate C\'est la vie`',
+                inline: false,
+            }
+        );
+
+    msg.channel.send(embed);
+}
