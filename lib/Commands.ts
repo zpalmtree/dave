@@ -246,11 +246,23 @@ function dubsType(roll: string): string {
 
     /* No dubs :( */
     if (numRepeatingDigits === 1) {
+        /* The final digit of the roll */
         const firstNum: number = Number(initial);
+        /* The preceding digit */
         const secondNum: number = Number(roll[1]);
 
-        if (Math.max(firstNum + 1, 0) % 10 === secondNum ||
-            Math.max(firstNum - 1, 0) % 10 === secondNum) {
+        let greaterNum = firstNum + 1;
+        let lesserNum = firstNum - 1;
+
+        if (greaterNum > 10) {
+            greaterNum -= 10;
+        }
+
+        if (lesserNum < 0) {
+            lesserNum += 10;
+        }
+
+        if (greaterNum === secondNum || lesserNum === secondNum) {
             return '- Off by one :(';
         }
 
