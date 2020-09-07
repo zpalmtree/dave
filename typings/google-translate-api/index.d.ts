@@ -7,6 +7,10 @@ declare module '@vitalets/google-translate-api' {
     ): Promise<googleTranslateApi.ITranslateResponse>
 
     namespace googleTranslateApi {
+      export namespace languages {
+        export function getCode(desiredLang: string): string | false;
+      }
+
       export interface IOptions {
         from?: string
         to?: string

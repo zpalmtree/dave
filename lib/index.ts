@@ -208,11 +208,11 @@ const commands: Command[] = [
     },
     {
         aliases: ['translate'],
-        argsFormat: Args.Combined,
+        argsFormat: Args.Split,
         hidden: false,
         implementation: handleTranslate,
         helpFunction: handleTranslateHelp,
-        description: 'Translate text from another language to english',
+        description: 'Translate text from one language to another',
     },
 ]
 

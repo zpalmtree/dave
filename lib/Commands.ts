@@ -1371,15 +1371,29 @@ export async function handlePurge(msg: Message) {
     });
 }
 
-export async function handleTranslate(msg: Message, args: string): Promise<void> {
+export async function handleTranslate(msg: Message, args: string[]): Promise<void> {
+    if (args.length === 0) {
+        msg.reply('No translate string given!');
+        return;
+    }
+
+    let translateString = args.join(' ');
+
+    const userSuppliedLang = translate.languages.getCode(args[0]);
+    const toLang = userSuppliedLang || 'en';
+
+    if (args.length > 1 && userSuppliedLang) {
+        translateString = args.slice(1).join(' ');
+    }
+
     try {
-        const res = await translate(args, {
-            to: 'en',
+        const res = await translate(translateString, {
+            to: toLang,
             client: 'gtx',
         });
 
         const embed = new MessageEmbed()
-            .setDescription(`${translate.languages[res.from.language.iso as any]} to English`)
+            .setDescription(`${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLang as any]}`)
             .setTitle(res.text);
 
         if (res.from.text.value !== '') {
