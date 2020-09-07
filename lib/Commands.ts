@@ -1379,10 +1379,9 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
 
     let translateString = args.join(' ');
 
-    const userSuppliedLang = translate.languages.getCode(args[0]);
-    const toLang = userSuppliedLang || 'en';
+    const toLang = translate.languages.getCode(args[0]) || 'en';
 
-    if (args.length > 1 && userSuppliedLang) {
+    if (args.length > 1 && args[0] in translate.languages) {
         translateString = args.slice(1).join(' ');
     }
 
