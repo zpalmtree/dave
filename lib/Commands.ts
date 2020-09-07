@@ -1381,7 +1381,7 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
 
     const toLang = translate.languages.getCode(args[0]) || 'en';
 
-    if (args.length > 1 && args[0] in translate.languages) {
+    if (args.length > 1 && Object.values(translate.languages).includes(args[0])) {
         translateString = args.slice(1).join(' ');
     }
 
