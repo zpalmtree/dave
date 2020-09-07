@@ -370,8 +370,13 @@ export function handleTranslateHelp(msg: Message): void {
         .setDescription('Translate text from another language to english')
         .addFields(
             {
-                name: 'Example',
+                name: 'Translate to english',
                 value: '`$translate C\'est la vie`',
+                inline: false,
+            },
+            {
+                name: 'Translate to another language',
+                value: '`$translate french It\s life`',
                 inline: false,
             }
         );
