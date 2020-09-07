@@ -367,7 +367,7 @@ export function handlePurgeHelp(msg: Message): void {
 export function handleTranslateHelp(msg: Message): void {
     const embed = new MessageEmbed()
         .setTitle('$translate')
-        .setDescription('Translate text from another language to english')
+        .setDescription('Translate text from one language to another')
         .addFields(
             {
                 name: 'Translate to english',
