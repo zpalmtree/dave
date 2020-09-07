@@ -1381,9 +1381,17 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
 
     let toLang = 'en';
 
-    if (args.length > 1 && Object.values(translate.languages).includes(args[0])) {
+    var keys = Object.keys(translate.languages).filter(function (key) {
+        if (typeof translate.languages[key as any] !== 'string') {
+            return false;
+        }
+
+        return translate.languages[key as any].toLowerCase() === (args[0] || '').toLowerCase();
+    });
+
+    if (keys.length > 0) {
         translateString = args.slice(1).join(' ');
-        toLang = translate.languages.getCode(args[0]) || 'en';
+        toLang = keys[0];
     }
 
     try {
