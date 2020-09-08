@@ -344,6 +344,11 @@ export function handleCountdownHelp(msg: Message): void {
                 value: '`$countdown 5`',
                 inline: false,
             },
+            {
+                name: 'Example',
+                value: '`$pause`',
+                inline: false,
+            },
         );
 
     msg.channel.send(embed);
