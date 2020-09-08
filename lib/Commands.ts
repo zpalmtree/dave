@@ -1322,7 +1322,7 @@ export async function handleCountdown(
         secs--;
 
         const message = secs === 0
-            ? 'Lets jam!'
+            ? completionMessage
             : secs.toString();
 
         /* Need to be careful not to hit API limits. Can only perform 5 actions
