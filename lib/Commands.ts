@@ -1290,7 +1290,11 @@ export async function handleTimer(msg: Message, args: string[]) {
     await msg.react('👍');
 }
 
-export async function handleCountdown(msg: Message, args: string) {
+export async function handleCountdown(
+    completionMessage: string,
+    msg: Message,
+    args: string) {
+
     if (args === '') {
         args = '3';
     }

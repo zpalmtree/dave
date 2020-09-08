@@ -193,7 +193,7 @@ const commands: Command[] = [
         aliases: ['countdown'],
         argsFormat: Args.Combined,
         hidden: true,
-        implementation: handleCountdown,
+        implementation: handleCountdown.bind(this, 'Lets jam!'),
         helpFunction: handleCountdownHelp,
         description: 'Perform a countdown',
     },
@@ -214,6 +214,14 @@ const commands: Command[] = [
         helpFunction: handleTranslateHelp,
         description: 'Translate text from one language to another',
     },
+    {
+        aliases: ['pause'],
+        argsFormat: Args.Combined,
+        hidden: true,
+        implementation: handleCountdown.bind(this, 'pause'),
+        helpFunction: handleCountdownHelp,
+        description: 'Perform a pause',
+    }
 ]
 
 function handleMessage(msg: Message) {
