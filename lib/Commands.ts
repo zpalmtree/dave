@@ -731,8 +731,8 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     try {
         // seems to loop around to page 0 if given a page > final page
         const finalPage = ({
-            'r/pizza': 9,
-            'r/turtle': 7,
+            'r/pizza': 14,
+            'r/turtle': 3,
         } as any)[gallery];
 
         const index = Math.floor(Math.random() * (finalPage + 1));
@@ -751,6 +751,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
         const image = images[Math.floor(Math.random() * images.length)];
 
         if (image == undefined) {
+            msg.reply('Failed to fetch image from imgur API');
             return;
         }
 
@@ -765,8 +766,6 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
 
         if (image.is_album) {
             embed.setFooter(`See ${image.images.length - 1} more images at ${image.link}`);
-        } else {
-            embed.setFooter(url);
         }
 
         msg.channel.send(embed);
