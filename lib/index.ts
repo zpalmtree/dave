@@ -148,7 +148,7 @@ const commands: Command[] = [
         implementation: handleDot,
         helpFunction: handleDotHelp,
         description: 'Get the Global Consciousness Project Dot Graph',
-        enabled: false,
+        disabled: true,
     },
     {
         aliases: ['pizza'],
