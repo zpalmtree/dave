@@ -32,6 +32,8 @@ import {
     renderDot,
 } from './Dot';
 
+import { Game } from './Game';
+
 import {
     readJSON,
     writeJSON,
@@ -658,7 +660,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
             renderDot(),
         ]);
     } catch (err) {
-        msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
+        msg.reply(`Failed to get dot data. [ ${err.toString()} ]`);
         return;
     }
 
@@ -713,6 +715,163 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     msg.channel.send(embed);
 }
 
+export async function handleGame(msg: Message, args: string): Promise<void> {
+    const ratKing = '333870370027339777';
+    //TODO important: help text for literally everything
+    //TODO not important: post message on pass "player1 has been given x points by player2"
+    //TODO not important: more join/leave/gameover/death messages
+
+    // if no args given just render the current board
+    if (args.length === 0) {
+        let gameBoard;
+        
+        try {
+            gameBoard = await Game.renderBoard();
+        } catch (err) {
+            msg.reply(err.toString());
+            return;
+        }
+
+        const gameAttachment = new MessageAttachment(gameBoard.toBuffer(), 'gameBoard.png')
+        const embed = new MessageEmbed()
+            .setColor('#C8102E')
+            .attachFiles([gameAttachment])
+            .setTitle('Plains of Calantha')
+            //.setThumbnail(/* insert game icon here */)
+            .setImage('attachment://gameBoard.png')
+
+        msg.channel.send(embed);
+        return;
+    }
+
+    if (args.length >= 1) {
+        switch (args[0]) {
+            case 'create': 
+            case 'new':
+                if (msg.author.id === ratKing) {
+                    msg.channel.send(Game.create()
+                        ? 'New game created, type `$game join` to play!'
+                        : 'A game has already been created!');
+                } else msg.channel.send('Only the Rat King can create the game.');
+                break;
+            case 'start':
+                if (msg.author.id === ratKing) {
+                    msg.channel.send(Game.start(msg)
+                        ? 'Game started.'
+                        : 'Failed to start game.');
+                } else msg.channel.send('Only the Rat King can start the game.');
+                break;
+            case 'reset':
+                if (msg.author.id === ratKing) {
+                    msg.channel.send(Game.reset()
+                        ? 'Game reset.'
+                        : 'There is no game in progress!');
+                } else msg.channel.send('Only the Rat King can reset the game.');
+                break;
+            case 'end':
+            case 'destroy':
+                if (msg.author.id === ratKing) {
+                    msg.channel.send(Game.destroy()
+                        ? 'Game over, man. GAME OVER'
+                        : 'There is no game in progress!');
+                } else msg.channel.send('Only the Rat King can destroy the game.');
+                break;
+            case 'join':
+                try {
+                    let player = Game.playerJoin(msg.author.id, args[1] || msg.author.username.substr(0, 12));
+                    msg.reply(`Welcome to the game, ${player.name}!`);
+                } catch(err) {
+                    msg.reply(`You can't join the game dumbass, ${err}!`);
+                }
+                break;
+            case 'leave':
+                try {
+                    let player = Game.playerLeave(msg.author.id);
+                    msg.reply(`See ya later ${player.name}!`);
+                } catch (err) {
+                    msg.reply(`You can't leave the game dumbass, ${err}!`);
+                }
+                break;
+            case 'move':
+                if (args.length > 1) {
+                    try {
+                        Game.playerMove(msg.author.id, args[1]);
+                        msg.react('✅');
+                    } catch (err) {
+                        msg.reply(`Failed to move because ${err}.`);
+                    }
+                } else {
+                    msg.reply('Move? Move where? Be more specific.')
+                }
+                break;
+            case 'shoot':
+                if (args.length > 1) {
+                    try {
+                        let res = Game.playerShoot(msg.author.id, args[1], (args.length > 2) ? args[2] : '1');
+                        msg.channel.send(res.win
+                            ? `${res.player.name} has won the game!`
+                            : res.player.health > 0 
+                                ? `${res.player.name} has ${res.player.health} health remaining.` 
+                                : `RIP <@!${res.player.id}>, ur ded.`);
+                    } catch (err) {
+                        msg.reply(`Failed to shoot because ${err}.`);
+                    }
+                } else {
+                    msg.reply('Shoot? Shoot where? Be more specific.')
+                }
+                break;
+            case 'pass': 
+                if (args.length > 1) {
+                    try {
+                        Game.playerPass(msg.author.id, args[1], (args.length > 2) ? args[2] : '1');
+                        msg.react('✅');
+                    } catch (err) {
+                        msg.reply(`Failed to pass because ${err}.`);
+                    }
+                } else {
+                    msg.reply('Pass? Pass where? Be more specific.')
+                }
+                break;
+            case 'vote':
+                if (args.length > 1) {
+                    try {
+                        Game.playerVote(msg.author.id, args[1]);
+                        msg.react('✅');
+                    } catch (err) {
+                        msg.reply(`Failed to vote because ${err}!`);
+                    }
+                } else {
+                    msg.reply('Vote? Vote for who? Be more specific.')
+                }
+                break;
+            case 'players':
+            case 'jury':
+            case 'score':
+                let scoreBoard;
+        
+                try {
+                    scoreBoard = await Game.renderScore();
+                } catch (err) {
+                    msg.reply(err.toString());
+                    return;
+                }
+
+                const scoreAttachment = new MessageAttachment(scoreBoard.toBuffer(), 'scoreBoard.png')
+                const embed = new MessageEmbed()
+                    .setColor('#C8102E')
+                    .attachFiles([scoreAttachment])
+                    .setTitle('Plains of Calantha')
+                    //.setThumbnail(/* insert game icon here */)
+                    .setImage('attachment://scoreBoard.png')
+
+                msg.channel.send(embed);
+                break;
+            default: {
+                msg.reply("Bro. The game doesn't work that way bro.");
+            }
+        }
+    }
+}
 
 export async function handleImgur(gallery: string, msg: Message): Promise<void> {
     try {

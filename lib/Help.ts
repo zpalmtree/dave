@@ -204,6 +204,20 @@ export function handleDotHelp(msg: Message): void {
     msg.channel.send(embed);
 }
 
+export function handleGameHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$game')
+        .setDescription('Play game with frens')
+        .addFields(
+            {
+                name: 'Example',
+                value: '`$game`',
+                inline: false,
+            }
+        );
+    msg.channel.send(embed);
+}
+
 export function handlePizzaHelp(msg: Message): void {
     const embed = new MessageEmbed()
         .setTitle('$pizza')
