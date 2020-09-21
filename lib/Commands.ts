@@ -1271,7 +1271,7 @@ export async function handleTimer(msg: Message, args: string[]) {
 
     const totalTimeSeconds = Number(seconds)
                            + Number(minutes) * 60
-                           + Number(hours) * 60;
+                           + Number(hours) * 60 * 60;
 
     if (totalTimeSeconds > 60 * 60 * 24) {
         msg.reply('Timers longer than 24 hours are not supported.');
