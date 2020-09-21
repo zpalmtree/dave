@@ -1415,9 +1415,19 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
             client: 'gtx',
         });
 
-        const embed = new MessageEmbed()
-            .setDescription(`${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLang as any]}`)
-            .setTitle(res.text);
+        const description = `${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLang as any]}`;
+        const title = res.text;
+
+        const embed = new MessageEmbed();
+
+        /* Max title length of 256 */
+        if (title.length < 256) {
+            embed.setDescription(description)
+            embed.setTitle(title);
+        } else {
+            embed.setDescription(title);
+            embed.setTitle(description);
+        }
 
         if (res.from.text.value !== '') {
             embed.setFooter(`Did you mean "${res.from.text.value}"?`);
