@@ -1208,8 +1208,8 @@ async function paginate(
             .setTitle(title)
             .setFooter(`Page ${currentPage} of ${totalPages}`);
 
-        const startIndex = (currentPage - 1) * 10;
-        const endIndex = (currentPage) * 10;
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = (currentPage) * itemsPerPage;
 
         for (const watch of data.slice(startIndex, endIndex)) {
             embed.addFields(displayFunction(watch));
