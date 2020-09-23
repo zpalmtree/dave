@@ -972,7 +972,7 @@ async function updateTime(msg: Message, args: string[]): Promise<void> {
         if (typeof watch === 'string') {
             msg.reply(watch);
         } else {
-            msg.reply(`Successfully updated time for ${watch.title}`);
+            msg.reply(`Successfully updated time for ${watch.title} to ${moment(time, 'YYYY/MM/DD hh:mm ZZ').utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
         }
     } else {
         handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
