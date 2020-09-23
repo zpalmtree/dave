@@ -808,7 +808,8 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
         return;
     }
 
-    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+               .filter((watch) => !watch.complete);
 
     if (data.length === 0) {
         msg.reply('Nothing has been scheduled to be watched yet! Use `$watch help` for more info');
@@ -819,12 +820,8 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
         .setTitle('Scheduled Movies/Series To Watch')
         .setFooter('Use $watch <movie id> to view more info and sign up to watch');
 
-    for (const watch of data) {
-        if (watch.complete) {
-            continue;
-        }
-
-        embed.addFields(
+    const f = (watch: ScheduledWatch) => {
+        return [
             {
                 name: `ID: ${watch.id}`,
                 value: `[${watch.title}](${watch.link})`,
@@ -851,10 +848,24 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
                 }).join(', '),
                 inline: true,
             },
-        );
+        ];
     }
 
-    msg.channel.send(embed);
+    const maxPageSize = 7;
+
+    for (const watch of data.slice(0, maxPageSize)) {
+        embed.addFields(f(watch));
+    }
+
+    const sentMessage = await msg.channel.send(embed);
+
+    paginate(
+        sentMessage,
+        maxPageSize,
+        f,
+        data,
+        'Scheduled Movies/Series To Watch',
+    );
 }
 
 async function displayAllWatches(msg: Message): Promise<void> {
@@ -865,21 +876,20 @@ async function displayAllWatches(msg: Message): Promise<void> {
         return;
     }
 
-    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+               .filter((watch) => watch.complete);
 
     if (data.length === 0) {
         msg.reply('Nothing has been watched before!');
         return;
     }
 
+    const maxPageSize = 10;
+
     const embed = new MessageEmbed()
         .setTitle('Previously Watched Movies/Series');
 
-    for (const watch of data) {
-        if (!watch.complete) {
-            continue;
-        }
-
+    for (const watch of data.slice(0, maxPageSize)) {
         embed.addFields(
             {
                 name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
@@ -889,7 +899,28 @@ async function displayAllWatches(msg: Message): Promise<void> {
         );
     }
 
-    msg.channel.send(embed);
+    const totalPages = Math.floor(data.length / maxPageSize)
+                     + (data.length % maxPageSize ? 1 : 0);
+
+    if (data.length > maxPageSize) {
+        embed.setFooter(`Page 1 of ${totalPages}`);
+    }
+
+    const sentMessage = await msg.channel.send(embed);
+
+    paginate(
+        sentMessage,
+        maxPageSize,
+        (watch: ScheduledWatch) => {
+            return {
+                name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
+                value: `[${watch.title}](${watch.link})`,
+                inline: false,
+            }
+        },
+        data,
+        'Previously Watched Movies/Series',
+    );
 }
 
 async function addMagnet(msg: Message, args: string[]): Promise<void> {
@@ -1136,6 +1167,54 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
     const sentMessage = await msg.channel.send(embed);
 
     awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 0);
+}
+
+async function paginate(
+    msg: Message,
+    itemsPerPage: number,
+    displayFunction: (watch: ScheduledWatch) => any,
+    data: ScheduledWatch[],
+    title: string) {
+
+    if (data.length <= itemsPerPage) {
+        return;
+    }
+
+    await msg.react('⬅️');
+    await msg.react('➡️');
+
+    const collector = msg.createReactionCollector((reaction, user) => {
+        return ['⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
+    }, { time: 3000000 });
+
+    let currentPage = 1;
+    const totalPages = Math.floor(data.length / itemsPerPage)
+                     + (data.length % itemsPerPage ? 1 : 0);
+
+    collector.on('collect', async (reaction, user) => {
+        if (reaction.emoji.name === '⬅️') {
+            if (currentPage > 1) {
+                currentPage--;
+            }
+        } else {
+            if (currentPage < totalPages) {
+                currentPage++;
+            }
+        }
+
+        const embed = new MessageEmbed()
+            .setTitle(title)
+            .setFooter(`Page ${currentPage} of ${totalPages}`);
+
+        const startIndex = (currentPage - 1) * 10;
+        const endIndex = (currentPage) * 10;
+
+        for (const watch of data.slice(startIndex, endIndex)) {
+            embed.addFields(displayFunction(watch));
+        }
+
+        msg.edit(embed);
+    });
 }
 
 async function awaitWatchReactions(
