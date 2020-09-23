@@ -876,7 +876,7 @@ async function displayAllWatches(msg: Message): Promise<void> {
         return;
     }
 
-    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+    data = data.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
                .filter((watch) => watch.complete);
 
     if (data.length === 0) {
@@ -1192,6 +1192,8 @@ async function paginate(
                      + (data.length % itemsPerPage ? 1 : 0);
 
     collector.on('collect', async (reaction, user) => {
+        reaction.users.remove(user.id);
+
         if (reaction.emoji.name === '⬅️') {
             if (currentPage > 1) {
                 currentPage--;
