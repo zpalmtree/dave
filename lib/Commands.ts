@@ -700,29 +700,15 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
     const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
 
+    const percentage = Math.floor(currentDotValue * 100);
+
     const embed = new MessageEmbed()
         .setColor(getDotColor(currentDotValue))
         .attachFiles([dotAttachment, dotGraphAttachment])
-        .setTitle('Global Consciousness Project Dot')
+        .setTitle(`${percentage}% Network Variance`)
         .setThumbnail('attachment://dot.png')
         .setImage('attachment://dot-graph.png')
-        .addFields(
-            {
-                name: 'Network Variance',
-                value: `${Math.floor(currentDotValue * 100)}%`,
-                inline: true
-            },
-            {
-                name: 'Timespan',
-                value: timeString.toString().replace(/^0+/, ''),
-                inline: true
-            },
-            {
-                name: 'Description',
-                value: description,
-                inline: false
-            }
-        );
+        .setDescription(description);
 
     msg.channel.send(embed);
 }
