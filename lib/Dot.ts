@@ -109,7 +109,7 @@ const dotColors: { tail: number, mc: Image }[] = [
 export function getDotColor(dotValue: number): string {
     for (const [index, color] of dotColors.entries()) {
         if (dotValue <= color.tail) {
-            return colors[index].color1;
+            return colors[index].color2;
         }
     }
 
