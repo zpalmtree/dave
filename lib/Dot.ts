@@ -5,8 +5,8 @@ import request = require('request-promise-native');
 const dotWidth = 120;
 const dotHeight = 120;
 
-const dotGraphWidth = 325;
-const dotGraphHeight = 120;
+const dotGraphWidth = 400;
+const dotGraphHeight = 150;
 
 const shadowBlur = 2.75;
 const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}' style='opacity:0.7'>
@@ -164,13 +164,10 @@ export async function renderDot(): Promise<[number, Canvas]> {
 
 export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
     const inv_ch = 1.0 / dotGraphHeight;
-    const shadowOffset = 10;
 
-    var canvasShadow = createCanvas(dotGraphWidth, dotGraphHeight+shadowOffset*2);
     var canvas = createCanvas(dotGraphWidth, dotGraphHeight);
-    var contextShadow = canvasShadow.getContext('2d');
     var context = canvas.getContext('2d');
-    var outCanvas = createCanvas(dotGraphWidth, dotGraphHeight+shadowOffset*2);
+    var outCanvas = createCanvas(dotGraphWidth, dotGraphHeight);
     var outContext = outCanvas.getContext("2d");
 
     const dotXML = await request({
@@ -194,8 +191,6 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
             imgBuffer.data[(y * dotGraphWidth + x) * 4 + 3] = 0;
         }
     }
-
-    const imgShadowBuffer = contextShadow.createImageData(bgImage.width, bgImage.height + shadowOffset * 2);
 
     for (let i = 0; i < graphData.length; i++) {
         let top = Number(graphData[i].attributes.t);
@@ -222,12 +217,8 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
             }
 
             imgBuffer.data[(i + y * bgImage.width) * 4 + 3] = 255 * a;
-            imgShadowBuffer.data[(i + (y + shadowOffset * 2) * (bgImage.width)) * 4 + 3] = Math.pow(a, 0.75) * 255;
         }
     }
-
-    // blur the shadow
-    stackBlurCanvasAlpha(imgShadowBuffer.data, bgImage.width, bgImage.height + shadowOffset * 2, 6);
 
     // calculate variance
     let sum: number = 0;
@@ -238,13 +229,11 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
     graphData.map((y: any) => numerator += Math.pow(Number(y.attributes.a) - mean, 2));
     const variance = numerator / (graphData.length - 1);
 
-    contextShadow.putImageData(imgShadowBuffer, 0, shadowOffset);
     context.putImageData(imgBuffer, 0, 0);
 
     outContext.fillStyle = '#2F3136';
     outContext.fillRect(0, 0, outCanvas.width, outCanvas.height);
-    outContext.drawImage(canvasShadow, 0, 0);
-    outContext.drawImage(canvas, 0, shadowOffset);
+    outContext.drawImage(canvas, 0, 0);
 
     return [ variance, outCanvas ];
 }
