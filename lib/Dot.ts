@@ -90,7 +90,7 @@ for (let i = 0; i < colors.length; i++) {
     img.src = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 }
 
-var dotColors: {tail: number, mc: Image}[] = [
+const dotColors: { tail: number, mc: Image }[] = [
     {tail: 0.00,    mc: dotImages[1]},
     {tail: 0.01,    mc: dotImages[2]},
     {tail: 0.05,    mc: dotImages[3]},
@@ -105,6 +105,16 @@ var dotColors: {tail: number, mc: Image}[] = [
     {tail: 0.98,    mc: dotImages[12]},
     {tail: 1.00,    mc: dotImages[13]}
 ];
+
+export function getDotColor(dotValue: number): string {
+    for (const [index, color] of dotColors.entries()) {
+        if (dotValue <= color.tail) {
+            return colors[index].color1;
+        }
+    }
+
+    throw new Error('Unexpected dot value!');
+}
 
 export async function renderDot(): Promise<[number, Canvas]> {
     const dotXML = await request({

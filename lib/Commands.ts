@@ -31,6 +31,7 @@ import { handleWatchHelp } from './Help';
 import {
     renderDotGraph,
     renderDot,
+    getDotColor,
 } from './Dot';
 
 import {
@@ -700,7 +701,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
 
     const embed = new MessageEmbed()
-        .setColor('#C8102E')
+        .setColor(getDotColor(currentDotValue))
         .attachFiles([dotAttachment, dotGraphAttachment])
         .setTitle('Global Consciousness Project Dot')
         .setThumbnail('attachment://dot.png')
