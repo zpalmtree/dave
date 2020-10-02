@@ -14,7 +14,8 @@ import {
     TextChannel,
     User,
     MessageEmbed,
-    MessageAttachment
+    MessageAttachment,
+    GuildMember
 } from 'discord.js';
 
 import { promisify } from 'util';
@@ -1465,11 +1466,11 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
     let toLang = 'en';
 
     var keys = Object.keys(translate.languages).filter(function (key) {
-        if (typeof translate.languages[key as any] !== 'string') {
+        if (typeof translate.languages[key] !== 'string') {
             return false;
         }
 
-        return translate.languages[key as any].toLowerCase() === (args[0] || '').toLowerCase();
+        return translate.languages[key].toLowerCase() === (args[0] || '').toLowerCase();
     });
 
     if (keys.length > 0) {
