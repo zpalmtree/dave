@@ -1,5 +1,7 @@
 import { Canvas, Image, createCanvas } from 'canvas';
 import { xml2json } from 'xml-js';
+import { RGB } from './Types';
+import { hexToRGB, rgbToHex} from './Utilities';
 import request = require('request-promise-native');
 
 const dotWidth = 120;
@@ -106,17 +108,7 @@ const dotColors: { tail: number, mc: Image }[] = [
     {tail: 1.00,    mc: dotImages[13]}
 ];
 
-export function getDotColor(dotValue: number): string {
-    for (const [index, color] of dotColors.entries()) {
-        if (dotValue <= color.tail) {
-            return colors[index].color2;
-        }
-    }
-
-    throw new Error('Unexpected dot value!');
-}
-
-export async function renderDot(): Promise<[number, Canvas]> {
+export async function renderDot(): Promise<[string, number, Canvas]> {
     const dotXML = await request({
         method: 'GET',
         timeout: 10000,
@@ -144,13 +136,28 @@ export async function renderDot(): Promise<[number, Canvas]> {
     shadowImage.src = `data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`;
     dotContext.drawImage(shadowImage, 0, 0);
 
+    let blendRGB: RGB = {r: 255, g: 255, b: 255}; // if the final output is white you know shit's fucked
     for (let i = 0; i < dotColors.length - 1; i++) {
         const opacity = (currentDotValue - dotColors[i].tail) / (dotColors[i + 1].tail - dotColors[i].tail);
 
         if (opacity >= 0 && opacity <= 1) {
+            blendRGB = hexToRGB(colors[i + 1].color2);
             dotContext.drawImage(dotColors[i].mc, 0, 0);
 
             if (dotColors[i].mc !== dotColors[i + 1].mc) {
+                const color_RGB = hexToRGB(colors[i + 2].color2);
+                const inv_opacity = 1 - opacity;
+
+                blendRGB.r = Math.floor(
+                  color_RGB.r * opacity + inv_opacity * blendRGB.r
+                );
+                blendRGB.g = Math.floor(
+                  color_RGB.g * opacity + inv_opacity * blendRGB.g
+                );
+                blendRGB.b = Math.floor(
+                  color_RGB.b * opacity + inv_opacity * blendRGB.b
+                );
+
                 dotContext.globalAlpha = opacity;
                 dotContext.drawImage(dotColors[i + 1].mc, 0, 0);
             }
@@ -159,7 +166,7 @@ export async function renderDot(): Promise<[number, Canvas]> {
         }
     }
 
-    return [ currentDotValue, dotCanvas ];
+    return [ rgbToHex(blendRGB), currentDotValue, dotCanvas ];
 };
 
 export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {

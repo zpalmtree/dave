@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
+import { RGB } from './Types';
 import { promisify } from 'util';
 
 import {
@@ -74,4 +75,24 @@ export function haveRole(msg: Message, role: string): boolean {
     }
 
     return msg.member.roles.cache.some((r) => r.name === role);
+}
+
+// convert a hex value (#212233) to an RGB object ({ r: 33, g: 34, b: 51 })
+export function hexToRGB(hex: string): RGB {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+    } : {r: 0, g: 0, b: 0};
+}
+
+// convert an RGB object ({ r: 31, g: 127, b: 255 }) to a hex value (#207fff)
+export function rgbToHex(rgb: RGB): string {
+    return `#${componentToHex(rgb.r)}${componentToHex(rgb.g)}${componentToHex(rgb.b)}`;
+}
+
+function componentToHex(c: number) {
+    const hex = c.toString(16);
+    return hex.length === 1 ? `0${hex}` : hex;
 }
