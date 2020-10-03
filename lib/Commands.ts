@@ -31,7 +31,6 @@ import { handleWatchHelp } from './Help';
 import {
     renderDotGraph,
     renderDot,
-    getDotColor,
 } from './Dot';
 
 import {
@@ -663,11 +662,12 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     }
 
     let dotGraph;
+    let currentDotColor = '#000000';
     let currentDotValue = 0;
     let dot;
 
     try {
-        [ [ , dotGraph ], [ currentDotValue, dot ] ] = await Promise.all([
+        [ [ , dotGraph ], [ currentDotColor, currentDotValue, dot ] ] = await Promise.all([
             renderDotGraph(timeSpan * -1),
             renderDot(),
         ]);
@@ -703,7 +703,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     const percentage = Math.floor(currentDotValue * 100);
 
     const embed = new MessageEmbed()
-        .setColor(getDotColor(currentDotValue))
+        .setColor(currentDotColor)
         .attachFiles([dotAttachment, dotGraphAttachment])
         .setTitle(`${percentage}% Network Variance`)
         .setThumbnail('attachment://dot.png')

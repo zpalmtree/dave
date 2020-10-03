@@ -64,3 +64,9 @@ export enum Args {
     Split,
     Combined,
 };
+
+export interface RGB {
+    r: number;
+    g: number;
+    b: number;
+}
