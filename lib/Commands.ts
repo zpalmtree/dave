@@ -37,7 +37,6 @@ import {
 import {
     readJSON,
     writeJSON,
-    addReaction,
     chunk,
     capitalize,
     sleep,
@@ -319,7 +318,7 @@ export async function handleSuggest(msg: Message, suggestion: string | undefined
 
     await writeJSON('quotes.json', quotes);
 
-    addReaction('579921155578658837', msg);
+    await msg.react('👍');
 }
 
 export async function handleKitty(msg: Message, args: string): Promise<void> {
