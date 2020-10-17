@@ -811,7 +811,9 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
         return [
             {
                 name: `ID: ${watch.id}`,
-                value: `[${watch.title}](${watch.link})`,
+                value: watch.link
+                    ? `[${watch.title}](${watch.link})`
+                    : watch.title,
                 inline: true,
             },
             {
@@ -901,7 +903,9 @@ async function displayAllWatches(msg: Message): Promise<void> {
         (watch: ScheduledWatch) => {
             return {
                 name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
-                value: `[${watch.title}](${watch.link})`,
+                value: watch.link
+                    ? `[${watch.title}](${watch.link})`
+                    : watch.title,
                 inline: false,
             }
         },
@@ -923,8 +927,8 @@ async function addMagnet(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    if (!/magnet:\?.+/.test(args[1])) {
-        handleWatchHelp(msg, 'Input does not look like a magnet link. Please try one of the following options.');
+    if (!/^(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)$/.test(args[1])) {
+        handleWatchHelp(msg, 'Input does not look like a magnet or youtube link. Please try one of the following options.');
         return;
     }
 
@@ -935,7 +939,7 @@ async function addMagnet(msg: Message, args: string[]): Promise<void> {
     if (typeof watch === 'string') {
         msg.reply(watch);
     } else {
-        msg.reply(`Successfully added/updated magnet for ${watch.title}`);
+        msg.reply(`Successfully added/updated link for ${watch.title}`);
     }
 }
 
@@ -1100,8 +1104,15 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
         },
     );
 
+    if (watch.link) {
+        embed.addFields({
+            name: 'Info Link',
+            value: watch.link,
+        });
+    }
+
     if (watch.magnet) {
-        embed.addField('Magnet', watch.magnet);
+        embed.addField('Download Link', watch.magnet);
     }
 
     const sentMessage = await msg.channel.send(embed);
@@ -1109,7 +1120,7 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
     awaitWatchReactions(sentMessage, watch.title, id, new Set(watch.attending), 1);
 }
 
-export async function scheduleWatch(msg: Message, title: string, imdbLink: string, time: string, magnet?: string) {
+export async function scheduleWatch(msg: Message, title: string, time: string, infoLink?: string, downloadLink?: string) {
     let { err, data } = await readWatchJSON();
 
     if (err) {
@@ -1122,10 +1133,10 @@ export async function scheduleWatch(msg: Message, title: string, imdbLink: strin
     data.push({
         id: maxID + 1,
         title,
-        link: imdbLink,
+        link: infoLink,
         time: moment(time, 'YYYY/MM/DD hh:mm ZZ').toDate(),
         attending: [msg.author.id],
-        magnet,
+        magnet: downloadLink,
         complete: false,
     });
 
@@ -1276,7 +1287,7 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
                 displayAllWatches(msg);
                 return;
             }
-            case 'addmagnet': {
+            case 'addlink': {
                 addMagnet(msg, args.slice(1));
                 return;
             }
@@ -1296,19 +1307,20 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    const regex = /(.+) (https:\/\/.*imdb\.com\/\S+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d)) ?(magnet:\?.+)?/;
+    /* Non greedy title match, optional imdb/myanimelist link, date / time / time zone, optional magnet/youtube link */
+    const regex = /(.+?) (?:(https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+) )?(\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d)) ?(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)?/;
 
     const results = regex.exec(args.join(' '));
 
     if (results) {
-        const [ , title, imdbLink, time, magnet ] = results;
+        const [ , title, infoLink, time, downloadLink ] = results;
 
         if (!moment(time, 'YYYY/MM/DD hh:mm ZZ').isValid()) {
             msg.reply(`Failed to parse date/time "${time}"`);
             return;
         }
 
-        await scheduleWatch(msg, title, imdbLink, time, magnet);
+        await scheduleWatch(msg, title, time, infoLink, downloadLink);
         return;
     }
 

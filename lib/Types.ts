@@ -20,8 +20,8 @@ export interface ScheduledWatch {
     /* Title of the watch */
     title: string;
 
-    /* IMDB link */
-    link: string;
+    /* IMDB / myanimelist link */
+    link?: string;
 
     /* Date of the watch */
     time: Date;
