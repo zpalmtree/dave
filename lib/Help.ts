@@ -246,12 +246,12 @@ export function handleWatchHelp(msg: Message, description?: string): void {
             },
             {
                 name: 'Schedule a new movie/series to be watched',
-                value: '`$watch <Title> <IMDB Link> <YYYY/MM/DD HH:MM UTC TIMEZONE OFFSET> <Optional Magnet Link>`',
+                value: '`$watch <Title> <Optional IMDB or MyAnimeList Link> <YYYY/MM/DD HH:MM UTC TIMEZONE OFFSET> <Optional Magnet or Youtube Link>`',
                 inline: false,
             },
             {
                 name: 'Schedule a new movie/series to be watched',
-                value: '`$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 03:00 -08:00`',
+                value: '`$watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 19:00 -08:00`',
                 inline: false,
             },
             {
@@ -265,13 +265,18 @@ export function handleWatchHelp(msg: Message, description?: string): void {
                 inline: false,
             },
             {
-                name: 'Delete a scheduled movie (mod only)',
+                name: 'Delete a scheduled movie (You must be a mod or the single watcher)',
                 value: '`$watch delete 1`',
                 inline: false,
             },
             {
-                name: 'Add a magnet link for a movie',
-                value: '`$watch addmagnet 1 magnet:?xt=urn:btih:e5f8d9251b8ca1f285b8474da1aa72844d830...`',
+                name: 'Add a youtube or magnet link for a movie',
+                value: '`$watch addlink 1 magnet:?xt=urn:btih:e5f8d9251b8ca1f285b8474da1aa72844d830...`',
+                inline: false,
+            },
+            {
+                name: 'Add a link for a movie',
+                value: '`$watch addlink 1 https://www.youtube.com/watch?v=vJykw3H4PDw`',
                 inline: false,
             },
             {
