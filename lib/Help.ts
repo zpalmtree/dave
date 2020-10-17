@@ -275,7 +275,7 @@ export function handleWatchHelp(msg: Message, description?: string): void {
                 inline: false,
             },
             {
-                name: 'Add a link for a movie',
+                name: 'Add a youtube or magnet link for a movie',
                 value: '`$watch addlink 1 https://www.youtube.com/watch?v=vJykw3H4PDw`',
                 inline: false,
             },

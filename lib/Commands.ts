@@ -1098,10 +1098,6 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
                 return `Unknown User <@${user}>`;
             }).join(', '),
         },
-        {
-            name: 'IMDB Link',
-            value: watch.link,
-        },
     );
 
     if (watch.link) {
