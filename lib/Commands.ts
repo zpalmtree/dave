@@ -27,7 +27,11 @@ import { catBreeds } from './Cats';
 import { dogBreeds } from './Dogs';
 import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
-import { handleWatchHelp } from './Help';
+
+import {
+    handleWatchHelp,
+    handleQueryHelp
+} from './Help';
 
 import {
     renderDotGraph,
@@ -1514,4 +1518,104 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
     } catch (err) {
         msg.reply(`Failed to translate: ${err}`);
     }
+}
+
+export async function handleQuery(msg: Message, args: string): Promise<void> {
+    const params = {
+        q: args,
+        format: 'json',
+        t: 'Dave the Discord Bot',
+        no_html: 1,
+        no_redirect: 1,
+        skip_disambig: 1,
+        kp: -2,
+    };
+
+    const url = `https://api.duckduckgo.com/?${stringify(params)}`;
+
+    let data;
+
+    try {
+        data = await request({
+            method: 'GET',
+            timeout: 10 * 1000,
+            url,
+            json: true,
+        });
+    } catch (err) {
+        msg.reply(`Failed to get answer: ${err.toString()}`);
+        return;
+    }
+
+    if (data.Redirect) {
+        msg.reply(data.Redirect);
+        return;
+    }
+
+    if (!data.Heading) {
+        msg.reply('No results found for that query! Note that this API only returns instant answers. Try shortening your query, single words will always work.');
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle(data.Heading);
+
+    if (data.Image) {
+        embed.setImage(data.Image);
+    }
+
+    if (data.AbstractURL) {
+        embed.setFooter(data.AbstractURL);
+    }
+
+    if (data.Answer) {
+        embed.setDescription(data.Answer);
+    } else if (data.AbstractText) {
+        embed.setDescription(data.AbstractText);
+    }
+
+    const results = data.Results.length > 0
+        ? data.Results
+        : data.RelatedTopics;
+
+    if (!embed.description) {
+        for (const topic of results) {
+            const regex = /<a href="https:\/\/duckduckgo\.com\/.+">(.+)<\/a>(.+)/;
+
+            const innerTopic = topic.Text
+                ? topic
+                : topic.Topics[0];
+
+            let description = innerTopic.Text;
+
+            const regexMatch = regex.exec(innerTopic.Result);
+
+            const [, header=undefined, result=undefined ] = (regexMatch || [ undefined, undefined, undefined ]);
+
+            if (result) {
+                description = result;
+            }
+
+            let title = '';
+
+            if (innerTopic.Name) {
+                title += `(${innerTopic.Name}) `;
+            }
+
+            if (header) {
+                title += header + ' - ';
+            }
+
+            title += innerTopic.FirstURL;
+
+            /* Embed max length */
+            if (embed.length + title.length + description.length > 5900) {
+                break;
+            }
+
+            embed.addField(title, description, false);
+        }
+    }
+
+    msg.channel.send(embed);
 }

@@ -34,6 +34,7 @@ import {
     handleCountdown,
     handlePurge,
     handleTranslate,
+    handleQuery,
 } from './Commands';
 
 import {
@@ -65,6 +66,7 @@ import {
     handleCountdownHelp,
     handlePurgeHelp,
     handleTranslateHelp,
+    handleQueryHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -221,7 +223,15 @@ const commands: Command[] = [
         implementation: handleCountdown.bind(this, 'pause'),
         helpFunction: handleCountdownHelp,
         description: 'Perform a pause',
-    }
+    },
+    {
+        aliases: ['query', 'search'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleQuery,
+        helpFunction: handleQueryHelp,
+        description: 'Query duckduckgo instant answers',
+    },
 ]
 
 function handleMessage(msg: Message) {

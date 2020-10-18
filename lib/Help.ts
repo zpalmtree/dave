@@ -386,9 +386,39 @@ export function handleTranslateHelp(msg: Message): void {
             },
             {
                 name: 'Translate to another language',
-                value: '`$translate french It\s life`',
+                value: '`$translate french Such is life`',
                 inline: false,
             }
+        );
+
+    msg.channel.send(embed);
+}
+
+export function handleQueryHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$query')
+        .setDescription('Query duckduckgo instant answers (Very simple queries)')
+        .addFields(
+            {
+                name: 'Define something',
+                value: '`$query apple`',
+                inline: false,
+            },
+            {
+                name: 'Use duckduckgo bangs - https://duckduckgo.com/bang',
+                value: '`$query !w Arnold Schwarzenegger`',
+                inline: false,
+            },
+            {
+                name: `Topic Summaries`,
+                value: '`$query Valley Forge National Historical Park`',
+                inline: false,
+            },
+            {
+                name: 'Categories',
+                value: '`$query Simpsons Characters`',
+                inline: false,
+            },
         );
 
     msg.channel.send(embed);
