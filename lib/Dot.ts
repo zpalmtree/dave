@@ -1,8 +1,19 @@
-import { Canvas, Image, createCanvas } from 'canvas';
+import fetch from 'node-fetch';
+
 import { xml2json } from 'xml-js';
+
+import {
+    Canvas,
+    Image,
+    createCanvas
+} from 'canvas';
+
 import { RGB } from './Types';
-import { hexToRGB, rgbToHex} from './Utilities';
-import request = require('request-promise-native');
+
+import {
+    hexToRGB,
+    rgbToHex
+} from './Utilities';
 
 const dotWidth = 120;
 const dotHeight = 120;
@@ -109,13 +120,9 @@ const dotColors: { tail: number, mc: Image }[] = [
 ];
 
 export async function renderDot(): Promise<[string, number, Canvas]> {
-    const dotXML = await request({
-        method: 'GET',
-        timeout: 10000,
-        url: 'http://gcpdot.com/gcpindex.php',
-    }).catch((err) => {
-        throw err;
-    });
+    const response = await fetch('http://gcpdot.com/gcpindex.php');
+
+    const dotXML = await response.text();
 
     const dotData = JSON.parse(xml2json(dotXML)).elements[0].elements;
 
@@ -177,13 +184,9 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
     var outCanvas = createCanvas(dotGraphWidth, dotGraphHeight);
     var outContext = outCanvas.getContext("2d");
 
-    const dotXML = await request({
-        method: 'GET',
-        timeout: 10000,
-        url: `http://global-mind.org/gcpdot/gcpgraph.php?pixels=${dotGraphWidth}&seconds=${timespan}`,
-    }).catch((err) => {
-        throw err;
-    });
+    const response = await fetch(`http://global-mind.org/gcpdot/gcpgraph.php?pixels=${dotGraphWidth}&seconds=${timespan}`);
+
+    const dotXML = await response.text();
 
     const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
 

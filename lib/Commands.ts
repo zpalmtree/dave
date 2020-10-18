@@ -3,10 +3,13 @@ import * as path from 'path';
 import * as moment from 'moment';
 import * as convert from 'xml-js';
 
-import request = require('request-promise-native');
 import translate = require('@vitalets/google-translate-api');
 
+import fetch from 'node-fetch';
+
 import { stringify } from 'querystring';
+import { promisify } from 'util';
+import { evaluate } from 'mathjs';
 
 import {
     Message,
@@ -17,10 +20,6 @@ import {
     MessageAttachment,
     GuildMember
 } from 'discord.js';
-
-import { promisify } from 'util';
-import { evaluate } from 'mathjs';
-
 
 import { config } from './Config';
 import { catBreeds } from './Cats';
@@ -343,12 +342,9 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
     const url: string = `https://api.thecatapi.com/v1/images/search?${stringify(kittyParams)}`;
 
     try {
-        const data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url,
-            json: true,
-        });
+        const response = await fetch(url);
+
+        const data = await response.json();
 
         if (!data || data.length < 1 || !data[0].url) {
             msg.reply(`Failed to get kitty pic :( [ ${JSON.stringify(data)} ]`);
@@ -399,12 +395,9 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
             : 'https://dog.ceo/api/breeds/image/random';
 
     try {
-        const data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url,
-            json: true,
-        });
+        const response = await fetch(url);
+
+        const data = await response.json();
 
         if (data.status !== 'success' || !data.message) {
             msg.reply(`Failed to get doggo pic :( [ ${JSON.stringify(data)} ]`);
@@ -421,12 +414,9 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
 
 async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
     try {
-        const data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url: host + '/v2/all',
-            json: true,
-        });
+        const response = await fetch(host + '/v2/all');
+
+        const data = await response.json();
 
         const embed = new MessageEmbed()
             .setColor('#C8102E')
@@ -473,12 +463,9 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
 
 async function getChinkedCountryData(msg: Message, country: string, host: string): Promise<void> {
     try {
-        const countryData = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url: `${host}/v2/countries/${country}`,
-            json: true,
-        });
+        const response = await fetch(`${host}/v2/countries/${country}`);
+
+        const countryData = await response.json();
 
         const embed = new MessageEmbed()
             .setColor('#C8102E')
@@ -534,12 +521,9 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
 
 async function getChinkedStateData(msg: Message, state: string, host: string): Promise<void> {
     try {
-        const data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url: `${host}/v2/states`,
-            json: true,
-        });
+        const response = await fetch(`${host}/v2/states`);
+
+        const data = await response.json();
 
         for (const stateData of data) {
             if (stateData.state.toLowerCase() === state) {
@@ -582,12 +566,9 @@ async function getChinkedStateData(msg: Message, state: string, host: string): P
 
 async function getChinkedCountries(msg: Message, host: string): Promise<void> {
     try {
-        const data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url: host + '/v2/countries',
-            json: true,
-        });
+        const response = await fetch(host + '/v2/countries');
+
+        const data = await response.json();
 
         const countries = 'Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', ');
 
@@ -727,15 +708,14 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
         } as any)[gallery];
 
         const index = Math.floor(Math.random() * (finalPage + 1));
-        const data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url: `https://api.imgur.com/3/gallery/${gallery}/top/all/${index}`,
-            json: true,
+
+        const response = await fetch(`https://api.imgur.com/3/gallery/${gallery}/top/all/${index}`, {
             headers: {
                 'Authorization': 'Client-ID de8a61d6a484c39',
-            }
+            },
         });
+
+        const data = await response.json();
 
         const images = data.data.filter((img: any) => img.size > 0);
 
@@ -1514,27 +1494,23 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
 
     const url = `https://api.duckduckgo.com/?${stringify(params)}`;
 
-    let data;
+    let data: any;
 
     try {
-        data = await request({
-            method: 'GET',
-            timeout: 10 * 1000,
-            url,
-            json: true,
-        });
+        const response = await fetch(url);
+        data = await response.json();
     } catch (err) {
         msg.reply(`Failed to get answer: ${err.toString()}`);
         return;
     }
 
-    if (data.Redirect) {
-        msg.reply(data.Redirect);
+    if (!data || (!data.Heading && !data.Redirect)) {
+        msg.reply('No results found for that query! Note that this API only returns instant answers. Try shortening your query, single words will usually work.');
         return;
     }
 
-    if (!data.Heading) {
-        msg.reply('No results found for that query! Note that this API only returns instant answers. Try shortening your query, single words will usually work.');
+    if (data.Redirect) {
+        msg.reply(data.Redirect);
         return;
     }
 
