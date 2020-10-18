@@ -844,20 +844,12 @@ async function displayScheduledWatches(msg: Message): Promise<void> {
         ];
     }
 
-    const maxPageSize = 7;
-
-    for (const watch of data.slice(0, maxPageSize)) {
-        embed.addFields(f(watch));
-    }
-
-    const sentMessage = await msg.channel.send(embed);
-
     paginate(
-        sentMessage,
-        maxPageSize,
+        msg,
+        7,
         f,
         data,
-        'Scheduled Movies/Series To Watch',
+        embed,
     );
 }
 
@@ -882,27 +874,11 @@ async function displayAllWatches(msg: Message): Promise<void> {
     const embed = new MessageEmbed()
         .setTitle('Previously Watched Movies/Series');
 
-    for (const watch of data.slice(0, maxPageSize)) {
-        embed.addFields(
-            {
-                name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
-                value: `[${watch.title}](${watch.link})`,
-                inline: false,
-            },
-        );
-    }
-
     const totalPages = Math.floor(data.length / maxPageSize)
                      + (data.length % maxPageSize ? 1 : 0);
 
-    if (data.length > maxPageSize) {
-        embed.setFooter(`Page 1 of ${totalPages}`);
-    }
-
-    const sentMessage = await msg.channel.send(embed);
-
     paginate(
-        sentMessage,
+        msg,
         maxPageSize,
         (watch: ScheduledWatch) => {
             return {
@@ -914,7 +890,7 @@ async function displayAllWatches(msg: Message): Promise<void> {
             }
         },
         data,
-        'Previously Watched Movies/Series',
+        embed,
     );
 }
 
@@ -1167,21 +1143,27 @@ export async function scheduleWatch(msg: Message, title: string, time: string, i
     awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 0);
 }
 
-async function paginate(
+async function paginate<T>(
     msg: Message,
     itemsPerPage: number,
-    displayFunction: (watch: ScheduledWatch) => any,
-    data: ScheduledWatch[],
-    title: string) {
+    displayFunction: (item: T) => any,
+    data: T[],
+    embed: MessageEmbed) {
+
+    for (const item of data.slice(0, itemsPerPage)) {
+        embed.addFields(displayFunction(item));
+    }
+
+    const sentMessage = await msg.channel.send(embed);
 
     if (data.length <= itemsPerPage) {
         return;
     }
 
-    await msg.react('⬅️');
-    await msg.react('➡️');
+    await sentMessage.react('⬅️');
+    await sentMessage.react('➡️');
 
-    const collector = msg.createReactionCollector((reaction, user) => {
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
         return ['⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 3000000 });
 
@@ -1202,9 +1184,8 @@ async function paginate(
             }
         }
 
-        const embed = new MessageEmbed()
-            .setTitle(title)
-            .setFooter(`Page ${currentPage} of ${totalPages}`);
+        embed.fields = [];
+        embed.setFooter(`Page ${currentPage} of ${totalPages}`);
 
         const startIndex = (currentPage - 1) * itemsPerPage;
         const endIndex = (currentPage) * itemsPerPage;
@@ -1213,7 +1194,7 @@ async function paginate(
             embed.addFields(displayFunction(watch));
         }
 
-        msg.edit(embed);
+        sentMessage.edit(embed);
     });
 }
 
@@ -1553,7 +1534,7 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     }
 
     if (!data.Heading) {
-        msg.reply('No results found for that query! Note that this API only returns instant answers. Try shortening your query, single words will always work.');
+        msg.reply('No results found for that query! Note that this API only returns instant answers. Try shortening your query, single words will usually work.');
         return;
     }
 
@@ -1579,43 +1560,48 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
         : data.RelatedTopics;
 
     if (!embed.description) {
-        for (const topic of results) {
-            const regex = /<a href="https:\/\/duckduckgo\.com\/.+">(.+)<\/a>(.+)/;
+        paginate(
+            msg,
+            5,
+            (topic: any) => {
+                const regex = /<a href="https:\/\/duckduckgo\.com\/.+">(.+)<\/a>(.+)/;
 
-            const innerTopic = topic.Text
-                ? topic
-                : topic.Topics[0];
+                const innerTopic = topic.Text
+                    ? topic
+                    : topic.Topics[0];
 
-            let description = innerTopic.Text;
+                let description = innerTopic.Text;
 
-            const regexMatch = regex.exec(innerTopic.Result);
+                const regexMatch = regex.exec(innerTopic.Result);
 
-            const [, header=undefined, result=undefined ] = (regexMatch || [ undefined, undefined, undefined ]);
+                const [, header=undefined, result=undefined ] = (regexMatch || [ undefined, undefined, undefined ]);
 
-            if (result) {
-                description = result;
-            }
+                if (result) {
+                    description = result;
+                }
 
-            let title = '';
+                let title = '';
 
-            if (innerTopic.Name) {
-                title += `(${innerTopic.Name}) `;
-            }
+                if (innerTopic.Name) {
+                    title += `(${innerTopic.Name}) `;
+                }
 
-            if (header) {
-                title += header + ' - ';
-            }
+                if (header) {
+                    title += header + ' - ';
+                }
 
-            title += innerTopic.FirstURL;
+                title += innerTopic.FirstURL;
 
-            /* Embed max length */
-            if (embed.length + title.length + description.length > 5900) {
-                break;
-            }
-
-            embed.addField(title, description, false);
-        }
+                return {
+                    name: title,
+                    value: description,
+                    inline: false,
+                };
+            },
+            results,
+            embed,
+        );
+    } else {
+        msg.channel.send(embed);
     }
-
-    msg.channel.send(embed);
 }
