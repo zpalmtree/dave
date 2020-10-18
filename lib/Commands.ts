@@ -1482,8 +1482,13 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
 }
 
 export async function handleQuery(msg: Message, args: string): Promise<void> {
+    if (args.trim() === '') {
+        msg.reply('No query given');
+        return;
+    }
+
     const params = {
-        q: args,
+        q: args.toLowerCase(),
         format: 'json',
         t: 'Dave the Discord Bot',
         no_html: 1,
