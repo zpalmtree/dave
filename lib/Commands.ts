@@ -7,10 +7,11 @@ import translate = require('@vitalets/google-translate-api');
 
 import fetch from 'node-fetch';
 
-import { stringify } from 'querystring';
+import { stringify, unescape } from 'querystring';
 import { promisify } from 'util';
 import { evaluate } from 'mathjs';
 import { parse } from 'node-html-parser';
+import { decode } from 'he';
 
 import {
     Message,
@@ -1509,17 +1510,19 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
     const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
     const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
 
-    const linkTitle = linkNode.childNodes[0].rawText.trim();
-    const link = html.querySelector('.result__url').childNodes[0].rawText.trim();
-    const snippet = html.querySelector('.result__snippet').childNodes.map((n) => n.rawText).join('');
+    const linkTitle = decode(linkNode.childNodes[0].text.trim());
+    const link = decode(html.querySelector('.result__url').childNodes[0].text.trim());
+    const snippet = html.querySelector('.result__snippet').childNodes.map((n) => decode(n.text)).join('');
 
     if (linkTitle === '' || link === '' || snippet === '') {
         throw new Error(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
     }
 
+    const linkURL = `${protocol}://${link}`;
+
     const embed = new MessageEmbed()
         .setTitle(linkTitle)
-        .setURL(`${protocol}://${link}`)
+        .setURL(linkURL)
         .setDescription(snippet);
 
     msg.channel.send(embed);
