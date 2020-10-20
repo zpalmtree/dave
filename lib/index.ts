@@ -230,7 +230,7 @@ const commands: Command[] = [
         hidden: false,
         implementation: handleQuery,
         helpFunction: handleQueryHelp,
-        description: 'Query duckduckgo instant answers',
+        description: 'Query duckduckgo',
     },
 ]
 

@@ -397,7 +397,7 @@ export function handleTranslateHelp(msg: Message): void {
 export function handleQueryHelp(msg: Message): void {
     const embed = new MessageEmbed()
         .setTitle('$query')
-        .setDescription('Query duckduckgo instant answers (Very simple queries)')
+        .setDescription('Query duckduckgo')
         .addFields(
             {
                 name: 'Define something',
