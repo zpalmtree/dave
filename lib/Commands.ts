@@ -10,6 +10,7 @@ import fetch from 'node-fetch';
 import { stringify } from 'querystring';
 import { promisify } from 'util';
 import { evaluate } from 'mathjs';
+import { parse } from 'node-html-parser';
 
 import {
     Message,
@@ -1481,6 +1482,49 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
     }
 }
 
+export async function handleQueryFullResults(msg: Message, args: string): Promise<void> {
+    const params = {
+        q: args,
+        kl: 'us-en', // US location
+        kp: -2, // safe search off
+        kac: -1, // auto suggest off
+    };
+
+    const url = `https://html.duckduckgo.com/html/?${stringify(params)}`;
+
+    let data: any;
+
+    try {
+        const response = await fetch(url);
+        data = await response.text();
+    } catch (err) {
+        msg.reply(`Failed to get answer: ${err.toString()}`);
+        return;
+    }
+
+    const html = parse(data);
+
+    const linkNode = html.querySelector('.result__a');
+
+    const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
+    const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
+
+    const linkTitle = linkNode.childNodes[0].rawText.trim();
+    const link = html.querySelector('.result__url').childNodes[0].rawText.trim();
+    const snippet = html.querySelector('.result__snippet').childNodes.map((n) => n.rawText).join('');
+
+    if (linkTitle === '' || link === '' || snippet === '') {
+        throw new Error(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle(linkTitle)
+        .setURL(`${protocol}://${link}`)
+        .setDescription(snippet);
+
+    msg.channel.send(embed);
+}
+
 export async function handleQuery(msg: Message, args: string): Promise<void> {
     if (args.trim() === '') {
         msg.reply('No query given');
@@ -1490,9 +1534,9 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     const params = {
         q: args.toLowerCase(),
         format: 'json',
-        t: 'Dave the Discord Bot',
+        t: 'Dave the Discord Bot', // identify ourselves to their servers
         no_html: 1,
-        no_redirect: 1,
+        no_redirect: 1, // don't follow redirects in bang queries
         skip_disambig: 1,
         kp: -2,
     };
@@ -1510,7 +1554,12 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     }
 
     if (!data || (!data.Heading && !data.Redirect)) {
-        msg.reply('No results found for that query! Note that this API only returns instant answers. Try shortening your query, single words will usually work.');
+        try {
+            await handleQueryFullResults(msg, args);
+        } catch (err) {
+            msg.reply(`Failed to get results: ${err.toString()}`);
+        }
+
         return;
     }
 
@@ -1527,7 +1576,7 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     }
 
     if (data.AbstractURL) {
-        embed.setFooter(data.AbstractURL);
+        embed.setURL(data.AbstractURL);
     }
 
     if (data.Answer) {
