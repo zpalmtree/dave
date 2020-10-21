@@ -10,7 +10,6 @@ import fetch from 'node-fetch';
 import { stringify, unescape } from 'querystring';
 import { promisify } from 'util';
 import { evaluate } from 'mathjs';
-import { parse } from 'node-html-parser';
 import { decode } from 'he';
 
 import {
@@ -22,6 +21,11 @@ import {
     MessageAttachment,
     GuildMember
 } from 'discord.js';
+
+import {
+    parse,
+    HTMLElement
+} from 'node-html-parser';
 
 import { config } from './Config';
 import { catBreeds } from './Cats';
@@ -1483,9 +1487,9 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
     }
 }
 
-export async function handleQueryFullResults(msg: Message, args: string): Promise<void> {
+async function getQueryResults(query: string): Promise<false | HTMLElement> {
     const params = {
-        q: args,
+        q: query,
         kl: 'us-en', // US location
         kp: -2, // safe search off
         kac: -1, // auto suggest off
@@ -1500,12 +1504,16 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
         const response = await fetch(url);
         data = await response.text();
     } catch (err) {
-        msg.reply(`Failed to get answer: ${err.toString()}`);
-        return;
+        console.log(err);
+        return false;
     }
 
     const html = parse(data);
 
+    return html;
+}
+
+async function displayQueryResults(html: HTMLElement, msg: Message) {
     const results = [];
     const errors = [];
 
@@ -1560,20 +1568,16 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
     }
 }
 
-export async function handleQuery(msg: Message, args: string): Promise<void> {
-    if (args.trim() === '') {
-        msg.reply('No query given');
-        return;
-    }
-
+async function getInstantAnswerResults(query: string) {
     const params = {
-        q: args.toLowerCase(),
+        q: query.toLowerCase(),
         format: 'json',
         t: 'Dave the Discord Bot', // identify ourselves to their servers
         no_html: 1,
         no_redirect: 1, // don't follow redirects in bang queries
         skip_disambig: 1,
         kp: -2,
+        kl: 'us-en', // US location
     };
 
     const url = `https://api.duckduckgo.com/?${stringify(params)}`;
@@ -1584,20 +1588,18 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
         const response = await fetch(url);
         data = await response.json();
     } catch (err) {
-        msg.reply(`Failed to get answer: ${err.toString()}`);
-        return;
+        console.log(err);
+        return false;
     }
 
     if (!data || (!data.Heading && !data.Redirect)) {
-        try {
-            await handleQueryFullResults(msg, args);
-        } catch (err) {
-            msg.reply(`Failed to get results: ${err.toString()}`);
-        }
-
-        return;
+        return false;
     }
 
+    return data;
+}
+
+async function displayInstantAnswerResult(data: any, msg: Message) {
     if (data.Redirect) {
         msg.reply(data.Redirect);
         return;
@@ -1668,5 +1670,36 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
         );
     } else {
         msg.channel.send(embed);
+    }
+}
+
+export async function handleQuery(msg: Message, args: string): Promise<void> {
+    if (args.trim() === '') {
+        msg.reply('No query given');
+        return;
+    }
+
+    try {
+        /* Fire off both requests asynchronously */
+        const instantAnswerPromise = getInstantAnswerResults(args);
+        const queryPromise = getQueryResults(args);
+
+        /* Wait for instant answer result to complete and use that if present */
+        const data = await instantAnswerPromise;
+
+        if (data) {
+            displayInstantAnswerResult(data, msg);
+        } else {
+            /* If not then use HTML scrape result */
+            const html = await queryPromise;
+
+            if (!html) {
+                throw new Error();
+            }
+
+            displayQueryResults(html, msg);
+        }
+    } catch (err) {
+        msg.reply(`Error getting query results: ${err.toString()}`);
     }
 }
