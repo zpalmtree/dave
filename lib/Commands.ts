@@ -1528,7 +1528,8 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
         const linkURL = `${protocol}://${link}`;
 
         if (linkTitle === '' || link === '' || snippet === '') {
-            throw new Error(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
+            errors.push(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
+            continue;
         }
 
         results.push({
@@ -1555,7 +1556,7 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
             embed
         );
     } else {
-        msg.reply('Failed to find any results!');
+        msg.reply(`Failed to find any results: ${errors.join(', ')}!`);
     }
 }
 
