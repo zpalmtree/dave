@@ -1489,6 +1489,7 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
         kl: 'us-en', // US location
         kp: -2, // safe search off
         kac: -1, // auto suggest off
+        kav: 1, // load all results
     };
 
     const url = `https://html.duckduckgo.com/html/?${stringify(params)}`;
@@ -1505,27 +1506,57 @@ export async function handleQueryFullResults(msg: Message, args: string): Promis
 
     const html = parse(data);
 
-    const linkNode = html.querySelector('.result__a');
+    const results = [];
+    const errors = [];
 
-    const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
-    const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
+    for (const resultNode of html.querySelectorAll('.result__body')) {
+        const linkNode = resultNode.querySelector('.result__a');
 
-    const linkTitle = decode(linkNode.childNodes[0].text.trim());
-    const link = decode(html.querySelector('.result__url').childNodes[0].text.trim());
-    const snippet = html.querySelector('.result__snippet').childNodes.map((n) => decode(n.text)).join('');
+        const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
+        const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
 
-    if (linkTitle === '' || link === '' || snippet === '') {
-        throw new Error(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
+        const linkTitle = decode(linkNode.childNodes[0].text.trim());
+        const link = decode(resultNode.querySelector('.result__url').childNodes[0].text.trim());
+        const snippetNode = resultNode.querySelector('.result__snippet');
+
+        /* sometimes we just have a url with no snippet */
+        if (!snippetNode || !snippetNode.childNodes) {
+            continue;
+        }
+
+        const snippet = snippetNode.childNodes.map((n) => decode(n.text)).join('');
+        const linkURL = `${protocol}://${link}`;
+
+        if (linkTitle === '' || link === '' || snippet === '') {
+            throw new Error(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
+        }
+
+        results.push({
+            linkTitle,
+            linkURL,
+            snippet,
+        });
     }
 
-    const linkURL = `${protocol}://${link}`;
+    if (results.length > 0) {
+        const embed = new MessageEmbed();
 
-    const embed = new MessageEmbed()
-        .setTitle(linkTitle)
-        .setURL(linkURL)
-        .setDescription(snippet);
-
-    msg.channel.send(embed);
+        paginate(
+            msg,
+            5,
+            (result: any) => {
+                return {
+                    name: `${result.linkTitle} - ${result.linkURL}`,
+                    value: result.snippet,
+                    inline: false,
+                };
+            },
+            results,
+            embed
+        );
+    } else {
+        msg.reply('Failed to find any results!');
+    }
 }
 
 export async function handleQuery(msg: Message, args: string): Promise<void> {
