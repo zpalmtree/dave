@@ -898,6 +898,11 @@ async function addMagnet(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
+    if (args[1].length > 1000) {
+        msg.reply('Link is too long. Must be less than 1000 chars.');
+        return;
+    }
+
     const watch = await updateWatchById(Number(id), {
         magnet: args[1],
     });
@@ -1287,6 +1292,16 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
             return;
         }
 
+        if (infoLink && infoLink.length > 1000) {
+            msg.reply('Link is too long. Must be less than 1000 chars.');
+            return;
+        }
+
+        if (title && title.length > 1000) {
+            msg.reply('Title is too long. Must be less than 1000 chars.');
+            return;
+        }
+
         await scheduleWatch(msg, title, time, infoLink, downloadLink);
         return;
     }
@@ -1552,7 +1567,7 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
 
         paginate(
             msg,
-            5,
+            3,
             (result: any) => {
                 return {
                     name: `${result.linkTitle} - ${result.linkURL}`,
@@ -1629,7 +1644,7 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
     if (!embed.description) {
         paginate(
             msg,
-            5,
+            3,
             (topic: any) => {
                 const regex = /<a href="https:\/\/duckduckgo\.com\/.+">(.+)<\/a>(.+)/;
 
