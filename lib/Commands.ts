@@ -1087,7 +1087,7 @@ async function displayWatchById(msg: Message, id: number): Promise<void> {
     awaitWatchReactions(sentMessage, watch.title, id, new Set(watch.attending), 1);
 }
 
-export async function scheduleWatch(msg: Message, title: string, time: string, infoLink?: string, downloadLink?: string) {
+export async function scheduleWatch(msg: Message, title: string, time: moment.Moment, infoLink?: string, downloadLink?: string) {
     let { err, data } = await readWatchJSON();
 
     if (err) {
@@ -1101,7 +1101,7 @@ export async function scheduleWatch(msg: Message, title: string, time: string, i
         id: maxID + 1,
         title,
         link: infoLink,
-        time: moment(time, 'YYYY/MM/DD hh:mm ZZ').toDate(),
+        time: time.toDate(),
         attending: [msg.author.id],
         magnet: downloadLink,
         complete: false,
@@ -1111,7 +1111,7 @@ export async function scheduleWatch(msg: Message, title: string, time: string, i
 
     const embed = new MessageEmbed()
         .setTitle(title)
-        .setDescription(`${title} has been successfully scheduled for ${moment(time, 'YYYY/MM/DD hh:mm ZZ').utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
+        .setDescription(`${title} has been successfully scheduled for ${time.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
         .setFooter('React with 👍 if you want to attend this movie night')
         .addFields(
             {
@@ -1279,18 +1279,13 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
         return;
     }
 
-    /* Non greedy title match, optional imdb/myanimelist link, date / time / time zone, optional magnet/youtube link */
-    const regex = /(.+?) (?:(https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+) )?(\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d)) ?(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)?/;
+    /* Non greedy title match, optional imdb/myanimelist link, time, optional magnet/youtube link */
+    const regex = /^(.+?) (?:(https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+) )?(.+?) ?(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)?$/;
 
     const results = regex.exec(args.join(' '));
 
     if (results) {
         const [ , title, infoLink, time, downloadLink ] = results;
-
-        if (!moment(time, 'YYYY/MM/DD hh:mm ZZ').isValid()) {
-            msg.reply(`Failed to parse date/time "${time}"`);
-            return;
-        }
 
         if (infoLink && infoLink.length > 1000) {
             msg.reply('Link is too long. Must be less than 1000 chars.');
@@ -1302,7 +1297,31 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
             return;
         }
 
-        await scheduleWatch(msg, title, time, infoLink, downloadLink);
+        const timeRegex = /^(\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d [+-]\d\d?:?\d\d)$/;
+        const relativeTimeRegex = /^(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?: (.+))?$/
+
+        let timeObject = moment(time, 'YYYY/MM/DD hh:mm ZZ');
+
+        if (!timeRegex.test(time) || !timeObject.isValid()) {
+            const [, daysStr, hoursStr, minutesStr ] = relativeTimeRegex.exec(time) || [ undefined, undefined, undefined, undefined ];
+
+            if (daysStr === undefined && hoursStr === undefined && minutesStr === undefined) {
+                msg.reply(`Could not parse time "${time}". Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM.\``);
+                return;
+            }
+
+            const days = Number(daysStr) || 0;
+            const hours = Number(hoursStr) || 0;
+            const minutes = Number(minutesStr) || 0;
+
+            timeObject = moment().add({
+                days,
+                hours,
+                minutes,
+            });
+        }
+
+        await scheduleWatch(msg, title, timeObject, infoLink, downloadLink);
         return;
     }
 
