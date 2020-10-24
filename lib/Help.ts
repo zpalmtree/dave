@@ -255,6 +255,11 @@ export function handleWatchHelp(msg: Message, description?: string): void {
                 inline: false,
             },
             {
+                name: 'Schedule a new movie/series to be watched',
+                value: '`$watch Tseagure! Bukatsumono https://myanimelist.net/anime/19919/Tesagure_Bukatsumono 5h30m`',
+                inline: false,
+            },
+            {
                 name: 'Find more info about a specific movie',
                 value: '`$watch 1`',
                 inline: false,
