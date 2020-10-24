@@ -1280,7 +1280,7 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
     }
 
     /* Non greedy title match, optional imdb/myanimelist link, time, optional magnet/youtube link */
-    const regex = /^(.+?) (?:(https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+) )?(.+?) ?(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)?$/;
+    const regex = /^(.+?) (?:(https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+) )?([0-9+-\/dhm]+?) ?(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)?$/;
 
     const results = regex.exec(args.join(' '));
 
