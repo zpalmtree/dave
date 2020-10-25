@@ -877,6 +877,7 @@ async function displayAllWatches(msg: Message): Promise<void> {
         },
         data,
         embed,
+        true,
     );
 }
 
@@ -1139,15 +1140,28 @@ async function paginate<T>(
     itemsPerPage: number,
     displayFunction: (item: T) => any,
     data: T[],
-    embed: MessageEmbed) {
+    embed: MessageEmbed,
+    addInitialFooter: boolean = false) {
 
     for (const item of data.slice(0, itemsPerPage)) {
         embed.addFields(displayFunction(item));
     }
 
+    const shouldPaginate = data.length > itemsPerPage;
+
+    let currentPage = 1;
+    const totalPages = Math.floor(data.length / itemsPerPage)
+                     + (data.length % itemsPerPage ? 1 : 0);
+
+    if (shouldPaginate) {
+        if (addInitialFooter) {
+            embed.setFooter(`Page ${currentPage} of ${totalPages}`);
+        }
+    }
+
     const sentMessage = await msg.channel.send(embed);
 
-    if (data.length <= itemsPerPage) {
+    if (!shouldPaginate) {
         return;
     }
 
@@ -1156,11 +1170,7 @@ async function paginate<T>(
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return ['⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 3000000 });
-
-    let currentPage = 1;
-    const totalPages = Math.floor(data.length / itemsPerPage)
-                     + (data.length % itemsPerPage ? 1 : 0);
+    }, { time: 600000 }); // 10 minutes
 
     collector.on('collect', async (reaction, user) => {
         reaction.users.remove(user.id);
@@ -1595,7 +1605,8 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
                 };
             },
             results,
-            embed
+            embed,
+            true,
         );
     } else {
         msg.reply(`Failed to find any results: ${errors.join(', ')}!`);
@@ -1701,6 +1712,7 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
             },
             results,
             embed,
+            true,
         );
     } else {
         msg.channel.send(embed);
