@@ -1562,6 +1562,12 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
     const errors = [];
 
     for (const resultNode of html.querySelectorAll('.result__body')) {
+        const isAd = resultNode.querySelector('.badge--ad');
+
+        if (isAd) {
+            continue;
+        }
+
         const linkNode = resultNode.querySelector('.result__a');
 
         const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
