@@ -35,6 +35,7 @@ import {
     handlePurge,
     handleTranslate,
     handleQuery,
+    handleExchange,
 } from './Commands';
 
 import {
@@ -67,6 +68,7 @@ import {
     handlePurgeHelp,
     handleTranslateHelp,
     handleQueryHelp,
+    handleExchangeHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -232,7 +234,15 @@ const commands: Command[] = [
         helpFunction: handleQueryHelp,
         description: 'Query duckduckgo',
     },
-]
+    {
+        aliases: ['exchange', 'convert'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleExchange,
+        helpFunction: handleExchangeHelp,
+        description: 'Convert between REAL currencies',
+    },
+];
 
 function handleMessage(msg: Message) {
     if (!msg.content.startsWith(config.prefix)) {

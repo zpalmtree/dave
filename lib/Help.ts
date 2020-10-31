@@ -3,6 +3,10 @@ import {
     MessageEmbed,
 } from 'discord.js';
 
+import {
+    exchangeService
+} from './Exchange';
+
 export function handleRollHelp(msg: Message): void {
     const embed = new MessageEmbed()
         .setTitle('$roll')
@@ -422,6 +426,26 @@ export function handleQueryHelp(msg: Message): void {
             {
                 name: 'Categories',
                 value: '`$query Simpsons Characters`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}
+
+export function handleExchangeHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$exchange')
+        .setDescription(`Convert between currencies. Known currencies: \`${exchangeService.getCurrencies().join(',')}\``)
+        .addFields(
+            {
+                name: 'Example',
+                value: '`$exchange 100 USD to GBP`',
+                inline: false,
+            },
+            {
+                name: 'Example',
+                value: '`$exchange 666.66 MXN to EUR`',
                 inline: false,
             },
         );

@@ -58,6 +58,10 @@ import {
     ScheduledWatch
 } from './Types';
 
+import {
+    exchangeService
+} from './Exchange';
+
 const timeUnits: TimeUnits = {
     Y: 31536000,
     M: 2592000,
@@ -1754,4 +1758,49 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     } catch (err) {
         msg.reply(`Error getting query results: ${err.toString()}`);
     }
+}
+
+export async function handleExchange(msg: Message, args: string): Promise<void> {
+    const regex = /(\d+(?:\.\d{1,2})?) ([A-Za-z]{3}) (?:[tT][oO] )?([A-Za-z]{3})/;
+
+    const result = regex.exec(args);
+
+    if (!result) {
+        msg.reply(`Failed to parse input. It should be in the form \`$exchange 100 ABC to XYZ\`. \`$exchange help\` to view currencies.`);
+        return;
+    }
+
+    let [, amountToConvert, from, to ] = result;
+
+    from = from.toUpperCase();
+    to = to.toUpperCase();
+
+    const asNum = Number(amountToConvert);
+
+    if (Number.isNaN(asNum)) {
+        msg.reply(`Failed to parse amount: ${amountToConvert}`);
+        return;
+    }
+
+    const {
+        success,
+        error,
+        amount,
+        amountInUsd,
+    } = exchangeService.exchange(from, to, asNum);
+
+    if (!success) {
+        msg.reply(error);
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle(`${amountToConvert} ${from} is ${amount} ${to}`)
+        .setFooter('Exchange rates are updated every 8 hours');
+
+    if (from !== 'USD' && to !== 'USD') {
+        embed.setDescription(`${amountToConvert} ${from} is ${amountInUsd} USD`);
+    }
+
+    msg.channel.send(embed);
 }
