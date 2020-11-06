@@ -1664,7 +1664,7 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
         .setTitle(data.Heading);
 
     if (data.Image) {
-        embed.setImage(data.Image);
+        embed.setImage(`https://duckduckgo.com${data.Image}`);
     }
 
     if (data.AbstractURL) {
