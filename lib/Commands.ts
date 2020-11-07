@@ -1817,5 +1817,6 @@ export async function handleAvatar(msg: Message): Promise<void> {
     msg.channel.send(user.displayAvatarURL({
         format: 'png',
         dynamic: true,
+        size: 4096,
     }));
 }
