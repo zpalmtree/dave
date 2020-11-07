@@ -36,6 +36,7 @@ import {
     handleTranslate,
     handleQuery,
     handleExchange,
+    handleAvatar,
 } from './Commands';
 
 import {
@@ -69,6 +70,7 @@ import {
     handleTranslateHelp,
     handleQueryHelp,
     handleExchangeHelp,
+    handleAvatarHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -241,6 +243,14 @@ const commands: Command[] = [
         implementation: handleExchange,
         helpFunction: handleExchangeHelp,
         description: 'Convert between REAL currencies',
+    },
+    {
+        aliases: ['avatar'],
+        argsFormat: Args.DontNeed,
+        hidden: false,
+        implementation: handleAvatar,
+        helpFunction: handleAvatarHelp,
+        description: 'Retrieve a users avatar',
     },
 ];
 

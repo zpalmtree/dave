@@ -1804,3 +1804,18 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
 
     msg.channel.send(embed);
 }
+
+export async function handleAvatar(msg: Message): Promise<void> {
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    let user = msg.author;
+
+    if (mentionedUsers.length > 0) {
+        user = mentionedUsers[0];
+    }
+
+    msg.channel.send(user.displayAvatarURL({
+        format: 'png',
+        dynamic: true,
+    }));
+}

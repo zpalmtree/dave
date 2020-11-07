@@ -452,3 +452,23 @@ export function handleExchangeHelp(msg: Message): void {
 
     msg.channel.send(embed);
 }
+
+export function handleAvatarHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$avatar')
+        .setDescription(`Retrieve a users avatar`)
+        .addFields(
+            {
+                name: `Retrieve bob's avatar`,
+                value: '`$avatar @bob`',
+                inline: false,
+            },
+            {
+                name: 'Retrieve your own avatar',
+                value: '`$avatar`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}
