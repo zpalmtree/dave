@@ -8,6 +8,8 @@ class Config {
     /* Used for accessing the cat api */
     public catApiKey: string = 'enter api key here';
 
+    public exchangeRateApiKey: string = '4d9af4c7abcf411692abcd198867c68b';
+
     public fit: string = 'enter channel here';
 
     public doggoBreedLink: string = 'https://pastebin.com/BS8JKb7V';

@@ -1787,6 +1787,8 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
         error,
         amount,
         amountInUsd,
+        fromCurrency,
+        toCurrency,
     } = exchangeService.exchange(from, to, asNum);
 
     if (!success) {
@@ -1795,12 +1797,8 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     }
 
     const embed = new MessageEmbed()
-        .setTitle(`${amountToConvert} ${from} is ${amount} ${to}`)
+        .setTitle(`${amountToConvert} ${fromCurrency} is ${amount} ${toCurrency}`)
         .setFooter('Exchange rates are updated every 8 hours');
-
-    if (from !== 'USD' && to !== 'USD') {
-        embed.setDescription(`${amountToConvert} ${from} is ${amountInUsd} USD`);
-    }
 
     msg.channel.send(embed);
 }

@@ -1,12 +1,14 @@
 import fetch from 'node-fetch';
 
+import { config } from './Config';
+
 interface Rates {
     [index: string]: number;
 }
 
 export class Exchange {
     public constructor() {
-        this.fetchRates();
+        this.init();
     }
 
     public getCurrencies(): string[] {
@@ -51,19 +53,40 @@ export class Exchange {
             success: true,
             amount: amountInTarget,
             amountInUsd,
+            fromCurrency: this.mapping[from],
+            toCurrency: this.mapping[to],
         };
     }
 
     private rates: Rates = {};
+    private mapping: { [index: string]: string } = {};
     private initialized: boolean = false;
+
+    private async init() {
+        this.fetchCurrencyMapping();
+        this.fetchRates();
+    }
+
+    private async fetchCurrencyMapping() {
+        try {
+            const response = await fetch(`https://openexchangerates.org/api/currencies.json`);
+            const data = await response.json();
+            this.mapping = data;
+        } catch (err) {
+            console.log('Failed to fetch currency mapping: ' + err.toString());
+
+            /* Try again in 10 seconds */
+            setTimeout(() => this.fetchCurrencyMapping(), 10 * 1000);
+        }
+    }
 
     private async fetchRates() {
         try {
-            const response = await fetch('https://api.exchangeratesapi.io/latest?base=USD');
+            const response = await fetch(`https://openexchangerates.org/api/latest.json?base=USD&app_id=${config.exchangeRateApiKey}`);
             const data = await response.json();
 
             /* Check it looks good */
-            if (data.base && data.date && data.rates) {
+            if (data.base && data.rates) {
                 this.rates = data.rates;
                 this.initialized = true;
 
