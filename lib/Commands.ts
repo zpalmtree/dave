@@ -477,6 +477,11 @@ async function getChinkedCountryData(msg: Message, country: string, host: string
 
         const countryData = await response.json();
 
+        if (countryData.message) {
+            msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
+            return;
+        }
+
         const embed = new MessageEmbed()
             .setColor('#C8102E')
             .setTitle('Coronavirus statistics, ' + countryData.country)
