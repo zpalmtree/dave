@@ -1357,6 +1357,16 @@ export function handleTime(msg: Message, args: string) {
     msg.reply(`The current time is ${moment().utcOffset(offset).format('HH:mm Z')}`);
 }
 
+export function handleDate(msg: Message, args: string) {
+    let offset: string | number = 0;
+
+    if (args.length > 0) {
+        offset = args;
+    }
+
+    msg.reply(`The current date is ${moment().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
+}
+
 export async function handleTimer(msg: Message, args: string[]) {
     const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 

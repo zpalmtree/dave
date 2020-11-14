@@ -323,6 +323,31 @@ export function handleTimeHelp(msg: Message): void {
     msg.channel.send(embed);
 }
 
+export function handleDateHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$date')
+        .setDescription('Get the current date in a specific UTC offset')
+        .addFields(
+            {
+                name: 'Example',
+                value: '`$date`',
+                inline: false,
+            },
+            {
+                name: 'Example',
+                value: '`$date +01:00`',
+                inline: false,
+            },
+            {
+                name: 'Example',
+                value: '`$date -06:00`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}
+
 export function handleTimerHelp(msg: Message): void {
     const embed = new MessageEmbed()
         .setTitle('$time')
