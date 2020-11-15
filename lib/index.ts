@@ -38,6 +38,7 @@ import {
     handleQuery,
     handleExchange,
     handleAvatar,
+    handleNikocado,
 } from './Commands';
 
 import {
@@ -73,6 +74,7 @@ import {
     handleQueryHelp,
     handleExchangeHelp,
     handleAvatarHelp,
+    handleNikocadoHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -261,6 +263,14 @@ const commands: Command[] = [
         implementation: handleAvatar,
         helpFunction: handleAvatarHelp,
         description: 'Retrieve a users avatar',
+    },
+    {
+        aliases: ['nikocado', 'orlin', 'niko', 'avocado'],
+        argsFormat: Args.DontNeed,
+        hidden: true,
+        implementation: handleNikocado,
+        helpFunction: handleNikocadoHelp,
+        description: 'Get a random nikocado',
     },
 ];
 

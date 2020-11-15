@@ -50,6 +50,7 @@ import {
     capitalize,
     sleep,
     haveRole,
+    pickRandomItem,
 } from './Utilities';
 
 import {
@@ -127,9 +128,7 @@ const states = [
 ];
 
 export function handleFortune(msg: Message): void {
-    var fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
-
-    msg.reply(`Your fortune: ${fortune}`);
+    msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
 }
 
 export function handleMath(msg: Message, args: string): void {
@@ -1832,4 +1831,15 @@ export async function handleAvatar(msg: Message): Promise<void> {
         dynamic: true,
         size: 4096,
     }));
+}
+
+export function handleNikocado(msg: Message): void {
+    const nikocados = [
+        "ORLINS BACK!",
+        "Orlins leaving!",
+        "I'm a vegan again!",
+        "I sharted the bed!",
+    ];
+
+    msg.reply(pickRandomItem(nikocados));
 }

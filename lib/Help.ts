@@ -497,3 +497,18 @@ export function handleAvatarHelp(msg: Message): void {
 
     msg.channel.send(embed);
 }
+
+export function handleNikocadoHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$nikocado')
+        .setDescription(`Get a random nikocado`)
+        .addFields(
+            {
+                name: `Example`,
+                value: '`$nikocado`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}
