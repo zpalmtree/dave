@@ -1861,7 +1861,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    if (!imageData.results) {
+    if (!imageData.results || imageData.results.length === 0) {
         msg.reply('No results found!');
         return;
     }
