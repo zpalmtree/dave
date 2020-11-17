@@ -51,6 +51,7 @@ import {
     sleep,
     haveRole,
     pickRandomItem,
+    paginate,
 } from './Utilities';
 
 import {
@@ -1143,70 +1144,6 @@ export async function scheduleWatch(msg: Message, title: string, time: moment.Mo
     awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 0);
 }
 
-async function paginate<T>(
-    msg: Message,
-    itemsPerPage: number,
-    displayFunction: (item: T) => any,
-    data: T[],
-    embed: MessageEmbed,
-    addInitialFooter: boolean = false) {
-
-    for (const item of data.slice(0, itemsPerPage)) {
-        embed.addFields(displayFunction(item));
-    }
-
-    const shouldPaginate = data.length > itemsPerPage;
-
-    let currentPage = 1;
-    const totalPages = Math.floor(data.length / itemsPerPage)
-                     + (data.length % itemsPerPage ? 1 : 0);
-
-    if (shouldPaginate) {
-        if (addInitialFooter) {
-            embed.setFooter(`Page ${currentPage} of ${totalPages}`);
-        }
-    }
-
-    const sentMessage = await msg.channel.send(embed);
-
-    if (!shouldPaginate) {
-        return;
-    }
-
-    await sentMessage.react('⬅️');
-    await sentMessage.react('➡️');
-
-    const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return ['⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 600000 }); // 10 minutes
-
-    collector.on('collect', async (reaction, user) => {
-        reaction.users.remove(user.id);
-
-        if (reaction.emoji.name === '⬅️') {
-            if (currentPage > 1) {
-                currentPage--;
-            }
-        } else {
-            if (currentPage < totalPages) {
-                currentPage++;
-            }
-        }
-
-        embed.fields = [];
-        embed.setFooter(`Page ${currentPage} of ${totalPages}`);
-
-        const startIndex = (currentPage - 1) * itemsPerPage;
-        const endIndex = (currentPage) * itemsPerPage;
-
-        for (const watch of data.slice(startIndex, endIndex)) {
-            embed.addFields(displayFunction(watch));
-        }
-
-        sentMessage.edit(embed);
-    });
-}
-
 async function awaitWatchReactions(
     msg: Message,
     title: string,
@@ -1842,4 +1779,99 @@ export function handleNikocado(msg: Message): void {
     ];
 
     msg.reply(pickRandomItem(nikocados));
+}
+
+export async function handleImage(msg: Message, args: string): Promise<void> {
+    if (args.trim() === '') {
+        msg.reply('No query given');
+        return;
+    }
+
+    const tokenParams = {
+        q: args,
+        kl: 'us-en', // US location
+        kp: -2, // safe search off
+        kac: -1, // auto suggest off
+        kav: 1, // load all results
+    };
+
+    const tokenURL = `https://duckduckgo.com/?${stringify(tokenParams)}`;
+
+    let data: any;
+
+    try {
+        const response = await fetch(tokenURL);
+        data = await response.text();
+    } catch (err) {
+        msg.reply(err);
+        return;
+    }
+
+    const regex = /vqd='([\d-]+)'/gm;
+
+    const [, token ] = regex.exec(data) || [ undefined, undefined ];
+
+    if (!token) {
+        msg.reply('Failed to get token!');
+        return;
+    }
+
+    const imageParams = {
+        q: args,
+        kl: 'us-en', // US location
+        kp: -2, // safe search off
+        kac: -1, // auto suggest off
+        kav: 1, // load all results
+        vqd: token,
+        f: ',,,',
+        p: '1',
+        v7exp: 'a',
+        o: 'json',
+    };
+
+    const options = {
+        headers: {
+            'authority': 'duckduckgo.com',
+            'accept': 'application/json, text/javascript, */*; q=0.01',
+            'sec-fetch-dest': 'empty',
+            'x-requested-with': 'XMLHttpRequest',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-mode': 'cors',
+            'referer': 'https://duckduckgo.com/',
+            'accept-language': 'en-US,en;q=0.9',
+        },
+    };
+
+    const imageURL = `https://duckduckgo.com/i.js?${stringify(imageParams)}`;
+
+    let imageData: any;
+
+    try {
+        const response = await fetch(imageURL, options);
+        imageData = await response.json();
+    } catch (err) {
+        msg.reply(err);
+        return;
+    }
+
+    if (!imageData.results) {
+        msg.reply('No results found!');
+        return;
+    }
+
+    const embed = new MessageEmbed();
+
+    paginate(
+        msg,
+        1,
+        (item: any) => {
+            embed.setTitle(item.title);
+            embed.setImage(item.image);
+            embed.setDescription(item.url);
+        },
+        imageData.results,
+        embed,
+        true,
+    );
 }

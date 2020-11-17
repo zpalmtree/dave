@@ -512,3 +512,18 @@ export function handleNikocadoHelp(msg: Message): void {
 
     msg.channel.send(embed);
 }
+
+export function handleImageHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$image')
+        .setDescription(`Query duckduckgo images`)
+        .addFields(
+            {
+                name: `Example`,
+                value: '`$image sunset`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}

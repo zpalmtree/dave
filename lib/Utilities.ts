@@ -5,7 +5,8 @@ import { RGB } from './Types';
 import { promisify } from 'util';
 
 import {
-    Message
+    Message,
+    MessageEmbed,
 } from 'discord.js';
 
 const readFile = promisify(fs.readFile);
@@ -99,4 +100,76 @@ function componentToHex(c: number) {
 
 export function pickRandomItem<T>(items: T[]): T {
     return items[Math.floor(Math.random() * items.length)];
+}
+
+export async function paginate<T>(
+    msg: Message,
+    itemsPerPage: number,
+    displayFunction: (item: T) => any,
+    data: T[],
+    embed: MessageEmbed,
+    addInitialFooter: boolean = false) {
+
+    for (const item of data.slice(0, itemsPerPage)) {
+        const newFields = displayFunction(item);
+
+        if (newFields) {
+            embed.addFields(displayFunction(item));
+        }
+    }
+
+    const shouldPaginate = data.length > itemsPerPage;
+
+    let currentPage = 1;
+    const totalPages = Math.floor(data.length / itemsPerPage)
+                     + (data.length % itemsPerPage ? 1 : 0);
+
+    if (shouldPaginate) {
+        if (addInitialFooter) {
+            embed.setFooter(`Page ${currentPage} of ${totalPages}`);
+        }
+    }
+
+    const sentMessage = await msg.channel.send(embed);
+
+    if (!shouldPaginate) {
+        return;
+    }
+
+    await sentMessage.react('⬅️');
+    await sentMessage.react('➡️');
+
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
+        return ['⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
+    }, { time: 600000 }); // 10 minutes
+
+    collector.on('collect', async (reaction, user) => {
+        reaction.users.remove(user.id);
+
+        if (reaction.emoji.name === '⬅️') {
+            if (currentPage > 1) {
+                currentPage--;
+            }
+        } else {
+            if (currentPage < totalPages) {
+                currentPage++;
+            }
+        }
+
+        embed.fields = [];
+        embed.setFooter(`Page ${currentPage} of ${totalPages}`);
+
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = (currentPage) * itemsPerPage;
+
+        for (const item of data.slice(startIndex, endIndex)) {
+            const newFields = displayFunction(item);
+
+            if (newFields) {
+                embed.addFields(displayFunction(item));
+            }
+        }
+
+        sentMessage.edit(embed);
+    });
 }

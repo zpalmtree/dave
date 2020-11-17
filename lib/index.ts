@@ -39,6 +39,7 @@ import {
     handleExchange,
     handleAvatar,
     handleNikocado,
+    handleImage,
 } from './Commands';
 
 import {
@@ -75,6 +76,7 @@ import {
     handleExchangeHelp,
     handleAvatarHelp,
     handleNikocadoHelp,
+    handleImageHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -271,6 +273,14 @@ const commands: Command[] = [
         implementation: handleNikocado,
         helpFunction: handleNikocadoHelp,
         description: 'Get a random nikocado',
+    },
+    {
+        aliases: ['image'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleImage,
+        helpFunction: handleImageHelp,
+        description: 'Query duckduckgo images',
     },
 ];
 
