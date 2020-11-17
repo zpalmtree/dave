@@ -1872,7 +1872,6 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         msg,
         1,
         (item: any) => {
-            console.log('Setting image: ' + item.image);
             embed.setTitle(item.title);
             embed.setImage(item.image);
             embed.setDescription(item.url);
