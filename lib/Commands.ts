@@ -1795,12 +1795,18 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         kav: 1, // load all results
     };
 
+    const tokenOptions = {
+        headers: {
+            'cookie': 'p=-2',
+        },
+    };
+
     const tokenURL = `https://duckduckgo.com/?${stringify(tokenParams)}`;
 
     let data: any;
 
     try {
-        const response = await fetch(tokenURL);
+        const response = await fetch(tokenURL, tokenOptions);
         data = await response.text();
     } catch (err) {
         msg.reply(err);
@@ -1818,13 +1824,12 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
 
     const imageParams = {
         q: args,
-        kl: 'us-en', // US location
-        kp: -2, // safe search off
-        kac: -1, // auto suggest off
-        kav: 1, // load all results
+        l: 'us-en', // US location
+        ac: -1, // auto suggest off
+        av: 1, // load all results
+        p: -1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
         vqd: token,
         f: ',,,',
-        p: '1',
         v7exp: 'a',
         o: 'json',
     };
@@ -1840,6 +1845,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
             'sec-fetch-mode': 'cors',
             'referer': 'https://duckduckgo.com/',
             'accept-language': 'en-US,en;q=0.9',
+            'cookie': 'p=-2',
         },
     };
 
@@ -1866,6 +1872,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         msg,
         1,
         (item: any) => {
+            console.log('Setting image: ' + item.image);
             embed.setTitle(item.title);
             embed.setImage(item.image);
             embed.setDescription(item.url);
