@@ -158,6 +158,7 @@ export async function paginate<T>(
         reaction.users.remove(user.id);
 
         if (lock.locked && user.id !== lock.lockedId) {
+            console.log(`currently locked by ${lock.lockedId}, you cannot change`);
             return;
         }
 
@@ -186,12 +187,13 @@ export async function paginate<T>(
     };
 
     const lockEmbed = (reaction: MessageReaction, user: User) => {
-        console.log('locking/unlocking');
-
         const allowedRoles = [
             'Mod',
             'Los de Intendencia'
         ];
+
+        console.log(`${user.username} lock/unlocking`);
+        console.log('current status: ' + JSON.stringify(lock));
 
         const guildUser = msg.guild!.members.cache.get(user.id);
 
@@ -203,12 +205,18 @@ export async function paginate<T>(
         for (let role of allowedRoles) {
             /* User has permission to perform action */
             if (guildUser.roles.cache.some((r) => r.name === role)) {
+                console.log('user has permission');
+
                 /* Embed is currently locked */
                 if (lock.locked) {
+                    console.log('embed is currently locked');
+
                     reaction.users.remove(user.id);
 
                     /* Locker is the current user, remove the lock */
                     if (lock.lockedId === user.id) {
+                        console.log('removing lock');
+
                         lock.locked = false;
                         lock.lockedId = '';
                     /* Locker is not the current user, do nothing, it's locked */
@@ -217,6 +225,8 @@ export async function paginate<T>(
                     }
                 /* Embed is unlocked, lock it */
                 } else {
+                    console.log('adding lock');
+
                     lock.locked = true;
                     lock.lockedId = user.id;
                 }
@@ -280,7 +290,6 @@ export async function paginate<T>(
                 break;
             }
             default: {
-                console.log('default case in paginate');
                 break;
             }
         }
