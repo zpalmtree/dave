@@ -152,7 +152,7 @@ export async function paginate<T>(
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return ['⬅️', '➡️', '🔒', '❌'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 600000 }); // 10 minutes
+    }, { time: 600000, dispose: true }); // 10 minutes
 
     const changePage = (amount: number, reaction: MessageReaction, user: User) => {
         reaction.users.remove(user.id);
@@ -186,6 +186,8 @@ export async function paginate<T>(
     };
 
     const lockEmbed = (reaction: MessageReaction, user: User) => {
+        console.log('locking/unlocking');
+
         const allowedRoles = [
             'Mod',
             'Los de Intendencia'
@@ -199,23 +201,31 @@ export async function paginate<T>(
         }
 
         for (let role of allowedRoles) {
+            /* User has permission to perform action */
             if (guildUser.roles.cache.some((r) => r.name === role)) {
+                /* Embed is currently locked */
                 if (lock.locked) {
+                    reaction.users.remove(user.id);
+
+                    /* Locker is the current user, remove the lock */
                     if (lock.lockedId === user.id) {
                         lock.locked = false;
                         lock.lockedId = '';
-                        reaction.users.remove(user.id);
-                        return;
+                    /* Locker is not the current user, do nothing, it's locked */
                     } else {
-                        return;
+                        reaction.users.remove(user.id);
                     }
+                /* Embed is unlocked, lock it */
                 } else {
                     lock.locked = true;
                     lock.lockedId = user.id;
-                    return;
                 }
+
+                return;
             }
         }
+
+        reaction.users.remove(user.id);
     };
 
     const removeEmbed = (reaction: MessageReaction, user: User) => {
@@ -264,10 +274,6 @@ export async function paginate<T>(
      });
 
     collector.on('remove', async (reaction: MessageReaction, user: User) => {
-        if (user.bot) {
-            return;
-        }
-
         switch (reaction.emoji.name) {
             case '🔒': {
                 lockEmbed(reaction, user);
