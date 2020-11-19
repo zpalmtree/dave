@@ -7,6 +7,8 @@ import { promisify } from 'util';
 import {
     Message,
     MessageEmbed,
+    MessageReaction,
+    User,
 } from 'discord.js';
 
 const readFile = promisify(fs.readFile);
@@ -136,15 +138,28 @@ export async function paginate<T>(
         return;
     }
 
+    let lock = {
+        locked: false,
+        lockedId: '',
+    };
+
     await sentMessage.react('⬅️');
     await sentMessage.react('➡️');
 
+    /* Not essential to be ordered or to block execution, lets do these non async */
+    sentMessage.react('🔒');
+    sentMessage.react('❌');
+
     const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return ['⬅️', '➡️', '🔒'].includes(reaction.emoji.name) && !user.bot;
+        return ['⬅️', '➡️', '🔒', '❌'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 600000 }); // 10 minutes
 
-    const changePage = (amount: number, reaction, user: string) => {
+    const changePage = (amount: number, reaction: MessageReaction, user: User) => {
         reaction.users.remove(user.id);
+
+        if (lock.locked && user.id !== lock.lockedId) {
+            return;
+        }
 
         /* Check we can move this many pages */
         if (currentPage + amount >= 1 && currentPage + amount <= totalPages) {
@@ -170,17 +185,92 @@ export async function paginate<T>(
         sentMessage.edit(embed);
     };
 
-    collector.on('collect', async (reaction, user) => {
+    const lockEmbed = (reaction: MessageReaction, user: User) => {
+        const allowedRoles = [
+            'Mod',
+            'Los de Intendencia'
+        ];
+
+        const guildUser = msg.guild!.members.cache.get(user.id);
+
+        if (!guildUser) {
+            reaction.users.remove(user.id);
+            return;
+        }
+
+        for (let role of allowedRoles) {
+            if (guildUser.roles.cache.some((r) => r.name === role)) {
+                if (lock.locked) {
+                    if (lock.lockedId === user.id) {
+                        lock.locked = false;
+                        lock.lockedId = '';
+                        reaction.users.remove(user.id);
+                        return;
+                    } else {
+                        return;
+                    }
+                } else {
+                    lock.locked = true;
+                    lock.lockedId = user.id;
+                    return;
+                }
+            }
+        }
+    };
+
+    const removeEmbed = (reaction: MessageReaction, user: User) => {
+        const allowedRoles = [
+            'Mod',
+            'Los de Intendencia'
+        ];
+
+        const guildUser = msg.guild!.members.cache.get(user.id);
+
+        if (!guildUser) {
+            reaction.users.remove(user.id);
+            return;
+        }
+
+        for (let role of allowedRoles) {
+            if (guildUser.roles.cache.some((r) => r.name === role)) {
+                sentMessage.delete();
+            }
+        }
+    };
+
+    collector.on('collect', async (reaction: MessageReaction, user: User) => {
         switch (reaction.emoji.name) {
             case '⬅️': {
-                changePage(-1);
+                changePage(-1, reaction, user);
                 break;
             }
             case '➡️': {
-                changePage(1);
+                changePage(1, reaction, user);
                 break;
             }
             case '🔒': {
+                lockEmbed(reaction, user);
+                break;
+            }
+            case '❌': {
+                removeEmbed(reaction, user);
+                break;
+            }
+            default: {
+                console.log('default case in paginate');
+                break;
+            }
+        }
+     });
+
+    collector.on('remove', async (reaction: MessageReaction, user: User) => {
+        if (user.bot) {
+            return;
+        }
+
+        switch (reaction.emoji.name) {
+            case '🔒': {
+                lockEmbed(reaction, user);
                 break;
             }
             default: {
