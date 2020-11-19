@@ -140,20 +140,17 @@ export async function paginate<T>(
     await sentMessage.react('➡️');
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return ['⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
+        return ['⬅️', '➡️', '🔒'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 600000 }); // 10 minutes
 
-    collector.on('collect', async (reaction, user) => {
+    const changePage = (amount: number, reaction, user: string) => {
         reaction.users.remove(user.id);
 
-        if (reaction.emoji.name === '⬅️') {
-            if (currentPage > 1) {
-                currentPage--;
-            }
+        /* Check we can move this many pages */
+        if (currentPage + amount >= 1 && currentPage + amount <= totalPages) {
+            currentPage += amount;
         } else {
-            if (currentPage < totalPages) {
-                currentPage++;
-            }
+            return;
         }
 
         embed.fields = [];
@@ -171,5 +168,25 @@ export async function paginate<T>(
         }
 
         sentMessage.edit(embed);
-    });
+    };
+
+    collector.on('collect', async (reaction, user) => {
+        switch (reaction.emoji.name) {
+            case '⬅️': {
+                changePage(-1);
+                break;
+            }
+            case '➡️': {
+                changePage(1);
+                break;
+            }
+            case '🔒': {
+                break;
+            }
+            default: {
+                console.log('default case in paginate');
+                break;
+            }
+        }
+     });
 }
