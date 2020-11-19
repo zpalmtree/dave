@@ -1781,14 +1781,37 @@ export function handleNikocado(msg: Message): void {
     msg.reply(pickRandomItem(nikocados));
 }
 
-export async function handleImage(msg: Message, args: string): Promise<void> {
+export async function handleYoutube(msg: Message, args: string): Promise<void> {
+    handleImage(msg, args, 'youtube.com', displayVideo);
+}
+
+function displayImage(duckduckgoItem: any, embed: MessageEmbed) {
+    embed.setTitle(duckduckgoItem.title);
+    embed.setImage(duckduckgoItem.image);
+    embed.setDescription(duckduckgoItem.url);
+}
+
+function displayVideo(duckduckgoItem: any, embed: MessageEmbed) {
+    embed.setTitle(duckduckgoItem.title);
+    embed.setImage(duckduckgoItem.image);
+    embed.setURL(duckduckgoItem.url);
+}
+
+export async function handleImage(msg: Message, args: string, site?: string, displayFunction?: (duckduckgoItem: any, embed: MessageEmbed) => any): Promise<void> {
     if (args.trim() === '') {
         msg.reply('No query given');
         return;
     }
 
+    let query = args;
+
+    /* Search a specific site */
+    if (site) {
+        query += ` site:${site}`;
+    }
+
     const tokenParams = {
-        q: args,
+        q: query,
         kl: 'us-en', // US location
         kp: -2, // safe search off
         kac: -1, // auto suggest off
@@ -1801,6 +1824,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         },
     };
 
+    // gotta get our magic token to perform an image search
     const tokenURL = `https://duckduckgo.com/?${stringify(tokenParams)}`;
 
     let data: any;
@@ -1813,6 +1837,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
+    // gimme that token...
     const regex = /vqd='([\d-]+)'/gm;
 
     const [, token ] = regex.exec(data) || [ undefined, undefined ];
@@ -1823,12 +1848,12 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
     }
 
     const imageParams = {
-        q: args,
+        q: query,
         l: 'us-en', // US location
         ac: -1, // auto suggest off
         av: 1, // load all results
         p: -1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
-        vqd: token,
+        vqd: token, // magic token!
         f: ',,,',
         v7exp: 'a',
         o: 'json',
@@ -1892,9 +1917,12 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         1,
         (item: any) => {
             console.log(item.image);
-            embed.setTitle(item.title);
-            embed.setImage(item.image);
-            embed.setDescription(item.url);
+
+            if (displayFunction) {
+                displayFunction(item, embed);
+            } else {
+                displayImage(item, embed);
+            }
         },
         filtered,
         embed,

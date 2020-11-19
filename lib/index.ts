@@ -40,6 +40,7 @@ import {
     handleAvatar,
     handleNikocado,
     handleImage,
+    handleYoutube,
 } from './Commands';
 
 import {
@@ -77,6 +78,7 @@ import {
     handleAvatarHelp,
     handleNikocadoHelp,
     handleImageHelp,
+    handleYoutubeHelp,
 } from './Help';
 
 const god = '354701063955152898';
@@ -281,6 +283,14 @@ const commands: Command[] = [
         implementation: handleImage,
         helpFunction: handleImageHelp,
         description: 'Query duckduckgo images',
+    },
+    {
+        aliases: ['youtube'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleYoutube,
+        helpFunction: handleYoutubeHelp,
+        description: 'Query youtube',
     },
 ];
 
