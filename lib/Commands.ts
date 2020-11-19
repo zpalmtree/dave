@@ -1261,7 +1261,7 @@ export async function handleWatch(msg: Message, args: string[]): Promise<void> {
             const [, daysStr, hoursStr, minutesStr ] = relativeTimeRegex.exec(time) || [ undefined, undefined, undefined, undefined ];
 
             if (daysStr === undefined && hoursStr === undefined && minutesStr === undefined) {
-                msg.reply(`Could not parse time "${time}". Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM.\``);
+                msg.reply(`Could not parse time "${time}". Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM\``);
                 return;
             }
 
