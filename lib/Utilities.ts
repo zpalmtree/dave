@@ -254,8 +254,11 @@ export async function paginate<T>(
         for (let role of allowedRoles) {
             if (guildUser.roles.cache.some((r) => r.name === role)) {
                 sentMessage.delete();
+                return;
             }
         }
+
+        reaction.users.remove(user.id);
     };
 
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
