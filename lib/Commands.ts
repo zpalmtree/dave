@@ -1871,6 +1871,10 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
     const filtered = imageData.results.filter((img: any) => {
         const url = new URL(img.image);
 
+        if (url.protocol === 'http:') {
+            return false;
+        }
+
         const file = url.pathname;
 
         return validExtensions.some((ext) => file.endsWith(`.${ext}`));
@@ -1887,6 +1891,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         msg,
         1,
         (item: any) => {
+            console.log(item.image);
             embed.setTitle(item.title);
             embed.setImage(item.image);
             embed.setDescription(item.url);
