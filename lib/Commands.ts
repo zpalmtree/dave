@@ -1866,6 +1866,21 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
+    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webm', 'mp4'];
+
+    const filtered = imageData.results.filter((img: any) => {
+        const url = new URL(img.image);
+
+        const file = url.pathname;
+
+        return validExtensions.some((ext) => file.endsWith(`.${ext}`));
+    });
+
+    if (filtered.length === 0) {
+        msg.reply('No results found!');
+        return;
+    }
+
     const embed = new MessageEmbed();
 
     paginate(
@@ -1876,7 +1891,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
             embed.setImage(item.image);
             embed.setDescription(item.url);
         },
-        imageData.results,
+        filtered,
         embed,
         true,
     );
