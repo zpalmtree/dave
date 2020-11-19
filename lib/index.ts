@@ -303,6 +303,10 @@ function handleMessage(msg: Message) {
         return;
     }
 
+    if (config.devEnv && msg.channel.id !== config.devChannel) {
+        return;
+    }
+
     /* Get the command with prefix, and any args */
     const [ tmp, ...args ] = msg.content.split(' ');
 
@@ -352,9 +356,9 @@ function main() {
     client.on('ready', () => {
         console.log('Logged in');
 
-        client.channels.fetch(config.fit)
-            .then((fit) => handleWatchNotifications(fit as TextChannel))
-            .catch((err) => { console.error(`Failed to find fit channel: ${err.toString()}`); });
+        client.channels.fetch(config.devEnv ? config.devChannel : config.fit)
+            .then((chan) => handleWatchNotifications(chan as TextChannel))
+            .catch((err) => { console.error(`Failed to find channel: ${err.toString()}`); });
     });
 
     client.on('message', (msg) => {

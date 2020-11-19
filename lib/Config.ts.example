@@ -17,6 +17,10 @@ class Config {
     public kittyBreedLink: string = 'https://pastebin.com/0iCzvPJq';
 
     public watchPollInterval: number = 10000;
+
+    public devEnv: boolean = false;
+
+    public devChannel: string = '483470443001413673';
 }
 
 export let config = new Config();
