@@ -1,7 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-import { RGB } from './Types';
 import { promisify } from 'util';
 
 import {
@@ -10,6 +9,9 @@ import {
     MessageReaction,
     User,
 } from 'discord.js';
+
+import { RGB } from './Types';
+import { config } from './Config';
 
 const readFile = promisify(fs.readFile);
 const writeFile = promisify(fs.writeFile);
@@ -204,7 +206,7 @@ export async function paginate<T>(
 
         for (let role of allowedRoles) {
             /* User has permission to perform action */
-            if (guildUser.roles.cache.some((r) => r.name === role)) {
+            if (guildUser.roles.cache.some((r) => r.name === role) || msg.author.id === user.id || user.id === config.god) {
                 console.log('user has permission');
 
                 /* Embed is currently locked */
@@ -252,7 +254,7 @@ export async function paginate<T>(
         }
 
         for (let role of allowedRoles) {
-            if (guildUser.roles.cache.some((r) => r.name === role)) {
+            if (guildUser.roles.cache.some((r) => r.name === role) || user.id === config.god) {
                 sentMessage.delete();
                 return;
             }

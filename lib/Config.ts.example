@@ -8,7 +8,7 @@ class Config {
     /* Used for accessing the cat api */
     public catApiKey: string = 'enter api key here';
 
-    public exchangeRateApiKey: string = '4d9af4c7abcf411692abcd198867c68b';
+    public exchangeRateApiKey: string = 'enter exchange rate api key here';
 
     public fit: string = 'enter channel here';
 
@@ -20,7 +20,9 @@ class Config {
 
     public devEnv: boolean = false;
 
-    public devChannel: string = '483470443001413673';
+    public devChannel: string = 'enter channel here';
+
+    public god: string = 'enter user here';
 }
 
 export let config = new Config();

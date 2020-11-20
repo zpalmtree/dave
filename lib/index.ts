@@ -81,8 +81,6 @@ import {
     handleYoutubeHelp,
 } from './Help';
 
-const god = '354701063955152898';
-
 const commands: Command[] = [
     {
         aliases: ['roll', 'reroll'],
@@ -384,7 +382,7 @@ function canAccessCommand(msg: Message, react: boolean): boolean {
         return true;
     }
 
-    if (msg.author.id === god) {
+    if (msg.author.id === config.god) {
         return true;
     }
 
