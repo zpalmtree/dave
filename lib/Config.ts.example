@@ -23,6 +23,8 @@ class Config {
     public devChannel: string = 'enter channel here';
 
     public god: string = 'enter user here';
+
+    public dbFile: string = 'example.sqlite3';
 }
 
 export let config = new Config();

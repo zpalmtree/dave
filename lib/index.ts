@@ -1,4 +1,5 @@
 import * as moment from 'moment';
+import { Database } from 'sqlite3';
 
 import {
     Message,
@@ -41,6 +42,7 @@ import {
     handleNikocado,
     handleImage,
     handleYoutube,
+    migrateSuggest,
 } from './Commands';
 
 import {
@@ -52,6 +54,12 @@ import {
     Command,
     ScheduledWatch,
     Args,
+    DontNeedArgsCommandDb,
+    DontNeedArgsCommand,
+    SplitArgsCommandDb,
+    SplitArgsCommand,
+    CombinedArgsCommandDb,
+    CombinedArgsCommand,
 } from './Types';
 
 import {
@@ -97,6 +105,7 @@ const commands: Command[] = [
         implementation: handleQuote,
         helpFunction: handleQuoteHelp,
         description: 'Gets a random quote',
+        needDb: true,
     },
     {
         aliases: ['suggest'],
@@ -105,6 +114,7 @@ const commands: Command[] = [
         implementation: handleSuggest,
         helpFunction: handleSuggestHelp,
         description: 'Suggest a new quote',
+        needDb: true,
     },
     {
         aliases: ['fortune'],
@@ -184,6 +194,7 @@ const commands: Command[] = [
         implementation: handleWatch,
         helpFunction: handleWatchHelp,
         description: 'Display or schedule a movie/series to watch',
+        needDb: true,
     },
     {
         aliases: ['time'],
@@ -208,6 +219,7 @@ const commands: Command[] = [
         implementation: handleTimer,
         helpFunction: handleTimerHelp,
         description: 'Set a timer to remind you of something',
+        needDb: true,
     },
     {
         aliases: ['countdown'],
@@ -292,7 +304,7 @@ const commands: Command[] = [
     },
 ];
 
-function handleMessage(msg: Message) {
+function handleMessage(msg: Message, db: Database) {
     if (!msg.content.startsWith(config.prefix)) {
         return;
     }
@@ -330,15 +342,30 @@ function handleMessage(msg: Message) {
 
             switch (c.argsFormat) {
                 case Args.DontNeed: {
-                    c.implementation(msg);
+                    if (c.needDb) {
+                        (c.implementation as DontNeedArgsCommandDb)(msg, db);
+                    } else {
+                        (c.implementation as DontNeedArgsCommand)(msg);
+                    }
+
                     break;
                 }
                 case Args.Split: {
-                    c.implementation(msg, args);
+                    if (c.needDb) {
+                        (c.implementation as SplitArgsCommandDb)(msg, args, db);
+                    } else {
+                        (c.implementation as SplitArgsCommand)(msg, args);
+                    }
+
                     break;
                 }
                 case Args.Combined: {
-                    c.implementation(msg, args.join(' '));
+                    if (c.needDb) {
+                        (c.implementation as CombinedArgsCommandDb)(msg, args.join(' '), db);
+                    } else {
+                        (c.implementation as CombinedArgsCommand)(msg, args.join(' '));
+                    }
+
                     break;
                 }
             }
@@ -348,7 +375,85 @@ function handleMessage(msg: Message) {
     }
 }
 
+function getDB(): Database {
+    return new Database(config.dbFile);
+}
+
+function createTablesIfNeeded(db: Database) {
+    if (config.devEnv) {
+        const areYouReallySure = false;
+
+        if (areYouReallySure) {
+            db.run(`DROP TABLE IF EXISTS quote`);
+            db.run(`DROP TABLE IF EXISTS movie`);
+            db.run(`DROP TABLE IF EXISTS movie_link`);
+            db.run(`DROP TABLE IF EXISTS watch_event`);
+            db.run(`DROP TABLE IF EXISTS user_watch`);
+            db.run(`DROP TABLE IF EXISTS timer`);
+        }
+    }
+
+    /* This table stores our quotes. Simple as. */
+    db.run(`CREATE TABLE IF NOT EXISTS quote (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote TEXT NOT NULL,
+        channel_id VARCHAR(255) NOT NULL,
+        timestamp TIMESTAMP
+        DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    /* This table stores movie titles. */
+    db.run(`CREATE TABLE IF NOT EXISTS movie (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        channel_id VARCHAR(255) NOT NULL
+    )`);
+
+    /* This table stores download links for movies. It references the movie
+     * title */
+    db.run(`CREATE TABLE IF NOT EXISTS movie_link (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        link TEXT NOT NULL,
+        movie_id INTEGER NOT NULL,
+        FOREIGN KEY(movie_id) REFERENCES movie(id)
+    )`);
+
+    /* This table stores a watch "event". This is when a user schedules a time
+     * to watch a specific movie. We store the channel to have channel specific
+     * watch lists. It references the movies title. */
+    db.run(`CREATE TABLE IF NOT EXISTS watch_event (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TIMESTAMP NOT NULL,
+        channel_id VARCHAR(255) NOT NULL,
+        movie_id INTEGER NOT NULL,
+        FOREIGN KEY(movie_id) REFERENCES movie(id)
+    )`);
+
+    /* This table stores watch event attendees. It stores the discord user id,
+     * and references the watch event. */
+    db.run(`CREATE TABLE IF NOT EXISTS user_watch (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL,
+        watch_event INTEGER NOT NULL,
+        FOREIGN KEY(watch_event) REFERENCES watch_event(id)
+    )`);
+
+    /* This table stores set timers and their messages if they have one. */
+    db.run(`CREATE TABLE IF NOT EXISTS timer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL,
+        channel_id VARCHAR(255) NOT NULL,
+        message VARCHAR(2000)
+    )`);
+}
+
 function main() {
+    const db: Database = getDB();
+
+    createTablesIfNeeded(db);
+
+    db.on('error', console.error);
+
     const client = new Client();
 
     client.on('ready', () => {
@@ -357,11 +462,13 @@ function main() {
         client.channels.fetch(config.devEnv ? config.devChannel : config.fit)
             .then((chan) => handleWatchNotifications(chan as TextChannel))
             .catch((err) => { console.error(`Failed to find channel: ${err.toString()}`); });
+
+        migrateSuggest(db);
     });
 
     client.on('message', (msg) => {
         try {
-            handleMessage(msg as Message);
+            handleMessage(msg as Message, db);
         /* Usually discord permissions errors */
         } catch (err) {
             console.error('Caught error: ' + err.toString());

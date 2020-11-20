@@ -11,6 +11,7 @@ import { stringify, unescape } from 'querystring';
 import { promisify } from 'util';
 import { evaluate } from 'mathjs';
 import { decode } from 'he';
+import { Database } from 'sqlite3';
 
 import {
     Message,
@@ -292,44 +293,80 @@ function dubsType(roll: string): string {
     return dubTypes[index];
 }
 
-export async function handleQuote(msg: Message): Promise<void> {
-    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
+export async function handleQuote(msg: Message, db: Database): Promise<void> {
+    db.all(`SELECT quote, timestamp FROM quote WHERE channel_id = ?`, [msg.channel.id], (err, rows) => {
+        if (err) {
+            console.log('got error: ' + err);
+            msg.reply(err);
+            return;
+        }
 
-    if (err) {
-        msg.reply(`Failed to read quotes :( [ ${err.toString()} ]`);
-        return;
-    }
+        if (rows.length === 0) {
+            msg.reply('No quotes in the database! Use $suggest to suggest one.');
+            return;
+        }
 
-    const { quote, timestamp } = quotes[Math.floor(Math.random() * quotes.length)];
+        const { quote, timestamp } = rows[Math.floor(Math.random() * rows.length)];
 
-    if (timestamp !== 0) {
-        msg.channel.send(`${quote} - ${new Date(timestamp).toISOString().slice(0, 10)}`);
-    } else {
-        msg.channel.send(quote);
-    }
+        if (timestamp) {
+            msg.channel.send(`${quote} - ${new Date(timestamp).toISOString().slice(0, 10)}`);
+        } else {
+            msg.channel.send(quote);
+        }
+    });
 }
 
-export async function handleSuggest(msg: Message, suggestion: string | undefined): Promise<void> {
+export async function migrateSuggest(db: Database) {
+    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
+
+    console.log('performing migration');
+
+    for (const quote of quotes) {
+        console.log(`inserting ${quote.quote}`);
+
+        if (quote.timestamp && quote.timestamp !== 0) {
+            const stmt = db.prepare(
+                `INSERT INTO quote
+                    (quote, channel_id, timestamp)
+                VALUES
+                    (?, ?, ?)`,
+            );
+
+            stmt.run(quote.quote, config.devChannel, moment(quote.timestamp).toISOString());
+            stmt.finalize();
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO quote
+                    (quote, channel_id, timestamp)
+                VALUES
+                    (?, ?, NULL)`,
+            );
+
+            stmt.run(quote.quote, config.devChannel);
+
+            stmt.finalize();
+        }
+    }
+
+    console.log('done');
+}
+
+export async function handleSuggest(msg: Message, suggestion: string, db: Database): Promise<void> {
     if (!suggestion || suggestion.length <= 1) {
         msg.reply('Enter a fucking suggestion you wank stain');
         return;
     }
 
-    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
+    const stmt = db.prepare(
+        `INSERT INTO quote
+            (quote, channel_id)
+        VALUES
+            (?, ?)`,
+    );
 
-    if (err) {
-        msg.reply(`Failed to read quotes :( [ ${err.toString()} ]`);
-        return;
-    }
+    stmt.run(suggestion, msg.channel.id);
 
-    const newQuote: Quote = {
-        quote: suggestion,
-        timestamp: Date.now(),
-    };
-
-    quotes.push(newQuote);
-
-    await writeJSON('quotes.json', quotes);
+    stmt.finalize();
 
     await msg.react('👍');
 }
@@ -1201,7 +1238,7 @@ async function awaitWatchReactions(
     });
 }
 
-export async function handleWatch(msg: Message, args: string[]): Promise<void> {
+export async function handleWatch(msg: Message, args: string[], db: Database): Promise<void> {
     /* No args, display scheduled things to watch */
     if (args.length === 0) {
         await displayScheduledWatches(msg);
@@ -1303,7 +1340,7 @@ export function handleDate(msg: Message, args: string) {
     msg.reply(`The current date is ${moment().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
 }
 
-export async function handleTimer(msg: Message, args: string[]) {
+export async function handleTimer(msg: Message, args: string[], db: Database) {
     const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 
     const results = regex.exec(args.join(' '));
@@ -1782,7 +1819,11 @@ export function handleNikocado(msg: Message): void {
 }
 
 export async function handleYoutube(msg: Message, args: string): Promise<void> {
-    handleImage(msg, args, 'youtube.com', displayVideo);
+    handleImageImpl(msg, args, 'youtube.com', displayVideo);
+}
+
+export async function handleImage(msg: Message, args: string): Promise<void> {
+    handleImageImpl(msg, args);
 }
 
 function displayImage(duckduckgoItem: any, embed: MessageEmbed) {
@@ -1797,7 +1838,7 @@ function displayVideo(duckduckgoItem: any, embed: MessageEmbed) {
     embed.setURL(duckduckgoItem.url);
 }
 
-export async function handleImage(msg: Message, args: string, site?: string, displayFunction?: (duckduckgoItem: any, embed: MessageEmbed) => any): Promise<void> {
+export async function handleImageImpl(msg: Message, args: string, site?: string, displayFunction?: (duckduckgoItem: any, embed: MessageEmbed) => any): Promise<void> {
     if (args.trim() === '') {
         msg.reply('No query given');
         return;

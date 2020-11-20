@@ -4,3 +4,4 @@ Config.d.ts
 node_modules
 yarn-error.log
 dist/
+*.sqlite3

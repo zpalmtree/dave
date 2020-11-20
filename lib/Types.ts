@@ -1,3 +1,9 @@
+import {
+    Message,
+} from 'discord.js';
+
+import { Database } from 'sqlite3';
+
 export interface TimeUnits {
     Y: number;  // year
     M: number;  // month
@@ -36,6 +42,15 @@ export interface ScheduledWatch {
     complete: boolean;
 }
 
+export type DontNeedArgsCommandDb = (msg: Message, db: Database) => void;
+export type DontNeedArgsCommand = (msg: Message) => void;
+
+export type SplitArgsCommandDb = (msg: Message, args: string[], db: Database) => void;
+export type SplitArgsCommand = (msg: Message, args: string[]) => void;
+
+export type CombinedArgsCommandDb = (msg: Message, args: string, db: Database) => void;
+export type CombinedArgsCommand = (msg: Message, args: string) => void;
+
 export interface Command {
     /* How can we access the command? */
     aliases: string[];
@@ -47,16 +62,23 @@ export interface Command {
     hidden: boolean;
 
     /* The function that implements this command */
-    implementation: any;
+    implementation: DontNeedArgsCommandDb
+                  | DontNeedArgsCommand
+                  | SplitArgsCommandDb
+                  | SplitArgsCommand
+                  | CombinedArgsCommandDb
+                  | CombinedArgsCommand;
 
     /* The function that provides help / examples on this command */
-    helpFunction?: any;
+    helpFunction?: (msg: Message) => void;
 
     /* A description of the command for help strings */
     description?: string;
 
     /* If the command is disabled */
     disabled?: boolean;
+
+    needDb?: boolean;
 }
 
 export enum Args {
