@@ -27,7 +27,7 @@ Dave is a discord bot.
    3. Enable `Developer Mode`.
 
 * Edit this link, replacing the string of numbers after `client_id=` with the Client ID you noted down earlier.
-`https://discordapp.com/oauth2/authorize?client_id=498258111572738048&scope=bot&permissions=268437568`
+`https://discord.com/oauth2/authorize?client_id=446154284514541579&scope=bot&permissions=268437568`
 * Open said link and choose the server you wish to add the bot to. You must have `Manage Server` permissions.
 
 ## Configuration
