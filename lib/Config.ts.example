@@ -10,8 +10,6 @@ class Config {
 
     public exchangeRateApiKey: string = 'enter exchange rate api key here';
 
-    public fit: string = 'enter channel here';
-
     public doggoBreedLink: string = 'https://pastebin.com/BS8JKb7V';
 
     public kittyBreedLink: string = 'https://pastebin.com/0iCzvPJq';
@@ -20,7 +18,9 @@ class Config {
 
     public devEnv: boolean = false;
 
-    public devChannel: string = 'enter channel here';
+    public devChannel: string = 'enter channel id here';
+
+    public mainChannel: string = 'enter channel id here';
 
     public god: string = 'enter user here';
 

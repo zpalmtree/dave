@@ -402,7 +402,7 @@ async function main() {
     client.on('ready', async () => {
         console.log('Logged in');
 
-        client.channels.fetch(config.devEnv ? config.devChannel : config.fit)
+        client.channels.fetch(config.devEnv ? config.devChannel : config.mainChannel)
             .then((chan) => handleWatchNotifications(chan as TextChannel, db))
             .catch((err) => { console.error(`Failed to find channel: ${err.toString()}`); });
 
@@ -435,7 +435,7 @@ async function main() {
 }
 
 function canAccessCommand(msg: Message, react: boolean): boolean {
-    if (msg.channel.id === config.fit) {
+    if (msg.channel.id === config.mainChannel) {
         return true;
     }
 
@@ -523,7 +523,7 @@ export async function migrateSuggest(db: Database) {
                     quote.quote,
                     config.devEnv
                         ? config.devChannel
-                        : config.fit,
+                        : config.mainChannel,
                     moment(quote.timestamp).utcOffset(0).format('YYYY-MM-DD hh:mm:ss')
                 ]
             );
@@ -538,7 +538,7 @@ export async function migrateSuggest(db: Database) {
                     quote.quote,
                     config.devEnv
                         ? config.devChannel
-                        : config.fit
+                        : config.mainChannel
                 ]
             );
         }
@@ -570,7 +570,7 @@ export async function migrateWatch(db: Database) {
                 watch.title,
                 config.devEnv
                     ? config.devChannel
-                    : config.fit
+                    : config.mainChannel
             ]
         );
 
@@ -606,7 +606,7 @@ export async function migrateWatch(db: Database) {
                 moment(watch.time).utcOffset(0).format('YYYY-MM-DD hh:mm:ss'),
                 config.devEnv
                     ? config.devChannel
-                    : config.fit,
+                    : config.mainChannel,
                 movieID
             ]
         );
