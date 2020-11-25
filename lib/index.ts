@@ -566,7 +566,12 @@ export async function migrateWatch(db: Database) {
             VALUES
                 (?, ?)`,
             db,
-            [ watch.title, config.devChannel ]
+            [
+                watch.title,
+                config.devEnv
+                    ? config.devChannel
+                    : config.fit
+            ]
         );
 
         if (watch.link) {
@@ -597,7 +602,13 @@ export async function migrateWatch(db: Database) {
             VALUES
                 (?, ?, ?)`,
             db,
-            [ moment(watch.time).utcOffset(0).format('YYYY-MM-DD hh:mm:ss'), config.devChannel, movieID ]
+            [
+                moment(watch.time).utcOffset(0).format('YYYY-MM-DD hh:mm:ss'),
+                config.devEnv
+                    ? config.devChannel
+                    : config.fit,
+                movieID
+            ]
         );
 
         for (const attendee of watch.attending) {
