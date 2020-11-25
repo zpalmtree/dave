@@ -20,26 +20,26 @@ export interface Quote {
 }
 
 export interface ScheduledWatch {
-    /* Id of the watch */
-    id: number;
+    /* Id of the watch event */
+    watchID: number;
+
+    /* ID of the movie */
+    movieID: number;
 
     /* Title of the watch */
     title: string;
 
-    /* IMDB / myanimelist link */
-    link?: string;
+    /* IMDB / myanimelist links */
+    infoLinks: string[];
+
+    /* Magnet / youtube links */
+    downloadLinks: string[];
 
     /* Date of the watch */
     time: Date;
 
     /* Discord IDs attending */
     attending: string[];
-
-    /* Magnet link to download */
-    magnet?: string;
-
-    /* Has it completed */
-    complete: boolean;
 }
 
 export type DontNeedArgsCommandDb = (msg: Message, db: Database) => void;

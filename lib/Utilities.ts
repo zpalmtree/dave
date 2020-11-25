@@ -8,6 +8,7 @@ import {
     MessageEmbed,
     MessageReaction,
     User,
+    TextChannel,
 } from 'discord.js';
 
 import { RGB } from './Types';
@@ -299,4 +300,16 @@ export async function paginate<T>(
             }
         }
      });
+}
+
+export function sendTimer(channel: TextChannel, milliseconds: number, user_id: string, description?: string) {
+    const mention = `<@${user_id}>,`;
+
+    setTimeout(() => {
+        if (description) {
+            channel.send(`${mention} Your ${description} timer has elapsed.`);
+        } else {
+            channel.send(`${mention} Your timer has elapsed.`);
+        }
+    }, milliseconds);
 }

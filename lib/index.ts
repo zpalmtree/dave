@@ -42,13 +42,18 @@ import {
     handleNikocado,
     handleImage,
     handleYoutube,
-    migrateSuggest,
 } from './Commands';
 
 import {
+    sendTimer,
     readJSON,
-    writeJSON,
 } from './Utilities';
+
+import {
+    insertQuery,
+    createTablesIfNeeded,
+    deleteTablesIfNeeded,
+} from './Database';
 
 import {
     Command,
@@ -60,6 +65,7 @@ import {
     SplitArgsCommand,
     CombinedArgsCommandDb,
     CombinedArgsCommand,
+    Quote,
 } from './Types';
 
 import {
@@ -88,6 +94,10 @@ import {
     handleImageHelp,
     handleYoutubeHelp,
 } from './Help';
+
+import {
+    handleWatchNotifications,
+} from './Watch';
 
 const commands: Command[] = [
     {
@@ -379,91 +389,31 @@ function getDB(): Database {
     return new Database(config.dbFile);
 }
 
-function createTablesIfNeeded(db: Database) {
-    if (config.devEnv) {
-        const areYouReallySure = false;
-
-        if (areYouReallySure) {
-            db.run(`DROP TABLE IF EXISTS quote`);
-            db.run(`DROP TABLE IF EXISTS movie`);
-            db.run(`DROP TABLE IF EXISTS movie_link`);
-            db.run(`DROP TABLE IF EXISTS watch_event`);
-            db.run(`DROP TABLE IF EXISTS user_watch`);
-            db.run(`DROP TABLE IF EXISTS timer`);
-        }
-    }
-
-    /* This table stores our quotes. Simple as. */
-    db.run(`CREATE TABLE IF NOT EXISTS quote (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        quote TEXT NOT NULL,
-        channel_id VARCHAR(255) NOT NULL,
-        timestamp TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    /* This table stores movie titles. */
-    db.run(`CREATE TABLE IF NOT EXISTS movie (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        channel_id VARCHAR(255) NOT NULL
-    )`);
-
-    /* This table stores download links for movies. It references the movie
-     * title */
-    db.run(`CREATE TABLE IF NOT EXISTS movie_link (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        link TEXT NOT NULL,
-        movie_id INTEGER NOT NULL,
-        FOREIGN KEY(movie_id) REFERENCES movie(id)
-    )`);
-
-    /* This table stores a watch "event". This is when a user schedules a time
-     * to watch a specific movie. We store the channel to have channel specific
-     * watch lists. It references the movies title. */
-    db.run(`CREATE TABLE IF NOT EXISTS watch_event (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TIMESTAMP NOT NULL,
-        channel_id VARCHAR(255) NOT NULL,
-        movie_id INTEGER NOT NULL,
-        FOREIGN KEY(movie_id) REFERENCES movie(id)
-    )`);
-
-    /* This table stores watch event attendees. It stores the discord user id,
-     * and references the watch event. */
-    db.run(`CREATE TABLE IF NOT EXISTS user_watch (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id VARCHAR(255) NOT NULL,
-        watch_event INTEGER NOT NULL,
-        FOREIGN KEY(watch_event) REFERENCES watch_event(id)
-    )`);
-
-    /* This table stores set timers and their messages if they have one. */
-    db.run(`CREATE TABLE IF NOT EXISTS timer (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id VARCHAR(255) NOT NULL,
-        channel_id VARCHAR(255) NOT NULL,
-        message VARCHAR(2000)
-    )`);
-}
-
-function main() {
+async function main() {
     const db: Database = getDB();
 
-    createTablesIfNeeded(db);
+    await deleteTablesIfNeeded(db);
+    await createTablesIfNeeded(db);
 
     db.on('error', console.error);
 
     const client = new Client();
 
-    client.on('ready', () => {
+    client.on('ready', async () => {
         console.log('Logged in');
 
         client.channels.fetch(config.devEnv ? config.devChannel : config.fit)
-            .then((chan) => handleWatchNotifications(chan as TextChannel))
+            .then((chan) => handleWatchNotifications(chan as TextChannel, db))
             .catch((err) => { console.error(`Failed to find channel: ${err.toString()}`); });
 
-        migrateSuggest(db);
+        const migrate = false;
+
+        if (migrate) {
+            await migrateSuggest(db);
+            await migrateWatch(db);
+        }
+
+        restoreTimers(db, client);
     });
 
     client.on('message', (msg) => {
@@ -519,34 +469,150 @@ function handleHelp(msg: Message): void {
     msg.reply(embed);
 }
 
-async function handleWatchNotifications(channel: TextChannel) {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
+export async function restoreTimers(db: Database, client: Client) {
+    db.all(
+        `SELECT
+            user_id,
+            channel_id,
+            message,
+            expire_time
+        FROM
+            timer`,
+        async (err, rows) => {
+            if (err) {
+                console.log('got error: ' + err);
+                return;
+            }
+
+            for (const row of rows) {
+                const milliseconds = moment(row.expire_time).diff(moment());
+
+                if (milliseconds < 0) {
+                    continue;
+                }
+
+                const chan = await client.channels.fetch(row.channel_id);
+
+                sendTimer(chan as TextChannel, milliseconds, row.user_id, row.message);
+            }
+        }
+    );
+}
+
+export async function migrateSuggest(db: Database) {
+    console.log('-- Performing quote migration');
+
+    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
 
     if (err) {
-        setTimeout(handleWatchNotifications, config.watchPollInterval, channel);
+        console.error(err);
+        return;
+    }
+
+    for (const quote of quotes) {
+        console.log(`---- Inserting ${quote.quote}..`);
+
+        if (quote.timestamp && quote.timestamp !== 0) {
+            await insertQuery(
+                `INSERT INTO quote
+                    (quote, channel_id, timestamp)
+                VALUES
+                    (?, ?, ?)`,
+                db,
+                [
+                    quote.quote,
+                    config.devEnv
+                        ? config.devChannel
+                        : config.fit,
+                    moment(quote.timestamp).utcOffset(0).format('YYYY-MM-DD hh:mm:ss')
+                ]
+            );
+        } else {
+            await insertQuery(
+                `INSERT INTO quote
+                    (quote, channel_id, timestamp)
+                VALUES
+                    (?, ?, NULL)`,
+                db,
+                [
+                    quote.quote,
+                    config.devEnv
+                        ? config.devChannel
+                        : config.fit
+                ]
+            );
+        }
+    }
+
+    console.log('-- Done');
+}
+
+export async function migrateWatch(db: Database) {
+    console.log('-- Performing watch migration');
+
+    const { err, data } = await readJSON<any>('watch.json');
+
+    if (err) {
+        console.error(err);
         return;
     }
 
     for (const watch of data) {
-        const fourHourReminder = moment(watch.time).subtract(4, 'hours');
-        const fifteenMinuteReminder = moment(watch.time).subtract(15, 'minutes');
+        console.log(`---- Inserting ${watch.title}...`);
 
-        /* Get our watch 'window' */
-        const nMinsAgo = moment().subtract(config.watchPollInterval / 2, 'milliseconds');
-        const nMinsAhead = moment().add(config.watchPollInterval / 2, 'milliseconds');
+        const movieID = await insertQuery(
+            `INSERT INTO movie
+                (title, channel_id)
+            VALUES
+                (?, ?)`,
+            db,
+            [ watch.title, config.devChannel ]
+        );
 
-        const mention = watch.attending.map((x) => `<@${x}>`).join(' ');
-
-        if (fourHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
-            channel.send(`${mention}, reminder, you are watching ${watch.title} in 4 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
+        if (watch.link) {
+            await insertQuery(
+                `INSERT INTO movie_link
+                    (link, movie_id, is_download)
+                VALUES
+                    (?, ?, 0)`,
+                db,
+                [ watch.link, movieID ]
+            );
         }
 
-        if (fifteenMinuteReminder.isBetween(nMinsAgo, nMinsAhead)) {
-            channel.send(`${mention}, reminder, you are watching ${watch.title} ${moment(watch.time).fromNow()}`);
+        if (watch.magnet) {
+            await insertQuery(
+                `INSERT INTO movie_link
+                    (link, movie_id, is_download)
+                VALUES
+                    (?, ?, 1)`,
+                db,
+                [ watch.magnet, movieID ]
+            );
+        }
+
+        const watchEventID = await insertQuery(
+            `INSERT INTO watch_event
+                (timestamp, channel_id, movie_id)
+            VALUES
+                (?, ?, ?)`,
+            db,
+            [ moment(watch.time).utcOffset(0).format('YYYY-MM-DD hh:mm:ss'), config.devChannel, movieID ]
+        );
+
+        for (const attendee of watch.attending) {
+            await insertQuery(
+                `INSERT INTO user_watch
+                    (user_id, watch_event)
+                VALUES
+                    (?, ?)`,
+                db,
+                [ attendee, watchEventID ]
+            );
         }
     }
 
-    setTimeout(handleWatchNotifications, config.watchPollInterval, channel);
+    console.log('-- Done');
 }
 
 main();

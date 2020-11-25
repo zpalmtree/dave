@@ -53,7 +53,14 @@ import {
     haveRole,
     pickRandomItem,
     paginate,
+    sendTimer,
 } from './Utilities';
+
+import {
+    insertQuery,
+    selectQuery,
+    deleteQuery,
+} from './Database';
 
 import {
     TimeUnits,
@@ -64,6 +71,16 @@ import {
 import {
     exchangeService
 } from './Exchange';
+
+import {
+    displayScheduledWatches,
+    displayAllWatches,
+    addLink,
+    updateTime,
+    deleteWatch,
+    displayWatchById,
+    scheduleWatch,
+} from './Watch';
 
 const timeUnits: TimeUnits = {
     Y: 31536000,
@@ -296,7 +313,6 @@ function dubsType(roll: string): string {
 export async function handleQuote(msg: Message, db: Database): Promise<void> {
     db.all(`SELECT quote, timestamp FROM quote WHERE channel_id = ?`, [msg.channel.id], (err, rows) => {
         if (err) {
-            console.log('got error: ' + err);
             msg.reply(err);
             return;
         }
@@ -316,57 +332,20 @@ export async function handleQuote(msg: Message, db: Database): Promise<void> {
     });
 }
 
-export async function migrateSuggest(db: Database) {
-    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
-
-    console.log('performing migration');
-
-    for (const quote of quotes) {
-        console.log(`inserting ${quote.quote}`);
-
-        if (quote.timestamp && quote.timestamp !== 0) {
-            const stmt = db.prepare(
-                `INSERT INTO quote
-                    (quote, channel_id, timestamp)
-                VALUES
-                    (?, ?, ?)`,
-            );
-
-            stmt.run(quote.quote, config.devChannel, moment(quote.timestamp).toISOString());
-            stmt.finalize();
-        } else {
-            const stmt = db.prepare(
-                `INSERT INTO quote
-                    (quote, channel_id, timestamp)
-                VALUES
-                    (?, ?, NULL)`,
-            );
-
-            stmt.run(quote.quote, config.devChannel);
-
-            stmt.finalize();
-        }
-    }
-
-    console.log('done');
-}
-
 export async function handleSuggest(msg: Message, suggestion: string, db: Database): Promise<void> {
     if (!suggestion || suggestion.length <= 1) {
         msg.reply('Enter a fucking suggestion you wank stain');
         return;
     }
 
-    const stmt = db.prepare(
+    await insertQuery(
         `INSERT INTO quote
             (quote, channel_id)
         VALUES
             (?, ?)`,
+        db,
+        [ suggestion, msg.channel.id ]
     );
-
-    stmt.run(suggestion, msg.channel.id);
-
-    stmt.finalize();
 
     await msg.react('👍');
 }
@@ -797,527 +776,47 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-async function readWatchJSON(update: boolean = false): Promise<{ err: string | undefined, data: ScheduledWatch[] }> {
-    let { err, data } = await readJSON<ScheduledWatch>('watch.json');
-
-    if (err) {
-        return {
-            err,
-            data: [],
-        };
-    }
-
-    const newData = data.map((watch) => {
-        /* Has more than 3 hours passed since the scheduled watch time? */
-        watch.complete = !moment(watch.time).add(3, 'hours').isAfter(moment());
-        return watch;
-    });
-
-    if (update) {
-        writeJSON('watch.json', newData);
-    }
-
-    return {
-        err: undefined,
-        data: newData
-    };
-}
-
-async function displayScheduledWatches(msg: Message): Promise<void> {
-    let { err, data } = await readWatchJSON(true);
-
-    if (err) {
-        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
-        return;
-    }
-
-    data = data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-               .filter((watch) => !watch.complete);
-
-    if (data.length === 0) {
-        msg.reply('Nothing has been scheduled to be watched yet! Use `$watch help` for more info');
-        return;
-    }
-
-    const embed = new MessageEmbed()
-        .setTitle('Scheduled Movies/Series To Watch')
-        .setFooter('Use $watch <movie id> to view more info and sign up to watch');
-
-    const f = (watch: ScheduledWatch) => {
-        return [
-            {
-                name: `ID: ${watch.id}`,
-                value: watch.link
-                    ? `[${watch.title}](${watch.link})`
-                    : watch.title,
-                inline: true,
-            },
-            {
-                name: 'Time',
-                /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-                value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                    ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                    : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`,
-                inline: true,
-            },
-            {
-                name: 'Attending',
-                value: watch.attending.map((user) => {
-                    const userObj = msg.guild!.members.cache.get(user)
-
-                    if (userObj !== undefined) {
-                        return userObj.displayName;
-                    }
-
-                    return `Unknown User <@${user}>`;
-                }).join(', '),
-                inline: true,
-            },
-        ];
-    }
-
-    paginate(
-        msg,
-        7,
-        f,
-        data,
-        embed,
-    );
-}
-
-async function displayAllWatches(msg: Message): Promise<void> {
-    let { err, data } = await readWatchJSON(true);
-
-    if (err) {
-        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
-        return;
-    }
-
-    data = data.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-               .filter((watch) => watch.complete);
-
-    if (data.length === 0) {
-        msg.reply('Nothing has been watched before!');
-        return;
-    }
-
-    const maxPageSize = 10;
-
-    const embed = new MessageEmbed()
-        .setTitle('Previously Watched Movies/Series');
-
-    const totalPages = Math.floor(data.length / maxPageSize)
-                     + (data.length % maxPageSize ? 1 : 0);
-
-    paginate(
-        msg,
-        maxPageSize,
-        (watch: ScheduledWatch) => {
-            return {
-                name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
-                value: watch.link
-                    ? `[${watch.title}](${watch.link})`
-                    : watch.title,
-                inline: false,
-            }
-        },
-        data,
-        embed,
-        true,
-    );
-}
-
-async function addMagnet(msg: Message, args: string[]): Promise<void> {
-    if (args.length < 2) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
-        return;
-    }
-
-    const id = Number(args[0]);
-
-    if (Number.isNaN(id)) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
-        return;
-    }
-
-    if (!/^(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)$/.test(args[1])) {
-        handleWatchHelp(msg, 'Input does not look like a magnet or youtube link. Please try one of the following options.');
-        return;
-    }
-
-    if (args[1].length > 1000) {
-        msg.reply('Link is too long. Must be less than 1000 chars.');
-        return;
-    }
-
-    const watch = await updateWatchById(Number(id), {
-        magnet: args[1],
-    });
-
-    if (typeof watch === 'string') {
-        msg.reply(watch);
-    } else {
-        msg.reply(`Successfully added/updated link for ${watch.title}`);
-    }
-}
-
-async function updateTime(msg: Message, args: string[]): Promise<void> {
-    const regex = /(\d+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d))/;
-
-    const results = regex.exec(args.join(' '));
-
-    if (results) {
-        const [ , id, time ] = results;
-
-        if (!moment(time, 'YYYY/MM/DD hh:mm ZZ').isValid()) {
-            msg.reply(`Failed to parse date/time "${time}"`);
-            return;
-        }
-
-        const watch = await updateWatchById(Number(id), {
-            time: moment(time, 'YYYY/MM/DD hh:mm ZZ'),
-        });
-
-        if (typeof watch === 'string') {
-            msg.reply(watch);
-        } else {
-            msg.reply(`Successfully updated time for ${watch.title} to ${moment(time, 'YYYY/MM/DD hh:mm ZZ').utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
-        }
-    } else {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
-    }
-}
-
-async function getWatchById(id: number): Promise<{ data: ScheduledWatch[], index: number } | string> {
-    let { err, data } = await readWatchJSON();
-
-    if (err) {
-        return `Failed to read watch list: ${err.toString()}`;
-    }
-
-    const index = data.findIndex((watch) => watch.id === id);
-
-    if (index === -1) {
-        return `Could not find movie ID "${id}".`;
-    }
-
-    return {
-        data,
-        index,
-    };
-}
-
-async function updateWatchById(id: number, fields: any): Promise<string | ScheduledWatch> {
-    const watch = await getWatchById(id);
-
-    if (typeof watch === 'string') {
-        return watch;
-    }
-
-    const newWatch = {
-        ...watch.data[watch.index],
-        ...fields,
-    };
-
-    watch.data[watch.index] = newWatch;
-
-    writeJSON('watch.json', watch.data);
-
-    return newWatch;
-}
-
-async function deleteWatch(msg: Message, args: string[]): Promise<void> {
-    if (args.length === 0) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
-        return;
-    }
-
-    const id = Number(args[0]);
-
-    if (Number.isNaN(id)) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
-        return;
-    }
-
-    const watch = await getWatchById(id);
-
-    if (typeof watch === 'string') {
-        msg.reply(watch);
-        return;
-    }
-
-    const movie = watch.data[watch.index];
-
-    const areOnlyAttendee = movie.attending.length === 1 && movie.attending[0] === msg.author.id;
-
-    if (!areOnlyAttendee && !haveRole(msg, 'Mod')) {
-        msg.reply('You must be the only watch attendee, or be a mod, to remove a movie');
-        return;
-    }
-
-    const title = movie.title;
-
-    /* Remove watch */
-    watch.data.splice(watch.index, 1);
-
-    writeJSON('watch.json', watch.data);
-
-    msg.reply(`Successfully deleted scheduled watch ${title}`);
-}
-
-async function removeWatchById(id: number): Promise<string> {
-    const watch = await getWatchById(id);
-
-    if (typeof watch === 'string') {
-        return watch;
-    }
-
-    const title = watch.data[watch.index].title;
-
-    /* Remove watch */
-    watch.data.splice(watch.index, 1);
-
-    writeJSON('watch.json', watch.data);
-
-    return `Successfully deleted scheduled watch ${title}`;
-}
-
-async function displayWatchById(msg: Message, id: number): Promise<void> {
-    const watchData = await getWatchById(Number(id));
-
-    if (typeof watchData === 'string') {
-        msg.reply(watchData);
-        return;
-    }
-
-    const watch = watchData.data[watchData.index];
-
-    const embed = new MessageEmbed()
-        .setTitle(watch.title)
-        .setFooter('React with 👍 if you want to attend this movie night')
-
-    embed.addFields(
-        {
-            name: 'Time',
-            /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-            value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`,
-        },
-        {
-            name: 'Attending',
-            value: watch.attending.map((user) => {
-                const userObj = msg.guild!.members.cache.get(user);
-
-                if (userObj !== undefined) {
-                    return userObj.displayName;
-                }
-
-                return `Unknown User <@${user}>`;
-            }).join(', '),
-        },
-    );
-
-    if (watch.link) {
-        embed.addFields({
-            name: 'Info Link',
-            value: watch.link,
-        });
-    }
-
-    if (watch.magnet) {
-        embed.addField('Download Link', watch.magnet);
-    }
-
-    const sentMessage = await msg.channel.send(embed);
-
-    awaitWatchReactions(sentMessage, watch.title, id, new Set(watch.attending), 1);
-}
-
-export async function scheduleWatch(msg: Message, title: string, time: moment.Moment, infoLink?: string, downloadLink?: string) {
-    let { err, data } = await readWatchJSON();
-
-    if (err) {
-        msg.reply(`Failed to read watch list :( [ ${err.toString()} ]`);
-        return;
-    }
-
-    const maxID = data.map((x) => x.id).sort((a, b) => b - a)[0] || 0;
-
-    data.push({
-        id: maxID + 1,
-        title,
-        link: infoLink,
-        time: time.toDate(),
-        attending: [msg.author.id],
-        magnet: downloadLink,
-        complete: false,
-    });
-
-    writeJSON('watch.json', data);
-
-    const embed = new MessageEmbed()
-        .setTitle(title)
-        .setDescription(`${title} has been successfully scheduled for ${time.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
-        .setFooter('React with 👍 if you want to attend this movie night')
-        .addFields(
-            {
-                name: 'Attending',
-                value: [msg.author.id].map((user) => {
-                    const userObj = msg.guild!.members.cache.get(user)
-
-                    if (userObj !== undefined) {
-                        return userObj.displayName;
-                    }
-
-                    return `Unknown User <@${user}>`;
-                }).join(', '),
-                inline: true,
-            },
-        );
-
-    const sentMessage = await msg.channel.send(embed);
-
-    awaitWatchReactions(sentMessage, title, maxID + 1, new Set([msg.author.id]), 0);
-}
-
-async function awaitWatchReactions(
-    msg: Message,
-    title: string,
-    id: number,
-    attending: Set<string>,
-    attendingFieldIndex: number) {
-
-    await msg.react('👍');
-    await msg.react('👎');
-
-    const collector = msg.createReactionCollector((reaction, user) => {
-        return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 3000000 });
-
-    collector.on('collect', async (reaction, user) => {
-        const embed = new MessageEmbed(msg.embeds[0]);
-
-        if (reaction.emoji.name === '👍') {
-            attending.add(user.id);
-        } else {
-            attending.delete(user.id);
-        }
-
-        if (attending.size === 0) {
-            msg.channel.send('All attendees removed! Cancelling watch.');
-            collector.stop();
-            const watchDeletionResponse = await removeWatchById(id);
-            msg.channel.send(watchDeletionResponse);
-            return;
-        }
-
-        embed.spliceFields(attendingFieldIndex, 1, {
-            name: 'Attending',
-            value: [...attending].map((user) => {
-                const userObj = msg.guild!.members.cache.get(user)
-
-                if (userObj !== undefined) {
-                    return userObj.displayName;
-                }
-
-                return `Unknown User <@${user}>`;
-            }).join(', '),
-            inline: true,
-        });
-
-        msg.edit(embed);
-
-        const err = await updateWatchById(id, {
-            attending: [...attending],
-        });
-
-        if (typeof err === 'string') {
-            msg.reply(err);
-        }
-    });
-}
-
 export async function handleWatch(msg: Message, args: string[], db: Database): Promise<void> {
     /* No args, display scheduled things to watch */
     if (args.length === 0) {
-        await displayScheduledWatches(msg);
+        await displayScheduledWatches(msg, db);
         return;
     }
 
+    /* Next lets check for a command match */
     if (args.length >= 1) {
         switch (args[0]) {
             case 'history': {
-                displayAllWatches(msg);
+                displayAllWatches(msg, db);
                 return;
             }
             case 'addlink': {
-                addMagnet(msg, args.slice(1));
+                addLink(msg, args.slice(1), db);
                 return;
             }
             case 'delete': {
-                deleteWatch(msg, args.slice(1));
+                deleteWatch(msg, args.slice(1), db);
                 return;
             }
             case 'updatetime': {
-                updateTime(msg, args.slice(1));
+                updateTime(msg, args.slice(1), db);
                 return;
             }
         }
     }
 
+    /* Single arg, should be trying to get a specific movie by id */
     if (args.length === 1) {
-        displayWatchById(msg, Number(args[0]));
+        displayWatchById(msg, Number(args[0]), db);
         return;
     }
 
-    /* Non greedy title match, optional imdb/myanimelist link, time, optional magnet/youtube link */
-    const regex = /^(.+?) (?:(https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+) )?([0-9+-: \/dhm]+?) ?(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)?$/;
+    /* Otherwise, try and parse it as a scheduling */
+    const success = await scheduleWatch(msg, args.join(' '), db);
 
-    const results = regex.exec(args.join(' '));
-
-    if (results) {
-        const [ , title, infoLink, time, downloadLink ] = results;
-
-        if (infoLink && infoLink.length > 1000) {
-            msg.reply('Link is too long. Must be less than 1000 chars.');
-            return;
-        }
-
-        if (title && title.length > 1000) {
-            msg.reply('Title is too long. Must be less than 1000 chars.');
-            return;
-        }
-
-        const timeRegex = /^(\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d [+-]\d\d?:?\d\d)$/;
-        const relativeTimeRegex = /^(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?: (.+))?$/
-
-        let timeObject = moment(time, 'YYYY/MM/DD hh:mm ZZ');
-
-        if (!timeRegex.test(time) || !timeObject.isValid()) {
-            const [, daysStr, hoursStr, minutesStr ] = relativeTimeRegex.exec(time) || [ undefined, undefined, undefined, undefined ];
-
-            if (daysStr === undefined && hoursStr === undefined && minutesStr === undefined) {
-                msg.reply(`Could not parse time "${time}". Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM\``);
-                return;
-            }
-
-            const days = Number(daysStr) || 0;
-            const hours = Number(hoursStr) || 0;
-            const minutes = Number(minutesStr) || 0;
-
-            timeObject = moment().add({
-                days,
-                hours,
-                minutes,
-            });
-        }
-
-        await scheduleWatch(msg, title, timeObject, infoLink, downloadLink);
-        return;
+    if (!success) {
+        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
     }
-
-    handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
 }
 
 export function handleTime(msg: Message, args: string) {
@@ -1356,20 +855,26 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
                            + Number(minutes) * 60
                            + Number(hours) * 60 * 60;
 
-    if (totalTimeSeconds > 60 * 60 * 24) {
-        msg.reply('Timers longer than 24 hours are not supported.');
+    if (totalTimeSeconds > 60 * 60 * 24 * 365 * 100) {
+        msg.reply('Timers longer than 100 years are not supported.');
         return;
     }
 
-    setTimeout(() => {
-        if (description) {
-            msg.reply(`Your ${description} timer has elapsed.`);
-        } else {
-            msg.reply(`Your timer has elapsed.`);
-        }
-    }, totalTimeSeconds * 1000);
+    sendTimer(msg.channel as TextChannel, totalTimeSeconds * 1000, msg.author.id, description);
 
     await msg.react('👍');
+
+    const time = moment().add(totalTimeSeconds, 'seconds');
+
+    const stmt = db.prepare(
+        `INSERT INTO timer
+            (user_id, channel_id, message, expire_time)
+        VALUES
+            (?, ?, ?, ?)`,
+    );
+
+    stmt.run(msg.author.id, msg.channel.id, description, time.toISOString());
+    stmt.finalize();
 }
 
 export async function handleCountdown(
