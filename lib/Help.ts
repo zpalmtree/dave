@@ -54,7 +54,7 @@ export function handleSuggestHelp(msg: Message): void {
         .addFields(
             {
                 name: 'Example',
-                value: '`$suggest "niggers tongue my anus" - you`',
+                value: '`$suggest "im a prancing lala boy" - you`',
                 inline: false,
             }
         );
