@@ -12,7 +12,7 @@
   "files": [
     "dist/*"
   ],
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@types/he": "^1.1.1",
     "@types/mathjs": "^6.0.0",
