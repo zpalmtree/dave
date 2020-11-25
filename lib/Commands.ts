@@ -151,18 +151,6 @@ export function handleFortune(msg: Message): void {
 }
 
 export function handleMath(msg: Message, args: string): void {
-    const niggers: string[] = [];
-
-    if (niggers.includes(msg.author.id)) {
-        msg.reply('FUCK YOU YOU STUPID NIGGER');
-        return;
-    }
-
-    if (args.includes('isPrime')) {
-        msg.reply(Math.random() < 0.5 ? 'true' : 'false');
-        return;
-    }
-
     try {
         msg.reply(evaluate(args).toString());
     } catch (err) {
