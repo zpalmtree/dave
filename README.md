@@ -1,4 +1,6 @@
-# thing
+# Dave
+
+Dave is a discord bot.
 
 ## Prerequisites
 
@@ -18,19 +20,24 @@
 * Next you need to get the Channel ID you want the bot to run in.
 * In Discord, follow these steps-
 
-   1. Click on `User Settings`(small gear icon to right of name in the bottom left) 
-   
-   2. Click on `Appearance` 
-   
+   1. Click on `User Settings`(small gear icon to right of name in the bottom left)
+
+   2. Click on `Appearance`
+
    3. Enable `Developer Mode`.
-   
+
 * Edit this link, replacing the string of numbers after `client_id=` with the Client ID you noted down earlier.
 `https://discordapp.com/oauth2/authorize?client_id=498258111572738048&scope=bot&permissions=268437568`
 * Open said link and choose the server you wish to add the bot to. You must have `Manage Server` permissions.
 
 ## Configuration
 
-Modify `src/Config.ts`
+Copy `src/Config.ts.example` to `src/Config.ts` and fill in the relevant fields.
+
+You can disable functions in `lib/index.ts` if you can't be bothered to get the API keys and don't want errors.
+
+* Cat API: https://thecatapi.com/signup
+* Exchange rates: https://docs.openexchangerates.org/docs/authentication
 
 ## Installation
 
