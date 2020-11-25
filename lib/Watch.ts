@@ -598,6 +598,10 @@ async function getWatchDetailsImpl(
         id,
     } = options;
 
+    if (Number.isNaN(id)) {
+        return undefined;
+    }
+
     const args = {
         $channel_id: channelID,
     } as any;
