@@ -6,8 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "prepublish": "yarn build",
-    "build": "./node_modules/.bin/tsc",
-    "style": "./node_modules/.bin/tslint -c tslint.json 'lib/**/*.ts'"
+    "build": "./node_modules/.bin/tsc"
   },
   "files": [
     "dist/*"
