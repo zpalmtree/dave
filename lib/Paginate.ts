@@ -5,6 +5,7 @@ import {
     MessageReaction,
     EmbedFieldData,
     ReactionCollector,
+    GuildMember,
 } from 'discord.js';
 
 import { config } from './Config';
@@ -190,29 +191,26 @@ export class Paginate<T> {
             return;
         }
 
-        for (let role of this.allowedRoles) {
-            /* User has permission to perform action */
-            if (guildUser.roles.cache.some((r) => r.name === role) || this.sourceMessage.author.id === user.id || user.id === config.god) {
-                /* Embed is currently locked */
-                if (this.locked) {
-                    reaction.users.remove(user.id);
+        if (this.havePermission(guildUser, user)) {
+            /* Embed is currently locked */
+            if (this.locked) {
+                reaction.users.remove(user.id);
 
-                    /* Locker is the current user, remove the lock */
-                    if (this.lockID === user.id) {
-                        this.locked = false;
-                        this.lockID = '';
-                    /* Locker is not the current user, do nothing, it's locked */
-                    } else {
-                        reaction.users.remove(user.id);
-                    }
-                /* Embed is unlocked, lock it */
+                /* Locker is the current user, remove the lock */
+                if (this.lockID === user.id) {
+                    this.locked = false;
+                    this.lockID = '';
+                /* Locker is not the current user, do nothing, it's locked */
                 } else {
-                    this.locked = true;
-                    this.lockID = user.id;
+                    reaction.users.remove(user.id);
                 }
-
-                return;
+            /* Embed is unlocked, lock it */
+            } else {
+                this.locked = true;
+                this.lockID = user.id;
             }
+
+            return;
         }
 
         reaction.users.remove(user.id);
@@ -226,11 +224,9 @@ export class Paginate<T> {
             return;
         }
 
-        for (let role of this.allowedRoles) {
-            if (guildUser.roles.cache.some((r) => r.name === role) || user.id === config.god) {
-                this.sentMessage!.delete();
-                return;
-            }
+        if (this.havePermission(guildUser, user)) {
+            this.sentMessage!.delete();
+            return;
         }
 
         reaction.users.remove(user.id);
@@ -255,5 +251,23 @@ export class Paginate<T> {
         }
 
         this.sentMessage!.edit(this.getPageContent());
+    }
+
+    private havePermission(guildUser: GuildMember, user: User) {
+        if (user.id === config.god) {
+            return true;
+        }
+
+        if (this.sourceMessage.author.id === user.id) {
+            return true;
+        }
+
+        for (const role of this.allowedRoles) {
+            if (guildUser.roles.cache.some((r) => r.name === role)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
