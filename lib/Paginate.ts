@@ -17,7 +17,7 @@ export enum DisplayType {
 
 export type DisplayItem<T> = (item: T) => EmbedFieldData | Array<EmbedFieldData>;
 export type ModifyEmbed<T> = (item: T, embed: MessageEmbed) => void;
-export type ModifyMessage<T> = (items: T[]) => string;
+export type ModifyMessage<T> = (items: T[], message: Message) => string;
 
 export class Paginate<T> {
 
@@ -117,7 +117,7 @@ export class Paginate<T> {
                 return this.embed;
             }
             case DisplayType.MessageData: {
-                return (this.displayFunction as ModifyMessage<T>)(this.data.slice(startIndex, endIndex));
+                return (this.displayFunction as ModifyMessage<T>)(this.data.slice(startIndex, endIndex), this.sentMessage!);
             }
         }
     }

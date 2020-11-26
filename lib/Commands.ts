@@ -1321,26 +1321,56 @@ export function handleNikocado(msg: Message): void {
 }
 
 export async function handleYoutube(msg: Message, args: string): Promise<void> {
-    handleImageImpl(msg, args, 'youtube.com', displayVideo);
+    const data = await handleImageImpl(msg, args, 'youtube.com');
+
+    if (!data) {
+        return;
+    }
+
+    const embed = new MessageEmbed();
+
+    const pages = new Paginate(
+        msg,
+        1,
+        (items: any[], message: Message) => {
+            return items[0].url;
+        },
+        DisplayType.MessageData,
+        data,
+        embed,
+        true,
+    );
+
+    pages.sendMessage();
 }
 
 export async function handleImage(msg: Message, args: string): Promise<void> {
-    handleImageImpl(msg, args);
+    const data = await handleImageImpl(msg, args);
+
+    if (!data) {
+        return;
+    }
+
+    const embed = new MessageEmbed();
+
+    const pages = new Paginate(
+        msg,
+        1,
+        (duckduckgoItem: any, embed: MessageEmbed) => {
+            embed.setTitle(duckduckgoItem.title);
+            embed.setImage(duckduckgoItem.image);
+            embed.setDescription(duckduckgoItem.url);
+        },
+        DisplayType.EmbedData,
+        data,
+        embed,
+        true,
+    );
+
+    pages.sendMessage();
 }
 
-function displayImage(duckduckgoItem: any, embed: MessageEmbed) {
-    embed.setTitle(duckduckgoItem.title);
-    embed.setImage(duckduckgoItem.image);
-    embed.setDescription(duckduckgoItem.url);
-}
-
-function displayVideo(duckduckgoItem: any, embed: MessageEmbed) {
-    embed.setTitle(duckduckgoItem.title);
-    embed.setImage(duckduckgoItem.image);
-    embed.setURL(duckduckgoItem.url);
-}
-
-export async function handleImageImpl(msg: Message, args: string, site?: string, displayFunction?: (duckduckgoItem: any, embed: MessageEmbed) => any): Promise<void> {
+export async function handleImageImpl(msg: Message, args: string, site?: string): Promise<undefined | any[]> {
     if (args.trim() === '') {
         msg.reply('No query given');
         return;
@@ -1453,23 +1483,5 @@ export async function handleImageImpl(msg: Message, args: string, site?: string,
         return;
     }
 
-    const embed = new MessageEmbed();
-
-    const pages = new Paginate(
-        msg,
-        1,
-        (item: any, embed: MessageEmbed) => {
-            if (displayFunction) {
-                displayFunction(item, embed);
-            } else {
-                displayImage(item, embed);
-            }
-        },
-        DisplayType.EmbedData,
-        filtered,
-        embed,
-        true,
-    );
-
-    pages.sendMessage();
+    return filtered;
 }
