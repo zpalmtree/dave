@@ -46,13 +46,11 @@ import {
 
 import {
     readJSON,
-    writeJSON,
     chunk,
     capitalize,
     sleep,
     haveRole,
     pickRandomItem,
-    paginate,
     sendTimer,
 } from './Utilities';
 
@@ -81,6 +79,11 @@ import {
     displayWatchById,
     scheduleWatch,
 } from './Watch';
+
+import {
+    Paginate,
+    DisplayType,
+} from './Paginate';
 
 const timeUnits: TimeUnits = {
     Y: 31536000,
@@ -1085,7 +1088,7 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
     if (results.length > 0) {
         const embed = new MessageEmbed();
 
-        paginate(
+        const pages = new Paginate(
             msg,
             3,
             (result: any) => {
@@ -1095,10 +1098,13 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
                     inline: false,
                 };
             },
+            DisplayType.EmbedFieldData,
             results,
             embed,
             true,
         );
+
+        pages.sendMessage();
     } else {
         msg.reply(`Failed to find any results: ${errors.join(', ')}!`);
     }
@@ -1163,7 +1169,7 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
         : data.RelatedTopics;
 
     if (!embed.description) {
-        paginate(
+        const pages = new Paginate(
             msg,
             3,
             (topic: any) => {
@@ -1201,10 +1207,13 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
                     inline: false,
                 };
             },
+            DisplayType.EmbedFieldData,
             results,
             embed,
             true,
         );
+
+        pages.sendMessage();
     } else {
         msg.channel.send(embed);
     }
@@ -1446,18 +1455,21 @@ export async function handleImageImpl(msg: Message, args: string, site?: string,
 
     const embed = new MessageEmbed();
 
-    paginate(
+    const pages = new Paginate(
         msg,
         1,
-        (item: any) => {
+        (item: any, embed: MessageEmbed) => {
             if (displayFunction) {
                 displayFunction(item, embed);
             } else {
                 displayImage(item, embed);
             }
         },
+        DisplayType.EmbedData,
         filtered,
         embed,
         true,
     );
+
+    pages.sendMessage();
 }

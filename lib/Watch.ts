@@ -23,7 +23,6 @@ import {
 
 import {
     haveRole,
-    paginate,
     capitalize,
 } from './Utilities';
 
@@ -32,6 +31,11 @@ import {
 } from './Types';
 
 import { config } from './Config';
+
+import {
+    Paginate,
+    DisplayType,
+} from './Paginate';
 
 interface IGetWatchDetails {
     excludeComplete?: boolean;
@@ -109,13 +113,16 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
         ];
     }
 
-    paginate(
+    const pages = new Paginate(
         msg,
         7,
         f,
+        DisplayType.EmbedFieldData,
         events,
         embed,
     );
+
+    pages.sendMessage();
 }
 
 export async function displayAllWatches(msg: Message, db: Database): Promise<void> {
@@ -139,7 +146,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
     const totalPages = Math.floor(data.length / maxPageSize)
                      + (data.length % maxPageSize ? 1 : 0);
 
-    paginate(
+    const pages = new Paginate(
         msg,
         maxPageSize,
         (watch: ScheduledWatch) => {
@@ -151,10 +158,13 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
                 inline: false,
             }
         },
+        DisplayType.EmbedFieldData,
         data,
         embed,
         true,
     );
+
+    pages.sendMessage();
 }
 
 export async function addLink(msg: Message, args: string[], db: Database): Promise<void> {
