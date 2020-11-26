@@ -1450,8 +1450,6 @@ export async function handleImageImpl(msg: Message, args: string, site?: string,
         msg,
         1,
         (item: any) => {
-            console.log(item.image);
-
             if (displayFunction) {
                 displayFunction(item, embed);
             } else {
