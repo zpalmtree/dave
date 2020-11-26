@@ -331,7 +331,7 @@ function handleMessage(msg: Message, db: Database) {
     const [ tmp, ...args ] = msg.content.split(' ');
 
     /* Get the actual command after the prefix is removed */
-    const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length);
+    const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length).toLowerCase();
 
     for (const c of commands) {
         if (c.disabled) {
