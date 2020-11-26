@@ -123,6 +123,10 @@ export class Paginate<T> {
         }
     }
 
+    public swapDisplayType(newDisplayType: DisplayType) {
+        this.displayType = newDisplayType;
+    }
+
     public async sendMessage(): Promise<Message> {
         const shouldPaginate = this.data.length > this.itemsPerPage;
 
