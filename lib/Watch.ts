@@ -137,21 +137,43 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
         return;
     }
 
+    const f = (watch: ScheduledWatch) => {
+        return [
+            {
+                name: `ID: ${watch.watchID}`,
+                value: watch.infoLinks.length > 0
+                    ? `[${watch.title}](${watch.infoLinks[0]})`
+                    : watch.title,
+                inline: true,
+            },
+            {
+                name: 'Time',
+                value : moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
+                inline: true,
+            },
+            {
+                name: 'Attended',
+                value: watch.attending.map((user: string) => {
+                    const userObj = msg.guild!.members.cache.get(user)
+
+                    if (userObj !== undefined) {
+                        return userObj.displayName;
+                    }
+
+                    return `Unknown User <@${user}>`;
+                }).join(', '),
+                inline: true,
+            },
+        ];
+    }
+
     const embed = new MessageEmbed()
         .setTitle('Previously Watched Movies/Series');
 
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 10,
-        displayFunction: (watch: ScheduledWatch) => {
-            return {
-                name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
-                value: watch.infoLinks.length > 0
-                    ? `[${watch.title}](${watch.infoLinks[0]})`
-                    : watch.title,
-                inline: false,
-            }
-        },
+        displayFunction: f,
         displayType: DisplayType.EmbedFieldData,
         data,
         embed,
