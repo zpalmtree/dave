@@ -83,6 +83,7 @@ import {
 import {
     Paginate,
     DisplayType,
+    ModifyMessage,
 } from './Paginate';
 
 const timeUnits: TimeUnits = {
@@ -1327,14 +1328,16 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
         return;
     }
 
+    const f: ModifyMessage<any> = function(this: Paginate<any>, items: any[], message: Message) {
+        return `${items[0].url} - Page ${this.currentPage} of ${this.totalPages}`;
+    }
+
     const embed = new MessageEmbed();
 
     const pages = new Paginate(
         msg,
         1,
-        (items: any[], message: Message) => {
-            return items[0].url;
-        },
+        f,
         DisplayType.MessageData,
         data,
         embed,

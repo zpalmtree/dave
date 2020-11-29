@@ -16,21 +16,21 @@ export enum DisplayType {
     MessageData = 3,
 }
 
-export type DisplayItem<T> = (item: T) => EmbedFieldData | Array<EmbedFieldData>;
-export type ModifyEmbed<T> = (item: T, embed: MessageEmbed) => void;
-export type ModifyMessage<T> = (items: T[], message: Message) => string;
+export type DisplayItem<T> = (this: Paginate<T>, item: T, page?: number) => EmbedFieldData | Array<EmbedFieldData>;
+export type ModifyEmbed<T> = (this: Paginate<T>, item: T, embed: MessageEmbed) => void;
+export type ModifyMessage<T> = (this: Paginate<T>, items: T[], message: Message) => string;
 
 export class Paginate<T> {
 
-    private currentPage: number = 1;
+    public currentPage: number = 1;
+
+    public totalPages: number;
 
     private itemsPerPage: number;
 
     private locked: boolean = false;
 
     private lockID: string = '';
-
-    private totalPages: number;
 
     private allowedRoles: string[] = [
         'Mod',
@@ -94,8 +94,10 @@ export class Paginate<T> {
                     this.embed!.setFooter(`Page ${this.currentPage} of ${this.totalPages}`);
                 }
 
+                const f = (this.displayFunction as DisplayItem<T>).bind(this);
+
                 for (const item of this.data.slice(startIndex, endIndex)) {
-                    const newFields = (this.displayFunction as DisplayItem<T>)(item);
+                    const newFields = f(item);
 
                     if (Array.isArray(newFields)) {
                         this.embed!.addFields(newFields);
@@ -112,13 +114,19 @@ export class Paginate<T> {
                 }
 
                 for (const item of this.data.slice(startIndex, endIndex)) {
-                    (this.displayFunction as ModifyEmbed<T>)(item, this.embed!);
+                    const f = (this.displayFunction as ModifyEmbed<T>).bind(this);
+                    f(item, this.embed!);
                 }
 
                 return this.embed;
             }
             case DisplayType.MessageData: {
-                return (this.displayFunction as ModifyMessage<T>)(this.data.slice(startIndex, endIndex), this.sentMessage!);
+                const f = (this.displayFunction as ModifyMessage<T>).bind(this);
+
+                const data = this.data.slice(startIndex, endIndex);
+
+                return f(data, this.sentMessage!);
+
             }
         }
     }
