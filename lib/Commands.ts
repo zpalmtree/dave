@@ -1359,7 +1359,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
     const determineDisplayType = (duckduckgoItems: any[]) => {
         const item = duckduckgoItems[0];
 
-        if (/https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+/.test(item.url)) {
+        if (/https?:\/\/.*(?:youtube\.com|youtu\.be)\/\S+/.test(item.url)) {
             return {
                 displayType: DisplayType.MessageData,
                 displayFunction: displayYoutube,

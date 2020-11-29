@@ -195,7 +195,7 @@ export async function addLink(msg: Message, args: string[], db: Database): Promi
         return;
     }
 
-    if (!/^(magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)$/.test(args[1])) {
+    if (!/^(magnet:\?.+|https?:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)$/.test(args[1])) {
         handleWatchHelp(msg, 'Input does not look like a magnet or youtube link. Please try one of the following options.');
         return;
     }
