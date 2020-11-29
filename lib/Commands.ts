@@ -1326,21 +1326,21 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const f: ModifyMessage<any> = function(this: Paginate<any>, items: any[], message: Message) {
-        return `${items[0].url} - ${this.getPageFooter()}`;
-    }
-
     const embed = new MessageEmbed();
 
     const pages = new Paginate({
         sourceMessage: msg,
-        displayFunction: f,
+        displayFunction: displayYoutube,
         displayType: DisplayType.MessageData,
         data,
         embed,
     });
 
     pages.sendMessage();
+}
+
+function displayYoutube (this: Paginate<any>, items: any[], message: Message) {
+    return `${items[0].url} - ${this.getPageFooter()}`;
 }
 
 export async function handleImage(msg: Message, args: string): Promise<void> {
@@ -1350,15 +1350,34 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
+    const displayImage = (duckduckgoItem: any, embed: MessageEmbed) => {
+        embed.setTitle(duckduckgoItem.title);
+        embed.setImage(duckduckgoItem.image);
+        embed.setDescription(duckduckgoItem.url);
+    };
+
+    const determineDisplayType = (duckduckgoItems: any[]) => {
+        const item = duckduckgoItems[0];
+
+        if (/https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+/.test(item.url)) {
+            return {
+                displayType: DisplayType.MessageData,
+                displayFunction: displayYoutube,
+            }
+        }
+
+        return {
+            displayType: DisplayType.EmbedData,
+            displayFunction: displayImage,
+        };
+    };
+
     const embed = new MessageEmbed();
 
     const pages = new Paginate({
         sourceMessage: msg,
-        displayFunction: (duckduckgoItem: any, embed: MessageEmbed) => {
-            embed.setTitle(duckduckgoItem.title);
-            embed.setImage(duckduckgoItem.image);
-            embed.setDescription(duckduckgoItem.url);
-        },
+        displayFunction: displayImage,
+        determineDisplayTypeFunction: determineDisplayType,
         displayType: DisplayType.EmbedData,
         data,
         embed,

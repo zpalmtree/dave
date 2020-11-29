@@ -24,6 +24,8 @@ export type PaginateFunction<T> = DisplayItem<T>
                                 | ModifyEmbed<T>
                                 | ModifyMessage<T>;
 
+export type DetermineDisplayType<T> = (items: T[]) => { displayType: DisplayType, displayFunction: PaginateFunction<T> };
+
 export interface PaginateOptions<T> {
     sourceMessage: Message;
 
@@ -32,6 +34,8 @@ export interface PaginateOptions<T> {
     displayType: DisplayType;
 
     displayFunction: PaginateFunction<T>;
+
+    determineDisplayTypeFunction?: DetermineDisplayType<T>;
 
     data: T[];
 
@@ -69,6 +73,8 @@ export class Paginate<T> {
 
     private displayFunction: PaginateFunction<T>;
 
+    private determineDisplayTypeFunction?: DetermineDisplayType<T>;
+
     private displayType: DisplayType;
 
     private collector: ReactionCollector | undefined;
@@ -82,6 +88,7 @@ export class Paginate<T> {
             data,
             embed,
             hideFooter = false,
+            determineDisplayTypeFunction,
         } = options;
 
         this.sourceMessage = sourceMessage;
@@ -91,8 +98,24 @@ export class Paginate<T> {
         this.data = data;
         this.embed = embed;
         this.displayFooter = !hideFooter;
+        this.determineDisplayTypeFunction = determineDisplayTypeFunction;
         this.totalPages = Math.floor(data.length / this.itemsPerPage)
                          + (data.length % this.itemsPerPage ? 1 : 0);
+    }
+
+    private editMessage(data: any) {
+        const embed = this.displayType === DisplayType.MessageData
+            ? null
+            : data;
+
+        const content = this.displayType === DisplayType.MessageData
+            ? data
+            : null;
+
+        this.sentMessage!.edit({
+            embed,
+            content,
+        });
     }
 
     private setPageFooter(editMessage: boolean = false) {
@@ -105,7 +128,7 @@ export class Paginate<T> {
                 this.embed.setFooter(this.getPageFooter());
 
                 if (editMessage) {
-                    this.sentMessage!.edit(this.embed);
+                    this.editMessage(this.embed);
                 }
             }
         }
@@ -133,6 +156,18 @@ export class Paginate<T> {
         const startIndex = (this.currentPage - 1) * this.itemsPerPage;
         const endIndex = (this.currentPage) * this.itemsPerPage;
 
+        const items = this.data.slice(startIndex, endIndex);
+
+        if (this.determineDisplayTypeFunction) {
+            const {
+                displayType,
+                displayFunction
+            } = this.determineDisplayTypeFunction(items);
+
+            this.displayType = displayType;
+            this.displayFunction = displayFunction;
+        }
+
         this.setPageFooter();
 
         switch (this.displayType) {
@@ -141,7 +176,7 @@ export class Paginate<T> {
 
                 const f = (this.displayFunction as DisplayItem<T>).bind(this);
 
-                for (const item of this.data.slice(startIndex, endIndex)) {
+                for (const item of items) {
                     const newFields = f(item);
 
                     if (Array.isArray(newFields)) {
@@ -154,7 +189,7 @@ export class Paginate<T> {
                 return this.embed;
             }
             case DisplayType.EmbedData: {
-                for (const item of this.data.slice(startIndex, endIndex)) {
+                for (const item of items) {
                     const f = (this.displayFunction as ModifyEmbed<T>).bind(this);
                     f(item, this.embed!);
                 }
@@ -163,10 +198,7 @@ export class Paginate<T> {
             }
             case DisplayType.MessageData: {
                 const f = (this.displayFunction as ModifyMessage<T>).bind(this);
-
-                const data = this.data.slice(startIndex, endIndex);
-
-                return f(data, this.sentMessage!);
+                return f(items, this.sentMessage!);
             }
         }
     }
@@ -252,7 +284,7 @@ export class Paginate<T> {
         if (!this.locked) {
             this.locked = true;
             this.lockID = user.id;
-            this.sentMessage!.edit(this.getPageContent());
+            this.editMessage(this.getPageContent());
             return;
         }
 
@@ -262,7 +294,7 @@ export class Paginate<T> {
         if (this.lockID === user.id) {
             this.locked = false;
             this.lockID = '';
-            this.sentMessage!.edit(this.getPageContent());
+            this.editMessage(this.getPageContent());
         }
     }
 
@@ -300,7 +332,7 @@ export class Paginate<T> {
             return;
         }
 
-        this.sentMessage!.edit(this.getPageContent());
+        this.editMessage(this.getPageContent());
     }
 
     private havePermission(guildUser: GuildMember, user: User) {
