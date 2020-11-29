@@ -111,7 +111,7 @@ const commands: Command[] = [
     {
         aliases: ['quote'],
         argsFormat: Args.DontNeed,
-        hidden: true,
+        hidden: false,
         implementation: handleQuote,
         helpFunction: handleQuoteHelp,
         description: 'Gets a random quote',
@@ -120,7 +120,7 @@ const commands: Command[] = [
     {
         aliases: ['suggest'],
         argsFormat: Args.Combined,
-        hidden: true,
+        hidden: false,
         implementation: handleSuggest,
         helpFunction: handleSuggestHelp,
         description: 'Suggest a new quote',
@@ -234,7 +234,7 @@ const commands: Command[] = [
     {
         aliases: ['countdown'],
         argsFormat: Args.Combined,
-        hidden: true,
+        hidden: false,
         implementation: handleCountdown.bind(this, 'Lets jam!'),
         helpFunction: handleCountdownHelp,
         description: 'Perform a countdown',
@@ -259,7 +259,7 @@ const commands: Command[] = [
     {
         aliases: ['pause'],
         argsFormat: Args.Combined,
-        hidden: true,
+        hidden: false,
         implementation: handleCountdown.bind(this, 'pause'),
         helpFunction: handleCountdownHelp,
         description: 'Perform a pause',
