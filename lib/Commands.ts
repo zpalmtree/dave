@@ -1089,21 +1089,20 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
     if (results.length > 0) {
         const embed = new MessageEmbed();
 
-        const pages = new Paginate(
-            msg,
-            3,
-            (result: any) => {
+        const pages = new Paginate({
+            sourceMessage: msg,
+            itemsPerPage: 3,
+            displayFunction: (result: any) => {
                 return {
                     name: `${result.linkTitle} - ${result.linkURL}`,
                     value: result.snippet,
                     inline: false,
                 };
             },
-            DisplayType.EmbedFieldData,
-            results,
+            displayType: DisplayType.EmbedFieldData,
+            data: results,
             embed,
-            true,
-        );
+        });
 
         pages.sendMessage();
     } else {
@@ -1170,10 +1169,10 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
         : data.RelatedTopics;
 
     if (!embed.description) {
-        const pages = new Paginate(
-            msg,
-            3,
-            (topic: any) => {
+        const pages = new Paginate({
+            sourceMessage: msg,
+            itemsPerPage: 3,
+            displayFunction: (topic: any) => {
                 const regex = /<a href="https:\/\/duckduckgo\.com\/.+">(.+)<\/a>(.+)/;
 
                 const innerTopic = topic.Text
@@ -1208,11 +1207,10 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
                     inline: false,
                 };
             },
-            DisplayType.EmbedFieldData,
-            results,
+            displayType: DisplayType.EmbedFieldData,
+            data: results,
             embed,
-            true,
-        );
+        });
 
         pages.sendMessage();
     } else {
@@ -1329,20 +1327,18 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
     }
 
     const f: ModifyMessage<any> = function(this: Paginate<any>, items: any[], message: Message) {
-        return `${items[0].url} - Page ${this.currentPage} of ${this.totalPages}`;
+        return `${items[0].url} - ${this.getPageFooter()}`;
     }
 
     const embed = new MessageEmbed();
 
-    const pages = new Paginate(
-        msg,
-        1,
-        f,
-        DisplayType.MessageData,
+    const pages = new Paginate({
+        sourceMessage: msg,
+        displayFunction: f,
+        displayType: DisplayType.MessageData,
         data,
         embed,
-        true,
-    );
+    });
 
     pages.sendMessage();
 }
@@ -1356,19 +1352,17 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
 
     const embed = new MessageEmbed();
 
-    const pages = new Paginate(
-        msg,
-        1,
-        (duckduckgoItem: any, embed: MessageEmbed) => {
+    const pages = new Paginate({
+        sourceMessage: msg,
+        displayFunction: (duckduckgoItem: any, embed: MessageEmbed) => {
             embed.setTitle(duckduckgoItem.title);
             embed.setImage(duckduckgoItem.image);
             embed.setDescription(duckduckgoItem.url);
         },
-        DisplayType.EmbedData,
+        displayType: DisplayType.EmbedData,
         data,
         embed,
-        true,
-    );
+    });
 
     pages.sendMessage();
 }

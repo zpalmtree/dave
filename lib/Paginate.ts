@@ -20,6 +20,26 @@ export type DisplayItem<T> = (this: Paginate<T>, item: T, page?: number) => Embe
 export type ModifyEmbed<T> = (this: Paginate<T>, item: T, embed: MessageEmbed) => void;
 export type ModifyMessage<T> = (this: Paginate<T>, items: T[], message: Message) => string;
 
+export type PaginateFunction<T> = DisplayItem<T>
+                                | ModifyEmbed<T>
+                                | ModifyMessage<T>;
+
+export interface PaginateOptions<T> {
+    sourceMessage: Message;
+
+    itemsPerPage?: number;
+
+    displayType: DisplayType;
+
+    displayFunction: PaginateFunction<T>;
+
+    data: T[];
+
+    embed?: MessageEmbed;
+
+    hideFooter?: boolean;
+}
+
 export class Paginate<T> {
 
     public currentPage: number = 1;
@@ -47,52 +67,77 @@ export class Paginate<T> {
 
     private displayFooter: boolean = true;
 
-    private displayFunction: DisplayItem<T>
-                           | ModifyEmbed<T>
-                           | ModifyMessage<T>;
+    private displayFunction: PaginateFunction<T>;
 
     private displayType: DisplayType;
 
     private collector: ReactionCollector | undefined;
 
-    public constructor(
-        sourceMessage: Message,
-        itemsPerPage: number,
-        displayFunction: DisplayItem<T> | ModifyEmbed<T> | ModifyMessage<T>,
-        displayType: DisplayType,
-        data: T[],
-        embed: MessageEmbed | undefined,
-        addFooter: boolean = true) {
+    public constructor(options: PaginateOptions<T>) {
+        const {
+            sourceMessage,
+            itemsPerPage = 1,
+            displayType,
+            displayFunction,
+            data,
+            embed,
+            hideFooter = false,
+        } = options;
 
         this.sourceMessage = sourceMessage;
-
         this.itemsPerPage = itemsPerPage;
-
-        this.displayFunction = displayFunction;
-
         this.displayType = displayType;
-
+        this.displayFunction = displayFunction;
         this.data = data;
-
         this.embed = embed;
-
-        this.displayFooter = addFooter;
-
+        this.displayFooter = !hideFooter;
         this.totalPages = Math.floor(data.length / this.itemsPerPage)
                          + (data.length % this.itemsPerPage ? 1 : 0);
+    }
+
+    private setPageFooter(editMessage: boolean = false) {
+        if (!this.displayFooter) {
+            return;
+        }
+
+        if (this.displayType !== DisplayType.MessageData) {
+            if (this.embed) {
+                this.embed.setFooter(this.getPageFooter());
+
+                if (editMessage) {
+                    this.sentMessage!.edit(this.embed);
+                }
+            }
+        }
+    }
+
+    public getPageFooter() {
+        if (!this.displayFooter) {
+            return '';
+        }
+
+        let lockMessage = '';
+
+        if (this.locked) {
+            const user = this.sourceMessage.guild!.members.cache.get(this.lockID);
+
+            if (user) {
+                lockMessage = `. Locked by ${user.displayName}.`;
+            }
+        }
+
+        return `Page ${this.currentPage} of ${this.totalPages}${lockMessage}`;
     }
 
     private getPageContent() {
         const startIndex = (this.currentPage - 1) * this.itemsPerPage;
         const endIndex = (this.currentPage) * this.itemsPerPage;
 
+        this.setPageFooter();
+
         switch (this.displayType) {
             case DisplayType.EmbedFieldData: {
                 this.embed!.fields = [];
-
-                if (this.displayFooter) {
-                    this.embed!.setFooter(`Page ${this.currentPage} of ${this.totalPages}`);
-                }
 
                 const f = (this.displayFunction as DisplayItem<T>).bind(this);
 
@@ -109,10 +154,6 @@ export class Paginate<T> {
                 return this.embed;
             }
             case DisplayType.EmbedData: {
-                if (this.displayFooter) {
-                    this.embed!.setFooter(`Page ${this.currentPage} of ${this.totalPages}`);
-                }
-
                 for (const item of this.data.slice(startIndex, endIndex)) {
                     const f = (this.displayFunction as ModifyEmbed<T>).bind(this);
                     f(item, this.embed!);
@@ -126,7 +167,6 @@ export class Paginate<T> {
                 const data = this.data.slice(startIndex, endIndex);
 
                 return f(data, this.sentMessage!);
-
             }
         }
     }
@@ -203,29 +243,27 @@ export class Paginate<T> {
             return;
         }
 
-        if (this.havePermission(guildUser, user)) {
-            /* Embed is currently locked */
-            if (this.locked) {
-                reaction.users.remove(user.id);
+        if (!this.havePermission(guildUser, user)) {
+            reaction.users.remove(user.id);
+            return;
+        }
 
-                /* Locker is the current user, remove the lock */
-                if (this.lockID === user.id) {
-                    this.locked = false;
-                    this.lockID = '';
-                /* Locker is not the current user, do nothing, it's locked */
-                } else {
-                    reaction.users.remove(user.id);
-                }
-            /* Embed is unlocked, lock it */
-            } else {
-                this.locked = true;
-                this.lockID = user.id;
-            }
-
+        /* Embed is unlocked, lock it, leave lock reaction */
+        if (!this.locked) {
+            this.locked = true;
+            this.lockID = user.id;
+            this.sentMessage!.edit(this.getPageContent());
             return;
         }
 
         reaction.users.remove(user.id);
+
+        /* Locker is the current user, remove the lock */
+        if (this.lockID === user.id) {
+            this.locked = false;
+            this.lockID = '';
+            this.sentMessage!.edit(this.getPageContent());
+        }
     }
 
     private removeEmbed(reaction: MessageReaction, user: User) {

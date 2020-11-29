@@ -77,8 +77,7 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
     }
 
     const embed = new MessageEmbed()
-        .setTitle('Scheduled Movies/Series To Watch')
-        .setFooter('Use $watch <movie id> to view more info and sign up to watch');
+        .setTitle('Scheduled Movies/Series To Watch');
 
     const f = (watch: ScheduledWatch) => {
         return [
@@ -113,14 +112,14 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
         ];
     }
 
-    const pages = new Paginate(
-        msg,
-        7,
-        f,
-        DisplayType.EmbedFieldData,
-        events,
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 7,
+        displayFunction: f,
+        displayType: DisplayType.EmbedFieldData,
+        data: events,
         embed,
-    );
+    });
 
     pages.sendMessage();
 }
@@ -138,18 +137,13 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
         return;
     }
 
-    const maxPageSize = 10;
-
     const embed = new MessageEmbed()
         .setTitle('Previously Watched Movies/Series');
 
-    const totalPages = Math.floor(data.length / maxPageSize)
-                     + (data.length % maxPageSize ? 1 : 0);
-
-    const pages = new Paginate(
-        msg,
-        maxPageSize,
-        (watch: ScheduledWatch) => {
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 10,
+        displayFunction: (watch: ScheduledWatch) => {
             return {
                 name: moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
                 value: watch.infoLinks.length > 0
@@ -158,11 +152,10 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
                 inline: false,
             }
         },
-        DisplayType.EmbedFieldData,
+        displayType: DisplayType.EmbedFieldData,
         data,
         embed,
-        true,
-    );
+    });
 
     pages.sendMessage();
 }
