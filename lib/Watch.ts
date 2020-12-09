@@ -322,11 +322,11 @@ export async function deleteWatch(msg: Message, args: string[], db: Database): P
         return;
     }
 
-    const response = await removeWatchById(id, db);
+    const response = await removeWatchById(id, msg.channel.id, db);
     msg.reply(response);
 }
 
-async function removeWatchById(id: number, db: Database) {
+async function removeWatchById(id: number, channelID: string, db: Database) {
     const [ watch ] = await selectQuery(
         `SELECT
             m.title
@@ -335,9 +335,10 @@ async function removeWatchById(id: number, db: Database) {
             INNER JOIN movie AS m
                 ON we.movie_id = m.id
         WHERE
-            we.id = ?`,
+            we.id = ?
+            AND we.channel_id = ?`,
         db,
-        [ id ]
+        [ id, channelID ]
     );
 
     if (!watch) {
@@ -576,7 +577,7 @@ async function awaitWatchReactions(
         if (attending.size === 0) {
             msg.channel.send('All attendees removed! Cancelling watch.');
             collector.stop();
-            const watchDeletionResponse = await removeWatchById(id, db);
+            const watchDeletionResponse = await removeWatchById(id, msg.channel.id, db);
             msg.channel.send(watchDeletionResponse);
             return;
         }
