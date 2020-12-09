@@ -106,7 +106,7 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
                         return userObj.displayName;
                     }
 
-                    return `Unknown User <@${user}>`;
+                    return `<@${user}>`;
                 }).join(', '),
                 inline: true,
             },
@@ -162,7 +162,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
                         return userObj.displayName;
                     }
 
-                    return `Unknown User <@${user}>`;
+                    return `<@${user}>`;
                 }).join(', '),
                 inline: true,
             },
@@ -397,7 +397,7 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
                     return userObj.displayName;
                 }
 
-                return `Unknown User <@${user}>`;
+                return `<@${user}>`;
             }).join(', '),
         },
     );
@@ -543,7 +543,7 @@ export async function createWatch(
                         return userObj.displayName;
                     }
 
-                    return `Unknown User <@${user}>`;
+                    return `<@${user}>`;
                 }).join(', '),
                 inline: true,
             },
@@ -595,7 +595,7 @@ async function awaitWatchReactions(
                     return userObj.displayName;
                 }
 
-                return `Unknown User <@${user}>`;
+                return `<@${user}>`;
             }).join(', '),
             inline: true,
         });
