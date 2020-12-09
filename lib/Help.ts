@@ -293,6 +293,11 @@ export function handleWatchHelp(msg: Message, description?: string): void {
                 value: '`$watch updatetime 1 2020/07/29 03:00 +01:00`',
                 inline: false,
             },
+            {
+                name: 'Update the date/time of a scheduled watch',
+                value: '`$watch updatetime 1 10m`',
+                inline: false,
+            },
         );
 
     msg.channel.send(embed);
