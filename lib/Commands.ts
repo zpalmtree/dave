@@ -791,7 +791,7 @@ export async function handleWatch(msg: Message, args: string[], db: Database): P
                 return;
             }
             case 'updatetime': {
-                updateTime(msg, args.slice(1), db);
+                updateTime(msg, args.slice(1).join(' '), db);
                 return;
             }
         }

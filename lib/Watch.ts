@@ -224,25 +224,52 @@ export async function addLink(msg: Message, args: string[], db: Database): Promi
     msg.reply(`Successfully added/updated link for ${watch.title}`);
 }
 
-export async function updateTime(msg: Message, args: string[], db: Database): Promise<void> {
-    const regex = /(\d+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d(?: ?[+-]\d\d?:?\d\d))/;
+export async function updateTime(msg: Message, args: string, db: Database): Promise<void> {
+    const timeRegex = /^(\d+) (\d\d\d\d\/\d\d?\/\d\d? \d?\d:\d\d [+-]\d\d?:?\d\d)$/;
+    const relativeTimeRegex = /^(\d+) (?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?: (.+))?$/
 
-    const results = regex.exec(args.join(' '));
+    const results = timeRegex.exec(args);
+    const relativeResults = relativeTimeRegex.exec(args);
 
-    if (results) {
-        const [ , id, time ] = results;
+    if (results || relativeResults) {
+        let parsedTime = moment();
+        let parsedId = '';
 
-        const parsedTime = moment(time, 'YYYY/MM/DD hh:mm ZZ');
+        if (results) {
+            const [ , id, time ] = results;
+
+            parsedTime = moment(time, 'YYYY/MM/DD hh:mm ZZ');
+            parsedId = id;
+        } else {
+            const [ , id, daysStr, hoursStr, minutesStr ] = relativeResults || [];
+            
+            parsedId = id;
+
+            if (daysStr === undefined && hoursStr === undefined && minutesStr === undefined) {
+                msg.reply(`Could not parse time. Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM\``);
+                return;
+            }
+
+            const days = Number(daysStr) || 0;
+            const hours = Number(hoursStr) || 0;
+            const minutes = Number(minutesStr) || 0;
+
+            parsedTime = moment().add({
+                days,
+                hours,
+                minutes,
+            });
+        }
 
         if (!parsedTime.isValid()) {
-            msg.reply(`Failed to parse date/time "${time}"`);
+            msg.reply(`Could not parse time. Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM\``);
             return;
         }
 
-        const watch = await getWatchDetailsById(id, msg.channel.id, db);
+        const watch = await getWatchDetailsById(parsedId, msg.channel.id, db);
 
         if (!watch) {
-            msg.reply(`Could not find movie ID "${id}". Use \`$watch\` to list all scheduled watches.`);
+            msg.reply(`Could not find movie ID "${parsedId}". Use \`$watch\` to list all scheduled watches.`);
             return;
         }
 
@@ -254,7 +281,7 @@ export async function updateTime(msg: Message, args: string[], db: Database): Pr
             WHERE
                 id = ?`,
             db,
-            [ id, parsedTime.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
+            [ parsedId, parsedTime.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
         );
 
         msg.reply(`Successfully updated time for ${watch.title} to ${parsedTime.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
@@ -282,9 +309,10 @@ export async function deleteWatch(msg: Message, args: string[], db: Database): P
         FROM
             user_watch
         WHERE
-            watch_event = ?`,
+            watch_event = ?
+            AND channel_id = ?`,
         db,
-        [ id ]
+        [ id, msg.channel.id ]
     );
 
     const areOnlyAttendee = attending.length === 1 && attending[0].user_id === msg.author.id;
