@@ -303,30 +303,11 @@ export async function deleteWatch(msg: Message, args: string[], db: Database): P
         return;
     }
 
-    const attending = await selectQuery(
-        `SELECT
-            user_id
-        FROM
-            user_watch
-        WHERE
-            watch_event = ?
-            AND channel_id = ?`,
-        db,
-        [ id, msg.channel.id ]
-    );
-
-    const areOnlyAttendee = attending.length === 1 && attending[0].user_id === msg.author.id;
-
-    if (!areOnlyAttendee && !haveRole(msg, 'Mod')) {
-        msg.reply('You must be the only watch attendee, or be a mod, to remove a movie');
-        return;
-    }
-
-    const response = await removeWatchById(id, msg.channel.id, db);
+    const response = await removeWatchById(id, msg, db);
     msg.reply(response);
 }
 
-async function removeWatchById(id: number, channelID: string, db: Database) {
+async function removeWatchById(id: number, msg: Message, db: Database, forceDelete: boolean = false) {
     const [ watch ] = await selectQuery(
         `SELECT
             m.title
@@ -338,11 +319,32 @@ async function removeWatchById(id: number, channelID: string, db: Database) {
             we.id = ?
             AND we.channel_id = ?`,
         db,
-        [ id, channelID ]
+        [ id, msg.channel.id ]
     );
 
     if (!watch) {
         return `Could not find movie ID "${id}". Use \`$watch\` to list all scheduled watches.`;
+    }
+
+    if (!forceDelete) {
+        const attending = await selectQuery(
+            `SELECT
+                user_id
+            FROM
+                user_watch
+            WHERE
+                watch_event = ?`,
+            db,
+            [ id ]
+        );
+
+        if (attending.length > 0) {
+            const areOnlyAttendee = attending.length === 1 && attending[0].user_id === msg.author.id;
+
+            if (!areOnlyAttendee && !haveRole(msg, 'Mod')) {
+                return 'You must be the only watch attendee, or be a mod, to remove a movie';
+            }
+        }
     }
 
     await deleteQuery(
@@ -577,7 +579,7 @@ async function awaitWatchReactions(
         if (attending.size === 0) {
             msg.channel.send('All attendees removed! Cancelling watch.');
             collector.stop();
-            const watchDeletionResponse = await removeWatchById(id, msg.channel.id, db);
+            const watchDeletionResponse = await removeWatchById(id, msg, db, true);
             msg.channel.send(watchDeletionResponse);
             return;
         }
