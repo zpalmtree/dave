@@ -10,7 +10,7 @@ export async function executeQuery(query: string, db: Database, params: any = []
     return new Promise((resolve, reject) => {
         const f = function (err: Error | null) {
             if (err) {
-                throw err;
+                return reject(err);
             }
 
             return resolve();
@@ -24,7 +24,7 @@ export async function insertQuery(query: string, db: Database, params: any = [])
     return new Promise((resolve, reject) => {
         const f = function (this: RunResult, err: Error | null) {
             if (err) {
-                throw err;
+                return reject(err);
             }
 
             return resolve(this.lastID);
@@ -38,7 +38,7 @@ export async function selectQuery(query: string, db: Database, params: any = [])
     return new Promise((resolve, reject) => {
         const f = function (err: Error | null, rows: any[]) {
             if (err) {
-                throw err;
+                return reject(err);
             }
 
             return resolve(rows);
@@ -52,7 +52,7 @@ export async function selectOneQuery<T>(query: string, db: Database, params: any
     return new Promise((resolve, reject) => {
         const f = function (err: Error | null, row: T | undefined) {
             if (err) {
-                throw err;
+                return reject(err);
             }
 
             return resolve(row);
@@ -66,7 +66,7 @@ export async function deleteQuery(query: string, db: Database, params: any = [])
     return new Promise((resolve, reject) => {
         const f = function (this: RunResult, err: Error | null) {
             if (err) {
-                throw err;
+                return reject(err);
             }
 
             return resolve(this.changes);
@@ -80,7 +80,7 @@ export async function updateQuery(query: string, db: Database, params: any = [])
     return new Promise((resolve, reject) => {
         const f = function (this: RunResult, err: Error | null) {
             if (err) {
-                throw err;
+                return reject(err);
             }
 
             return resolve(this.changes);
@@ -156,6 +156,17 @@ export async function createTablesIfNeeded(db: Database) {
         channel_id VARCHAR(255) NOT NULL,
         message VARCHAR(2000),
         expire_time TIMESTAMP
+    )`, db);
+
+    /* This table stores every time a command is called for statistics and 
+     * logging purposes */
+    await executeQuery(`CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL,
+        channel_id VARCHAR(255) NOT NULL,
+        command VARCHAR(255) NOT NULL,
+        args VARCHAR(2000),
+        timestamp TIMESTAMP NOT NULL
     )`, db);
 }
 

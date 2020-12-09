@@ -1534,3 +1534,31 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
 
     return filtered;
 }
+
+export async function handleStats(msg: Message, args: string, db: Database): Promise<void> {
+    const commands = await selectQuery(
+        `SELECT
+            command AS command,
+            COUNT(*) AS usage
+        FROM
+            logs
+        WHERE
+            channel_id = ?
+        GROUP BY
+            command
+        ORDER BY
+            usage DESC`,
+        db,
+        [ msg.channel.id ]
+    );
+
+    const embed = new MessageEmbed()
+        .setTitle('Bot usage statistics')
+        .setDescription('Number of times a command has been used');
+
+    for (const command of commands) {
+        embed.addField(`${config.prefix}${command.command}`, command.usage, true);
+    }
+
+    msg.channel.send(embed);
+}

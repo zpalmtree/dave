@@ -547,3 +547,23 @@ export function handleImageHelp(msg: Message): void {
 
     msg.channel.send(embed);
 }
+
+export function handleStatsHelp(msg: Message): void {
+    const embed = new MessageEmbed()
+        .setTitle('$stats')
+        .setDescription(`View bot usage statistics`)
+        .addFields(
+            {
+                name: `View most used commands`,
+                value: '`$stats`',
+                inline: false,
+            },
+            {
+                name: `View usage of a specific command`,
+                value: '`$stats fortune`',
+                inline: false,
+            },
+        );
+
+    msg.channel.send(embed);
+}

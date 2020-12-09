@@ -42,6 +42,7 @@ import {
     handleNikocado,
     handleImage,
     handleYoutube,
+    handleStats,
 } from './Commands';
 
 import {
@@ -93,13 +94,14 @@ import {
     handleNikocadoHelp,
     handleImageHelp,
     handleYoutubeHelp,
+    handleStatsHelp,
 } from './Help';
 
 import {
     handleWatchNotifications,
 } from './Watch';
 
-const commands: Command[] = [
+export const commands: Command[] = [
     {
         aliases: ['roll', 'reroll'],
         argsFormat: Args.Combined,
@@ -312,6 +314,15 @@ const commands: Command[] = [
         helpFunction: handleYoutubeHelp,
         description: 'Query youtube',
     },
+    {
+        aliases: ['stats'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleStats,
+        helpFunction: handleStatsHelp,
+        description: 'View bot usage statistics',
+        needDb: true,
+    },
 ];
 
 async function handleMessage(msg: Message, db: Database): Promise<void> {
@@ -339,6 +350,21 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
         }
 
         if (c.aliases.includes(command)) {
+            insertQuery(
+                `INSERT INTO logs
+                    (user_id, channel_id, command, args, timestamp)
+                VALUES
+                    (?, ?, ?, ?, ?)`,
+                db,
+                [
+                    msg.author.id,
+                    msg.channel.id,
+                    c.aliases[0],
+                    args.join(' '),
+                    moment().utcOffset(0).format('YYYY-MM-DD hh:mm:ss'),
+                ]
+            );
+
             if (c.hidden) {
                 if (!canAccessCommand(msg, true)) {
                     return;
@@ -419,6 +445,7 @@ async function main() {
         /* Usually discord permissions errors */
         } catch (err) {
             console.error('Caught error: ' + err.toString());
+            msg.react('🔥');
         }
     });
 
