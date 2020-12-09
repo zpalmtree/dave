@@ -314,7 +314,7 @@ const commands: Command[] = [
     },
 ];
 
-function handleMessage(msg: Message, db: Database) {
+async function handleMessage(msg: Message, db: Database): Promise<void> {
     if (!msg.content.startsWith(config.prefix)) {
         return;
     }
@@ -346,34 +346,34 @@ function handleMessage(msg: Message, db: Database) {
             }
 
             if (args.length === 1 && args[0] === 'help' && c.helpFunction) {
-                c.helpFunction(msg);
+                await c.helpFunction(msg);
                 return;
             }
 
             switch (c.argsFormat) {
                 case Args.DontNeed: {
                     if (c.needDb) {
-                        (c.implementation as DontNeedArgsCommandDb)(msg, db);
+                        await (c.implementation as DontNeedArgsCommandDb)(msg, db);
                     } else {
-                        (c.implementation as DontNeedArgsCommand)(msg);
+                        await (c.implementation as DontNeedArgsCommand)(msg);
                     }
 
                     break;
                 }
                 case Args.Split: {
                     if (c.needDb) {
-                        (c.implementation as SplitArgsCommandDb)(msg, args, db);
+                        await (c.implementation as SplitArgsCommandDb)(msg, args, db);
                     } else {
-                        (c.implementation as SplitArgsCommand)(msg, args);
+                        await (c.implementation as SplitArgsCommand)(msg, args);
                     }
 
                     break;
                 }
                 case Args.Combined: {
                     if (c.needDb) {
-                        (c.implementation as CombinedArgsCommandDb)(msg, args.join(' '), db);
+                        await (c.implementation as CombinedArgsCommandDb)(msg, args.join(' '), db);
                     } else {
-                        (c.implementation as CombinedArgsCommand)(msg, args.join(' '));
+                        await (c.implementation as CombinedArgsCommand)(msg, args.join(' '));
                     }
 
                     break;
@@ -416,9 +416,9 @@ async function main() {
         restoreTimers(db, client);
     });
 
-    client.on('message', (msg) => {
+    client.on('message', async (msg) => {
         try {
-            handleMessage(msg as Message, db);
+            await handleMessage(msg as Message, db);
         /* Usually discord permissions errors */
         } catch (err) {
             console.error('Caught error: ' + err.toString());
