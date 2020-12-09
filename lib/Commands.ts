@@ -1482,7 +1482,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
 
     const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webm', 'mp4'];
 
-    const filtered = imageData.results.filter((img: any) => {
+    const isValidExtension = (img: any) => {
         const url = new URL(img.image);
 
         if (url.protocol === 'http:') {
@@ -1492,6 +1492,27 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const file = url.pathname;
 
         return validExtensions.some((ext) => file.endsWith(`.${ext}`));
+    };
+
+    const blacklistedDomains: string[] = [
+    ];
+
+    const isBlacklistedDomain = (img: any) => {
+        const url = new URL(img.image);
+
+        return blacklistedDomains.includes(url.hostname);
+    };
+
+    const filtered = imageData.results.filter((img: any) => {
+        if (isBlacklistedDomain(img)) {
+            return false;
+        }
+
+        if (!isValidExtension(img)) {
+            return false;
+        }
+
+        return true;
     });
 
     if (filtered.length === 0) {
