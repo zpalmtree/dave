@@ -248,11 +248,11 @@ export async function updateTime(msg: Message, args: string[], db: Database): Pr
 
         await updateQuery(
             `UPDATE
-                watch_event AS we
+                watch_event
             SET
-                we.timestamp = ?
+                timestamp = ?
             WHERE
-                we.id = ?`,
+                id = ?`,
             db,
             [ id, parsedTime.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
         );
