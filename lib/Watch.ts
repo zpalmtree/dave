@@ -41,6 +41,7 @@ interface IGetWatchDetails {
     excludeComplete?: boolean;
     excludeIncomplete?: boolean;
     id?: number | string;
+    sort?: 'ASC' | 'DESC';
 }
 
 async function doesWatchIDExist(id: number, channelID: string, db: Database): Promise<boolean> {
@@ -129,6 +130,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
         msg.channel.id,
         db, {
             excludeIncomplete: true,
+            sort: 'DESC',
         },
     );
 
@@ -652,6 +654,7 @@ async function getWatchDetailsImpl(
         excludeComplete,
         excludeIncomplete,
         id,
+        sort = 'ASC',
     } = options;
 
     if (Number.isNaN(id)) {
@@ -688,7 +691,11 @@ async function getWatchDetailsImpl(
         args['$movie_id'] = id;
     }
 
-    query += ` ORDER BY we.timestamp`;
+    if (sort === 'ASC') {
+        query += ` ORDER BY we.timestamp ASC`;
+    } else {
+        query += ` ORDER BY we.timestamp DESC`;
+    }
 
     const events = await selectQuery(
         query,
