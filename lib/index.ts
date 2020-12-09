@@ -43,11 +43,13 @@ import {
     handleImage,
     handleYoutube,
     handleStats,
+    handleHelp,
 } from './Commands';
 
 import {
     sendTimer,
     readJSON,
+    canAccessCommand,
 } from './Utilities';
 
 import {
@@ -456,41 +458,6 @@ async function main() {
               console.error(err);
               main();
     });
-}
-
-function canAccessCommand(msg: Message, react: boolean): boolean {
-    if (msg.channel.id === config.mainChannel) {
-        return true;
-    }
-
-    if (msg.author.id === config.god) {
-        return true;
-    }
-
-    if (react) {
-        msg.react('❌');
-    }
-
-    return false;
-}
-
-function handleHelp(msg: Message): void {
-    const embed = new MessageEmbed()
-        .setFooter('Enter <command> help for more info and examples on any command');
-
-    for (const c of commands) {
-        if (c.hidden && !canAccessCommand(msg, false)) {
-            continue;
-        }
-
-        embed.addFields({
-            name: '$' + c.aliases[0],
-            value: c.description,
-            inline: true,
-        });
-    }
-
-    msg.reply(embed);
 }
 
 export async function restoreTimers(db: Database, client: Client) {

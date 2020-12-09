@@ -109,3 +109,19 @@ export function sendTimer(channel: TextChannel, milliseconds: number, user_id: s
         }
     }, milliseconds);
 }
+
+export function canAccessCommand(msg: Message, react: boolean): boolean {
+    if (msg.channel.id === config.mainChannel) {
+        return true;
+    }
+
+    if (msg.author.id === config.god) {
+        return true;
+    }
+
+    if (react) {
+        msg.react('❌');
+    }
+
+    return false;
+}
