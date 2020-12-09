@@ -764,6 +764,10 @@ export async function handleWatchNotifications(client: Client, db: Database) {
 
     if (events) {
         for (const watch of events) {
+            if (config.devEnv && watch.channelID !== config.devChannel) {
+                continue;
+            }
+
             const fourHourReminder = moment(watch.time).subtract(4, 'hours');
             const twentyMinuteReminder = moment(watch.time).subtract(20, 'minutes');
 
