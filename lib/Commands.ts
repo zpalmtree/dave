@@ -1503,14 +1503,26 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         return blacklistedDomains.includes(url.hostname);
     };
 
-    const filtered = imageData.results.filter((img: any) => {
+    const images = new Set<string>();
+
+    const filtered = imageData.results.filter((img: any, position: number) => {
+        /* Verify the image doesn't appear in the results multiple times */
+        if (images.has(img.image)) {
+            return false;
+        }
+
+        /* Skip known bad domains */
         if (isBlacklistedDomain(img)) {
             return false;
         }
 
+        /* Verify it has a valid extension, discord will not display a preview without one */
         if (!isValidExtension(img)) {
             return false;
         }
+
+        /* Add to url cache */
+        images.add(img.image);
 
         return true;
     });
