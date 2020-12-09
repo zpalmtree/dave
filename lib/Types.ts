@@ -40,6 +40,9 @@ export interface ScheduledWatch {
 
     /* Discord IDs attending */
     attending: string[];
+
+    /* Channel the movie is being watched in */
+    channelID: string;
 }
 
 export type DontNeedArgsCommandDb = (msg: Message, db: Database) => void;

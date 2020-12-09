@@ -1,6 +1,7 @@
 import * as moment from 'moment';
 
 import {
+    Client,
     Message,
     MessageEmbed,
     TextChannel,
@@ -42,6 +43,7 @@ interface IGetWatchDetails {
     excludeIncomplete?: boolean;
     id?: number | string;
     sort?: 'ASC' | 'DESC';
+    channelID?: string;
 }
 
 async function doesWatchIDExist(id: number, channelID: string, db: Database): Promise<boolean> {
@@ -65,10 +67,9 @@ async function doesWatchIDExist(id: number, channelID: string, db: Database): Pr
 }
 
 export async function displayScheduledWatches(msg: Message, db: Database): Promise<void> {
-    const events = await getWatchDetails(
-        msg.channel.id,
-        db, {
+    const events = await getWatchDetails(db, {
             excludeComplete: true,
+            channelID: msg.channel.id,
         },
     );
 
@@ -126,11 +127,10 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
 }
 
 export async function displayAllWatches(msg: Message, db: Database): Promise<void> {
-    const data = await getWatchDetails(
-        msg.channel.id,
-        db, {
+    const data = await getWatchDetails(db, {
             excludeIncomplete: true,
             sort: 'DESC',
+            channelID: msg.channel.id,
         },
     );
 
@@ -235,17 +235,17 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
 
     if (results || relativeResults) {
         let parsedTime = moment();
-        let parsedId = '';
+        let parsedID = '';
 
         if (results) {
             const [ , id, time ] = results;
 
             parsedTime = moment(time, 'YYYY/MM/DD hh:mm ZZ');
-            parsedId = id;
+            parsedID = id;
         } else {
             const [ , id, daysStr, hoursStr, minutesStr ] = relativeResults || [];
             
-            parsedId = id;
+            parsedID = id;
 
             if (daysStr === undefined && hoursStr === undefined && minutesStr === undefined) {
                 msg.reply(`Could not parse time. Should be in the form \`YYYY/MM/DD HH:MM [+-]HH:MM\``);
@@ -268,10 +268,10 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
             return;
         }
 
-        const watch = await getWatchDetailsById(parsedId, msg.channel.id, db);
+        const watch = await getWatchDetailsById(parsedID, msg.channel.id, db);
 
         if (!watch) {
-            msg.reply(`Could not find movie ID "${parsedId}". Use \`$watch\` to list all scheduled watches.`);
+            msg.reply(`Could not find movie ID "${parsedID}". Use \`$watch\` to list all scheduled watches.`);
             return;
         }
 
@@ -281,9 +281,9 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
             SET
                 timestamp = ?
             WHERE
-                id = ?`,
+                movie_id = ?`,
             db,
-            [ parsedId, parsedTime.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
+            [ parsedTime.utcOffset(0).format('YYYY-MM-DD hh:mm:ss'), parsedID ],
         );
 
         msg.reply(`Successfully updated time for ${watch.title} to ${parsedTime.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
@@ -627,18 +627,17 @@ async function awaitWatchReactions(
 }
 
 async function getWatchDetailsById(id: number | string, channelID: string, db: Database, options?: IGetWatchDetails): Promise<ScheduledWatch | undefined> {
-    return getWatchDetailsImpl(
-        channelID, {
+    return getWatchDetailsImpl({
             id,
+            channelID,
             ...options,
         },
         db
     ) as Promise<ScheduledWatch | undefined>;
 }
 
-async function getWatchDetails(channelID: string, db: Database, options?: IGetWatchDetails): Promise<ScheduledWatch[] | undefined> {
-    return getWatchDetailsImpl(
-        channelID, {
+async function getWatchDetails(db: Database, options?: IGetWatchDetails): Promise<ScheduledWatch[] | undefined> {
+    return getWatchDetailsImpl({
             ...options,
         },
         db
@@ -646,7 +645,6 @@ async function getWatchDetails(channelID: string, db: Database, options?: IGetWa
 }
 
 async function getWatchDetailsImpl(
-    channelID: string,
     options: IGetWatchDetails,
     db: Database): Promise<ScheduledWatch | ScheduledWatch[] | undefined> {
 
@@ -655,28 +653,33 @@ async function getWatchDetailsImpl(
         excludeIncomplete,
         id,
         sort = 'ASC',
+        channelID,
     } = options;
 
     if (Number.isNaN(id)) {
         return undefined;
     }
 
-    const args = {
-        $channel_id: channelID,
-    } as any;
+    const args = {} as any;
 
     let query =
         `SELECT
             m.id AS movieID,
             m.title AS title,
             we.id AS watchID,
-            we.timestamp AS time
+            we.timestamp AS time,
+            we.channel_id AS channelID
         FROM
             watch_event AS we
             INNER JOIN movie AS m
                 ON m.id = we.movie_id
         WHERE
-            we.channel_id = $channel_id`;
+            1 = 1`;
+
+    if (channelID) {
+        query += ` AND we.channel_id = $channel_id`;
+        args['$channel_id'] = channelID;
+    }
 
     if (excludeComplete !== undefined && excludeComplete) {
         query += ` AND we.timestamp > STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW', '-3 HOURS')`;
@@ -752,10 +755,12 @@ async function getWatchDetailsImpl(
     }
 }
 
-export async function handleWatchNotifications(channel: TextChannel, db: Database) {
-    const events = await getWatchDetails(channel.id, db, {
+export async function handleWatchNotifications(client: Client, db: Database) {
+    const events = await getWatchDetails(db, {
         excludeComplete: true,
     });
+
+    const channels = new Map<string, TextChannel>();
 
     if (events) {
         for (const watch of events) {
@@ -768,6 +773,24 @@ export async function handleWatchNotifications(channel: TextChannel, db: Databas
 
             const mention = watch.attending.map((x) => `<@${x}>`).join(' ');
 
+            let channel = channels.get(watch.channelID);
+
+            if (channel === undefined) {
+                try {
+                    channel = await client.channels.fetch(watch.channelID) as TextChannel;
+
+                    if (!channel) {
+                        console.log(`Failed to get channel ${watch.channelID}`);
+                        continue;
+                    }
+
+                    channels.set(watch.channelID, channel);
+                } catch (err) {
+                    console.log(`Failed to get channel ${watch.channelID}`);
+                    continue;
+                }
+            }
+
             if (fourHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
                 channel.send(`${mention}, reminder, you are watching ${watch.title} in 4 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
             }
@@ -778,6 +801,6 @@ export async function handleWatchNotifications(channel: TextChannel, db: Databas
         }
     }
 
-    setTimeout(handleWatchNotifications, config.watchPollInterval, channel, db);
+    setTimeout(handleWatchNotifications, config.watchPollInterval, client, db);
 }
 

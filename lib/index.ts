@@ -402,10 +402,6 @@ async function main() {
     client.on('ready', async () => {
         console.log('Logged in');
 
-        client.channels.fetch(config.devEnv ? config.devChannel : config.mainChannel)
-            .then((chan) => handleWatchNotifications(chan as TextChannel, db))
-            .catch((err) => { console.error(`Failed to find channel: ${err.toString()}`); });
-
         const migrate = false;
 
         if (migrate) {
@@ -413,6 +409,7 @@ async function main() {
             await migrateWatch(db);
         }
 
+        handleWatchNotifications(client, db);
         restoreTimers(db, client);
     });
 
