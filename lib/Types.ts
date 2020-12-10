@@ -81,7 +81,10 @@ export interface Command {
     helpFunction?: (msg: Message) => void;
 
     /* A description of the command for help strings */
-    description?: string;
+    description: string;
+
+    /* A more detailed description used when calling $help for just this function */
+    helpDescription?: string;
 
     /* If the command is disabled */
     disabled?: boolean;

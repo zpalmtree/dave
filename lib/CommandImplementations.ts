@@ -36,7 +36,6 @@ import { dubTypes } from './Dubs';
 
 import {
     handleWatchHelp,
-    handleQueryHelp
 } from './Help';
 
 import {

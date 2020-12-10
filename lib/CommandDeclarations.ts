@@ -45,32 +45,10 @@ import {
 } from './CommandImplementations';
 
 import {
-    handleRollHelp,
-    handleQuoteHelp,
-    handleSuggestHelp,
-    handleFortuneHelp,
-    handleMathHelp,
-    handleDoggoHelp,
-    handleKittyHelp,
-    handleChinkedHelp,
-    handleDotHelp,
-    handlePizzaHelp,
-    handleTurtleHelp,
     handleWatchHelp,
-    handleTimeHelp,
-    handleDateHelp,
-    handleTimerHelp,
-    handleCountdownHelp,
-    handlePurgeHelp,
-    handleTranslateHelp,
-    handleQueryHelp,
-    handleExchangeHelp,
-    handleAvatarHelp,
-    handleNikocadoHelp,
-    handleImageHelp,
-    handleYoutubeHelp,
-    handleStatsHelp,
 } from './Help';
+
+import { exchangeService } from './Exchange';
 
 import { config } from './Config';
 
@@ -80,15 +58,27 @@ export const Commands: Command[] = [
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleRoll,
-        helpFunction: handleRollHelp,
         description: 'Gets your post number and its repeating digits',
+        examples: [
+            {
+                name: 'Example',
+                value: '`$roll`',
+            },
+            {
+                name: 'Example',
+                value: '`$roll d20`',
+            },
+            {
+                name: 'Example',
+                value: '`$roll 6d10`',
+            },
+        ],
     },
     {
         aliases: ['quote'],
         argsFormat: Args.DontNeed,
         hidden: false,
         implementation: handleQuote,
-        helpFunction: handleQuoteHelp,
         description: 'Gets a random quote',
         needDb: true,
     },
@@ -97,41 +87,79 @@ export const Commands: Command[] = [
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleSuggest,
-        helpFunction: handleSuggestHelp,
         description: 'Suggest a new quote',
         needDb: true,
+        examples: [
+            {
+                value: '`$suggest "im a prancing lala boy" - you`',
+            },
+        ],
     },
     {
         aliases: ['fortune'],
         argsFormat: Args.DontNeed,
         hidden: false,
         implementation: handleFortune,
-        helpFunction: handleFortuneHelp,
         description: 'Get your fortune',
+        examples: [
+            {
+                value: '`$fortune`',
+            },
+            {
+                value: '`$fortune I die tomorrow`',
+            },
+        ],
     },
     {
         aliases: ['math'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleMath,
-        helpFunction: handleMathHelp,
         description: 'Perform math or conversions',
+        examples: [
+            {
+                value: '`$math 123 * 456`',
+            },
+            {
+                value: '`$math 100 fahrenheit to celsius`',
+            }
+        ],
     },
     {
         aliases: ['doggo'],
         argsFormat: Args.Split,
         hidden: false,
         implementation: handleDoggo,
-        helpFunction: handleDoggoHelp,
         description: 'Get a random dog picture',
+        examples: [
+            {
+                value: '`$doggo`',
+            },
+            {
+                value: '`$doggo corgi`',
+            },
+            {
+                value: '`$doggo golden retriever`',
+            },
+        ],
     },
     {
         aliases: ['kitty'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleKitty,
-        helpFunction: handleKittyHelp,
         description: 'Get a random cat picture',
+        examples: [
+            {
+                value: '`$kitty`',
+            },
+            {
+                value: '`$kitty persian`',
+            },
+            {
+                value: '`$kitty european burmese`',
+            },
+        ],
     },
     {
         aliases: ['help'],
@@ -145,23 +173,43 @@ export const Commands: Command[] = [
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleChinked,
-        helpFunction: handleChinkedHelp,
         description: 'Display coronavirus statistics',
+        examples: [
+            {
+                value: '`$chinked`',
+            },
+            {
+                value: '`$chinked usa`',
+            },
+            {
+                value: '`$chinked new york`',
+            },
+        ],
     },
     {
         aliases: ['dot'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleDot,
-        helpFunction: handleDotHelp,
         description: 'Get the Global Consciousness Project Dot Graph',
+        helpDescription: 'The Global Consciousness Project collects random numbers from ' +
+            'around the world. These numbers are available on the GCP website. ' +
+            'This website downloads those numbers once a minute and performs ' +
+            'sophisticated analysis on these random numbers to see how coherent ' +
+            'they are. That is, we compute how random the random numbers coming ' +
+            'from the eggs really are. The theory is that the Global Consciousness ' +
+            'of all Beings of the Planet affect these random numbers... Maybe ' +
+            'they aren\'t quite as random as we thought.\n\nThe probability time ' +
+            'window is one and two hours; with the display showing the more ' +
+            'coherent of the two. For more information on the algorithm you can ' +
+            'read about it on the GCP Basic Science page ' +
+            '(<http://global-mind.org/science2.html#hypothesis>)',
     },
     {
         aliases: ['pizza'],
         argsFormat: Args.DontNeed,
         hidden: false,
         implementation: handleImgur.bind(undefined, 'r/pizza'),
-        helpFunction: handlePizzaHelp,
         description: 'Get a random r/pizza picture',
     },
     {
@@ -169,7 +217,6 @@ export const Commands: Command[] = [
         argsFormat: Args.DontNeed,
         hidden: false,
         implementation: handleImgur.bind(undefined, 'r/turtle'),
-        helpFunction: handleTurtleHelp,
         description: 'Get a random r/turtle picture',
     },
     {
@@ -186,40 +233,73 @@ export const Commands: Command[] = [
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleTime,
-        helpFunction: handleTimeHelp,
         description: 'Get the current time in a specific UTC offset',
+        examples: [
+            {
+                value: '`$time`',
+            },
+            {
+                value: '`$time +01:00`',
+            },
+            {
+                value: '`$time -06:00`',
+            },
+        ],
     },
     {
         aliases: ['date'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleDate,
-        helpFunction: handleDateHelp,
         description: 'Get the current date in a specific UTC offset',
+        examples: [
+            {
+                value: '`$date`',
+            },
+            {
+                value: '`$date +01:00`',
+            },
+            {
+                value: '`$date -06:00`',
+            },
+        ],
     },
     {
         aliases: ['timer'],
         argsFormat: Args.Split,
         hidden: false,
         implementation: handleTimer,
-        helpFunction: handleTimerHelp,
         description: 'Set a timer to remind you of something',
         needDb: true,
+        examples: [
+            {
+                value: '`$timer 5m coffee`',
+            },
+            {
+                value: '`$timer 2h`',
+            },
+        ]
     },
     {
         aliases: ['countdown'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleCountdown.bind(undefined, 'Lets jam!'),
-        helpFunction: handleCountdownHelp,
         description: 'Perform a countdown',
+        examples: [
+            {
+                value: '`$countdown`',
+            },
+            {
+                value: '`$countdown 5`',
+            },
+        ],
     },
     {
         aliases: ['purge'],
         argsFormat: Args.DontNeed,
         hidden: true,
         implementation: handlePurge,
-        helpFunction: handlePurgeHelp,
         description: 'Delete all your messages in a channel',
         disabled: true,
     },
@@ -228,47 +308,96 @@ export const Commands: Command[] = [
         argsFormat: Args.Split,
         hidden: false,
         implementation: handleTranslate,
-        helpFunction: handleTranslateHelp,
         description: 'Translate text from one language to another',
+        examples: [
+            {
+                name: 'Translate to english',
+                value: '`$translate C\'est la vie`',
+            },
+            {
+                name: 'Translate to another language',
+                value: '`$translate french Such is life`',
+            }
+        ],
     },
     {
         aliases: ['pause'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleCountdown.bind(undefined, 'pause'),
-        helpFunction: handleCountdownHelp,
         description: 'Perform a pause',
+        examples: [
+            {
+                value: '`$pause`',
+            },
+            {
+                value: '`$pause 5`',
+            },
+        ]
     },
     {
         aliases: ['query', 'search'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleQuery,
-        helpFunction: handleQueryHelp,
         description: 'Query duckduckgo',
+        examples: [
+            {
+                name: 'Define something',
+                value: '`$query apple`',
+            },
+            {
+                name: 'Use duckduckgo bangs - https://duckduckgo.com/bang',
+                value: '`$query !w Arnold Schwarzenegger`',
+            },
+            {
+                name: `Topic Summaries`,
+                value: '`$query Valley Forge National Historical Park`',
+            },
+            {
+                name: 'Categories',
+                value: '`$query Simpsons Characters`',
+            },
+        ],
     },
     {
         aliases: ['exchange', 'convert'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleExchange,
-        helpFunction: handleExchangeHelp,
         description: 'Convert between REAL currencies',
+        helpDescription: `Convert between currencies. Known currencies: \`${exchangeService.getCurrencies().join(',')}\``,
+        examples: [
+            {
+                value: '`$exchange 100 USD to GBP`',
+            },
+            {
+                value: '`$exchange 666.66 MXN to EUR`',
+            },
+        ],
     },
     {
         aliases: ['avatar'],
         argsFormat: Args.DontNeed,
         hidden: false,
         implementation: handleAvatar,
-        helpFunction: handleAvatarHelp,
         description: 'Retrieve a users avatar',
+        examples: [
+            {
+                name: `Retrieve bob's avatar`,
+                value: '`$avatar @bob`',
+            },
+            {
+                name: 'Retrieve your own avatar',
+                value: '`$avatar`',
+            },
+        ]
     },
     {
         aliases: ['nikocado', 'orlin', 'niko', 'avocado'],
         argsFormat: Args.DontNeed,
         hidden: true,
         implementation: handleNikocado,
-        helpFunction: handleNikocadoHelp,
         description: 'Get a random nikocado',
     },
     {
@@ -276,25 +405,38 @@ export const Commands: Command[] = [
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleImage,
-        helpFunction: handleImageHelp,
         description: 'Query duckduckgo images',
+        examples: [
+            {
+                value: '`$image sunset`',
+            },
+        ],
     },
     {
         aliases: ['youtube'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleYoutube,
-        helpFunction: handleYoutubeHelp,
         description: 'Query youtube',
+        examples: [
+            {
+                value: '`$youtube install gentoo`',
+            },
+        ],
     },
     {
         aliases: ['stats'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleStats,
-        helpFunction: handleStatsHelp,
         description: 'View bot usage statistics',
         needDb: true,
+        examples: [
+            {
+                name: `View most used commands`,
+                value: '`$stats`',
+            },
+        ],
     },
 ];
 
@@ -319,21 +461,29 @@ export function handleHelp(msg: Message, args: string): void {
                     return;
                 }
 
+                const callString = config.prefix + args;
+
+                let examples = [{
+                    value: `\`${callString}\``,
+                }]
+
                 if (c.examples && c.examples.length > 0) {
-                    const embed = new MessageEmbed()
-                        .setTitle(`${config.prefix}${args}`)
-                        .setDescription(c.description)
-                        .addFields(c.examples.map((e) => {
-                            return {
-                                name: 'Example',
-                                ...e,
-                            }
-                        }));
-
-                    msg.channel.send(embed);
-
-                    return;
+                    examples = c.examples;
                 }
+
+                const embed = new MessageEmbed()
+                    .setTitle(callString)
+                    .setDescription(c.helpDescription || c.description)
+                    .addFields(examples.map((e) => {
+                        return {
+                            name: 'Example',
+                            ...e,
+                        }
+                    }));
+
+                msg.channel.send(embed);
+
+                return;
             }
         }
     }
