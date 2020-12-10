@@ -88,10 +88,6 @@ import {
     ModifyMessage,
 } from './Paginate';
 
-import {
-    commands
-} from './index';
-
 const timeUnits: TimeUnits = {
     Y: 31536000,
     M: 2592000,
@@ -1567,35 +1563,4 @@ export async function handleStats(msg: Message, args: string, db: Database): Pro
     }
 
     msg.channel.send(embed);
-}
-
-export function handleHelp(msg: Message): void {
-    const embed = new MessageEmbed()
-        .setTitle('Available commands')
-        .setDescription(`Enter \`${config.prefix}command help\` for more info and examples on a specific command`);
-
-    const availableCommands = commands.filter((c) => {
-        if (c.hidden && !canAccessCommand(msg, false)) {
-            return false;
-        }
-
-        return true;
-    })
-
-    const pages = new Paginate({
-        sourceMessage: msg,
-        itemsPerPage: 9,
-        displayType: DisplayType.EmbedFieldData,
-        data: availableCommands,
-        embed: embed,
-        displayFunction: (item: Command) => {
-            return {
-                name: config.prefix + item.aliases[0],
-                value: item.description,
-                inline: true,
-            };
-        },
-    });
-
-    pages.sendMessage();
 }

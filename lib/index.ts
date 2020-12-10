@@ -19,34 +19,6 @@ import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
 
 import {
-    handleFortune,
-    handleMath,
-    handleRoll,
-    handleQuote,
-    handleSuggest,
-    handleKitty,
-    handleDoggo,
-    handleChinked,
-    handleDot,
-    handleImgur,
-    handleWatch,
-    handleTime,
-    handleDate,
-    handleTimer,
-    handleCountdown,
-    handlePurge,
-    handleTranslate,
-    handleQuery,
-    handleExchange,
-    handleAvatar,
-    handleNikocado,
-    handleImage,
-    handleYoutube,
-    handleStats,
-    handleHelp,
-} from './Commands';
-
-import {
     sendTimer,
     readJSON,
     canAccessCommand,
@@ -72,260 +44,13 @@ import {
 } from './Types';
 
 import {
-    handleRollHelp,
-    handleQuoteHelp,
-    handleSuggestHelp,
-    handleFortuneHelp,
-    handleMathHelp,
-    handleDoggoHelp,
-    handleKittyHelp,
-    handleChinkedHelp,
-    handleDotHelp,
-    handlePizzaHelp,
-    handleTurtleHelp,
-    handleWatchHelp,
-    handleTimeHelp,
-    handleDateHelp,
-    handleTimerHelp,
-    handleCountdownHelp,
-    handlePurgeHelp,
-    handleTranslateHelp,
-    handleQueryHelp,
-    handleExchangeHelp,
-    handleAvatarHelp,
-    handleNikocadoHelp,
-    handleImageHelp,
-    handleYoutubeHelp,
-    handleStatsHelp,
-} from './Help';
-
-import {
     handleWatchNotifications,
 } from './Watch';
 
-export const commands: Command[] = [
-    {
-        aliases: ['roll', 'reroll'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleRoll,
-        helpFunction: handleRollHelp,
-        description: 'Gets your post number and its repeating digits',
-    },
-    {
-        aliases: ['quote'],
-        argsFormat: Args.DontNeed,
-        hidden: false,
-        implementation: handleQuote,
-        helpFunction: handleQuoteHelp,
-        description: 'Gets a random quote',
-        needDb: true,
-    },
-    {
-        aliases: ['suggest'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleSuggest,
-        helpFunction: handleSuggestHelp,
-        description: 'Suggest a new quote',
-        needDb: true,
-    },
-    {
-        aliases: ['fortune'],
-        argsFormat: Args.DontNeed,
-        hidden: false,
-        implementation: handleFortune,
-        helpFunction: handleFortuneHelp,
-        description: 'Get your fortune',
-    },
-    {
-        aliases: ['math'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleMath,
-        helpFunction: handleMathHelp,
-        description: 'Perform math or conversions',
-    },
-    {
-        aliases: ['doggo'],
-        argsFormat: Args.Split,
-        hidden: false,
-        implementation: handleDoggo,
-        helpFunction: handleDoggoHelp,
-        description: 'Get a random dog picture',
-    },
-    {
-        aliases: ['kitty'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleKitty,
-        helpFunction: handleKittyHelp,
-        description: 'Get a random cat picture',
-    },
-    {
-        aliases: ['help'],
-        argsFormat: Args.DontNeed,
-        hidden: false,
-        implementation: handleHelp,
-        description: 'Displays this help',
-    },
-    {
-        aliases: ['chinked', 'corona', 'coronavirus', 'chinavirus'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleChinked,
-        helpFunction: handleChinkedHelp,
-        description: 'Display coronavirus statistics',
-    },
-    {
-        aliases: ['dot'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleDot,
-        helpFunction: handleDotHelp,
-        description: 'Get the Global Consciousness Project Dot Graph',
-    },
-    {
-        aliases: ['pizza'],
-        argsFormat: Args.DontNeed,
-        hidden: false,
-        implementation: handleImgur.bind(this, 'r/pizza'),
-        helpFunction: handlePizzaHelp,
-        description: 'Get a random r/pizza picture',
-    },
-    {
-        aliases: ['turtle'],
-        argsFormat: Args.DontNeed,
-        hidden: false,
-        implementation: handleImgur.bind(this, 'r/turtle'),
-        helpFunction: handleTurtleHelp,
-        description: 'Get a random r/turtle picture',
-    },
-    {
-        aliases: ['watch', 'movie'],
-        argsFormat: Args.Split,
-        hidden: true,
-        implementation: handleWatch,
-        helpFunction: handleWatchHelp,
-        description: 'Display or schedule a movie/series to watch',
-        needDb: true,
-    },
-    {
-        aliases: ['time'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleTime,
-        helpFunction: handleTimeHelp,
-        description: 'Get the current time in a specific UTC offset',
-    },
-    {
-        aliases: ['date'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleDate,
-        helpFunction: handleDateHelp,
-        description: 'Get the current date in a specific UTC offset',
-    },
-    {
-        aliases: ['timer'],
-        argsFormat: Args.Split,
-        hidden: false,
-        implementation: handleTimer,
-        helpFunction: handleTimerHelp,
-        description: 'Set a timer to remind you of something',
-        needDb: true,
-    },
-    {
-        aliases: ['countdown'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleCountdown.bind(this, 'Lets jam!'),
-        helpFunction: handleCountdownHelp,
-        description: 'Perform a countdown',
-    },
-    {
-        aliases: ['purge'],
-        argsFormat: Args.DontNeed,
-        hidden: true,
-        implementation: handlePurge,
-        helpFunction: handlePurgeHelp,
-        description: 'Delete all your messages in a channel',
-        disabled: true,
-    },
-    {
-        aliases: ['translate'],
-        argsFormat: Args.Split,
-        hidden: false,
-        implementation: handleTranslate,
-        helpFunction: handleTranslateHelp,
-        description: 'Translate text from one language to another',
-    },
-    {
-        aliases: ['pause'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleCountdown.bind(this, 'pause'),
-        helpFunction: handleCountdownHelp,
-        description: 'Perform a pause',
-    },
-    {
-        aliases: ['query', 'search'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleQuery,
-        helpFunction: handleQueryHelp,
-        description: 'Query duckduckgo',
-    },
-    {
-        aliases: ['exchange', 'convert'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleExchange,
-        helpFunction: handleExchangeHelp,
-        description: 'Convert between REAL currencies',
-    },
-    {
-        aliases: ['avatar'],
-        argsFormat: Args.DontNeed,
-        hidden: false,
-        implementation: handleAvatar,
-        helpFunction: handleAvatarHelp,
-        description: 'Retrieve a users avatar',
-    },
-    {
-        aliases: ['nikocado', 'orlin', 'niko', 'avocado'],
-        argsFormat: Args.DontNeed,
-        hidden: true,
-        implementation: handleNikocado,
-        helpFunction: handleNikocadoHelp,
-        description: 'Get a random nikocado',
-    },
-    {
-        aliases: ['image'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleImage,
-        helpFunction: handleImageHelp,
-        description: 'Query duckduckgo images',
-    },
-    {
-        aliases: ['youtube'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleYoutube,
-        helpFunction: handleYoutubeHelp,
-        description: 'Query youtube',
-    },
-    {
-        aliases: ['stats'],
-        argsFormat: Args.Combined,
-        hidden: false,
-        implementation: handleStats,
-        helpFunction: handleStatsHelp,
-        description: 'View bot usage statistics',
-        needDb: true,
-    },
-];
+import {
+    Commands,
+    handleHelp,
+} from './CommandDeclarations';
 
 async function handleMessage(msg: Message, db: Database): Promise<void> {
     if (!msg.content.startsWith(config.prefix)) {
@@ -346,7 +71,7 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
     /* Get the actual command after the prefix is removed */
     const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length).toLowerCase();
 
-    for (const c of commands) {
+    for (const c of Commands) {
         if (c.disabled) {
             continue;
         }
@@ -373,8 +98,8 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
                 }
             }
 
-            if (args.length === 1 && args[0] === 'help' && c.helpFunction) {
-                await c.helpFunction(msg);
+            if (args.length === 1 && args[0] === 'help') {
+                handleHelp(msg, c.aliases[0]);
                 return;
             }
 

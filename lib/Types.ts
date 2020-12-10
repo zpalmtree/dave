@@ -54,6 +54,11 @@ export type SplitArgsCommand = (msg: Message, args: string[]) => void;
 export type CombinedArgsCommandDb = (msg: Message, args: string, db: Database) => void;
 export type CombinedArgsCommand = (msg: Message, args: string) => void;
 
+export interface Example {
+    name?: string;
+    value: string;
+}
+
 export interface Command {
     /* How can we access the command? */
     aliases: string[];
@@ -82,6 +87,8 @@ export interface Command {
     disabled?: boolean;
 
     needDb?: boolean;
+
+    examples?: Example[];
 }
 
 export enum Args {
