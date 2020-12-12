@@ -34,7 +34,7 @@ Dave is a discord bot.
 
 Copy `src/Config.ts.example` to `src/Config.ts` and fill in the relevant fields.
 
-You can disable functions in `lib/index.ts` if you can't be bothered to get the API keys and don't want errors.
+You can disable functions in `lib/CommandDefinitions.ts` if you can't be bothered to get the API keys and don't want errors.
 
 * Cat API: https://thecatapi.com/signup
 * Exchange rates: https://docs.openexchangerates.org/docs/authentication
