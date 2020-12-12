@@ -38,6 +38,7 @@ You can disable functions in `lib/index.ts` if you can't be bothered to get the 
 
 * Cat API: https://thecatapi.com/signup
 * Exchange rates: https://docs.openexchangerates.org/docs/authentication
+* Youtube API: https://developers.google.com/youtube/v3/docs
 
 ## Installation
 

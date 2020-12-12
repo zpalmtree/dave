@@ -1321,7 +1321,7 @@ export function handleNikocado(msg: Message): void {
 }
 
 export async function handleYoutube(msg: Message, args: string): Promise<void> {
-    const data = await handleImageImpl(msg, args, 'youtube.com');
+    const data = await handleYoutubeApi(msg, args);
 
     if (!data) {
         return;
@@ -1562,4 +1562,115 @@ export async function handleStats(msg: Message, args: string, db: Database): Pro
     }
 
     msg.channel.send(embed);
+}
+
+export async function handleYoutubeScrape(msg: Message, args: string): Promise<undefined | any[]> {
+    if (args.trim() === '') {
+        msg.reply('No query given');
+        return;
+    }
+
+    const params = {
+        search_query: args,
+    };
+
+    const url = `https://youtube.com/results?${stringify(params)}`;
+
+    let data: any;
+
+    try {
+        const response = await fetch(url);
+        data = await response.text();
+    } catch (err) {
+        msg.reply(err);
+        return;
+    }
+
+    /* Pull out the response json */
+    const regex = /<script nonce=".*">var ytInitialData = ({.*});<\/script>/;
+
+    const [, jsonStr ] = regex.exec(data) || [];
+
+    if (!jsonStr) {
+        console.error(data);
+        msg.reply('Failed to extract youtube results from HTML!');
+        return;
+    }
+
+    let json = {} as any;
+
+    try {
+        json = JSON.parse(jsonStr);
+    } catch (err) {
+        console.error(err);
+        msg.reply('Failed to extract youtube results from HTML!');
+        return;
+    }
+
+    const videoData = json
+        .contents
+        .twoColumnSearchResultsRenderer
+        .primaryContents
+        .sectionListRenderer
+        .contents[0]
+        .itemSectionRenderer
+        .contents;
+
+    console.log(videoData);
+
+    const videos = videoData.filter((x: any) => x.videoRenderer).map((x: any) => {
+        return {
+            url: `https://www.youtube.com/watch?v=${x.videoRenderer.videoId}`,
+        }
+    });
+
+    if (videos.length === 0) {
+        msg.reply('No results found!');
+        return;
+    }
+
+    return videos;
+}
+
+export async function handleYoutubeApi(msg: Message, args: string): Promise<undefined | any[]> {
+    if (args.trim() === '') {
+        msg.reply('No query given');
+        return;
+    }
+
+    const params = {
+        q: args,
+        part: 'snippet',
+        key: config.youtubeApiKey,
+        maxResults: 50,
+        type: 'video',
+        regionCode: 'US',
+        relevanceLanguage: 'en',
+        safeSearch: 'none',
+    };
+
+    const url = `https://youtube.googleapis.com/youtube/v3/search/?${stringify(params)}`;
+
+    let data: any;
+
+    try {
+        const response = await fetch(url);
+        data = await response.json();
+    } catch (err) {
+        msg.reply(err);
+        return;
+    }
+
+    const videos = data.items.map((x: any) => {
+        return {
+            url: `https://www.youtube.com/watch?v=${x.id.videoId}`,
+        }
+    });
+
+    if (videos.length === 0) {
+        msg.reply('No results found!');
+        return;
+    }
+
+    return videos;
 }
