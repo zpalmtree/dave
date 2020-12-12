@@ -1,8 +1,3 @@
-import * as path from 'path';
-import * as fs from 'fs';
-
-import { promisify } from 'util';
-
 import {
     Message,
     MessageEmbed,
@@ -13,24 +8,6 @@ import {
 
 import { RGB } from './Types';
 import { config } from './Config';
-
-const readFile = promisify(fs.readFile);
-
-export async function readJSON<T>(filepath: string): Promise<{ err: string | undefined, data: T[] }> {
-    try {
-        const data: string = await readFile(path.join(__dirname, filepath), { encoding: 'utf8' });
-
-        return {
-            err: undefined,
-            data: JSON.parse(data),
-        };
-    } catch (err) {
-        return {
-            err: err.toString(),
-            data: [],
-        }
-    }
-}
 
 export function addReaction(emoji: string, message: Message): void {
     /* Find the reaction */

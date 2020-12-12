@@ -44,7 +44,6 @@ import {
 } from './Dot';
 
 import {
-    readJSON,
     chunk,
     capitalize,
     sleep,

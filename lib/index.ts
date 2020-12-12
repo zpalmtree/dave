@@ -20,7 +20,6 @@ import { dubTypes } from './Dubs';
 
 import {
     sendTimer,
-    readJSON,
     canAccessCommand,
 } from './Utilities';
 
@@ -155,13 +154,6 @@ async function main() {
     client.on('ready', async () => {
         console.log('Logged in');
 
-        const migrate = false;
-
-        if (migrate) {
-            await migrateSuggest(db);
-            await migrateWatch(db);
-        }
-
         handleWatchNotifications(client, db);
         restoreTimers(db, client);
     });
@@ -213,133 +205,6 @@ export async function restoreTimers(db: Database, client: Client) {
             }
         }
     );
-}
-
-export async function migrateSuggest(db: Database) {
-    console.log('-- Performing quote migration');
-
-    const { err, data: quotes } = await readJSON<Quote>('./quotes.json');
-
-    if (err) {
-        console.error(err);
-        return;
-    }
-
-    for (const quote of quotes) {
-        console.log(`---- Inserting ${quote.quote}..`);
-
-        if (quote.timestamp && quote.timestamp !== 0) {
-            await insertQuery(
-                `INSERT INTO quote
-                    (quote, channel_id, timestamp)
-                VALUES
-                    (?, ?, ?)`,
-                db,
-                [
-                    quote.quote,
-                    config.devEnv
-                        ? config.devChannel
-                        : config.mainChannel,
-                    moment(quote.timestamp).utcOffset(0).format('YYYY-MM-DD hh:mm:ss')
-                ]
-            );
-        } else {
-            await insertQuery(
-                `INSERT INTO quote
-                    (quote, channel_id, timestamp)
-                VALUES
-                    (?, ?, NULL)`,
-                db,
-                [
-                    quote.quote,
-                    config.devEnv
-                        ? config.devChannel
-                        : config.mainChannel
-                ]
-            );
-        }
-    }
-
-    console.log('-- Done');
-}
-
-export async function migrateWatch(db: Database) {
-    console.log('-- Performing watch migration');
-
-    const { err, data } = await readJSON<any>('watch.json');
-
-    if (err) {
-        console.error(err);
-        return;
-    }
-
-    for (const watch of data) {
-        console.log(`---- Inserting ${watch.title}...`);
-
-        const movieID = await insertQuery(
-            `INSERT INTO movie
-                (title, channel_id)
-            VALUES
-                (?, ?)`,
-            db,
-            [
-                watch.title,
-                config.devEnv
-                    ? config.devChannel
-                    : config.mainChannel
-            ]
-        );
-
-        if (watch.link) {
-            await insertQuery(
-                `INSERT INTO movie_link
-                    (link, movie_id, is_download)
-                VALUES
-                    (?, ?, 0)`,
-                db,
-                [ watch.link, movieID ]
-            );
-        }
-
-        if (watch.magnet) {
-            await insertQuery(
-                `INSERT INTO movie_link
-                    (link, movie_id, is_download)
-                VALUES
-                    (?, ?, 1)`,
-                db,
-                [ watch.magnet, movieID ]
-            );
-        }
-
-        const watchEventID = await insertQuery(
-            `INSERT INTO watch_event
-                (timestamp, channel_id, movie_id)
-            VALUES
-                (?, ?, ?)`,
-            db,
-            [
-                moment(watch.time).utcOffset(0).format('YYYY-MM-DD hh:mm:ss'),
-                config.devEnv
-                    ? config.devChannel
-                    : config.mainChannel,
-                movieID
-            ]
-        );
-
-        for (const attendee of watch.attending) {
-            await insertQuery(
-                `INSERT INTO user_watch
-                    (user_id, watch_event)
-                VALUES
-                    (?, ?)`,
-                db,
-                [ attendee, watchEventID ]
-            );
-        }
-    }
-
-    console.log('-- Done');
 }
 
 main();
