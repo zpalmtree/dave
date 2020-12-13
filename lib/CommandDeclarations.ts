@@ -266,7 +266,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['timer'],
+        aliases: ['timer', 'reminder'],
         argsFormat: Args.Split,
         hidden: false,
         implementation: handleTimer,

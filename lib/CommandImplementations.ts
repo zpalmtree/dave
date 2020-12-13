@@ -833,9 +833,17 @@ export function handleDate(msg: Message, args: string) {
 }
 
 export async function handleTimer(msg: Message, args: string[], db: Database) {
-    if (args.length > 0 && args[0] === 'list') {
-        handleTimers(msg, db);
-        return;
+    if (args.length >= 1) {
+        switch (args[0]) {
+            case 'list': {
+                handleTimers(msg, db);
+                return;
+            }
+            case 'delete': {
+                deleteTimer(msg, args.slice(1), db);
+                return;
+            }
+        }
     }
 
     const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
@@ -1757,4 +1765,28 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
     });
 
     pages.sendMessage();
+}
+
+async function deleteTimer(msg: Message, args: string[], db: Database) {
+    if (args.length === 0) {
+        msg.reply('No timer ID given');
+        return;
+    }
+
+    const changes = await deleteQuery(
+        `DELETE FROM
+            timer
+        WHERE
+            id = ?
+            AND channel_id = ?
+            AND user_id = ?`,
+        db,
+        [ args[0], msg.channel.id, msg.author.id ]
+    );
+
+    if (changes === 1) {
+        msg.reply(`Successfully deleted timer #${args[0]}.`);
+    } else {
+        msg.reply(`Failed to delete, unknown ID or not your timer.`);
+    }
 }
