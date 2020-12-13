@@ -42,6 +42,7 @@ import {
     handleImage,
     handleYoutube,
     handleStats,
+    handleTimers,
 } from './CommandImplementations';
 
 import {
@@ -278,6 +279,14 @@ export const Commands: Command[] = [
             {
                 value: '`$timer 2h`',
             },
+            {
+                name: 'View running timers',
+                value: '`$timer list`',
+            },
+            {
+                name: 'Delete a timer by ID - you must be the timer creator',
+                value: '`$timer delete 1`',
+            },
         ]
     },
     {
@@ -437,6 +446,14 @@ export const Commands: Command[] = [
                 value: '`$stats`',
             },
         ],
+    },
+    {
+        aliases: ['timers'],
+        argsFormat: Args.DontNeed,
+        hidden: false,
+        implementation: handleTimers,
+        description: 'View the status of running timers',
+        needDb: true,
     },
 ];
 

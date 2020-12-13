@@ -1,4 +1,5 @@
 import {
+    Guild,
     Message,
     MessageEmbed,
     MessageReaction,
@@ -101,4 +102,20 @@ export function canAccessCommand(msg: Message, react: boolean): boolean {
     }
 
     return false;
+}
+
+export function getUsername(id: string, guild: Guild | null | undefined): string {
+    const ping = `<@${id}>`;
+ 
+    if (!guild) {
+        return ping;
+    }
+
+    const user = guild.members.cache.get(id);
+
+    if (!user) {
+        return ping;
+    }
+
+    return user.displayName;
 }

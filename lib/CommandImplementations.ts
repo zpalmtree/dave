@@ -51,6 +51,7 @@ import {
     pickRandomItem,
     sendTimer,
     canAccessCommand,
+    getUsername,
 } from './Utilities';
 
 import {
@@ -832,6 +833,11 @@ export function handleDate(msg: Message, args: string) {
 }
 
 export async function handleTimer(msg: Message, args: string[], db: Database) {
+    if (args.length > 0 && args[0] === 'list') {
+        handleTimers(msg, db);
+        return;
+    }
+
     const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 
     const results = regex.exec(args.join(' '));
@@ -854,19 +860,36 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
 
     sendTimer(msg.channel as TextChannel, totalTimeSeconds * 1000, msg.author.id, description);
 
-    await msg.react('👍');
-
     const time = moment().add(totalTimeSeconds, 'seconds');
 
-    const stmt = db.prepare(
+    const timerID = await insertQuery(
         `INSERT INTO timer
             (user_id, channel_id, message, expire_time)
         VALUES
             (?, ?, ?, ?)`,
+        db,
+        [ msg.author.id, msg.channel.id, description, time.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
     );
 
-    stmt.run(msg.author.id, msg.channel.id, description, time.toISOString());
-    stmt.finalize();
+    const embed = new MessageEmbed()
+        .setTitle('Success')
+        .setDescription(`Timer #${timerID} has been scheduled.`)
+        .setFooter(`Type ${config.prefix}timer delete ${timerID} to cancel this timer`)
+        .addFields(
+            {
+                name: 'Time',
+                value: `${capitalize(moment(time).fromNow())}, ${moment(time).utcOffset(-6).format('HH:mm')} CST`,
+            }
+        );
+
+    if (description) {
+        embed.addFields({
+            name: 'Message',
+            value: description,
+        });
+    }
+
+    msg.channel.send(embed);
 }
 
 export async function handleCountdown(
@@ -1672,4 +1695,66 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
     }
 
     return videos;
+}
+
+export async function handleTimers(msg: Message, db: Database): Promise<void> {
+    const timers = await selectQuery(
+        `SELECT
+            id,
+            user_id,
+            message,
+            expire_time
+        FROM
+            timer
+        WHERE
+            channel_id = ?
+            AND expire_time > STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
+        ORDER BY
+            expire_time ASC` ,
+        db,
+        [ msg.channel.id ]
+    );
+
+    if (!timers || timers.length === 0) {
+        msg.reply('There are no timers currently running!');
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle('Running Timers');
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 7,
+        displayFunction: (timer: any) => {
+            const fields = [];
+
+            fields.push({
+                name: `ID: ${timer.id}`,
+                value: timer.message || 'N/A',
+                inline: true,
+            });
+
+            fields.push(
+                {
+                    name: 'Time',
+                    value: `${capitalize(moment(timer.expire_time).fromNow())}, ${moment(timer.expire_time).utcOffset(-6).format('HH:mm')} CST`,
+
+                    inline: true,
+                },
+                {
+                    name: 'Requester',
+                    value: getUsername(timer.user_id, msg.guild),
+                    inline: true,
+                }
+            );
+
+            return fields;
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: timers,
+        embed,
+    });
+
+    pages.sendMessage();
 }
