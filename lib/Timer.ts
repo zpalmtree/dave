@@ -109,7 +109,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         VALUES
             (?, ?, ?, ?)`,
         db,
-        [ msg.author.id, msg.channel.id, description, time.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
+        [ msg.author.id, msg.channel.id, description, time.utc().format('YYYY-MM-DD HH:mm:ss') ],
     );
 
     sendTimer(
@@ -152,7 +152,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
             timer
         WHERE
             channel_id = ?
-            AND expire_time > STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
+            AND expire_time >= STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
         ORDER BY
             expire_time ASC` ,
         db,
@@ -182,7 +182,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
             fields.push(
                 {
                     name: 'Time',
-                    value: `${capitalize(moment(timer.expire_time).fromNow())}, ${moment(timer.expire_time).utcOffset(-6).format('HH:mm')} CST`,
+                    value: `${capitalize(moment.utc(timer.expire_time).fromNow())}, ${moment.utc(timer.expire_time).utcOffset(-6).format('HH:mm')} CST`,
 
                     inline: true,
                 },
@@ -245,7 +245,7 @@ export async function restoreTimers(db: Database, client: Client) {
             }
         }
 
-        const milliseconds = moment(timer.expire_time).diff(moment());
+        const milliseconds = moment.utc(timer.expire_time).diff(moment());
 
         if (milliseconds < 0) {
             continue;

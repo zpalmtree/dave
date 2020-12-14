@@ -150,7 +150,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
             },
             {
                 name: 'Time',
-                value : moment(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
+                value : moment.utc(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
                 inline: true,
             },
             {
@@ -283,7 +283,7 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
             WHERE
                 movie_id = ?`,
             db,
-            [ parsedTime.utcOffset(0).format('YYYY-MM-DD hh:mm:ss'), parsedID ],
+            [ parsedTime.utc().format('YYYY-MM-DD HH:mm:ss'), parsedID ],
         );
 
         msg.reply(`Successfully updated time for ${watch.title} to ${parsedTime.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
@@ -384,9 +384,9 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
         {
             name: 'Time',
             /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-            value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`,
+            value: moment.utc().isBefore(moment.utc(watch.time).subtract(6, 'hours'))
+                ? moment.utc(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
+                : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(-6).format('HH:mm')} CST`,
         },
         {
             name: 'Attending',
@@ -517,7 +517,7 @@ export async function createWatch(
         VALUES
             (?, ?, ?)`,
         db,
-        [ time.utcOffset(0).format('YYYY-MM-DD hh:mm:ss'), msg.channel.id, movieID ]
+        [ time.utc().format('YYYY-MM-DD HH:mm:ss'), msg.channel.id, movieID ]
     );
 
     await insertQuery(
@@ -768,8 +768,8 @@ export async function handleWatchNotifications(client: Client, db: Database) {
                 continue;
             }
 
-            const fourHourReminder = moment(watch.time).subtract(4, 'hours');
-            const twentyMinuteReminder = moment(watch.time).subtract(20, 'minutes');
+            const fourHourReminder = moment.utc(watch.time).subtract(4, 'hours');
+            const twentyMinuteReminder = moment.utc(watch.time).subtract(20, 'minutes');
 
             /* Get our watch 'window' */
             const nMinsAgo = moment().subtract(config.watchPollInterval / 2, 'milliseconds');
@@ -796,11 +796,11 @@ export async function handleWatchNotifications(client: Client, db: Database) {
             }
 
             if (fourHourReminder.isBetween(nMinsAgo, nMinsAhead)) {
-                channel.send(`${mention}, reminder, you are watching ${watch.title} in 4 hours (${moment(watch.time).utcOffset(0).format('HH:mm Z')})`);
+                channel.send(`${mention}, reminder, you are watching ${watch.title} in 4 hours (${moment.utc(watch.time).utcOffset(0).format('HH:mm Z')})`);
             }
 
             if (twentyMinuteReminder.isBetween(nMinsAgo, nMinsAhead)) {
-                channel.send(`${mention}, reminder, you are watching ${watch.title} ${moment(watch.time).fromNow()}`);
+                channel.send(`${mention}, reminder, you are watching ${watch.title} ${moment.utc(watch.time).fromNow()}`);
             }
         }
     }
