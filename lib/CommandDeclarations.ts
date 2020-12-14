@@ -31,7 +31,6 @@ import {
     handleWatch,
     handleTime,
     handleDate,
-    handleTimer,
     handleCountdown,
     handlePurge,
     handleTranslate,
@@ -42,8 +41,12 @@ import {
     handleImage,
     handleYoutube,
     handleStats,
-    handleTimers,
 } from './CommandImplementations';
+
+import {
+    handleTimers,
+    handleTimer,
+} from './Timer';
 
 import {
     handleWatchHelp,

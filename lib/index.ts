@@ -19,7 +19,6 @@ import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
 
 import {
-    sendTimer,
     canAccessCommand,
 } from './Utilities';
 
@@ -50,6 +49,8 @@ import {
     Commands,
     handleHelp,
 } from './CommandDeclarations';
+
+import { restoreTimers } from './Timer';
 
 async function handleMessage(msg: Message, db: Database): Promise<void> {
     if (!msg.content.startsWith(config.prefix)) {
@@ -175,36 +176,6 @@ async function main() {
               console.error(err);
               main();
     });
-}
-
-export async function restoreTimers(db: Database, client: Client) {
-    db.all(
-        `SELECT
-            user_id,
-            channel_id,
-            message,
-            expire_time
-        FROM
-            timer`,
-        async (err, rows) => {
-            if (err) {
-                console.log('got error: ' + err);
-                return;
-            }
-
-            for (const row of rows) {
-                const milliseconds = moment(row.expire_time).diff(moment());
-
-                if (milliseconds < 0) {
-                    continue;
-                }
-
-                const chan = await client.channels.fetch(row.channel_id);
-
-                sendTimer(chan as TextChannel, milliseconds, row.user_id, row.message);
-            }
-        }
-    );
 }
 
 main();

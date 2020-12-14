@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as moment from 'moment';
-import * as convert from 'xml-js';
 
 import translate = require('@vitalets/google-translate-api');
 
@@ -49,7 +48,6 @@ import {
     sleep,
     haveRole,
     pickRandomItem,
-    sendTimer,
     canAccessCommand,
     getUsername,
 } from './Utilities';
@@ -830,74 +828,6 @@ export function handleDate(msg: Message, args: string) {
     }
 
     msg.reply(`The current date is ${moment().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
-}
-
-export async function handleTimer(msg: Message, args: string[], db: Database) {
-    if (args.length >= 1) {
-        switch (args[0]) {
-            case 'list': {
-                handleTimers(msg, db);
-                return;
-            }
-            case 'delete': {
-                deleteTimer(msg, args.slice(1), db);
-                return;
-            }
-        }
-    }
-
-    const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
-
-    const results = regex.exec(args.join(' '));
-
-    if (!results) {
-        msg.reply('Failed to parse input, try `$timer 5m coffee` or `$timer 5h10m`. Max 24h timers.');
-        return;
-    }
-
-    const [, hours=0, minutes=0, seconds=0, description ] = results;
-
-    const totalTimeSeconds = Number(seconds)
-                           + Number(minutes) * 60
-                           + Number(hours) * 60 * 60;
-
-    if (totalTimeSeconds > 60 * 60 * 24 * 365 * 100) {
-        msg.reply('Timers longer than 100 years are not supported.');
-        return;
-    }
-
-    sendTimer(msg.channel as TextChannel, totalTimeSeconds * 1000, msg.author.id, description);
-
-    const time = moment().add(totalTimeSeconds, 'seconds');
-
-    const timerID = await insertQuery(
-        `INSERT INTO timer
-            (user_id, channel_id, message, expire_time)
-        VALUES
-            (?, ?, ?, ?)`,
-        db,
-        [ msg.author.id, msg.channel.id, description, time.utcOffset(0).format('YYYY-MM-DD hh:mm:ss') ],
-    );
-
-    const embed = new MessageEmbed()
-        .setTitle('Success')
-        .setDescription(`Timer #${timerID} has been scheduled.`)
-        .setFooter(`Type ${config.prefix}timer delete ${timerID} to cancel this timer`)
-        .addFields(
-            {
-                name: 'Time',
-                value: `${capitalize(moment(time).fromNow())}, ${moment(time).utcOffset(-6).format('HH:mm')} CST`,
-            }
-        );
-
-    if (description) {
-        embed.addFields({
-            name: 'Message',
-            value: description,
-        });
-    }
-
-    msg.channel.send(embed);
 }
 
 export async function handleCountdown(
@@ -1703,90 +1633,4 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
     }
 
     return videos;
-}
-
-export async function handleTimers(msg: Message, db: Database): Promise<void> {
-    const timers = await selectQuery(
-        `SELECT
-            id,
-            user_id,
-            message,
-            expire_time
-        FROM
-            timer
-        WHERE
-            channel_id = ?
-            AND expire_time > STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
-        ORDER BY
-            expire_time ASC` ,
-        db,
-        [ msg.channel.id ]
-    );
-
-    if (!timers || timers.length === 0) {
-        msg.reply('There are no timers currently running!');
-        return;
-    }
-
-    const embed = new MessageEmbed()
-        .setTitle('Running Timers');
-
-    const pages = new Paginate({
-        sourceMessage: msg,
-        itemsPerPage: 7,
-        displayFunction: (timer: any) => {
-            const fields = [];
-
-            fields.push({
-                name: `ID: ${timer.id}`,
-                value: timer.message || 'N/A',
-                inline: true,
-            });
-
-            fields.push(
-                {
-                    name: 'Time',
-                    value: `${capitalize(moment(timer.expire_time).fromNow())}, ${moment(timer.expire_time).utcOffset(-6).format('HH:mm')} CST`,
-
-                    inline: true,
-                },
-                {
-                    name: 'Requester',
-                    value: getUsername(timer.user_id, msg.guild),
-                    inline: true,
-                }
-            );
-
-            return fields;
-        },
-        displayType: DisplayType.EmbedFieldData,
-        data: timers,
-        embed,
-    });
-
-    pages.sendMessage();
-}
-
-async function deleteTimer(msg: Message, args: string[], db: Database) {
-    if (args.length === 0) {
-        msg.reply('No timer ID given');
-        return;
-    }
-
-    const changes = await deleteQuery(
-        `DELETE FROM
-            timer
-        WHERE
-            id = ?
-            AND channel_id = ?
-            AND user_id = ?`,
-        db,
-        [ args[0], msg.channel.id, msg.author.id ]
-    );
-
-    if (changes === 1) {
-        msg.reply(`Successfully deleted timer #${args[0]}.`);
-    } else {
-        msg.reply(`Failed to delete, unknown ID or not your timer.`);
-    }
 }

@@ -76,18 +76,6 @@ export function pickRandomItem<T>(items: T[]): T {
     return items[Math.floor(Math.random() * items.length)];
 }
 
-export function sendTimer(channel: TextChannel, milliseconds: number, user_id: string, description?: string) {
-    const mention = `<@${user_id}>,`;
-
-    setTimeout(() => {
-        if (description) {
-            channel.send(`${mention} Your ${description} timer has elapsed.`);
-        } else {
-            channel.send(`${mention} Your timer has elapsed.`);
-        }
-    }, milliseconds);
-}
-
 export function canAccessCommand(msg: Message, react: boolean): boolean {
     if (msg.channel.id === config.mainChannel) {
         return true;
