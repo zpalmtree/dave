@@ -1304,8 +1304,10 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
     pages.sendMessage();
 }
 
-function displayYoutube (this: Paginate<any>, items: any[], message: Message) {
-    return `${items[0].url} - ${this.getPageFooter()}`;
+async function displayYoutube (this: Paginate<any>, items: any[], message: Message) {
+    const footer = await this.getPageFooter();
+
+    return `${items[0].url} - ${footer}`;
 }
 
 export async function handleImage(msg: Message, args: string): Promise<void> {

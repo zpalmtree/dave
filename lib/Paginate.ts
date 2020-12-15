@@ -18,9 +18,11 @@ export enum DisplayType {
     MessageData = 3,
 }
 
-export type DisplayItem<T> = (this: Paginate<T>, item: T, page?: number) => EmbedFieldData | Array<EmbedFieldData>;
-export type ModifyEmbed<T> = (this: Paginate<T>, item: T, embed: MessageEmbed) => void;
-export type ModifyMessage<T> = (this: Paginate<T>, items: T[], message: Message) => string;
+type Asyncable<T> = T | Promise<T>
+
+export type DisplayItem<T> = (this: Paginate<T>, item: T, page?: number) => Asyncable<EmbedFieldData | Array<EmbedFieldData>>;
+export type ModifyEmbed<T> = (this: Paginate<T>, item: T, embed: MessageEmbed) => any;
+export type ModifyMessage<T> = (this: Paginate<T>, items: T[], message: Message) => Asyncable<string>;
 
 export type PaginateFunction<T> = DisplayItem<T>
                                 | ModifyEmbed<T>
