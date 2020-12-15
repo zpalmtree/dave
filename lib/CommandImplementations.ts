@@ -1524,9 +1524,9 @@ async function handleUserStats(msg: Message, db: Database): Promise<void> {
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 9,
-        displayFunction: (user: any) => {
+        displayFunction: async (user: any) => {
             return {
-                name: getUsername(user.user, msg.guild),
+                name: await getUsername(user.user, msg.guild),
                 value: user.usage,
                 inline: true,
             };
@@ -1537,9 +1537,6 @@ async function handleUserStats(msg: Message, db: Database): Promise<void> {
     });
 
     pages.sendMessage();
-
-
-    msg.channel.send(embed);
 }
 
 async function handleCommandStats(msg: Message, db: Database, command: string): Promise<void> {
@@ -1567,9 +1564,9 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 9,
-        displayFunction: (user: any) => {
+        displayFunction: async (user: any) => {
             return {
-                name: getUsername(user.user, msg.guild),
+                name: await getUsername(user.user, msg.guild),
                 value: user.usage,
                 inline: true,
             };
@@ -1581,7 +1578,6 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
 
     pages.sendMessage();
 }
-
 
 export async function handleStats(msg: Message, args: string[], db: Database): Promise<void> {
     if (args.length > 0) {

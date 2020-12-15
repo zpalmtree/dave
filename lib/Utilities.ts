@@ -92,14 +92,14 @@ export function canAccessCommand(msg: Message, react: boolean): boolean {
     return false;
 }
 
-export function getUsername(id: string, guild: Guild | null | undefined): string {
+export async function getUsername(id: string, guild: Guild | null | undefined): Promise<string> {
     const ping = `<@${id}>`;
  
     if (!guild) {
         return ping;
     }
 
-    const user = guild.members.cache.get(id);
+    const user = await guild.members.fetch(id);
 
     if (!user) {
         return ping;

@@ -152,7 +152,7 @@ export class Paginate<T> {
         return `Page ${this.currentPage} of ${this.totalPages}${lockMessage}`;
     }
 
-    private getPageContent() {
+    private async getPageContent() {
         const startIndex = (this.currentPage - 1) * this.itemsPerPage;
         const endIndex = (this.currentPage) * this.itemsPerPage;
 
@@ -177,7 +177,7 @@ export class Paginate<T> {
                 const f = (this.displayFunction as DisplayItem<T>).bind(this);
 
                 for (const item of items) {
-                    const newFields = f(item);
+                    const newFields = await f(item);
 
                     if (Array.isArray(newFields)) {
                         this.embed!.addFields(newFields);
@@ -191,14 +191,14 @@ export class Paginate<T> {
             case DisplayType.EmbedData: {
                 for (const item of items) {
                     const f = (this.displayFunction as ModifyEmbed<T>).bind(this);
-                    f(item, this.embed!);
+                    await f(item, this.embed!);
                 }
 
                 return this.embed;
             }
             case DisplayType.MessageData: {
                 const f = (this.displayFunction as ModifyMessage<T>).bind(this);
-                return f(items, this.sentMessage!);
+                return await f(items, this.sentMessage!);
             }
         }
     }
@@ -210,7 +210,9 @@ export class Paginate<T> {
     public async sendMessage(): Promise<Message> {
         const shouldPaginate = this.data.length > this.itemsPerPage;
 
-        this.sentMessage = await this.sourceMessage.channel.send(this.getPageContent());
+        const content = await this.getPageContent();
+
+        this.sentMessage = await this.sourceMessage.channel.send(content);
 
         if (!shouldPaginate) {
             return this.sentMessage;
@@ -267,7 +269,7 @@ export class Paginate<T> {
         return this.sentMessage;
     }
 
-    private lockEmbed(reaction: MessageReaction, user: User) {
+    private async lockEmbed(reaction: MessageReaction, user: User) {
         const guildUser = this.sourceMessage.guild!.members.cache.get(user.id);
 
         if (!guildUser) {
@@ -284,7 +286,10 @@ export class Paginate<T> {
         if (!this.locked) {
             this.locked = true;
             this.lockID = user.id;
-            this.editMessage(this.getPageContent());
+
+            const content = await this.getPageContent();
+            this.editMessage(content);
+
             return;
         }
 
@@ -294,7 +299,9 @@ export class Paginate<T> {
         if (this.lockID === user.id) {
             this.locked = false;
             this.lockID = '';
-            this.editMessage(this.getPageContent());
+
+            const content = await this.getPageContent();
+            this.editMessage(content);
         }
     }
 
@@ -314,7 +321,7 @@ export class Paginate<T> {
         reaction.users.remove(user.id);
     }
 
-    private changePage(
+    private async changePage(
         amount: number,
         reaction: MessageReaction,
         user: User) {
@@ -332,7 +339,8 @@ export class Paginate<T> {
             return;
         }
 
-        this.editMessage(this.getPageContent());
+        const content = await this.getPageContent();
+        this.editMessage(content);
     }
 
     private havePermission(guildUser: GuildMember, user: User) {

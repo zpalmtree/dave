@@ -170,7 +170,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 7,
-        displayFunction: (timer: any) => {
+        displayFunction: async (timer: any) => {
             const fields = [];
 
             fields.push({
@@ -188,7 +188,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
                 },
                 {
                     name: 'Requester',
-                    value: getUsername(timer.user_id, msg.guild),
+                    value: await getUsername(timer.user_id, msg.guild),
                     inline: true,
                 }
             );
