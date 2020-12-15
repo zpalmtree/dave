@@ -25,6 +25,7 @@ import {
 import {
     haveRole,
     capitalize,
+    getUsername,
 } from './Utilities';
 
 import {
@@ -81,7 +82,9 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
     const embed = new MessageEmbed()
         .setTitle('Scheduled Movies/Series To Watch');
 
-    const f = (watch: ScheduledWatch) => {
+    const f = async (watch: ScheduledWatch) => {
+        const names = await Promise.all(watch.attending.map((user) => getUsername(user, msg.guild)));
+
         return [
             {
                 name: `ID: ${watch.watchID}`,
@@ -100,15 +103,7 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
             },
             {
                 name: 'Attending',
-                value: watch.attending.map((user: string) => {
-                    const userObj = msg.guild!.members.cache.get(user)
-
-                    if (userObj !== undefined) {
-                        return userObj.displayName;
-                    }
-
-                    return `<@${user}>`;
-                }).join(', '),
+                value: names.join(', '),
                 inline: true,
             },
         ];
@@ -139,7 +134,9 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
         return;
     }
 
-    const f = (watch: ScheduledWatch) => {
+    const f = async (watch: ScheduledWatch) => {
+        const names = await Promise.all(watch.attending.map((user) => getUsername(user, msg.guild)));
+
         return [
             {
                 name: `ID: ${watch.watchID}`,
@@ -155,15 +152,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
             },
             {
                 name: 'Attended',
-                value: watch.attending.map((user: string) => {
-                    const userObj = msg.guild!.members.cache.get(user)
-
-                    if (userObj !== undefined) {
-                        return userObj.displayName;
-                    }
-
-                    return `<@${user}>`;
-                }).join(', '),
+                value: names.join(', '),
                 inline: true,
             },
         ];
@@ -378,7 +367,9 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
 
     const embed = new MessageEmbed()
         .setTitle(watch.title)
-        .setFooter('React with 👍 if you want to attend this movie night')
+        .setFooter('React with 👍 if you want to attend this movie night');
+
+    const names = await Promise.all(watch.attending.map((user) => getUsername(user, msg.guild)));
 
     embed.addFields(
         {
@@ -390,15 +381,7 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
         },
         {
             name: 'Attending',
-            value: watch.attending.map((user) => {
-                const userObj = msg.guild!.members.cache.get(user);
-
-                if (userObj !== undefined) {
-                    return userObj.displayName;
-                }
-
-                return `<@${user}>`;
-            }).join(', '),
+            value: names.join(', '),
         },
     );
 
@@ -529,6 +512,8 @@ export async function createWatch(
         [ msg.author.id, watchEventID ]
     );
 
+    const user = await getUsername(msg.author.id, msg.guild);
+
     const embed = new MessageEmbed()
         .setTitle(title)
         .setDescription(`${title} has been successfully scheduled for ${time.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
@@ -536,15 +521,7 @@ export async function createWatch(
         .addFields(
             {
                 name: 'Attending',
-                value: [msg.author.id].map((user) => {
-                    const userObj = msg.guild!.members.cache.get(user)
-
-                    if (userObj !== undefined) {
-                        return userObj.displayName;
-                    }
-
-                    return `<@${user}>`;
-                }).join(', '),
+                value: user,
                 inline: true,
             },
         );
@@ -586,17 +563,11 @@ async function awaitWatchReactions(
             return;
         }
 
+        const names = await Promise.all([...attending].map((user) => getUsername(user, msg.guild)));
+
         embed.spliceFields(attendingFieldIndex, 1, {
             name: 'Attending',
-            value: [...attending].map((user) => {
-                const userObj = msg.guild!.members.cache.get(user)
-
-                if (userObj !== undefined) {
-                    return userObj.displayName;
-                }
-
-                return `<@${user}>`;
-            }).join(', '),
+            value: names.join(', '),
             inline: true,
         });
 

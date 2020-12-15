@@ -8,6 +8,8 @@ import {
     GuildMember,
 } from 'discord.js';
 
+import { getUsername } from './Utilities';
+
 import { config } from './Config';
 
 export enum DisplayType {
@@ -118,14 +120,15 @@ export class Paginate<T> {
         });
     }
 
-    private setPageFooter(editMessage: boolean = false) {
+    private async setPageFooter(editMessage: boolean = false) {
         if (!this.displayFooter) {
             return;
         }
 
         if (this.displayType !== DisplayType.MessageData) {
             if (this.embed) {
-                this.embed.setFooter(this.getPageFooter());
+                const footer = await this.getPageFooter();
+                this.embed.setFooter(footer);
 
                 if (editMessage) {
                     this.editMessage(this.embed);
@@ -134,7 +137,7 @@ export class Paginate<T> {
         }
     }
 
-    public getPageFooter() {
+    public async getPageFooter() {
         if (!this.displayFooter) {
             return '';
         }
@@ -142,11 +145,8 @@ export class Paginate<T> {
         let lockMessage = '';
 
         if (this.locked) {
-            const user = this.sourceMessage.guild!.members.cache.get(this.lockID);
-
-            if (user) {
-                lockMessage = `. Locked by ${user.displayName}.`;
-            }
+            const user = await getUsername(this.lockID, this.sourceMessage.guild);
+            lockMessage = `. Locked by ${user}.`;
         }
 
         return `Page ${this.currentPage} of ${this.totalPages}${lockMessage}`;
@@ -168,7 +168,7 @@ export class Paginate<T> {
             this.displayFunction = displayFunction;
         }
 
-        this.setPageFooter();
+        await this.setPageFooter();
 
         switch (this.displayType) {
             case DisplayType.EmbedFieldData: {
@@ -270,12 +270,7 @@ export class Paginate<T> {
     }
 
     private async lockEmbed(reaction: MessageReaction, user: User) {
-        const guildUser = this.sourceMessage.guild!.members.cache.get(user.id);
-
-        if (!guildUser) {
-            reaction.users.remove(user.id);
-            return;
-        }
+        const guildUser = await this.sourceMessage.guild?.members.fetch(user.id);
 
         if (!this.havePermission(guildUser, user)) {
             reaction.users.remove(user.id);
@@ -305,13 +300,8 @@ export class Paginate<T> {
         }
     }
 
-    private removeEmbed(reaction: MessageReaction, user: User) {
-        const guildUser = this.sourceMessage.guild!.members.cache.get(user.id);
-
-        if (!guildUser) {
-            reaction.users.remove(user.id);
-            return;
-        }
+    private async removeEmbed(reaction: MessageReaction, user: User) {
+        const guildUser = await this.sourceMessage.guild?.members.fetch(user.id);
 
         if (this.havePermission(guildUser, user)) {
             this.sentMessage!.delete();
@@ -343,7 +333,7 @@ export class Paginate<T> {
         this.editMessage(content);
     }
 
-    private havePermission(guildUser: GuildMember, user: User) {
+    private havePermission(guildUser: GuildMember | undefined, user: User) {
         if (user.id === config.god) {
             return true;
         }
@@ -352,9 +342,11 @@ export class Paginate<T> {
             return true;
         }
 
-        for (const role of this.allowedRoles) {
-            if (guildUser.roles.cache.some((r) => r.name === role)) {
-                return true;
+        if (guildUser) {
+            for (const role of this.allowedRoles) {
+                if (guildUser.roles.cache.some((r) => r.name === role)) {
+                    return true;
+                }
             }
         }
 
