@@ -1521,9 +1521,23 @@ async function handleUserStats(msg: Message, db: Database): Promise<void> {
         .setTitle('Bot user usage statistics')
         .setDescription('Number of times a user has used the bot');
 
-    for (const user of users) {
-        embed.addField(getUsername(user.user, msg.guild), user.usage);
-    }
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (user: any) => {
+            return {
+                name: getUsername(user.user, msg.guild),
+                value: user.usage,
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: users,
+        embed,
+    });
+
+    pages.sendMessage();
+
 
     msg.channel.send(embed);
 }
@@ -1550,11 +1564,22 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         .setTitle(`Bot user usage statistics`)
         .setDescription(`Number of times a user has used \`${config.prefix}${command}\``);
 
-    for (const user of users) {
-        embed.addField(getUsername(user.user, msg.guild), user.usage);
-    }
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (user: any) => {
+            return {
+                name: getUsername(user.user, msg.guild),
+                value: user.usage,
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: users,
+        embed,
+    });
 
-    msg.channel.send(embed);
+    pages.sendMessage();
 }
 
 
