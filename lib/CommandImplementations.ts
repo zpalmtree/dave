@@ -1614,11 +1614,22 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         .setTitle('Bot usage statistics')
         .setDescription('Number of times a command has been used');
 
-    for (const command of commands) {
-        embed.addField(`${config.prefix}${command.command}`, command.usage, true);
-    }
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (command: any) => {
+            return {
+                name: command.command,
+                value: command.usage,
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: commands,
+        embed,
+    });
 
-    msg.channel.send(embed);
+    pages.sendMessage();
 }
 
 export async function handleYoutubeScrape(msg: Message, args: string): Promise<undefined | any[]> {
