@@ -85,6 +85,10 @@ import {
     ModifyMessage,
 } from './Paginate';
 
+import {
+    Commands,
+} from './CommandDeclarations';
+
 const timeUnits: TimeUnits = {
     Y: 31536000,
     M: 2592000,
@@ -1496,7 +1500,79 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     return filtered;
 }
 
-export async function handleStats(msg: Message, args: string, db: Database): Promise<void> {
+async function handleUserStats(msg: Message, db: Database): Promise<void> {
+    const users = await selectQuery(
+        `SELECT
+            COUNT(*) AS usage,
+            user_id AS user
+        FROM
+            logs
+        WHERE
+            channel_id = ?
+        GROUP BY
+            user_id
+        ORDER BY
+            usage DESC`,
+        db,
+        [ msg.channel.id ]
+    );
+
+    const embed = new MessageEmbed()
+        .setTitle('Bot user usage statistics')
+        .setDescription('Number of times a user has used the bot');
+
+    for (const user of users) {
+        embed.addField(getUsername(user.user, msg.guild), user.usage);
+    }
+
+    msg.channel.send(embed);
+}
+
+async function handleCommandStats(msg: Message, db: Database, command: string): Promise<void> {
+    const users = await selectQuery(
+        `SELECT
+            COUNT(*) AS usage,
+            user_id AS user
+        FROM
+            logs
+        WHERE
+            channel_id = ?
+            AND command = ?
+        GROUP BY
+            user_id
+        ORDER BY
+            usage DESC`,
+        db,
+        [ msg.channel.id, command ]
+    );
+
+    const embed = new MessageEmbed()
+        .setTitle(`Bot user usage statistics`)
+        .setDescription(`Number of times a user has used \`${config.prefix}${command}\``);
+
+    for (const user of users) {
+        embed.addField(getUsername(user.user, msg.guild), user.usage);
+    }
+
+    msg.channel.send(embed);
+}
+
+
+export async function handleStats(msg: Message, args: string[], db: Database): Promise<void> {
+    if (args.length > 0) {
+        if (args[0] === 'users' || args[0] === 'user') {
+            handleUserStats(msg, db);
+            return;
+        }
+
+        for (const command of Commands) {
+            if (command.aliases.includes(args[0])) {
+                handleCommandStats(msg, db, command.aliases[0]);
+                return;
+            }
+        }
+    }
+
     const commands = await selectQuery(
         `SELECT
             command AS command,

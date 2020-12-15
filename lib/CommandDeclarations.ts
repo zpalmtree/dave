@@ -438,7 +438,7 @@ export const Commands: Command[] = [
     },
     {
         aliases: ['stats'],
-        argsFormat: Args.Combined,
+        argsFormat: Args.Split,
         hidden: false,
         implementation: handleStats,
         description: 'View bot usage statistics',
@@ -447,6 +447,14 @@ export const Commands: Command[] = [
             {
                 name: `View most used commands`,
                 value: '`$stats`',
+            },
+            {
+                name: `View number of times users have used the bot`,
+                value: '`$stats users`',
+            },
+            {
+                name: `View number of times users have used a specific command`,
+                value: '`$stats fortune`',
             },
         ],
     },
