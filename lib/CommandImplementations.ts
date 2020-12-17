@@ -1836,9 +1836,10 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     });
 
     collector.on('end', async (collected, reason) => {
-        if (reason === '') {
+        if (reason !== 'messageDelete') {
             const notReadyNames = await Promise.all([...notReadyUsers].map((user) => getUsername(user, msg.guild)));
             embed.setDescription(`Countdown cancelled! ${notReadyNames.join(', ')} did not ready up in time.`);
+            sentMessage.edit(embed);
         }
     });
 }
