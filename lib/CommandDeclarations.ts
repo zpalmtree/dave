@@ -528,6 +528,10 @@ export const Commands: Command[] = [
                 name: 'Check if specific users are ready',
                 value: 'ready @james @bob',
             },
+            {
+                name: 'Check if movie users and specific users are ready',
+                value: 'ready 1 @james @bob',
+            },
         ],
     },
 ];
