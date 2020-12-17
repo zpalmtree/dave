@@ -73,6 +73,7 @@ import {
     deleteWatch,
     displayWatchById,
     scheduleWatch,
+    getWatchDetailsById,
 } from './Watch';
 
 import {
@@ -1739,4 +1740,105 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
     }
 
     return videos;
+}
+
+export async function handleReady(msg: Message, args: string[], db: Database) {
+    const notReadyUsers = new Set<string>([...msg.mentions.users.keys()]);
+    const readyUsers = new Set<string>([]);
+
+    let title = 'Are you ready?';
+
+    if (args.length > 0) {
+        const id = Number(args[0]);
+        const watch = await getWatchDetailsById(id, msg.channel.id, db);
+
+        if (watch) {
+            title = `Are you ready for "${watch.title}"?`;
+
+            for (const user of watch.attending) {
+                if (msg.author.id !== user) {
+                    notReadyUsers.add(user);
+                }
+            }
+        }
+    }
+
+    /* They didn't mention anyone, lets make them unready so we can allow
+     * sending the message */
+    if (notReadyUsers.size === 0) {
+        notReadyUsers.add(msg.author.id);
+    /* If the user doesn't mention themselves and there are other attendents, make them ready automatically. */
+    } else if (!notReadyUsers.has(msg.author.id)) {
+        readyUsers.add(msg.author.id);
+    }
+
+    if (notReadyUsers.size === 0) {
+        msg.reply(`At least one user other than yourself must be mentioned or attending the movie ID. See \`${config.prefix}help ready\``);
+        return;
+    }
+
+    const mention = Array.from(notReadyUsers).map((x) => `<@${x}>`).join(' ');
+
+    const description = 'React with 👍 when you are ready. Once everyone is ready, ' + 
+        'a countdown will automatically start! The countdown will be cancelled after 5 ' +
+        'minutes if not all users are ready.';
+
+    const f = async () => {
+        const notReadyNames = await Promise.all([...notReadyUsers].map((user) => getUsername(user, msg.guild)));
+        const readyNames = await Promise.all([...readyUsers].map((user) => getUsername(user, msg.guild)));
+
+        return [
+            {
+                name: 'Not Ready',
+                value: notReadyNames.length > 0
+                    ? notReadyNames.join(', ')
+                    : 'None',
+            },
+            {
+                name: 'Ready',
+                value: readyNames.length > 0
+                    ? readyNames.join(', ')
+                    : 'None',
+            },
+        ];
+    }
+
+    const fields = await f();
+
+    const embed = new MessageEmbed()
+        .setTitle(title)
+        .setDescription(description)
+        .addFields(fields);
+
+    const sentMessage = await msg.channel.send(embed);
+
+    await sentMessage.react('👍');
+
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
+        return ['👍'].includes(reaction.emoji.name) && !user.bot;
+    }, { time: 60 * 5 * 1000 });
+
+    collector.on('collect', async (reaction, user) => {
+        if (!notReadyUsers.has(user.id)) {
+            return;
+        }
+
+        notReadyUsers.delete(user.id);
+        readyUsers.add(user.id);
+
+        if (notReadyUsers.size === 0) {
+            sentMessage.delete();
+            handleCountdown("Let's jam!", msg, '7');
+        } else {
+            const newFields = await f();
+            embed.spliceFields(0, 2, newFields);
+        }
+    });
+
+    collector.on('end', async (collected, reason) => {
+        if (reason === '') {
+            const notReadyNames = await Promise.all([...notReadyUsers].map((user) => getUsername(user, msg.guild)));
+            embed.setDescription(`Countdown cancelled! ${notReadyNames.join(', ')} did not ready up in time.`);
+        }
+    });
 }

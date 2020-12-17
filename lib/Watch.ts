@@ -594,7 +594,7 @@ async function awaitWatchReactions(
     });
 }
 
-async function getWatchDetailsById(id: number | string, channelID: string, db: Database, options?: IGetWatchDetails): Promise<ScheduledWatch | undefined> {
+export async function getWatchDetailsById(id: number | string, channelID: string, db: Database, options?: IGetWatchDetails): Promise<ScheduledWatch | undefined> {
     return getWatchDetailsImpl({
             id,
             channelID,

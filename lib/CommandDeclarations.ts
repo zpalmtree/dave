@@ -41,6 +41,7 @@ import {
     handleImage,
     handleYoutube,
     handleStats,
+    handleReady,
 } from './CommandImplementations';
 
 import {
@@ -338,7 +339,7 @@ export const Commands: Command[] = [
         aliases: ['countdown'],
         argsFormat: Args.Combined,
         hidden: false,
-        implementation: handleCountdown.bind(undefined, 'Lets jam!'),
+        implementation: handleCountdown.bind(undefined, "Let's jam!"),
         description: 'Perform a countdown',
         examples: [
             {
@@ -507,6 +508,27 @@ export const Commands: Command[] = [
         implementation: handleTimers,
         description: 'View the status of running timers',
         needDb: true,
+    },
+    {
+        aliases: ['ready'],
+        argsFormat: Args.Split,
+        hidden: false,
+        implementation: handleReady,
+        description: 'Verify if users are ready to launch a countdown',
+        helpDescription: 'Lets you verify if users are ready for a movie, or other ' +
+            'event, and launches a countdown to start the event once all users are ready.' +
+            ' The ready event will expire after 5 minutes if all users do not ready up.',
+        needDb: true,
+        examples: [
+            {
+                name: 'Check if everyone is ready for a movie',
+                value: 'ready 1',
+            },
+            {
+                name: 'Check if specific users are ready',
+                value: 'ready @james @bob',
+            },
+        ],
     },
 ];
 
