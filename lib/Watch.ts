@@ -19,10 +19,6 @@ import {
 } from './Database';
 
 import {
-    handleWatchHelp,
-} from './Help';
-
-import {
     haveRole,
     capitalize,
     getUsername,
@@ -75,7 +71,7 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
     );
 
     if (!events || events.length === 0) {
-        msg.reply('Nothing has been scheduled to be watched yet! Use `$watch help` for more info');
+        msg.reply(`Nothing has been scheduled to be watched yet! Use \`${config.prefix}help watch\` for more info`);
         return;
     }
 
@@ -175,19 +171,20 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
 
 export async function addLink(msg: Message, args: string[], db: Database): Promise<void> {
     if (args.length < 2) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        msg.reply(`Invalid input, not enough args. Try \`${config.prefix}help watch\``);
+
         return;
     }
 
     const id = Number(args[0]);
 
     if (Number.isNaN(id)) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        msg.reply(`Invalid input, non numeric ID. Try \`${config.prefix}help watch\``);
         return;
     }
 
     if (!/^(magnet:\?.+|https?:\/\/.*(?:youtube\.com|youtu\.be)\/\S+)$/.test(args[1])) {
-        handleWatchHelp(msg, 'Input does not look like a magnet or youtube link. Please try one of the following options.');
+        msg.reply(`Invalid input, does not look like a magnet or youtube link. Try \`${config.prefix}help watch\``);
         return;
     }
 
@@ -199,7 +196,7 @@ export async function addLink(msg: Message, args: string[], db: Database): Promi
     const watch = await getWatchDetailsById(id, msg.channel.id, db);
 
     if (!watch) {
-        msg.reply(`Could not find movie ID "${id}". Use \`$watch\` to list all scheduled watches.`);
+        msg.reply(`Could not find movie ID "${id}". Use \`${config.prefix}watch\` to list all scheduled watches.`);
         return;
     }
 
@@ -260,7 +257,7 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
         const watch = await getWatchDetailsById(parsedID, msg.channel.id, db);
 
         if (!watch) {
-            msg.reply(`Could not find movie ID "${parsedID}". Use \`$watch\` to list all scheduled watches.`);
+            msg.reply(`Could not find movie ID "${parsedID}". Use \`${config.prefix}watch\` to list all scheduled watches.`);
             return;
         }
 
@@ -277,20 +274,20 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
 
         msg.reply(`Successfully updated time for ${watch.title} to ${parsedTime.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
     } else {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        msg.reply(`Invalid input. Try \`${config.prefix}help watch\``);
     }
 }
 
 export async function deleteWatch(msg: Message, args: string[], db: Database): Promise<void> {
     if (args.length === 0) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        msg.reply(`Invalid input. No movie ID given. Try \`${config.prefix}help watch\``);
         return;
     }
 
     const id = Number(args[0]);
 
     if (Number.isNaN(id)) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        msg.reply(`Invalid input, non numeric ID. Try \`${config.prefix}help watch\``);
         return;
     }
 
@@ -314,7 +311,7 @@ async function removeWatchById(id: number, msg: Message, db: Database, forceDele
     );
 
     if (!watch) {
-        return `Could not find movie ID "${id}". Use \`$watch\` to list all scheduled watches.`;
+        return `Could not find movie ID "${id}". Use \`${config.prefix}watch\` to list all scheduled watches.`;
     }
 
     if (!forceDelete) {
@@ -361,7 +358,7 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
     const watch = await getWatchDetailsById(id, msg.channel.id, db);
 
     if (!watch) {
-        msg.reply(`Could not find movie ID "${id}". Use \`$watch\` to list all scheduled watches.`);
+        msg.reply(`Could not find movie ID "${id}". Use \`${config.prefix}watch\` to list all scheduled watches.`);
         return;
     }
 

@@ -34,10 +34,6 @@ import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
 
 import {
-    handleWatchHelp,
-} from './Help';
-
-import {
     renderDotGraph,
     renderDot,
 } from './Dot';
@@ -810,7 +806,7 @@ export async function handleWatch(msg: Message, args: string[], db: Database): P
     const success = await scheduleWatch(msg, args.join(' '), db);
 
     if (!success) {
-        handleWatchHelp(msg, 'Sorry, your input was invalid. Please try one of the following options.');
+        msg.reply(`Invalid input. Try \`${config.prefix}help watch\``);
     }
 }
 
@@ -846,7 +842,7 @@ export async function handleCountdown(
     let secs = Number(args);
 
     if (Number.isNaN(secs)) {
-        msg.reply('Invalid input, try `$countdown` or `$countdown 5`');
+        msg.reply(`Invalid input, try \`${config.prefix}help countdown\``);
         return;
     }
 
@@ -1220,7 +1216,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     const result = regex.exec(args);
 
     if (!result) {
-        msg.reply(`Failed to parse input. It should be in the form \`$exchange 100 ABC to XYZ\`. \`$exchange help\` to view currencies.`);
+        msg.reply(`Failed to parse input. It should be in the form \`${config.prefix}exchange 100 ABC to XYZ\`. \`${config.prefix}help exchange\` to view currencies.`);
         return;
     }
 

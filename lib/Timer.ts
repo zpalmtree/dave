@@ -86,7 +86,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
     const results = regex.exec(args.join(' '));
 
     if (!results) {
-        msg.reply('Failed to parse input, try `$timer 5m coffee` or `$timer 5h10m`. Max 24h timers.');
+        msg.reply(`Failed to parse input, try \`${config.prefix}help timer\``);
         return;
     }
 
