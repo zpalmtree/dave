@@ -81,7 +81,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         }
     }
 
-    const regex = /^(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
+    const regex = /^(?:([0-9\.]+)y)?(?:([0-9\.]+)w)?(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 
     const results = regex.exec(args.join(' '));
 
@@ -90,14 +90,31 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         return;
     }
 
-    const [, hours=0, minutes=0, seconds=0, description ] = results;
+    const [
+        ,
+        years=0,
+        weeks=0,
+        days=0,
+        hours=0,
+        minutes=0,
+        seconds=0,
+        description
+    ] = results;
 
     const totalTimeSeconds = Number(seconds)
                            + Number(minutes) * 60
-                           + Number(hours) * 60 * 60;
+                           + Number(hours) * 60 * 60
+                           + Number(days) * 60 * 60 * 24
+                           + Number(weeks) * 60 * 60 * 24 * 7
+                           + Number(years) * 60 * 60 * 24 * 365;
 
     if (totalTimeSeconds > 60 * 60 * 24 * 365 * 100) {
         msg.reply('Timers longer than 100 years are not supported.');
+        return;
+    }
+
+    if (totalTimeSeconds <= 0) {
+        msg.reply(`Invalid or no time duration given, try \`${config.prefix}help timer\``);
         return;
     }
 

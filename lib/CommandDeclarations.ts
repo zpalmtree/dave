@@ -317,13 +317,20 @@ export const Commands: Command[] = [
         hidden: false,
         implementation: handleTimer,
         description: 'Set a timer to remind you of something',
+        helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
         needDb: true,
         examples: [
             {
+                name: 'Set a timer with a description',
                 value: 'timer 5m coffee',
             },
             {
-                value: 'timer 2h',
+                name: 'Set a timer',
+                value: 'timer 2h5m',
+            },
+            {
+                name: 'Set a super long timer',
+                value: 'timer 1y2w3d4h5m6s',
             },
             {
                 name: 'View running timers',
