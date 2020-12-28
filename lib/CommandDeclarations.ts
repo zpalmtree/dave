@@ -580,7 +580,7 @@ export function handleHelp(msg: Message, args: string): void {
                 const callString = config.prefix + args;
 
                 let examples = [{
-                    value: callString,
+                    value: args,
                 }]
 
                 if (c.examples && c.examples.length > 0) {
@@ -596,6 +596,11 @@ export function handleHelp(msg: Message, args: string): void {
                             value: `\`${config.prefix}${e.value}\``,
                         }
                     }));
+
+                if (c.aliases.length > 1) {
+                    const aliases = c.aliases.map((x) => config.prefix + x).join(', ');
+                    embed.setFooter(`Aliases: ${aliases}`);
+                }
 
                 msg.channel.send(embed);
 
