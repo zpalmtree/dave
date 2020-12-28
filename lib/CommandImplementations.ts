@@ -74,6 +74,8 @@ import {
     displayWatchById,
     scheduleWatch,
     getWatchDetailsById,
+    handleMovieBank,
+    addToBank,
 } from './Watch';
 
 import {
@@ -794,6 +796,16 @@ export async function handleWatch(msg: Message, args: string[], db: Database): P
                 updateTime(msg, args.slice(1).join(' '), db);
                 return;
             }
+            /*
+            case 'bank': {
+                handleMovieBank(msg, args.slice(1), db);
+                return;
+            }
+            case 'addbank': {
+                addToBank(msg, args.slice(1).join(' '), db);
+                return;
+            }
+            */
         }
     }
 

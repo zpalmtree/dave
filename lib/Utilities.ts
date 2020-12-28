@@ -76,6 +76,13 @@ export function pickRandomItem<T>(items: T[]): T {
     return items[Math.floor(Math.random() * items.length)];
 }
 
+export function shuffleArray(array: any[]) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
 export function canAccessCommand(msg: Message, react: boolean): boolean {
     if (msg.channel.id === config.mainChannel) {
         return true;

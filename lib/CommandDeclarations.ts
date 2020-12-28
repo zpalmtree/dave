@@ -271,7 +271,20 @@ export const Commands: Command[] = [
                 name: 'Update the date/time of a scheduled watch',
                 value: 'watch updatetime 1 10m',
             },
-
+            /*
+            {
+                name: 'Add a movie to the movie bank',
+                value: 'watch addbank Rocky https://www.imdb.com/title/tt0075148/?ref_=fn_al_tt_1',
+            },
+            {
+                name: 'Find an unwatched movie',
+                value: 'watch bank',
+            },
+            {
+                name: 'Find a movie unwatched by a group',
+                value: 'watch bank @tom @bob',
+            },
+            */
         ],
         needDb: true,
     },
