@@ -1855,3 +1855,187 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         }
     });
 }
+
+export async function handlePoll(msg: Message, args: string) {
+    const yesUsers = new Set<string>();
+    const noUsers = new Set<string>();
+
+    const f = async () => {
+        const yesNames = await Promise.all([...yesUsers].map((user) => getUsername(user, msg.guild)));
+        const noNames = await Promise.all([...noUsers].map((user) => getUsername(user, msg.guild)));
+
+        const fields = [];
+
+        if (yesNames.length > 0) {
+            fields.push({
+                name: `Yes: ${yesNames.length}`,
+                value: yesNames.join(', '),
+            })
+        }
+
+        if (noNames.length > 0) {
+            fields.push({
+                name: `No: ${noNames.length}`,
+                value: noNames.join(', '),
+            })
+        }
+
+        return fields;
+    }
+
+    let title = capitalize(args.trim());
+
+    if (!title.endsWith('?')) {
+        title += '?';
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle(title)
+        .setFooter('React with 👍 or 👎 to vote');
+
+    const sentMessage = await msg.channel.send(embed);
+
+    await sentMessage.react('👍');
+    await sentMessage.react('👎');
+
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
+        return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
+    }, { time: 60 * 5 * 1000 });
+
+    collector.on('collect', async (reaction, user) => {
+        reaction.users.remove(user.id);
+
+        if (reaction.emoji.name === '👍') {
+            yesUsers.add(user.id);
+            noUsers.delete(user.id);
+        } else {
+            noUsers.add(user.id);
+            yesUsers.delete(user.id);
+        }
+
+        const newFields = await f();
+
+        embed.spliceFields(0, 2, newFields);
+
+        sentMessage.edit(embed);
+    });
+}
+
+export async function handleMultiPoll(msg: Message, args: string) {
+    args = args.trim();
+
+    /* Remove an extra / if they accidently put one there to make the splitting
+     * work correctly */
+    if (args.endsWith('/')) {
+        args = args.slice(0, -1);
+    }
+
+    const responseMapping = new Map<string, Set<string>>();
+
+    const emojiToIndexMap = new Map([
+        ['0️⃣', 0],
+        ['1⃣', 1],
+        ['2️⃣', 2],
+        ['3️⃣', 3],
+        ['4️⃣', 4],
+        ['5️⃣', 5],
+        ['6️⃣', 6],
+        ['7️⃣', 7],
+        ['8️⃣', 8],
+        ['9️⃣', 9],
+        ['🔟', 10],
+    ])
+
+    const emojis = [...emojiToIndexMap.keys()];
+
+    const f = async () => {
+        const fields = [];
+
+        let i = 0;
+
+        for (const [response, users] of responseMapping) {
+            const names = await Promise.all([...users].map((user) => getUsername(user, msg.guild)));
+
+            fields.push({
+                name: `${emojis[i]} ${response}: ${users.size}`,
+                value: names.join(', ') || 'None',
+            })
+
+            i++;
+        }
+
+        return fields;
+    }
+
+    const questionEndIndex = args.indexOf('/');
+
+    if (questionEndIndex === -1) {
+        msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll\` help`);
+        return;
+    }
+
+    const options = args.slice(questionEndIndex + 1).split('/').map((x) => x.trim());
+
+    if (options.length > 11) {
+        msg.reply('Multipoll only supports up to 11 different options.');
+        return;
+    }
+
+    if (options.length <= 1) {
+        msg.reply('Multipoll requires at least 2 different options.');
+        return;
+    }
+
+    for (const option of options) {
+        responseMapping.set(option, new Set());
+    }
+
+    let title = capitalize(args.slice(0, questionEndIndex)).trim();
+
+    if (!title.endsWith('?')) {
+        title += '?';
+    }
+
+    const fields = await f();
+
+    const embed = new MessageEmbed()
+        .setTitle(title)
+        .addFields(fields)
+        .setFooter('React with the emoji indicated to cast your vote');
+
+    const sentMessage = await msg.channel.send(embed);
+    
+    const usedEmojis = emojis.slice(0, options.length);
+
+    for (const emoji of usedEmojis) {
+        await sentMessage.react(emoji);
+    }
+
+    const collector = sentMessage.createReactionCollector((reaction, user) => {
+        return usedEmojis.includes(reaction.emoji.name) && !user.bot;
+    }, { time: 60 * 5 * 1000 });
+
+    collector.on('collect', async (reaction, user) => {
+        reaction.users.remove(user.id);
+
+        const index = emojiToIndexMap.get(reaction.emoji.name) || 0;
+
+        let i = 0;
+
+        for (let [response, users] of responseMapping) {
+            if (i === index) {
+                users.add(user.id);
+            } else {
+                users.delete(user.id);
+            }
+
+            i++;
+        }
+
+        const newFields = await f();
+
+        embed.spliceFields(0, 11, newFields);
+
+        sentMessage.edit(embed);
+    });
+}

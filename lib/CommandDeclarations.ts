@@ -42,6 +42,8 @@ import {
     handleYoutube,
     handleStats,
     handleReady,
+    handlePoll,
+    handleMultiPoll,
 } from './CommandImplementations';
 
 import {
@@ -554,6 +556,34 @@ export const Commands: Command[] = [
             },
         ],
     },
+    {
+        aliases: ['poll', 'vote'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handlePoll,
+        description: 'Propose a yes/no query and let users vote',
+        examples: [
+            {
+                value: 'poll Do you like peanut butter?',
+            },
+        ],
+    },
+    {
+        aliases: ['multipoll', 'multivote'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleMultiPoll,
+        description: 'Create a query with multiple options and let users vote',
+        helpDescription: 'Create a query with multiple options and let users vote. ' +
+            'Multipoll should start with the query, then be followed by a forward slash (`/`). ' +
+            'Then, enter the poll options, each one again separated by a forward slash.',
+        examples: [
+            {
+                value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
+            },
+        ],
+    },
+
 ];
 
 export function handleHelp(msg: Message, args: string): void {
