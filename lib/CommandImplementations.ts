@@ -307,7 +307,7 @@ function dubsType(roll: string): string {
 export async function handleQuote(msg: Message, db: Database): Promise<void> {
     db.all(`SELECT quote, timestamp FROM quote WHERE channel_id = ?`, [msg.channel.id], (err, rows) => {
         if (err) {
-            msg.reply(err);
+            msg.reply(err.toString());
             return;
         }
 
@@ -1255,7 +1255,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     } = exchangeService.exchange(from, to, asNum);
 
     if (!success) {
-        msg.reply(error);
+        msg.reply(error as string);
         return;
     }
 
@@ -1899,12 +1899,10 @@ export async function handlePoll(msg: Message, args: string) {
     await sentMessage.react('👎');
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
-        console.log('got reaction');
         return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
-        console.log('got reaction from ' + user.id);
         reaction.users.remove(user.id);
 
         if (reaction.emoji.name === '👍') {
@@ -2014,16 +2012,11 @@ export async function handleMultiPoll(msg: Message, args: string) {
     }
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
-        console.log('got reaction');
         return usedEmojis.includes(reaction.emoji.name) && !user.bot;
     }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
-        console.log('reaction: ' + reaction.emoji.name + ', ' + user.id);
-
         reaction.users.remove(user.id);
-
-        console.log('removed');
 
         const index = emojiToIndexMap.get(reaction.emoji.name) || 0;
 
@@ -2037,11 +2030,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
             }
 
             i++;
-
-            responseMapping.set(response, users);
         }
-
-        console.log("new mapping: " + JSON.stringify([...responseMapping.entries()].map(([k, v]) => `${k}: ${[...v]}`)));
 
         const newFields = await f();
 

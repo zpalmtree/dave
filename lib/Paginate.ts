@@ -214,7 +214,7 @@ export class Paginate<T> {
 
         const content = await this.getPageContent();
 
-        this.sentMessage = await this.sourceMessage.channel.send(content);
+        this.sentMessage = await this.sourceMessage.channel.send(content!);
 
         if (!shouldPaginate) {
             return this.sentMessage;
