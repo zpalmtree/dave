@@ -324,11 +324,15 @@ export class Paginate<T> {
             return;
         }
 
-        /* Check we can move this many pages */
-        if (this.currentPage + amount >= 1 && this.currentPage + amount <= this.totalPages) {
-            this.currentPage += amount;
+        /* If we are going to go over the end of the pages, wrap around to the start */
+        if (this.currentPage + amount > this.totalPages) {
+            this.currentPage = (this.currentPage + amount) % this.totalPages;
+        /* If we are going to go before the first page, wrap around to the end */
+        } else if (this.currentPage + amount < 1) {
+            this.currentPage = this.totalPages + this.currentPage + amount;
+        /* Otherwise just change pages as normal */
         } else {
-            return;
+            this.currentPage = this.currentPage + amount;
         }
 
         const content = await this.getPageContent();
