@@ -940,36 +940,34 @@ export async function handlePurge(msg: Message) {
     });
 }
 
-export async function handleTranslate(msg: Message, args: string[]): Promise<void> {
-    if (args.length === 0) {
-        msg.reply('No translate string given!');
-        return;
-    }
-
-    let translateString = args.join(' ');
-
-    let toLang = 'en';
-
-    var keys = Object.keys(translate.languages).filter(function (key) {
+function getLanguage(x: string) {
+    for (const key of Object.keys(translate.languages)) {
         if (typeof translate.languages[key] !== 'string') {
-            return false;
+            continue;
         }
 
-        return translate.languages[key].toLowerCase() === (args[0] || '').toLowerCase();
-    });
-
-    if (keys.length > 0) {
-        translateString = args.slice(1).join(' ');
-        toLang = keys[0];
+        if (translate.languages[key].toLowerCase() === x.toLowerCase()) {
+            return key;
+        }
     }
+
+    return undefined;
+}
+
+async function handleTranslateImpl(
+    msg: Message,
+    toLanguage: string,
+    fromLanguage: string | undefined,
+    translateString: string) {
 
     try {
         const res = await translate(translateString, {
-            to: toLang,
+            to: toLanguage,
+            from: fromLanguage,
             client: 'gtx',
         });
 
-        const description = `${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLang as any]}`;
+        const description = `${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLanguage as any]}`;
         const title = res.text;
 
         const embed = new MessageEmbed();
@@ -992,6 +990,50 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
     } catch (err) {
         msg.reply(`Failed to translate: ${err}`);
     }
+}
+
+export async function handleTranslateFrom(msg: Message, args: string[]): Promise<void> {
+    if (args.length < 2) {
+        msg.reply(`No language or translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
+        return;
+    }
+
+    const fromLanguage = getLanguage(args[0]);
+    let toLanguage = getLanguage(args[1]);
+
+    if (fromLanguage === undefined) {
+        msg.reply(`Unknown language "${args[0]}". Try \`${config.prefix}help translatefrom\` to see available languages.`);
+        return;
+    }
+
+    let translateString = args.slice(1).join(' ');
+
+    if (toLanguage !== undefined) {
+        translateString = args.slice(2).join(' ');
+    } else {
+        toLanguage = 'en';
+    }
+
+    handleTranslateImpl(msg, toLanguage, fromLanguage, translateString);
+}
+
+export async function handleTranslate(msg: Message, args: string[]): Promise<void> {
+    if (args.length === 0) {
+        msg.reply(`No translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
+        return;
+    }
+
+    let toLanguage = getLanguage(args[0]);
+
+    let translateString = args.join(' ');
+
+    if (toLanguage !== undefined) {
+        translateString = args.slice(1).join(' ');
+    } else {
+        toLanguage = 'en';
+    }
+
+    handleTranslateImpl(msg, toLanguage, undefined, translateString);
 }
 
 async function getQueryResults(query: string): Promise<false | HTMLElement> {

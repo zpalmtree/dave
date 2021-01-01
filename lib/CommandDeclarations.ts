@@ -15,6 +15,7 @@ import {
 
 import {
     canAccessCommand,
+    getLanguageNames,
 } from './Utilities';
 
 import {
@@ -34,6 +35,7 @@ import {
     handleCountdown,
     handlePurge,
     handleTranslate,
+    handleTranslateFrom,
     handleQuery,
     handleExchange,
     handleAvatar,
@@ -386,6 +388,7 @@ export const Commands: Command[] = [
         hidden: false,
         implementation: handleTranslate,
         description: 'Translate text from one language to another',
+        helpDescription: `Translate text from one language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
         examples: [
             {
                 name: 'Translate to english',
@@ -394,6 +397,24 @@ export const Commands: Command[] = [
             {
                 name: 'Translate to another language',
                 value: 'translate french Such is life',
+            }
+        ],
+    },
+    {
+        aliases: ['translatefrom'],
+        argsFormat: Args.Split,
+        hidden: false,
+        implementation: handleTranslateFrom,
+        description: 'Translate text from a specific language to another',
+        helpDescription: `Translate text from a specific language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
+        examples: [
+            {
+                name: 'Translate to english',
+                value: 'translatefrom french C\'est la vie',
+            },
+            {
+                name: 'Translate to another language',
+                value: 'translatefrom french spanish C\'est la vie',
             }
         ],
     },

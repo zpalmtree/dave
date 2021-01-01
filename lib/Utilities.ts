@@ -7,6 +7,8 @@ import {
     TextChannel,
 } from 'discord.js';
 
+import translate = require('@vitalets/google-translate-api');
+
 import { RGB } from './Types';
 import { config } from './Config';
 
@@ -113,4 +115,12 @@ export async function getUsername(id: string, guild: Guild | null | undefined): 
     }
 
     return user.displayName;
+}
+
+export function getLanguageNames() {
+    const languages = Object.values(translate.languages)
+        .filter((x) => typeof x === 'string');
+
+    /* First language is 'Automatic' */
+    return languages.slice(1);
 }
