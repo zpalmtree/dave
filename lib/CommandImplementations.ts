@@ -903,6 +903,8 @@ export async function handlePurge(msg: Message) {
     let inProgress = false;
 
     collector.on('collect', async (reaction, user) => {
+        reaction.users.remove(user.id);
+
         if (inProgress) {
             return;
         }
@@ -912,6 +914,9 @@ export async function handlePurge(msg: Message) {
         }
 
         inProgress = true;
+
+        embed.setDescription('Deletion started. You will be notified when it is complete.');
+        sentMessage.edit(embed);
 
         let messages: Message[] = [];
 
@@ -932,11 +937,11 @@ export async function handlePurge(msg: Message) {
                     }
                 }
             } while (messages.length > 0);
+
+            msg.reply(`Message deletion complete.`);
         } catch (err) {
             console.log('err: ' + err.toString());
         }
-
-        msg.channel.send(`Message deletion for <@${msg.author.id}> complete`);
     });
 }
 

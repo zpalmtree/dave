@@ -108,13 +108,17 @@ export async function getUsername(id: string, guild: Guild | null | undefined): 
         return ping;
     }
 
-    const user = await guild.members.fetch(id);
+    try {
+        const user = await guild.members.fetch(id);
 
-    if (!user) {
+        if (!user) {
+            return ping;
+        }
+
+        return user.displayName;
+    } catch (err) {
         return ping;
     }
-
-    return user.displayName;
 }
 
 export function getLanguageNames() {
