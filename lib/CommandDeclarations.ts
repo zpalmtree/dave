@@ -380,7 +380,7 @@ export const Commands: Command[] = [
         hidden: true,
         implementation: handlePurge,
         description: 'Delete all your messages in a channel',
-        disabled: true,
+        disabled: false,
     },
     {
         aliases: ['translate'],
