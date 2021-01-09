@@ -887,6 +887,11 @@ export async function handleCountdown(
 }
 
 export async function handlePurge(msg: Message) {
+    if (!haveRole(msg, 'Mod')) {
+        msg.reply('fuck off');
+        return;
+    }
+
     const embed = new MessageEmbed()
         .setTitle('Message Deletion')
         .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take several hours.')
