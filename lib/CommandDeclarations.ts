@@ -227,7 +227,7 @@ export const Commands: Command[] = [
     {
         aliases: ['watch', 'movie'],
         argsFormat: Args.Split,
-        hidden: true,
+        hidden: false,
         implementation: handleWatch,
         description: 'Display or schedule a movie/series to watch',
         examples: [
