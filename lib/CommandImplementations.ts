@@ -936,23 +936,13 @@ export async function handlePurge(msg: Message) {
 
                 for (const message of messages) {
                     if (message.author.id === msg.author.id) {
-                        let deleteSuccess = false;
-
-                        while (!deleteSuccess) {
-                            await sleep(1500);
-
-                            try {
-                                await message.delete();
-                                deleteSuccess = true;
-                            } catch (err) {
-                                console.log(err);
-                                if (err.code === 10008) {
-                                    deleteSuccess = true;
-                                }
-                            }
+                        try {
+                            await message.delete();
+                            console.log(`Deleted message ${i} for ${msg.author.id}`);
+                        } catch (err) {
+                            console.log(err);
                         }
 
-                        console.log(`Deleted message ${i} for ${msg.author.id}`);
                         i++;
                     }
                 }
