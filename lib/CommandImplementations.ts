@@ -946,6 +946,9 @@ export async function handlePurge(msg: Message) {
                                 deleteSuccess = true;
                             } catch (err) {
                                 console.log(err);
+                                if (err.code === 10008) {
+                                    deleteSuccess = true;
+                                }
                             }
                         }
 
