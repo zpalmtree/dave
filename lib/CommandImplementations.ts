@@ -887,7 +887,9 @@ export async function handleCountdown(
 }
 
 export async function handlePurge(msg: Message) {
-    if (!haveRole(msg, 'Mod')) {
+    const allowed = ['389071148421218330'];
+
+    if (!haveRole(msg, 'Mod') && !allowed.includes(msg.author.id)) {
         msg.reply('fuck off');
         return;
     }
