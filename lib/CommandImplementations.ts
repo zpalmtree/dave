@@ -1890,6 +1890,8 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     }, { time: 60 * 5 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
+        reaction.users.remove(user.id);
+
         if (!notReadyUsers.has(user.id)) {
             return;
         }
@@ -1903,6 +1905,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         } else {
             const newFields = await f();
             embed.spliceFields(0, 2, newFields);
+            sentMessage.edit(embed);
         }
     });
 
