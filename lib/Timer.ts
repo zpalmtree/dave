@@ -285,6 +285,17 @@ export function sendTimer(
     userID: string,
     description?: string) {
 
+    const maxTimeout = (2 ** 31) - 1;
+
+    /* setTimeout uses a 32 bit signed value so any timeouts above this will
+     * overflow. To handle this, we just set a timeout for the max value, then
+     * repeat the process with this amount taken off. */
+    if (milliseconds > maxTimeout) {
+        const timeoutID = setTimeout(() => sendTimer(channel, milliseconds - maxTimeout, timerID, userID, description), maxTimeout);
+        runningTimers.set(timerID, timeoutID);
+        return;
+    }
+
     const mention = `<@${userID}>,`;
 
     const timeoutID = setTimeout(() => {
