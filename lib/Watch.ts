@@ -615,7 +615,7 @@ async function awaitWatchReactions(
 
     const collector = msg.createReactionCollector((reaction, user) => {
         return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 3000000 });
+    }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
         const embed = new MessageEmbed(msg.embeds[0]);
@@ -976,7 +976,7 @@ export async function handleMovieBank(msg: Message, args: string[], db: Database
 
     const collector = msg.createReactionCollector((reaction, user) => {
         return reactions.includes(reaction.emoji.name) && !user.bot;
-    }, { time: 3000000 });
+    }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
     });

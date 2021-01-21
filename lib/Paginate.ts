@@ -229,7 +229,7 @@ export class Paginate<T> {
 
         this.collector = this.sentMessage.createReactionCollector((reaction, user) => {
             return ['⬅️', '➡️', '🔒', '❌'].includes(reaction.emoji.name) && !user.bot;
-        }, { time: 600000, dispose: true }); // 10 minutes
+        }, { time: 60 * 15 * 1000, dispose: true }); // 10 minutes
 
         this.collector.on('collect', async (reaction: MessageReaction, user: User) => {
             switch (reaction.emoji.name) {

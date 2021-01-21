@@ -911,7 +911,7 @@ export async function handlePurge(msg: Message) {
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return reaction.emoji.name === '👍' && user.id === msg.author.id
-    }, { time: 3000000 });
+    }, { time: 60 * 15 * 1000 });
 
     let inProgress = false;
 
