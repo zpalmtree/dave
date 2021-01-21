@@ -806,7 +806,7 @@ export async function handleWatchNotifications(client: Client, db: Database) {
 
     if (events) {
         for (const watch of events) {
-            if (config.devEnv && watch.channelID !== config.devChannel) {
+            if (config.devEnv && !config.devChannels.includes(watch.channelID)) {
                 continue;
             }
 

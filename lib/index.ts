@@ -61,7 +61,7 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
         return;
     }
 
-    if (config.devEnv && msg.channel.id !== config.devChannel) {
+    if (config.devEnv && !config.devChannels.includes(msg.channel.id)) {
         return;
     }
 

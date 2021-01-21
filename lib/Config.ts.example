@@ -20,9 +20,9 @@ class Config {
 
     public devEnv: boolean = false;
 
-    public devChannel: string = 'enter channel id here';
+    public devChannels: string[] = [];
 
-    public mainChannel: string = 'enter channel id here';
+    public priviledgedChannels: string[] = [];
 
     public god: string = 'enter user here';
 
