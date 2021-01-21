@@ -51,6 +51,7 @@ import {
 import {
     insertQuery,
     selectQuery,
+    selectOneQuery,
     deleteQuery,
 } from './Database';
 
@@ -305,25 +306,30 @@ function dubsType(roll: string): string {
 }
 
 export async function handleQuote(msg: Message, db: Database): Promise<void> {
-    db.all(`SELECT quote, timestamp FROM quote WHERE channel_id = ?`, [msg.channel.id], (err, rows) => {
-        if (err) {
-            msg.reply(err.toString());
-            return;
-        }
+    const { quote, timestamp } = await selectOneQuery(
+        `SELECT
+            quote,
+            timestamp
+        FROM
+            quote
+        WHERE
+            channel_id = ?
+        ORDER BY RANDOM()
+        LIMIT 1`,
+        db,
+        [ msg.channel.id ],
+    ) || {};
 
-        if (rows.length === 0) {
-            msg.reply('No quotes in the database! Use $suggest to suggest one.');
-            return;
-        }
+    if (!quote) {
+        msg.reply(`No quotes in the database! Use ${config.prefix}addquote to suggest one.`);
+        return;
+    }
 
-        const { quote, timestamp } = rows[Math.floor(Math.random() * rows.length)];
-
-        if (timestamp) {
-            msg.channel.send(`${quote} - ${new Date(timestamp).toISOString().slice(0, 10)}`);
-        } else {
-            msg.channel.send(quote);
-        }
-    });
+    if (timestamp) {
+        msg.channel.send(`${quote} - ${moment(timestamp).format('YYYY-MM-DD')}`);
+    } else {
+        msg.channel.send(quote);
+    }
 }
 
 export async function handleSuggest(msg: Message, suggestion: string, db: Database): Promise<void> {
@@ -2100,4 +2106,43 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
         sentMessage.edit(embed);
     });
+}
+
+export async function handleQuotes(msg: Message, db: Database): Promise<void> {
+    const quotes = await selectQuery(
+        `SELECT
+            quote,
+            timestamp
+        FROM
+            quote
+        WHERE
+            channel_id = ?
+        ORDER BY RANDOM()`,
+        db,
+        [ msg.channel.id ],
+    );
+
+    if (quotes.length === 0) {
+        msg.reply(`No quotes in the database! Use ${config.prefix}addquote to suggest one.`);
+        return;
+    }
+
+    const embed = new MessageEmbed();
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 3,
+        displayFunction: (quote: any) => {
+            return {
+                name: moment(quote.timestamp).format('YYYY-MM-DD'),
+                value: quote.quote,
+                inline: false,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: quotes,
+        embed,
+    });
+
+    pages.sendMessage();
 }

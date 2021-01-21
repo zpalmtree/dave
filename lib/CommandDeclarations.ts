@@ -23,6 +23,7 @@ import {
     handleMath,
     handleRoll,
     handleQuote,
+    handleQuotes,
     handleSuggest,
     handleKitty,
     handleDoggo,
@@ -99,6 +100,14 @@ export const Commands: Command[] = [
                 value: 'suggest "im a prancing lala boy" - you',
             },
         ],
+    },
+    {
+        aliases: ['quotes'],
+        argsFormat: Args.DontNeed,
+        hidden: false,
+        implementation: handleQuotes,
+        description: 'View all quotes',
+        needDb: true,
     },
     {
         aliases: ['fortune'],
