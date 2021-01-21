@@ -2134,7 +2134,9 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
         itemsPerPage: 3,
         displayFunction: (quote: any) => {
             return {
-                name: moment(quote.timestamp).format('YYYY-MM-DD'),
+                name: quote.timestamp
+                    ? moment(quote.timestamp).format('YYYY-MM-DD')
+                    : 'The Before Times',
                 value: quote.quote,
                 inline: false,
             };
