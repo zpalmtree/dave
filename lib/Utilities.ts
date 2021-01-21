@@ -86,7 +86,7 @@ export function shuffleArray(array: any[]) {
 }
 
 export function canAccessCommand(msg: Message, react: boolean): boolean {
-    if (config.priviledgedChannels.includes(msg.channel.id)) {
+    if (config.privilegedChannels.includes(msg.channel.id)) {
         return true;
     }
 
