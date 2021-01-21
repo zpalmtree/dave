@@ -88,7 +88,7 @@ export const Commands: Command[] = [
         needDb: true,
     },
     {
-        aliases: ['suggest'],
+        aliases: ['addquote', 'suggest', 'suggestquote'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleSuggest,
