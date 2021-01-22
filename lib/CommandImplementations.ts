@@ -1576,7 +1576,55 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     return filtered;
 }
 
-async function handleUserStats(msg: Message, db: Database): Promise<void> {
+async function handleUserStats(msg: Message, db: Database, user: string): Promise<void> {
+    const username = await getUsername(user, msg.guild);
+
+    /* Get stats on which commands are used the most */
+    const commands = await selectQuery(
+        `SELECT
+            command AS command,
+            COUNT(*) AS usage
+        FROM
+            logs
+        WHERE
+            channel_id = ?
+            AND user_id = ?
+        GROUP BY
+            command
+        ORDER BY
+            usage DESC`,
+        db,
+        [ msg.channel.id, user ]
+    );
+
+    if (commands.length === 0) {
+        msg.reply('User has never used the bot!');
+        return;
+    }
+
+    const embed = new MessageEmbed()
+        .setTitle(`${username}'s bot usage statistics`)
+        .setDescription('Number of times a command has been used');
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (command: any) => {
+            return {
+                name: command.command,
+                value: command.usage,
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: commands,
+        embed,
+    });
+
+    pages.sendMessage();
+}
+
+async function handleUsersStats(msg: Message, db: Database): Promise<void> {
     const users = await selectQuery(
         `SELECT
             COUNT(*) AS usage,
@@ -1656,20 +1704,31 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
 }
 
 export async function handleStats(msg: Message, args: string[], db: Database): Promise<void> {
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    /* Get stats on commands used by a specific user */
+    if (mentionedUsers.length > 0) {
+        handleUserStats(msg, db, mentionedUsers[0].id);
+        return;
+    }
+
     if (args.length > 0) {
+        /* Get stats on biggest users of the bot */
         if (args[0] === 'users' || args[0] === 'user') {
-            handleUserStats(msg, db);
+            handleUsersStats(msg, db);
             return;
         }
 
         for (const command of Commands) {
             if (command.aliases.includes(args[0])) {
+                /* Get stats on which users used a specific command the most */
                 handleCommandStats(msg, db, command.aliases[0]);
                 return;
             }
         }
     }
 
+    /* Get stats on which commands are used the most */
     const commands = await selectQuery(
         `SELECT
             command AS command,
