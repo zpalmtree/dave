@@ -140,7 +140,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['doggo'],
+        aliases: ['doggo', 'dog', 'doggy'],
         argsFormat: Args.Split,
         hidden: false,
         implementation: handleDoggo,
@@ -158,7 +158,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['kitty'],
+        aliases: ['kitty', 'cat'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleKitty,
@@ -520,7 +520,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['youtube'],
+        aliases: ['youtube', 'video'],
         argsFormat: Args.Combined,
         hidden: false,
         implementation: handleYoutube,
@@ -550,6 +550,10 @@ export const Commands: Command[] = [
             {
                 name: `View number of times users have used a specific command`,
                 value: 'stats fortune',
+            },
+            {
+                name: 'View most used commands for a user',
+                value: 'stats @bob',
             },
         ],
     },
