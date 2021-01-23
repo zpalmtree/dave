@@ -682,7 +682,7 @@ export async function createWatch(
     const user = await getUsername(msg.author.id, msg.guild);
 
     const embed = new MessageEmbed()
-        .setTitle(title)
+        .setTitle(`ID: ${movieID} - ${title}`)
         .setDescription(`${title} has been successfully scheduled for ${time.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
         .setFooter('React with 👍 if you want to attend this movie night')
         .addFields(
