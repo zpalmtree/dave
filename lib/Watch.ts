@@ -212,7 +212,7 @@ export async function addLink(msg: Message, args: string[], db: Database): Promi
         [ args[1], watch.movieID ]
     );
 
-    msg.reply(`Successfully added/updated link for ${watch.title}`);
+    msg.reply(`Successfully added link for ${watch.title}`);
 }
 
 export async function updateTime(msg: Message, args: string, db: Database): Promise<void> {
