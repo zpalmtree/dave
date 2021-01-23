@@ -365,40 +365,136 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
         return;
     }
 
+    const attending = new Set(watch.attending);
+
+    const getFields = async (currentPage: number, totalPage: number) => {
+        const names = await Promise.all([...attending].map((user) => getUsername(user, msg.guild)));
+
+        const fields = [];
+
+        fields.push(
+            {
+                name: 'Time',
+                /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
+                value: moment.utc().isBefore(moment.utc(watch.time).subtract(6, 'hours'))
+                    ? moment.utc(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
+                    : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(-6).format('HH:mm')} CST`,
+            },
+            {
+                name: 'Attending',
+                value: names.join(', '),
+            },
+        );
+
+        if (watch.infoLinks.length > 0) {
+            fields.push({
+                name: 'Info Link',
+                value: watch.infoLinks[0],
+            });
+        }
+
+        if (watch.downloadLinks.length === 1) {
+            fields.push({
+                name: 'Download Link',
+                value: watch.downloadLinks[0],
+            });
+        } else if (watch.downloadLinks.length > 1) {
+            fields.push({
+                name: `Download Link ${currentPage + 1} of ${totalPage}`,
+                value: watch.downloadLinks[currentPage],
+            });
+        }
+
+        return fields;
+    }
+
     const embed = new MessageEmbed()
         .setTitle(watch.title)
         .setFooter('React with 👍 if you want to attend this movie night');
 
-    const names = await Promise.all(watch.attending.map((user) => getUsername(user, msg.guild)));
+    const fields = await getFields(0, watch.downloadLinks.length);
 
-    embed.addFields(
-        {
-            name: 'Time',
-            /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-            value: moment.utc().isBefore(moment.utc(watch.time).subtract(6, 'hours'))
-                ? moment.utc(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(-6).format('HH:mm')} CST`,
-        },
-        {
-            name: 'Attending',
-            value: names.join(', '),
-        },
-    );
+    embed.addFields(fields);
 
-    if (watch.infoLinks.length > 0) {
-        embed.addFields({
-            name: 'Info Link',
-            value: watch.infoLinks[0],
-        });
+    const f = async function(this: Paginate<string>, downloadLink: string, embed: MessageEmbed) {
+        embed.fields = [];
+
+        const newFields = await getFields(this.currentPage, this.totalPages);
+
+        embed.addFields(newFields);
+
+        return embed;
+    };
+
+    const updateAttendeesFunction = async function(
+        this: Paginate<string>,
+        downloadLink: string[],
+        embed: MessageEmbed,
+        reaction: MessageReaction,
+        user: User,
+    ) {
+        if (reaction.emoji.name === '👍') {
+            attending.add(user.id);
+        } else {
+            attending.delete(user.id);
+        }
+
+        if (attending.size === 0) {
+            msg.channel.send('All attendees removed! Cancelling watch.');
+
+            this.deleteMessage();
+
+            const watchDeletionResponse = await removeWatchById(id, msg, db, true);
+
+            msg.channel.send(watchDeletionResponse);
+
+            return;
+        }
+
+        await serializeQueries(async () => {
+            await deleteQuery(
+                `DELETE FROM
+                    user_watch
+                WHERE
+                    watch_event = ?`,
+                db,
+                [ id ],
+            );
+
+            for (const attendee of attending) {
+                await insertQuery(
+                    `INSERT INTO user_watch
+                        (user_id, watch_event)
+                    VALUES
+                        (?, ?)`,
+                    db,
+                    [ attendee, id ]
+                );
+            }
+        }, db);
+
+        embed.fields = [];
+
+        const newFields = await getFields(this.currentPage, this.totalPages);
+
+        embed.addFields(newFields);
+
+        return embed;
     }
 
-    if (watch.downloadLinks.length > 0) {
-        embed.addField('Download Link', watch.downloadLinks[0]);
-    }
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 1,
+        displayFunction: f,
+        displayType: DisplayType.EmbedData,
+        data: watch.downloadLinks,
+        embed,
+        hideFooter: true,
+        customReactions: ['👍', '👎'],
+        customReactionFunction: updateAttendeesFunction,
+    });
 
-    const sentMessage = await msg.channel.send(embed);
-
-    awaitWatchReactions(sentMessage, watch.title, id, new Set(watch.attending), 1, db);
+    await pages.sendMessage();
 }
 
 export async function addToBank(
