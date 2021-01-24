@@ -46,6 +46,7 @@ import {
     pickRandomItem,
     canAccessCommand,
     getUsername,
+    shuffleArray,
 } from './Utilities';
 
 import {
@@ -739,7 +740,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
         } as any)[gallery];
 
         const index = Math.floor(Math.random() * (finalPage + 1));
-
+        
         const response = await fetch(`https://api.imgur.com/3/gallery/${gallery}/top/all/${index}`, {
             headers: {
                 'Authorization': 'Client-ID de8a61d6a484c39',
@@ -748,29 +749,24 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
 
         const data = await response.json();
 
-        const images = data.data.filter((img: any) => img.size > 0);
+        const images = data.data.filter((img: any) => img.size > 0 && !img.is_album && img.link.startsWith('https://'));
 
-        const image = images[Math.floor(Math.random() * images.length)];
+        shuffleArray(images);
 
-        if (image == undefined) {
-            msg.reply('Failed to fetch image from imgur API');
-            return;
-        }
+        const embed = new MessageEmbed();
 
-        const embed = new MessageEmbed().setTitle(image.title);
+        const pages = new Paginate({
+            sourceMessage: msg,
+            embed,
+            data: images,
+            displayType: DisplayType.EmbedData,
+            displayFunction: (item: any, embed: MessageEmbed) => {
+                embed.setTitle(item.title);
+                embed.setImage(item.link);
+            }
+        })
 
-        const url = image.is_album
-            ? image.images[0].link
-            : image.link;
-
-        embed.attachFiles([url]);
-        embed.setImage(`attachment://${new URL(image.link).pathname.substr(1)}`);
-
-        if (image.is_album) {
-            embed.setFooter(`See ${image.images.length - 1} more images at ${image.link}`);
-        }
-
-        msg.channel.send(embed);
+        pages.sendMessage();
     } catch (err) {
         msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
     }
