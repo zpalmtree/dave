@@ -273,22 +273,10 @@ export class Paginate<T> {
 
         let reactions = ['❌'].concat(this.customReactions || []);
 
-        for (const reaction of this.customReactions || []) {
-            await this.sentMessage.react(reaction);
-        }
-
         /* Only enable pagination and locking if we need multiple pages. */
         if (shouldPaginate) {
             reactions = reactions.concat(['⬅️', '➡️', '🔒']);
-
-            await this.sentMessage.react('⬅️');
-            await this.sentMessage.react('➡️');
-
-            /* Not essential to be ordered or to block execution, lets do these non async */
-            this.sentMessage.react('🔒');
         }
-
-        this.sentMessage.react('❌');
 
         this.collector = this.sentMessage.createReactionCollector((reaction, user) => {
             return reactions.includes(reaction.emoji.name) && !user.bot;
@@ -322,7 +310,7 @@ export class Paginate<T> {
                     break;
                 }
             }
-         });
+        });
 
         this.collector.on('remove', async (reaction: MessageReaction, user: User) => {
             switch (reaction.emoji.name) {
@@ -334,7 +322,21 @@ export class Paginate<T> {
                     break;
                 }
             }
-         });
+        });
+
+        for (const reaction of this.customReactions || []) {
+            await this.sentMessage.react(reaction);
+        }
+
+        if (shouldPaginate) {
+            await this.sentMessage.react('⬅️');
+            await this.sentMessage.react('➡️');
+
+            /* Not essential to be ordered or to block execution, lets do these non async */
+            this.sentMessage.react('🔒');
+        }
+
+        this.sentMessage.react('❌');
 
         return this.sentMessage;
     }
