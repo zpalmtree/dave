@@ -39,6 +39,7 @@ You can disable functions in `lib/CommandDefinitions.ts` if you can't be bothere
 * Cat API: https://thecatapi.com/signup
 * Exchange rates: https://docs.openexchangerates.org/docs/authentication
 * Youtube API: https://developers.google.com/youtube/v3/docs
+* Weather API: https://openweathermap.org/price
 
 ## Installation
 

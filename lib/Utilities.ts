@@ -42,6 +42,10 @@ export function capitalize(str: string): string {
     return str && str[0].toUpperCase() + str.slice(1);
 }
 
+export function capitalizeAllWords(str: string): string {
+    return str.split(' ').map(capitalize).join(' ');
+}
+
 export async function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }

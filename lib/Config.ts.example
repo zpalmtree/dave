@@ -12,6 +12,8 @@ class Config {
 
     public youtubeApiKey: string = 'enter youtube api key here';
 
+    public weatherApiKey: string = 'enter weather api key here';
+
     public doggoBreedLink: string = 'https://pastebin.com/BS8JKb7V';
 
     public kittyBreedLink: string = 'https://pastebin.com/0iCzvPJq';

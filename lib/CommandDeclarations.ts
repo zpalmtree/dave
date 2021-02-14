@@ -56,6 +56,8 @@ import {
 
 import { exchangeService } from './Exchange';
 
+import { handleWeather } from './Weather';
+
 import { config } from './Config';
 
 export const Commands: Command[] = [
@@ -617,7 +619,27 @@ export const Commands: Command[] = [
             },
         ],
     },
-
+    {
+        aliases: ['weather', 'forecast'],
+        argsFormat: Args.Combined,
+        hidden: false,
+        implementation: handleWeather,
+        description: 'Retrieve the weather forecast for a region',
+        examples: [
+            {
+                name: 'Get the weather in a city',
+                value: 'weather Paris',
+            },
+            {
+                name: 'Get the weather in a zip code',
+                value: 'weather 10001',
+            },
+            {
+                name: 'Get the weather in a post code',
+                value: 'weather SW1',
+            },
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
