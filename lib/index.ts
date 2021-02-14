@@ -66,7 +66,7 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
     }
 
     /* Get the command with prefix, and any args */
-    const [ tmp, ...args ] = msg.content.split(' ');
+    const [ tmp, ...args ] = msg.content.trim().split(' ');
 
     /* Get the actual command after the prefix is removed */
     const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length).toLowerCase();

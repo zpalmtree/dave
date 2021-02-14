@@ -18,6 +18,8 @@ class Config {
 
     public kittyBreedLink: string = 'https://pastebin.com/0iCzvPJq';
 
+    public imageHostPath: string = 'https://raw.githubusercontent.com/zpalmtree/dave/master/images/';
+
     public watchPollInterval: number = 10000;
 
     public devEnv: boolean = false;

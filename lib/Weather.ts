@@ -13,6 +13,11 @@ import { config } from './Config';
 
 import { capitalizeAllWords } from './Utilities';
 
+import {
+    Paginate,
+    DisplayType,
+} from './Paginate';
+
 export interface IWeatherIcon {
     day: string;
     night: string;
@@ -245,8 +250,75 @@ export const weatherIconMapping: IWeatherIcons = {
     },
 };
 
-export async function handleWeather(msg: Message, query: string): Promise<void> {
-    query = query.trim();
+function displayWeather(embed: MessageEmbed, data: any, cityData: any) {
+    embed.fields = [];
+
+    const weather = data.weather[0];
+
+    const toF = (temp: number) => {
+        return Math.round((temp * 1.8) + 32);
+    }
+
+    const toMph = (kph: number) => {
+        return Math.round(kph / 1.609344);
+    }
+
+    const getTempStr = (c: number) => {
+        return `${toF(c)}°F, ${Math.round(c)}°C`;
+    }
+
+    const weatherImage = weatherIconMapping[weather.id as number];
+
+    if (!weatherImage.day) {
+        throw new Error(`Unhandled weather ${weather.description} (${weather.id})`);
+    }
+
+    const forecastTime = moment.unix(data.dt).utcOffset(cityData.timezone);
+
+    const image = forecastTime.hour() > 6 && forecastTime.hour() < 18
+        ? weatherImage.day
+        : weatherImage.night;
+
+    embed.setTitle(`${cityData.name}, ${cityData.country} • ${capitalizeAllWords(weather.description)}`)
+        /* We can't use local images with attachment:// since there is no
+         * way to remove an attachment - so changing images doesn't work. */
+        .setThumbnail(config.imageHostPath + image)
+        .addFields(
+            {
+                name: 'Local Time',
+                value: forecastTime.format('ddd, hA'),
+                inline: true,
+            },
+            {
+                name: 'Temperature',
+                value: getTempStr(data.main.temp),
+                inline: true,
+            },
+            {
+                name: 'Feels Like',
+                value: getTempStr(data.main.feels_like),
+                inline: true,
+            },
+            {
+                name: 'Humidity',
+                value: Math.round(data.main.humidity) + '%',
+                inline: true,
+            },
+            {
+                name: 'Wind',
+                value: `${toMph(data.wind.speed)} mph, ${Math.round(data.wind.speed)} km/h`,
+                inline: true,
+            },
+            {
+                name: 'Cloudiness',
+                value: Math.round(data.clouds.all) + '%',
+                inline: true,
+            },
+        );
+}
+
+export async function handleWeather(msg: Message, args: string[]): Promise<void> {
+    let query = args[0].trim();
 
     /* Prevent leaking our IP */
     if (query.includes('auto:ip')) {
@@ -264,71 +336,33 @@ export async function handleWeather(msg: Message, query: string): Promise<void> 
         units: 'metric',
     };
 
-    const url = `https://api.openweathermap.org/data/2.5/weather?${stringify(params)}`;
+    const url = `https://api.openweathermap.org/data/2.5/forecast?${stringify(params)}`;
 
     try {
         const response = await fetch(url);
 
         const data = await response.json();
 
-        if (data.cod !== 200) {
+        if (data.cod !== '200') {
             msg.reply(data.message);
             return;
         }
 
-        const weather = data.weather[0];
+        const cityData = data.city;
 
-        const toF = (temp: number) => {
-            return Math.round((temp * 1.8) + 32);
-        }
+        const embed = new MessageEmbed();
 
-        const toMph = (kph: number) => {
-            return Math.round(kph / 1.609344);
-        }
+        const pages = new Paginate({
+            sourceMessage: msg,
+            embed,
+            data: data.list,
+            displayType: DisplayType.EmbedData,
+            displayFunction: (item: any, embed: MessageEmbed) => {
+                displayWeather(embed, item, cityData);
+            }
+        });
 
-        const getTempStr = (c: number) => {
-            return `${toF(c)}°F, ${Math.round(c)}°C`;
-        }
-
-        const weatherImage = weatherIconMapping[weather.id as number];
-
-        const unixTimestamp = Math.round(Date.now() / 1000);
-
-        if (!weatherImage.day) {
-            msg.reply(`Unhandled weather ${weather.description} (${weather.id})`);
-        }
-
-        const isDayTime = unixTimestamp > data.sys.sunrise && unixTimestamp < data.sys.sunset;
-
-        const image = isDayTime ? weatherImage.day : weatherImage.night;
-
-        const time = moment().utcOffset(data.timezone).format('hh:mm');
-
-        const embed = new MessageEmbed()
-            .setTitle(`${data.name}, ${data.sys.country} • ${capitalizeAllWords(weather.description)}`)
-            .setFooter(`Lat: ${data.coord.lat}, Long: ${data.coord.lon}`)
-            .setThumbnail(`attachment://${image}`)
-            .addFields(
-                {
-                    name: 'Temperature',
-                    value: getTempStr(data.main.temp),
-                },
-                {
-                    name: 'Feels Like',
-                    value: getTempStr(data.main.feels_like),
-                },
-                {
-                    name: 'Humidity',
-                    value: Math.round(data.main.humidity) + '%',
-                },
-                {
-                    name: 'Wind',
-                    value: `${toMph(data.wind.speed)} mph, ${Math.round(data.wind.speed)} km/h`,
-                },
-            )
-            .attachFiles([ `images/${image}` ]);
-
-        msg.channel.send(embed);
+        await pages.sendMessage();
     } catch (err) {
         msg.reply(`Failed to get weather: ${err.toString()}`);
     }

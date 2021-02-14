@@ -621,10 +621,12 @@ export const Commands: Command[] = [
     },
     {
         aliases: ['weather', 'forecast'],
-        argsFormat: Args.Combined,
+        argsFormat: Args.Split,
         hidden: false,
         implementation: handleWeather,
         description: 'Retrieve the weather forecast for a region',
+        helpDescription: 'Retrieve the weather forecast for a region. Returns ' +
+            '5 days of forecasts, at 3 hour intervals.',
         examples: [
             {
                 name: 'Get the weather in a city',
