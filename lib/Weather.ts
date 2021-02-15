@@ -273,7 +273,10 @@ function displayWeather(embed: MessageEmbed, data: any, cityData: any) {
         throw new Error(`Unhandled weather ${weather.description} (${weather.id})`);
     }
 
-    const forecastTime = moment.unix(data.dt).utcOffset(cityData.timezone);
+    /* Timezone offset is given in seconds, convert it to minutes for moment. */
+    const minuteOffset = cityData.timezone / 60;
+
+    const forecastTime = moment.unix(data.dt).utcOffset(minuteOffset);
 
     const image = forecastTime.hour() > 6 && forecastTime.hour() < 18
         ? weatherImage.day
