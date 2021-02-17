@@ -110,7 +110,7 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
 
     const pages = new Paginate({
         sourceMessage: msg,
-        itemsPerPage: 7,
+        itemsPerPage: 3,
         displayFunction: f,
         displayType: DisplayType.EmbedFieldData,
         data: events,
@@ -162,7 +162,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
 
     const pages = new Paginate({
         sourceMessage: msg,
-        itemsPerPage: 10,
+        itemsPerPage: 4,
         displayFunction: f,
         displayType: DisplayType.EmbedFieldData,
         data,
