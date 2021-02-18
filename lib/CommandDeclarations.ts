@@ -707,12 +707,16 @@ export const Commands: Command[] = [
                 value: 'weather Paris',
             },
             {
+                name: 'Get the weather in a specific city',
+                value: 'Weather Paris,US',
+            },
+            {
                 name: 'Get the weather in a zip code',
-                value: 'weather 10001',
+                value: 'weather 10001,US',
             },
             {
                 name: 'Get the weather in a post code',
-                value: 'weather SW1',
+                value: 'weather SW1,GB',
             },
         ],
     },
