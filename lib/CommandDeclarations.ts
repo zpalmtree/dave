@@ -89,6 +89,10 @@ export const Commands: Command[] = [
         implementation: handleQuote,
         description: 'Gets a random quote',
         needDb: true,
+        relatedCommands: [
+            'addquote',
+            'quotes',
+        ],
     },
     {
         aliases: ['addquote', 'suggest', 'suggestquote'],
@@ -102,6 +106,10 @@ export const Commands: Command[] = [
                 value: 'suggest "im a prancing lala boy" - you',
             },
         ],
+        relatedCommands: [
+            'quote',
+            'quotes',
+        ],
     },
     {
         aliases: ['quotes'],
@@ -110,6 +118,10 @@ export const Commands: Command[] = [
         implementation: handleQuotes,
         description: 'View all quotes',
         needDb: true,
+        relatedCommands: [
+            'addquote',
+            'quote',
+        ],
     },
     {
         aliases: ['fortune'],
@@ -158,6 +170,9 @@ export const Commands: Command[] = [
                 value: 'doggo golden retriever',
             },
         ],
+        relatedCommands: [
+            'kitty',
+        ],
     },
     {
         aliases: ['kitty', 'cat'],
@@ -175,6 +190,9 @@ export const Commands: Command[] = [
             {
                 value: 'kitty european burmese',
             },
+        ],
+        relatedCommands: [
+            'doggo',
         ],
     },
     {
@@ -302,6 +320,11 @@ export const Commands: Command[] = [
             */
         ],
         needDb: true,
+        relatedCommands: [
+            'countdown',
+            'ready',
+            'pause',
+        ],
     },
     {
         aliases: ['time'],
@@ -320,6 +343,9 @@ export const Commands: Command[] = [
                 value: 'time -06:00',
             },
         ],
+        relatedCommands: [
+            'date',
+        ],
     },
     {
         aliases: ['date'],
@@ -337,6 +363,9 @@ export const Commands: Command[] = [
             {
                 value: 'date -06:00',
             },
+        ],
+        relatedCommands: [
+            'time',
         ],
     },
     {
@@ -368,7 +397,10 @@ export const Commands: Command[] = [
                 name: 'Delete a timer by ID - you must be the timer creator',
                 value: 'timer delete 1',
             },
-        ]
+        ],
+        relatedCommands: [
+            'timers',
+        ],
     },
     {
         aliases: ['countdown'],
@@ -383,6 +415,11 @@ export const Commands: Command[] = [
             {
                 value: 'countdown 5',
             },
+        ],
+        relatedCommands: [
+            'watch',
+            'ready',
+            'pause',
         ],
     },
     {
@@ -410,6 +447,9 @@ export const Commands: Command[] = [
                 value: 'translate french Such is life',
             }
         ],
+        relatedCommands: [
+            'translatefrom',
+        ],
     },
     {
         aliases: ['translatefrom'],
@@ -428,6 +468,9 @@ export const Commands: Command[] = [
                 value: 'translatefrom french spanish C\'est la vie',
             }
         ],
+        relatedCommands: [
+            'translate',
+        ],
     },
     {
         aliases: ['pause'],
@@ -442,7 +485,12 @@ export const Commands: Command[] = [
             {
                 value: 'pause 5',
             },
-        ]
+        ],
+        relatedCommands: [
+            'watch',
+            'countdown',
+            'ready',
+        ],
     },
     {
         aliases: ['query', 'search'],
@@ -467,6 +515,10 @@ export const Commands: Command[] = [
                 name: 'Categories',
                 value: 'query Simpsons Characters',
             },
+        ],
+        relatedCommands: [
+            'image',
+            'youtube',
         ],
     },
     {
@@ -520,6 +572,10 @@ export const Commands: Command[] = [
                 value: 'image sunset',
             },
         ],
+        relatedCommands: [
+            'query',
+            'youtube',
+        ],
     },
     {
         aliases: ['youtube', 'video'],
@@ -531,6 +587,10 @@ export const Commands: Command[] = [
             {
                 value: 'youtube install gentoo',
             },
+        ],
+        relatedCommands: [
+            'query',
+            'image',
         ],
     },
     {
@@ -566,6 +626,9 @@ export const Commands: Command[] = [
         implementation: handleTimers,
         description: 'View the status of running timers',
         needDb: true,
+        relatedCommands: [
+            'timer',
+        ],
     },
     {
         aliases: ['ready'],
@@ -591,6 +654,11 @@ export const Commands: Command[] = [
                 value: 'ready 1 @james @bob',
             },
         ],
+        relatedCommands: [
+            'watch',
+            'countdown',
+            'pause',
+        ],
     },
     {
         aliases: ['poll', 'vote'],
@@ -602,6 +670,9 @@ export const Commands: Command[] = [
             {
                 value: 'poll Do you like peanut butter?',
             },
+        ],
+        relatedCommands: [
+            'multipoll',
         ],
     },
     {
@@ -617,6 +688,9 @@ export const Commands: Command[] = [
             {
                 value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
             },
+        ],
+        relatedCommands: [
+            'poll',
         ],
     },
     {
@@ -677,17 +751,27 @@ export function handleHelp(msg: Message, args: string): void {
 
                 const embed = new MessageEmbed()
                     .setTitle(callString)
-                    .setDescription(c.helpDescription || c.description)
-                    .addFields(examples.map((e: any) => {
-                        return {
-                            name: e.name || 'Example',
-                            value: `\`${config.prefix}${e.value}\``,
-                        }
-                    }));
+                    .setDescription(c.helpDescription || c.description);
+
+                embed.addFields(examples.map((e: any) => {
+                    return {
+                        name: e.name || 'Example',
+                        value: `\`${config.prefix}${e.value}\``,
+                    }
+                }));
+
+                if (c.relatedCommands && c.relatedCommands.length > 0) {
+                    embed.addFields({
+                        name: 'Related commands',
+                        value: c.relatedCommands.map((x) => `\`${config.prefix + x}\``).join(', '),
+                    });
+                }
 
                 if (c.aliases.length > 1) {
-                    const aliases = c.aliases.map((x) => config.prefix + x).join(', ');
-                    embed.setFooter(`Aliases: ${aliases}`);
+                    embed.addFields({
+                        name: 'Aliases',
+                        value: c.aliases.map((x) => `\`${config.prefix + x}\``).join(', '),
+                    });
                 }
 
                 msg.channel.send(embed);
@@ -701,7 +785,6 @@ export function handleHelp(msg: Message, args: string): void {
         .setTitle('Available commands')
         .setDescription(`Enter \`${config.prefix}command help\` for more info and examples on a specific command`);
 
-    
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 9,

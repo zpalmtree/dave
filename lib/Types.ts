@@ -92,6 +92,8 @@ export interface Command {
     needDb?: boolean;
 
     examples?: Example[];
+
+    relatedCommands?: string[];
 }
 
 export enum Args {
