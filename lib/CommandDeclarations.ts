@@ -144,6 +144,7 @@ export const Commands: Command[] = [
         hidden: false,
         implementation: handleMath,
         description: 'Perform math or conversions',
+        helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
         examples: [
             {
                 value: 'math 123 * 456',
