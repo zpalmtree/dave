@@ -58,6 +58,11 @@ import { exchangeService } from './Exchange';
 
 import { handleWeather } from './Weather';
 
+import { 
+    handleTurtle,
+    handleTurtleTanks,
+} from './TurtleTanks';
+
 import { config } from './Config';
 
 export const Commands: Command[] = [
@@ -248,7 +253,7 @@ export const Commands: Command[] = [
         description: 'Get a random r/pizza picture',
     },
     {
-        aliases: ['turtle'],
+        aliases: ['tortle'],
         argsFormat: Args.DontNeed,
         hidden: false,
         implementation: handleImgur.bind(undefined, 'r/turtle'),
@@ -720,6 +725,22 @@ export const Commands: Command[] = [
                 value: 'weather SW1,GB',
             },
         ],
+    },
+    {
+        aliases: ['tanks', 'tank'],
+        argsFormat: Args.Split,
+        hidden: false,
+        implementation: handleTurtleTanks,
+        description: 'Play Turtle Tanks!',
+        needDb: true,
+        disabled: true,
+    },
+    {
+        aliases: ['turtle'],
+        argsFormat: Args.DontNeed,
+        hidden: false,
+        implementation: handleTurtle,
+        description: 'Get a random generated turtle',
     },
 ];
 
