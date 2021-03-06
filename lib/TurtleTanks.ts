@@ -79,7 +79,7 @@ export async function handleTurtle(msg: Message) {
 
     canvas.renderAll();
 
-    const attachment = new MessageAttachment((canvas as any).createPNGStream(), 'canvas.png');
+    const attachment = new MessageAttachment((canvas as any).createPNGStream(), 'turtle.png');
 
     msg.reply(attachment);
 }

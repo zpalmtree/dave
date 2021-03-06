@@ -68,19 +68,6 @@ export async function deleteTimer(msg: Message, args: string[], db: Database) {
 }
 
 export async function handleTimer(msg: Message, args: string[], db: Database) {
-    if (args.length >= 1) {
-        switch (args[0]) {
-            case 'list': {
-                handleTimers(msg, db);
-                return;
-            }
-            case 'delete': {
-                deleteTimer(msg, args.slice(1), db);
-                return;
-            }
-        }
-    }
-
     const regex = /^(?:([0-9\.]+)y)?(?:([0-9\.]+)w)?(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 
     const results = regex.exec(args.join(' '));

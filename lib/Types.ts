@@ -54,45 +54,64 @@ export type SplitArgsCommand = (msg: Message, args: string[]) => void;
 export type CombinedArgsCommandDb = (msg: Message, args: string, db: Database) => void;
 export type CombinedArgsCommand = (msg: Message, args: string) => void;
 
+export type CommandImplementation = DontNeedArgsCommandDb
+                                  | DontNeedArgsCommand
+                                  | SplitArgsCommandDb
+                                  | SplitArgsCommand
+                                  | CombinedArgsCommandDb
+                                  | CombinedArgsCommand;
+
 export interface Example {
     name?: string;
     value: string;
+}
+
+export interface CommandFunc {
+    /* Do we need the args, do we want them split on spaces or not */
+    argsFormat: Args;
+
+    /* The function that implements this command */
+    implementation: CommandImplementation;
+
+    /* Simple description of the sub command */
+    description: string;
+
+    /* How can we access the sub command? Missing if primary command. */
+    aliases?: string[];
+
+    /* More detailed description of the command for help strings */
+    helpDescription?: string;
+
+    /* Whether we need the DB for this command. Default false. */
+    needDb?: boolean;
+
+    /* Examples on how to use this sub command */
+    examples?: Example[];
+
+    /* The function that provides help / examples on this sub command */
+    helpFunction?: (msg: Message) => void;
+
+    /* Sub-commands that are relevant to this one */
+    relatedCommands?: string[];
+
+    /* Whether this sub command is disabled. Default false. */
+    disabled?: boolean;
 }
 
 export interface Command {
     /* How can we access the command? */
     aliases: string[];
 
-    /* Do we need the args, do we want them split on spaces or not */
-    argsFormat: Args;
+    /* The function to call when the command is called with no arguments */
+    primaryCommand: CommandFunc;
 
     /* Is this a private command */
-    hidden: boolean;
+    hidden?: boolean;
 
-    /* The function that implements this command */
-    implementation: DontNeedArgsCommandDb
-                  | DontNeedArgsCommand
-                  | SplitArgsCommandDb
-                  | SplitArgsCommand
-                  | CombinedArgsCommandDb
-                  | CombinedArgsCommand;
+    /* Other 'sub commands', e.g. $watch addlink. */
+    subCommands?: CommandFunc[];
 
-    /* The function that provides help / examples on this command */
-    helpFunction?: (msg: Message) => void;
-
-    /* A description of the command for help strings */
-    description: string;
-
-    /* A more detailed description used when calling $help for just this function */
-    helpDescription?: string;
-
-    /* If the command is disabled */
-    disabled?: boolean;
-
-    needDb?: boolean;
-
-    examples?: Example[];
-
+    /* Commands that are related to this one */
     relatedCommands?: string[];
 }
 

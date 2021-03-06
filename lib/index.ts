@@ -30,6 +30,7 @@ import {
 
 import {
     Command,
+    CommandFunc,
     ScheduledWatch,
     Args,
     DontNeedArgsCommandDb,
@@ -52,6 +53,7 @@ import {
 
 import { restoreTimers } from './Timer';
 
+/* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: Database): Promise<void> {
     if (!msg.content.startsWith(config.prefix)) {
         return;
@@ -72,11 +74,13 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
     const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length).toLowerCase();
 
     for (const c of Commands) {
-        if (c.disabled) {
-            continue;
-        }
-
         if (c.aliases.includes(command)) {
+            if (c.hidden) {
+                if (!canAccessCommand(msg, true)) {
+                    return;
+                }
+            }
+
             insertQuery(
                 `INSERT INTO logs
                     (user_id, channel_id, command, args, timestamp)
@@ -92,45 +96,27 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
                 ]
             );
 
-            if (c.hidden) {
-                if (!canAccessCommand(msg, true)) {
-                    return;
-                }
-            }
-
             if (args.length === 1 && args[0] === 'help') {
                 handleHelp(msg, c.aliases[0]);
                 return;
             }
 
-            switch (c.argsFormat) {
-                case Args.DontNeed: {
-                    if (c.needDb) {
-                        await (c.implementation as DontNeedArgsCommandDb)(msg, db);
-                    } else {
-                        await (c.implementation as DontNeedArgsCommand)(msg);
-                    }
+            /* Check if the user is calling a sub command instead of the main
+             * function. */
+            if (args.length > 0 && c.subCommands && c.subCommands.length > 0) {
+                for (const subCommand of c.subCommands) {
+                    if (subCommand.aliases && subCommand.aliases.includes(args[0])) {
+                        if (!subCommand.disabled) {
+                            await dispatchCommand(subCommand, msg, db, args.slice(1));
+                        }
 
-                    break;
-                }
-                case Args.Split: {
-                    if (c.needDb) {
-                        await (c.implementation as SplitArgsCommandDb)(msg, args, db);
-                    } else {
-                        await (c.implementation as SplitArgsCommand)(msg, args);
+                        return;
                     }
-
-                    break;
                 }
-                case Args.Combined: {
-                    if (c.needDb) {
-                        await (c.implementation as CombinedArgsCommandDb)(msg, args.join(' '), db);
-                    } else {
-                        await (c.implementation as CombinedArgsCommand)(msg, args.join(' '));
-                    }
+            }
 
-                    break;
-                }
+            if (!c.primaryCommand.disabled) {
+                await dispatchCommand(c.primaryCommand, msg, db, args);
             }
 
             return;
@@ -138,12 +124,45 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
     }
 }
 
-function getDB(): Database {
-    return new Database(config.dbFile);
+async function dispatchCommand(
+    command: CommandFunc,
+    msg: Message,
+    db: Database,
+    args: string[]) {
+
+    switch (command.argsFormat) {
+        case Args.DontNeed: {
+            if (command.needDb) {
+                await (command.implementation as DontNeedArgsCommandDb)(msg, db);
+            } else {
+                await (command.implementation as DontNeedArgsCommand)(msg);
+            }
+
+            break;
+        }
+        case Args.Split: {
+            if (command.needDb) {
+                await (command.implementation as SplitArgsCommandDb)(msg, args, db);
+            } else {
+                await (command.implementation as SplitArgsCommand)(msg, args);
+            }
+
+            break;
+        }
+        case Args.Combined: {
+            if (command.needDb) {
+                await (command.implementation as CombinedArgsCommandDb)(msg, args.join(' '), db);
+            } else {
+                await (command.implementation as CombinedArgsCommand)(msg, args.join(' '));
+            }
+
+            break;
+        }
+    }
 }
 
 async function main() {
-    const db: Database = getDB();
+    const db: Database = new Database(config.dbFile);
 
     await deleteTablesIfNeeded(db);
     await createTablesIfNeeded(db);

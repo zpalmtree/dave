@@ -772,59 +772,6 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-export async function handleWatch(msg: Message, args: string[], db: Database): Promise<void> {
-    /* No args, display scheduled things to watch */
-    if (args.length === 0) {
-        await displayScheduledWatches(msg, db);
-        return;
-    }
-
-    /* Next lets check for a command match */
-    if (args.length >= 1) {
-        switch (args[0]) {
-            case 'history': {
-                displayAllWatches(msg, db);
-                return;
-            }
-            case 'addlink': {
-                addLink(msg, args.slice(1), db);
-                return;
-            }
-            case 'delete': {
-                deleteWatch(msg, args.slice(1), db);
-                return;
-            }
-            case 'updatetime': {
-                updateTime(msg, args.slice(1).join(' '), db);
-                return;
-            }
-            /*
-            case 'bank': {
-                handleMovieBank(msg, args.slice(1), db);
-                return;
-            }
-            case 'addbank': {
-                addToBank(msg, args.slice(1).join(' '), db);
-                return;
-            }
-            */
-        }
-    }
-
-    /* Single arg, should be trying to get a specific movie by id */
-    if (args.length === 1) {
-        displayWatchById(msg, Number(args[0]), db);
-        return;
-    }
-
-    /* Otherwise, try and parse it as a scheduling */
-    const success = await scheduleWatch(msg, args.join(' '), db);
-
-    if (!success) {
-        msg.reply(`Invalid input. Try \`${config.prefix}help watch\``);
-    }
-}
-
 export function handleTime(msg: Message, args: string) {
     let offset: string | number = 0;
 
@@ -1620,7 +1567,7 @@ async function handleUserStats(msg: Message, db: Database, user: string): Promis
     pages.sendMessage();
 }
 
-async function handleUsersStats(msg: Message, db: Database): Promise<void> {
+export async function handleUsersStats(msg: Message, db: Database): Promise<void> {
     const users = await selectQuery(
         `SELECT
             COUNT(*) AS usage,

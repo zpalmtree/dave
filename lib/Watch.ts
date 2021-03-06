@@ -46,6 +46,27 @@ interface IGetWatchDetails {
     channelID?: string;
 }
 
+export async function handleWatch(msg: Message, args: string[], db: Database): Promise<void> {
+    /* No args, display scheduled things to watch */
+    if (args.length === 0) {
+        await displayScheduledWatches(msg, db);
+        return;
+    }
+
+    /* Single arg, should be trying to get a specific movie by id */
+    if (args.length === 1) {
+        displayWatchById(msg, Number(args[0]), db);
+        return;
+    }
+
+    /* Otherwise, try and parse it as a scheduling */
+    const success = await scheduleWatch(msg, args.join(' '), db);
+
+    if (!success) {
+        msg.reply(`Invalid input. Try \`${config.prefix}help watch\``);
+    }
+}
+
 async function doesWatchIDExist(id: number, channelID: string, db: Database): Promise<boolean> {
     const count: number | undefined = await selectOneQuery(
         `SELECT
@@ -946,9 +967,7 @@ export async function handleWatchNotifications(client: Client, db: Database) {
     setTimeout(handleWatchNotifications, config.watchPollInterval, client, db);
 }
 
-export async function handleMovieBank(msg: Message, args: string[], db: Database) {
-    const regex = /^(.+?)(?: (https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+))?(?: (magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+))?$/
-
+export async function handleMovieBank(msg: Message, db: Database) {
     const mentionedUsers = new Set<string>([...msg.mentions.users.keys()]);
 
     mentionedUsers.add(msg.author.id);
