@@ -1656,12 +1656,6 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
     }
 
     if (args.length > 0) {
-        /* Get stats on biggest users of the bot */
-        if (args[0] === 'users' || args[0] === 'user') {
-            handleUsersStats(msg, db);
-            return;
-        }
-
         for (const command of Commands) {
             if (command.aliases.includes(args[0])) {
                 /* Get stats on which users used a specific command the most */
