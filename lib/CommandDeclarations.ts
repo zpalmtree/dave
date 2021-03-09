@@ -72,7 +72,7 @@ import { handleWeather } from './Weather';
 import { 
     handleTurtle,
     handleTurtleTanks,
-} from './TurtleTanks';
+} from './TurtleTanks/TurtleTanks';
 
 import { config } from './Config';
 
@@ -866,8 +866,9 @@ export const Commands: Command[] = [
             implementation: handleTurtleTanks,
             description: 'Play Turtle Tanks!',
             needDb: true,
-            disabled: true,
+            disabled: false,
         },
+        hidden: true,
     },
     {
         aliases: ['turtle'],

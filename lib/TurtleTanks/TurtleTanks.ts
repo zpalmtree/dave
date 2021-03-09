@@ -8,7 +8,8 @@ import { fabric } from 'fabric';
 
 import { Database } from 'sqlite3';
 
-import { pickRandomItem } from './Utilities';
+import { pickRandomItem } from '../Utilities';
+import { Game } from './Game';
 
 interface CanvasFile {
     filepath: string;
@@ -85,4 +86,11 @@ export async function handleTurtle(msg: Message) {
 }
 
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
+    const game = new Game();
+
+    const gameImage = game.render();
+
+    const attachment = game.getGameImageAttachment();
+
+    msg.reply(attachment);
 }
