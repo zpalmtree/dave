@@ -8,6 +8,7 @@ import { fabric } from 'fabric';
 
 import { Database } from 'sqlite3';
 
+import { map1 } from './CustomMaps';
 import { Map } from './Map';
 import { MapTile } from './MapTile';
 
@@ -16,23 +17,28 @@ export class Game {
 
     private map: Map;
 
+    private initialRenderComplete: boolean = false;
+
     constructor() {
         const canvas = new fabric.StaticCanvas(null, {});
 
-        this.map = new Map(15, 15);
+        this.map = new Map({ height: 8, width: 8 });
 
         const { width, height } = this.map.dimensionsOnCanvas();
 
         canvas.setWidth(width);
         canvas.setHeight(height);
-        
-        /* We only need to render the map once, since it should never change. */
-        this.map.render(canvas, 0, 0);
 
         this.canvas = canvas;
     }
 
-    public render(): void {
+    public async render(): Promise<void> {
+        /* We only need to render the map once, since it should never change. */
+        if (!this.initialRenderComplete) {
+            await this.map.render(this.canvas, 0, 0);
+            this.initialRenderComplete = true;
+        }
+
         this.canvas.renderAll();
     }
 

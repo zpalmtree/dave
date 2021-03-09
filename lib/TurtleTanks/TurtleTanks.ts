@@ -8,6 +8,7 @@ import { fabric } from 'fabric';
 
 import { Database } from 'sqlite3';
 
+import { loadImage } from './Utilities';
 import { pickRandomItem } from '../Utilities';
 import { Game } from './Game';
 
@@ -50,18 +51,6 @@ async function loadCanvasFile(canvasFile: CanvasFile): Promise<fabric.Image> {
     return image;
 }
 
-async function loadImage(filename: string): Promise<fabric.Image> {
-    return new Promise((resolve, reject) => {
-        try {
-            fabric.Image.fromURL(`file://${__dirname}/../images/turtles/${filename}`, (img) => {
-                resolve(img);
-            });
-        } catch (err) {
-            reject(err);
-        }
-    });
-}
-
 async function randomTurtle(canvas: fabric.StaticCanvas) {
     const body = await loadCanvasFile(pickRandomItem(bodies));
     const face = await loadCanvasFile(pickRandomItem(faces));
@@ -88,7 +77,7 @@ export async function handleTurtle(msg: Message) {
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
     const game = new Game();
 
-    const gameImage = game.render();
+    const gameImage = await game.render();
 
     const attachment = game.getGameImageAttachment();
 

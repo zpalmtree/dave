@@ -1,7 +1,20 @@
 import { fabric } from 'fabric';
 
-import { MapTile } from './MapTile';
 import { IRenderable } from './IRenderable';
+
+import {
+    MapTile,
+    MapTileSpecification,
+} from './MapTile';
+
+export interface MapSpecification {
+    /* To create a map, either specify the width and height */
+    width?: number;
+    height?: number;
+
+    /* Or provide an array defining the map shape and features. */
+    map?: MapTileSpecification[][];
+}
 
 export class Map implements IRenderable {
     private map: MapTile[][];
@@ -24,31 +37,60 @@ export class Map implements IRenderable {
     /* The width of tiles in pixels */
     private tileWidth: number;
 
-    constructor(
-        width: number,
-        height: number,
-    ) {
-        if (width < 1 || Math.floor(width) !== width) {
-            throw new Error('Invalid width');
-        }
+    constructor(specification: MapSpecification) {
+        let {
+            width,
+            height,
+            map,
+        } = specification;
 
-        if (height < 1 || Math.floor(height) !== height) {
-            throw new Error('Invalid height');
-        }
+        const newMap: MapTile[][] = [];
 
-        const map: MapTile[][] = [];
+        if (map) {
+            if (map.length < 1) {
+                throw new Error('Invalid map');
+            }
 
-        for (let i = 0; i < width; i++) {
-            map[i] = [];
+            width = map.length;
 
-            for (let j = 0; j < height; j++) {
-                map[i][j] = new MapTile(false);
+            for (let i = 0; i < map.length; i++) {
+                if (!map[i]) {
+                    throw new Error('Invalid map');
+                }
+
+                if (height && height !== map[i].length) {
+                    throw new Error('Map must be a rectangle');
+                } else {
+                    height = map[i].length;
+                }
+
+                newMap[i] = [];
+
+                for (let j = 0; j < map[i].length; j++) {
+                    newMap[i][j] = new MapTile(map[i][j]);
+                }
+            }
+        } else {
+            if (!width || width < 1 || Math.floor(width) !== width) {
+                throw new Error('Invalid width');
+            }
+
+            if (!height || height < 1 || Math.floor(height) !== height) {
+                throw new Error('Invalid height');
+            }
+
+            for (let i = 0; i < width; i++) {
+                newMap[i] = [];
+
+                for (let j = 0; j < height; j++) {
+                    newMap[i][j] = new MapTile({});
+                }
             }
         }
 
-        this.map = map;
+        this.map = newMap;
         this.width = width;
-        this.height = height;
+        this.height = height as number;
 
         const tileDimensions = this.map[0][0].dimensionsOnCanvas();
         
@@ -59,20 +101,26 @@ export class Map implements IRenderable {
         this.mapHeight = this.tileHeight * this.height;
     }
 
-    public render(
+    public async render(
         canvas: fabric.StaticCanvas,
         widthOffset: number,
         heightOffset: number) {
 
+        const promises = [];
+
         for (let i = 0; i < this.width; i++) {
             for (let j = 0; j < this.height; j++) {
-                this.map[i][j].render(
+                const p = this.map[i][j].render(
                     canvas,
                     widthOffset + (i * this.tileWidth),
                     heightOffset + (j * this.tileHeight),
                 );
+
+                promises.push(p);
             }
         }
+
+        await Promise.all(promises);
     }
 
     public dimensionsOnCanvas() {
