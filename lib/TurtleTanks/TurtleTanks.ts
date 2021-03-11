@@ -12,58 +12,46 @@ import { loadImage } from './Utilities';
 import { pickRandomItem } from '../Utilities';
 import { Game } from './Game';
 
-interface CanvasFile {
-    filepath: string;
-    coords: {
-        left?: number;
-        top?: number;
-    }
-}
-
-const BODY_TEMPLATE_WIDTH = 1174;
-const BODY_TEMPLATE_HEIGHT = 827;
-
-const bodies: CanvasFile[] = [
-    {
-        filepath: 'bodies/body1.png',
-        coords: {
-            left: 0,
-            top: 0,
-        },
-    }
+const bodies = [
+    'bodies/body1.png',
 ];
 
-const faces: CanvasFile[] = [
-    {
-        filepath: 'faces/happy1.png',
-        coords: {
-            left: 75,
-            top: 300,
-        },
-    }
+const faces = [
+    'faces/t_boomer.png',
+    'faces/t_cry.png',
+    'faces/t_derp.png',
+    'faces/t_gun.png',
+    'faces/t_intrigue.png',
+    'faces/t_kissy.png',
+    'faces/t_lmao.png',
+    'faces/t_mad.png',
+    'faces/t_mono.png',
+    'faces/t_nervous.png',
+    'faces/t_ooh.png',
+    'faces/t_sad.png',
+    'faces/t_salute.png',
+    'faces/t_scared.png',
+    'faces/t_shrug.png',
+    'faces/t_smile.png',
+    'faces/t_sweat.png',
+    'faces/t_think.png',
+    'faces/t_xD.png',
+    'faces/t_yawn.png',
 ];
-
-async function loadCanvasFile(canvasFile: CanvasFile): Promise<fabric.Image> {
-    const image = await loadImage(canvasFile.filepath);
-
-    image.set(canvasFile.coords);
-
-    return image;
-}
 
 async function randomTurtle(canvas: fabric.StaticCanvas) {
-    const body = await loadCanvasFile(pickRandomItem(bodies));
-    const face = await loadCanvasFile(pickRandomItem(faces));
+    const body = await loadImage(pickRandomItem(bodies));
+    const face = await loadImage(pickRandomItem(faces));
+
+    canvas.setWidth(body.width!);
+    canvas.setHeight(body.height!);
 
     canvas.add(body);
     canvas.add(face);
 }
 
 export async function handleTurtle(msg: Message) {
-    const canvas = new fabric.StaticCanvas(null, {
-        width: BODY_TEMPLATE_WIDTH,
-        height: BODY_TEMPLATE_HEIGHT,
-    });
+    const canvas = new fabric.StaticCanvas(null, {});
 
     await randomTurtle(canvas);
 
