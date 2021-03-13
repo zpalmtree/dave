@@ -47,6 +47,7 @@ import {
     canAccessCommand,
     getUsername,
     shuffleArray,
+    formatLargeNumber,
 } from './Utilities';
 
 import {
@@ -439,48 +440,61 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
     }
 }
 
-async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
+function formatChinkedData(data: any, location?: string): MessageEmbed {
+    /* Alias for conciseness */
+    const f = formatLargeNumber;
+
+    const title = location
+        ? `Coronavirus statistics, ${location}`
+        : 'Coronavirus statistics';
+
+    const embed = new MessageEmbed()
+        .setColor('#C8102E')
+        .setTitle(title)
+        .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+        .addFields(
+            {
+                name: 'Cases',
+                value: `${f(data.cases)} (+${f(data.todayCases)})`,
+                inline: true,
+            },
+            {
+                name: 'Deaths',
+                value: `${f(data.deaths)} (+${f(data.todayDeaths)})`,
+                inline: true,
+            },
+            {
+                name: 'Active',
+                value: f(data.active),
+                inline: true,
+            },
+            {
+                name: 'Recovered',
+                value: f(data.recovered),
+                inline: true,
+            },
+            {
+                name: 'Percentage Infected',
+                value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(2) + '%',
+                inline: true,
+            },
+            {
+                name: 'Last Updated',
+                value: moment(data.updated).fromNow(),
+                inline: true,
+            },
+        );
+
+    return embed;
+}
+
+async function getChinkedWorldData(msg: Message): Promise<void> {
     try {
-        const response = await fetch(host + '/v2/all');
+        const response = await fetch('https://disease.sh/v3/covid-19/all');
 
         const data = await response.json();
 
-        const embed = new MessageEmbed()
-            .setColor('#C8102E')
-            .setTitle('Coronavirus statistics')
-            .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-            .addFields(
-                {
-                    name: 'Cases',
-                    value: `${data.cases} (+${data.todayCases})`,
-                    inline: true,
-                },
-                {
-                    name: 'Deaths',
-                    value: `${data.deaths} (+${data.todayDeaths})`,
-                    inline: true,
-                },
-                {
-                    name: 'Active',
-                    value: data.active,
-                    inline: true,
-                },
-                {
-                    name: 'Recovered',
-                    value: data.recovered,
-                    inline: true,
-                },
-                {
-                    name: 'Percentage Infected',
-                    value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(5) + '%',
-                    inline: true,
-                },
-                {
-                    name: 'Last Updated',
-                    value: moment(data.updated).fromNow(),
-                    inline: true,
-                },
-            );
+        const embed = formatChinkedData(data);
 
         msg.channel.send(embed);
     } catch (err) {
@@ -488,117 +502,52 @@ async function getChinkedWorldData(msg: Message, host: string): Promise<void> {
     }
 }
 
-async function getChinkedCountryData(msg: Message, country: string, host: string): Promise<void> {
+async function getChinkedCountryData(msg: Message, country: string): Promise<void> {
     try {
-        const response = await fetch(`${host}/v2/countries/${country}`);
+        const response = await fetch(`https://disease.sh/v3/covid-19/countries/${country}`);
 
         const countryData = await response.json();
 
         if (countryData.message) {
-            msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
+            msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
             return;
         }
 
-        const embed = new MessageEmbed()
-            .setColor('#C8102E')
-            .setTitle('Coronavirus statistics, ' + countryData.country)
-            .setThumbnail(countryData.countryInfo.flag)
-            .addFields(
-                {
-                    name: 'Cases',
-                    value: `${countryData.cases} (+${countryData.todayCases})`,
-                    inline: true,
-                },
-                {
-                    name: 'Deaths',
-                    value: `${countryData.deaths} (+${countryData.todayDeaths})`,
-                    inline: true,
-                },
-                {
-                    name: 'Active',
-                    value: countryData.active,
-                    inline: true,
-                },
-                {
-                    name: 'Recovered',
-                    value: countryData.recovered,
-                    inline: true,
-                },
-                {
-                    name: 'Percentage Infected',
-                    value: (100 * (countryData.casesPerOneMillion / 1_000_000)).toFixed(5) + '%',
-                    inline: true,
-                },
-                {
-                    name: 'Last Updated',
-                    value: moment(countryData.updated).fromNow(),
-                    inline: true,
-                }
-            );
+        const embed = formatChinkedData(countryData, countryData.country);
 
-        if (countryData.country === 'UK') {
-            embed.setFooter('Results from the UK should not be considered accurate. See https://www.cebm.net/covid-19/why-no-one-can-ever-recover-from-covid-19-in-england-a-statistical-anomaly/');
-        }
+        embed.setThumbnail(countryData.countryInfo.flag);
 
         msg.channel.send(embed);
-
     } catch (err) {
         if (err.statusCode === 404) {
-            msg.reply(`Unknown country "${country}", run \`$chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
+            msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
         } else {
             msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
         }
     }
 }
 
-async function getChinkedStateData(msg: Message, state: string, host: string): Promise<void> {
+async function getChinkedStateData(msg: Message, state: string): Promise<void> {
     try {
-        const response = await fetch(`${host}/v2/states`);
+        const response = await fetch(`https://disease.sh/v3/covid-19/states/${state}`);
 
         const data = await response.json();
 
-        for (const stateData of data) {
-            if (stateData.state.toLowerCase() === state) {
-                const embed = new MessageEmbed()
-                    .setColor('#C8102E')
-                    .setTitle(`Coronavirus statistics, ${stateData.state}`)
-                    .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-                    .addFields(
-                        {
-                            name: 'Cases',
-                            value: `${stateData.cases} (+${stateData.todayCases})`,
-                            inline: false,
-                        },
-                        {
-                            name: 'Deaths',
-                            value: `${stateData.deaths} (+${stateData.todayDeaths})`,
-                            inline: false,
-                        },
-                        {
-                            name: 'Active',
-                            value: stateData.active,
-                            inline: false,
-                        },
-                        {
-                            name: 'Recovered',
-                            value: stateData.cases - stateData.active - stateData.deaths,
-                            inline: false,
-                        },
-                    );
+        const embed = formatChinkedData(data, data.state);
 
-                msg.channel.send(embed);
-
-                return;
-            }
-        }
+        msg.channel.send(embed);
     } catch (err) {
-        msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+        if (err.statusCode === 404) {
+            msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
+        } else {
+            msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+        }
     }
 }
 
-async function getChinkedCountries(msg: Message, host: string): Promise<void> {
+async function getChinkedCountries(msg: Message): Promise<void> {
     try {
-        const response = await fetch(host + '/v2/countries');
+        const response = await fetch('https://disease.sh/v3/covid-19/countries');
 
         const data = await response.json();
 
@@ -633,16 +582,13 @@ async function getChinkedStates(msg: Message): Promise<void> {
 export async function handleChinked(msg: Message, country: string): Promise<void> {
     country = country.trim().toLowerCase();
 
-    const runningLocally = false;
-    const host = runningLocally ? 'http://127.0.0.1:7531' : 'https://corona.lmao.ninja';
-
     switch(country) {
         case '': {
-            getChinkedWorldData(msg, host);
+            getChinkedWorldData(msg);
             break;
         }
         case 'countries': {
-            getChinkedCountries(msg, host);
+            getChinkedCountries(msg);
             break;
         }
         case 'states': {
@@ -651,9 +597,9 @@ export async function handleChinked(msg: Message, country: string): Promise<void
         }
         default: {
             if (states.map((x) => x.toLowerCase()).includes(country)) {
-                getChinkedStateData(msg, country, host);
+                getChinkedStateData(msg, country);
             } else {
-                getChinkedCountryData(msg, country, host);
+                getChinkedCountryData(msg, country);
             }
 
             break;
