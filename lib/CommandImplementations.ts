@@ -7,7 +7,6 @@ import translate = require('@vitalets/google-translate-api');
 import fetch from 'node-fetch';
 
 import { stringify, unescape } from 'querystring';
-import { promisify } from 'util';
 import { evaluate } from 'mathjs';
 import { decode } from 'he';
 import { Database } from 'sqlite3';
@@ -48,6 +47,7 @@ import {
     getUsername,
     shuffleArray,
     formatLargeNumber,
+    roundToNPlaces,
 } from './Utilities';
 
 import {
@@ -436,7 +436,7 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
 
         msg.channel.send(attachment);
     } catch (err) {
-        msg.reply(`Failed to get doggo pic :( [ ${err.toString()} ]`);
+        msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
@@ -488,25 +488,93 @@ function formatChinkedData(data: any, location?: string): MessageEmbed {
     return embed;
 }
 
+function formatVaccineData(data: any, population: number, embed: MessageEmbed) {
+    /* No vaccine data */
+    if (!data || data.message) {
+        embed.addFields(
+            {
+                name: 'Vaccinations',
+                value: '0',
+                inline: true,
+            },
+            {
+                name: 'Doses/100 people',
+                value: '0',
+                inline: true,
+            },
+            {
+                name: 'Approx Vaccinated',
+                value: '0%',
+                inline: true,
+            },
+        );
+
+        return;
+    }
+    
+    const [yesterday, today] = Object.values(data);
+
+    const change = today - yesterday;
+
+    const dosesPer100 = (100 * (today / population));
+
+    const percentageVaccinated = `${roundToNPlaces(dosesPer100 / 2, 2)}% - ${roundToNPlaces(Math.min(dosesPer100 * 0.95, 100), 2)}%`;
+
+    /* Alias for conciseness */
+    const f = formatLargeNumber;
+
+    embed.addFields(
+        {
+            name: 'Vaccinations',
+            value: `${f(today)} (+${f(change)})`,
+            inline: true,
+        },
+        {
+            name: 'Doses/100 people',
+            value: dosesPer100.toFixed(2),
+            inline: true,
+        },
+        {
+            name: 'Approx Vaccinated',
+            value: percentageVaccinated,
+            inline: true,
+        },
+    );
+}
+
 async function getChinkedWorldData(msg: Message): Promise<void> {
     try {
-        const response = await fetch('https://disease.sh/v3/covid-19/all');
+        /* Launch the two requests in parallel */
+        const worldPromise = fetch('https://disease.sh/v3/covid-19/all');
+        const vaccinePromise = fetch(`https://disease.sh/v3/covid-19/vaccine/coverage?lastdays=2`);
 
-        const data = await response.json();
+        /* Wait for the request to complete as we need this data to proceed. */
+        const worldResponse = await worldPromise;
+        const worldData = await worldResponse.json();
 
-        const embed = formatChinkedData(data);
+        const embed = formatChinkedData(worldData);
+
+        const vaccineResponse = await vaccinePromise;
+        const vaccineData = await vaccineResponse.json();
+
+        formatVaccineData(vaccineData, worldData.population, embed);
 
         msg.channel.send(embed);
+
     } catch (err) {
-        msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+        msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
 async function getChinkedCountryData(msg: Message, country: string): Promise<void> {
     try {
-        const response = await fetch(`https://disease.sh/v3/covid-19/countries/${country}`);
+        /* Launch the two requests in parallel */
+        const countryPromise = fetch(`https://disease.sh/v3/covid-19/countries/${country}`);
+        const vaccinePromise = fetch(`https://disease.sh/v3/covid-19/vaccine/coverage/countries/${country}?lastdays=2`);
 
-        const countryData = await response.json();
+        /* Wait for the country request to complete as we need this data to proceed. */
+        const countryResponse = await countryPromise;
+        const countryData = await countryResponse.json();
 
         if (countryData.message) {
             msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
@@ -514,16 +582,16 @@ async function getChinkedCountryData(msg: Message, country: string): Promise<voi
         }
 
         const embed = formatChinkedData(countryData, countryData.country);
-
         embed.setThumbnail(countryData.countryInfo.flag);
+
+        const vaccineResponse = await vaccinePromise;
+        const vaccineData = await vaccineResponse.json();
+
+        formatVaccineData(vaccineData.timeline, countryData.population, embed);
 
         msg.channel.send(embed);
     } catch (err) {
-        if (err.statusCode === 404) {
-            msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`$chinked states\` to list all states.`);
-        } else {
-            msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
-        }
+        msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
@@ -540,7 +608,7 @@ async function getChinkedStateData(msg: Message, state: string): Promise<void> {
         if (err.statusCode === 404) {
             msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
         } else {
-            msg.reply(`Failed to get stats :( [ ${err.toString()} ]`);
+            msg.reply(`Failed to get data: ${err.toString()}`);
         }
     }
 }
@@ -563,7 +631,7 @@ async function getChinkedCountries(msg: Message): Promise<void> {
             msg.reply(countries);
         }
     } catch (err) {
-        msg.reply(`Failed to get countries :( [ ${err.toString()} ]`);
+        msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
