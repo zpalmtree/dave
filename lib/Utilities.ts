@@ -132,3 +132,66 @@ export function getLanguageNames() {
     /* First language is 'Automatic' */
     return languages.slice(1);
 }
+
+export function roundToNPlaces(num: number, places: number) {
+    const x = Math.pow(10, places);
+
+    return Math.round((num + Number.EPSILON) * x) / x;
+}
+
+export function formatLargeNumber(num: number): string {
+    const million = 1_000_000;
+    const billion = 1000 * million;
+    const trillion = 1000 * billion;
+    const quadrillion = 1000 * trillion;
+    const quintillion = 1000 * quadrillion;
+    const sextillion = 1000 * quintillion;
+    const septillion = 1000 * sextillion;
+    const octillion = 1000 * septillion;
+    const nonillion = 1000 * octillion;
+    const decillion = 1000 * nonillion;
+
+    if (num < million) {
+        return num.toString();
+    }
+
+    if (num < billion) {
+        return `${roundToNPlaces(num / million, 2)} million`;
+    }
+
+    if (num < trillion) {
+        return `${roundToNPlaces(num / billion, 2)} billion`;
+    }
+
+    if (num < quadrillion) {
+        return `${roundToNPlaces(num / trillion, 2)} trillion`;
+    }
+
+    if (num < quintillion) {
+        return `${roundToNPlaces(num / quadrillion, 2)} quadrillion`;
+    }
+
+    if (num < sextillion) {
+        return `${roundToNPlaces(num / quintillion, 2)} quintillion`;
+    }
+
+    if (num < septillion) {
+        return `${roundToNPlaces(num / sextillion, 2)} sextillion`;
+    }
+
+    if (num < octillion) {
+        return `${roundToNPlaces(num / septillion, 2)} septillion`;
+    }
+
+    if (num < nonillion) {
+        return `${roundToNPlaces(num / octillion, 2)} octillion`;
+    }
+
+    if (num < decillion) {
+        return `${roundToNPlaces(num / decillion, 2)} decillion`;
+    }
+
+    /* Whatever, who the fuck even knows the names of numbers this big. */
+    return num.toString();
+
+}
