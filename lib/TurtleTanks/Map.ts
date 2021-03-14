@@ -224,7 +224,7 @@ export class MapManager implements IRenderable {
         this.mapCoordinates = [];
 
         for (let i = 0; i < this.height; i++) {
-            const label = new fabric.Text(i.toString(), {
+            const label = new fabric.Text((i + 1).toString(), {
                 top: COORDINATES_HEIGHT + (i * this.tileHeight) + (this.tileHeight * 0.15),
                 strokeWidth: COORDINATES_OUTLINE_WIDTH,
                 stroke: COORDINATES_OUTLINE,
