@@ -13,35 +13,36 @@ import { pickRandomItem } from '../Utilities';
 import { Game } from './Game';
 
 const bodies = [
-    'bodies/body1.png',
+    'body1.png',
 ];
 
 const faces = [
-    'faces/t_boomer.png',
-    'faces/t_cry.png',
-    'faces/t_derp.png',
-    'faces/t_gun.png',
-    'faces/t_intrigue.png',
-    'faces/t_kissy.png',
-    'faces/t_lmao.png',
-    'faces/t_mad.png',
-    'faces/t_mono.png',
-    'faces/t_nervous.png',
-    'faces/t_ooh.png',
-    'faces/t_sad.png',
-    'faces/t_salute.png',
-    'faces/t_scared.png',
-    'faces/t_shrug.png',
-    'faces/t_smile.png',
-    'faces/t_sweat.png',
-    'faces/t_think.png',
-    'faces/t_xD.png',
-    'faces/t_yawn.png',
+    't_boomer.png',
+    't_cry.png',
+    't_derp.png',
+    't_gun.png',
+    't_intrigue.png',
+    't_jooooe_biden.png',
+    't_kissy.png',
+    't_lmao.png',
+    't_mad.png',
+    't_mono.png',
+    't_nervous.png',
+    't_ooh.png',
+    't_sad.png',
+    't_salute.png',
+    't_scared.png',
+    't_shrug.png',
+    't_smile.png',
+    't_sweat.png',
+    't_think.png',
+    't_xD.png',
+    't_yawn.png',
 ];
 
 async function randomTurtle(canvas: fabric.StaticCanvas) {
-    const body = await loadImage(pickRandomItem(bodies));
-    const face = await loadImage(pickRandomItem(faces));
+    const body = await loadImage('bodies/10%/' + pickRandomItem(bodies));
+    const face = await loadImage('faces/10%/' + pickRandomItem(faces));
 
     canvas.setWidth(body.width!);
     canvas.setHeight(body.height!);

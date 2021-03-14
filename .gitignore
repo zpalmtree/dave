@@ -5,3 +5,8 @@ node_modules
 yarn-error.log
 dist/
 *.sqlite3
+50%
+25%
+5%
+2%
+resize.sh
