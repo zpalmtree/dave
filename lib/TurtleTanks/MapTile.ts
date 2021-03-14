@@ -3,7 +3,15 @@ import { fabric } from 'fabric';
 import { IRenderable } from './IRenderable';
 import { loadImage } from './Utilities';
 
-export const PIXELS_PER_TILE = 64;
+import {
+    Coordinate,
+} from './Types';
+
+import {
+    PIXELS_PER_TILE,
+    DEFAULT_TILE_COLOR,
+    DEFAULT_TILE_OPACITY,
+} from './Constants';
 
 export interface MapTileSpecification {
     /* Is this tile utilized? Tiles are stored in a 2d array, but maps do not
@@ -19,12 +27,6 @@ export interface MapTileSpecification {
 
     /* Opacity. Should be between 0 and 1. */
     opacity?: number;
-
-    /* What color is the outline of this tile? */
-    outlineColor?: string;
-
-    /* Width of outline. Default of 0 */
-    strokeWidth?: number;
 }
 
 export class MapTile implements IRenderable {
@@ -36,10 +38,6 @@ export class MapTile implements IRenderable {
 
     private opacity: number;
 
-    private outlineColor: string;
-
-    private strokeWidth: number;
-
     private width: number;
 
     private height: number;
@@ -48,33 +46,26 @@ export class MapTile implements IRenderable {
 
     public sparse: boolean;
 
-    public x: number;
-
-    public y: number;
+    public coords: Coordinate;
 
     constructor(
         tileSpecification: MapTileSpecification,
-        coords: { x: number, y: number },
+        coords: Coordinate,
     ) {
         const {
             sparse = false,
-            color = 'rgba(0, 0, 0, 0)',
+            color = DEFAULT_TILE_COLOR,
             image,
-            opacity = 1,
-            outlineColor = 'black',
-            strokeWidth = 0,
+            opacity = DEFAULT_TILE_OPACITY,
         } = tileSpecification;
 
         this.sparse = sparse;
         this.color = color;
         this.image = image;
         this.opacity = opacity;
-        this.outlineColor = outlineColor;
-        this.strokeWidth = strokeWidth;
         this.width = PIXELS_PER_TILE;
         this.height = PIXELS_PER_TILE;
-        this.x = coords.x;
-        this.y = coords.y;
+        this.coords = coords;
     }
 
     public async render(
@@ -109,8 +100,7 @@ export class MapTile implements IRenderable {
                     fill: this.color,
                     left: widthOffset,
                     top: heightOffset,
-                    stroke: this.outlineColor,
-                    strokeWidth: this.strokeWidth,
+                    strokeWidth: 0,
                 });
             }
 

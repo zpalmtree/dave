@@ -9,8 +9,16 @@ import {
     MapTileSpecification,
 } from './MapTile';
 
-export const COORDINATES_HEIGHT = 50;
-export const COORDINATES_WIDTH = 40;
+import {
+    COORDINATES_HEIGHT,
+    COORDINATES_WIDTH,
+    COORDINATES_FILL,
+    COORDINATES_OUTLINE,
+    COORDINATES_OUTLINE_WIDTH,
+    COORDINATES_FONT,
+    GRIDLINES_COLOR,
+    DEFAULT_TILE_COLOR,
+} from './Constants';
 
 export interface MapSpecification {
     /* Width of map in tiles */
@@ -122,7 +130,7 @@ export class MapManager implements IRenderable {
                 for (let j = 0; j < height; j++) {
                     newMap[i][j] = new MapTile(
                         {
-                            color: '#e6e6e6',
+                            color: DEFAULT_TILE_COLOR,
                             ...tileSpecification,
                         },
                         { x: i, y: j },
@@ -182,7 +190,7 @@ export class MapManager implements IRenderable {
                     this.mapHeight + COORDINATES_HEIGHT
                 ],
                 {
-                    stroke: '#F0F0F0',
+                    stroke: GRIDLINES_COLOR,
                 }
             );
 
@@ -199,7 +207,7 @@ export class MapManager implements IRenderable {
                     i + COORDINATES_HEIGHT
                 ],
                 {
-                    stroke: '#F0F0F0',
+                    stroke: GRIDLINES_COLOR,
                 }
             );
 
@@ -218,10 +226,10 @@ export class MapManager implements IRenderable {
         for (let i = 0; i < this.height; i++) {
             const label = new fabric.Text(i.toString(), {
                 top: COORDINATES_HEIGHT + (i * this.tileHeight) + (this.tileHeight * 0.15),
-                strokeWidth: 1,
-                stroke: '#ffffff',
-                fontFamily: 'NotoSans',
-                fill: '#e6e6e6',
+                strokeWidth: COORDINATES_OUTLINE_WIDTH,
+                stroke: COORDINATES_OUTLINE,
+                fontFamily: COORDINATES_FONT,
+                fill: COORDINATES_FILL,
             });
 
             this.mapCoordinates.push(label);
@@ -234,10 +242,10 @@ export class MapManager implements IRenderable {
 
             const label = new fabric.Text(chr, {
                 left: COORDINATES_WIDTH + (i * this.tileHeight) + (this.tileHeight * 0.27),
-                strokeWidth: 1,
-                stroke: '#ffffff',
-                fontFamily: 'NotoSans',
-                fill: '#e6e6e6',
+                strokeWidth: COORDINATES_OUTLINE_WIDTH,
+                stroke: COORDINATES_OUTLINE,
+                fontFamily: COORDINATES_FONT,
+                fill: COORDINATES_FILL,
             });
 
             this.mapCoordinates.push(label);

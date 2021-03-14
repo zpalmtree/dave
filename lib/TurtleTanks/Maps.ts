@@ -5,6 +5,7 @@ export const map1: MapSpecification = {
     height: 10,
     backgroundImage: 'maps/map1.png',
     tileSpecification: {
+        color: 'rgba(0, 0, 0, 0)',
     },
     map: [
         [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}],

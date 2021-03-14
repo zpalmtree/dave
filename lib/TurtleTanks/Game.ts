@@ -7,16 +7,25 @@ import {
 import { fabric } from 'fabric';
 import { Database } from 'sqlite3';
 
-import { map1 } from './CustomMaps';
 import { MapTile } from './MapTile';
 import { Player } from './Player';
 
 import {
     MapManager,
     MapSpecification,
+} from './Map';
+
+import {
+    Coordinate,
+    Direction,
+} from './Types';
+
+import {
+    DEFAULT_MAP_HEIGHT,
+    DEFAULT_MAP_WIDTH,
     COORDINATES_HEIGHT,
     COORDINATES_WIDTH,
-} from './Map';
+} from './Constants';
 
 export class Game {
     private canvas: fabric.StaticCanvas;
@@ -40,8 +49,8 @@ export class Game {
             this.map = new MapManager(map);
         } else {
             this.map = new MapManager({
-                height: 10,
-                width: 10,
+                height: DEFAULT_MAP_HEIGHT,
+                width: DEFAULT_MAP_WIDTH,
             });
         }
 
@@ -81,8 +90,8 @@ export class Game {
             promises.push(
                 player.render(
                     this.canvas,
-                    (player.x * tileWidth) + COORDINATES_WIDTH,
-                    (player.y * tileHeight) + COORDINATES_HEIGHT,
+                    (player.coords.x * tileWidth) + COORDINATES_WIDTH,
+                    (player.coords.y * tileHeight) + COORDINATES_HEIGHT,
                     highlight,
                 ),
             );
@@ -118,12 +127,18 @@ export class Game {
             return 'Game is full, sorry.';
         }
 
-        this.players.set(userId, new Player(userId, square.x, square.y));
+        this.players.set(userId, new Player(userId, square.coords));
 
         return;
     }
 
     public hasPlayer(userId: string) {
         return this.players.has(userId);
+    }
+
+    public moveToCoord(userId: string, coord: Coordinate) {
+    }
+
+    public moveInDirection(userId: string, direction: Direction) {
     }
 }

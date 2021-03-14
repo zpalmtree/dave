@@ -3,13 +3,22 @@ import { fabric } from 'fabric';
 import { loadImage } from './Utilities';
 import { pickRandomItem } from '../Utilities';
 import { faces, bodies } from './Avatar';
-import { PIXELS_PER_TILE } from './MapTile';
+
+import {
+    Coordinate,
+} from './Types';
+
+import {
+    PIXELS_PER_TILE,
+    AVATAR_SIZES,
+    HIGHLIGHT_COLOR,
+    HIGHLIGHT_OUTLINE_WIDTH,
+} from './Constants';
 
 export class Player {
     public userId: string;
 
-    public x: number;
-    public y: number;
+    public coords: Coordinate;
 
     private body: fabric.Image | undefined;
     private face: fabric.Image | undefined;
@@ -17,12 +26,10 @@ export class Player {
 
     constructor(
         userId: string,
-        x: number = 0,
-        y: number = 0) {
+        coords: Coordinate) {
 
         this.userId = userId;
-        this.x = x;
-        this.y = y;
+        this.coords = coords;
     }
 
     private async init(canvas: fabric.StaticCanvas) {
@@ -30,15 +37,15 @@ export class Player {
             return;
         }
 
-        const bodyPromise = loadImage('bodies/2%/' + pickRandomItem(bodies));
-        const facePromise = loadImage('faces/2%/' + pickRandomItem(faces));
+        const bodyPromise = loadImage(`bodies/${AVATAR_SIZES}/${pickRandomItem(bodies)}`);
+        const facePromise = loadImage(`faces/${AVATAR_SIZES}/${pickRandomItem(faces)}`);
 
         this.body = await bodyPromise;
         this.face = await facePromise;
         this.highlight = new fabric.Circle({
             radius: (PIXELS_PER_TILE / 2) * 0.8,
-            stroke: '#ff0000',
-            strokeWidth: 5,
+            stroke: HIGHLIGHT_COLOR,
+            strokeWidth: HIGHLIGHT_OUTLINE_WIDTH,
             fill: 'rgba(0,0,0,0)',
         });
 
