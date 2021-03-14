@@ -27,8 +27,6 @@ export interface MapTileSpecification {
 export class MapTile implements IRenderable {
     private tile: fabric.Rect | fabric.Image | null = null;
 
-    private sparse: boolean;
-
     private color?: string;
 
     private image?: string;
@@ -41,8 +39,18 @@ export class MapTile implements IRenderable {
 
     private height: number;
 
+    public occupied: undefined | string;
+
+    public sparse: boolean;
+
+    public x: number;
+
+    public y: number;
+
     constructor(
         tileSpecification: MapTileSpecification,
+        x: number,
+        y: number,
     ) {
         const {
             sparse = false,
@@ -59,6 +67,8 @@ export class MapTile implements IRenderable {
         this.outlineColor = outlineColor;
         this.width = PIXELS_PER_TILE;
         this.height = PIXELS_PER_TILE;
+        this.x = x;
+        this.y = y;
     }
 
     public async render(

@@ -4,13 +4,16 @@ import { loadImage } from './Utilities';
 import { pickRandomItem } from '../Utilities';
 import { faces, bodies } from './Avatar';
 import { PIXELS_PER_TILE } from './MapTile';
-import { IRenderable } from './IRenderable';
 
-export class Player implements IRenderable {
+export class Player {
     public userId: string;
 
     public x: number;
     public y: number;
+
+    private body: fabric.Image | undefined;
+    private face: fabric.Image | undefined;
+    private highlight: fabric.Circle | undefined;
 
     constructor(
         userId: string,
@@ -22,28 +25,54 @@ export class Player implements IRenderable {
         this.y = y;
     }
 
-    public async render(
-        canvas: fabric.StaticCanvas,
-        widthOffset: number,
-        heightOffset: number) {
+    private async init(canvas: fabric.StaticCanvas) {
+        if (this.body && this.face && this.highlight) {
+            return;
+        }
 
         const bodyPromise = loadImage('bodies/1.5%/' + pickRandomItem(bodies));
         const facePromise = loadImage('faces/1.5%/' + pickRandomItem(faces));
 
-        const [body, face] = await Promise.all([bodyPromise, facePromise]);
+        this.body = await bodyPromise;
+        this.face = await facePromise;
+        this.highlight = new fabric.Circle({
+            radius: (PIXELS_PER_TILE / 2) * 0.8,
+            stroke: '#ff0000',
+            strokeWidth: 5,
+            fill: 'rgba(0,0,0,0)',
+        });
 
-        body.set({
+        canvas.add(this.highlight);
+        canvas.add(this.body);
+        canvas.add(this.face);
+    }
+
+    public async render(
+        canvas: fabric.StaticCanvas,
+        widthOffset: number,
+        heightOffset: number,
+        highlightPlayer: boolean) {
+
+        await this.init(canvas);
+
+        this.body!.set({
             left: widthOffset,
             top: heightOffset + (PIXELS_PER_TILE * 0.2),
         });
 
-        face.set({
+        this.face!.set({
             left: widthOffset,
             top: heightOffset + (PIXELS_PER_TILE * 0.2),
         });
 
-        canvas.add(body);
-        canvas.add(face);
+        if (highlightPlayer) {
+            this.highlight!.set({
+                left: widthOffset + (PIXELS_PER_TILE * 0.06),
+                top: heightOffset + (PIXELS_PER_TILE * 0.06),
+            });
+        }
+
+        this.highlight!.visible = highlightPlayer;
     }
 
     public dimensionsOnCanvas() {

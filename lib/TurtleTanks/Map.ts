@@ -1,6 +1,7 @@
 import { fabric } from 'fabric';
 
 import { IRenderable } from './IRenderable';
+import { pickRandomItem } from '../Utilities';
 
 import {
     MapTile,
@@ -16,7 +17,7 @@ export interface MapSpecification {
     map?: MapTileSpecification[][];
 }
 
-export class Map implements IRenderable {
+export class MapManager implements IRenderable {
     private map: MapTile[][];
 
     /* The width of the map in tiles */
@@ -70,11 +71,9 @@ export class Map implements IRenderable {
                     const tile = newMap[i][j];
                     
                     if (tile === undefined) {
-                        newMap[i][j] = new MapTile({
-                            sparse: true,
-                        });
+                        newMap[i][j] = new MapTile({ sparse: true }, i, j);
                     } else {
-                        newMap[i][j] = new MapTile(map[i][j]);
+                        newMap[i][j] = new MapTile(map[i][j], i, j);
                     }
                 }
             }
@@ -91,9 +90,7 @@ export class Map implements IRenderable {
                 newMap[i] = [];
 
                 for (let j = 0; j < height; j++) {
-                    newMap[i][j] = new MapTile({
-                        color: '#e6e6e6'
-                    });
+                    newMap[i][j] = new MapTile({ color: '#e6e6e6', }, i, j);
                 }
             }
         }
@@ -141,4 +138,30 @@ export class Map implements IRenderable {
             tileHeight: this.tileHeight,
         };
     }
-}
+
+    public getUnoccupiedSquare(): MapTile | undefined {
+        const squares = this.getUnoccupiedSquares();
+
+        if (squares.length === 0) {
+            return undefined;
+        }
+
+        return pickRandomItem(squares);
+    }
+
+    public getUnoccupiedSquares(): Array<MapTile> {
+        const unoccupiedSquares: MapTile[] = [];
+
+        for (let i = 0; i < this.width; i++) {
+            for (let j = 0; j < this.height; j++) {
+                const tile = this.map[i][j];
+
+                if (!tile.sparse && !tile.occupied) {
+                    unoccupiedSquares.push(tile);
+                }
+            }
+        }
+
+        return unoccupiedSquares;
+    }
+} 

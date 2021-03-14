@@ -23,12 +23,25 @@ export async function handleTurtle(msg: Message) {
     msg.reply(attachment);
 }
 
+let game: undefined | Game;
+
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
-    const game = new Game();
+    if (!game) {
+        game = new Game();
+        msg.channel.send('Created new game!');
+    }
 
-    game.addTestPlayers();
+    if (!game.hasPlayer(msg.author.id)) {
+        const err = game.join(msg.author.id);
 
-    const gameImage = await game.render();
+        if (err) {
+            msg.reply(err);
+        } else {
+            msg.reply('You have successfully joined the game!');
+        }
+    }
+
+    const gameImage = await game.render(msg.author.id);
 
     const attachment = game.getGameImageAttachment();
 
