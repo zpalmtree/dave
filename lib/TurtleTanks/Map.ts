@@ -220,7 +220,7 @@ export class MapManager implements IRenderable {
                 top: COORDINATES_HEIGHT + (i * this.tileHeight) + (this.tileHeight * 0.15),
                 strokeWidth: 1,
                 stroke: '#ffffff',
-                fontFamily: 'Delicious',
+                fontFamily: 'NotoSans',
                 fill: '#e6e6e6',
             });
 
@@ -236,7 +236,7 @@ export class MapManager implements IRenderable {
                 left: COORDINATES_WIDTH + (i * this.tileHeight) + (this.tileHeight * 0.27),
                 strokeWidth: 1,
                 stroke: '#ffffff',
-                fontFamily: 'Delicious',
+                fontFamily: 'NotoSans',
                 fill: '#e6e6e6',
             });
 
