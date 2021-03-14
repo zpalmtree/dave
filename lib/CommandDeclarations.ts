@@ -864,7 +864,7 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['tanks', 'tank'],
+        aliases: ['tanks', 'tank', 'game'],
         primaryCommand: {
             argsFormat: Args.Split,
             implementation: handleTurtleTanks,

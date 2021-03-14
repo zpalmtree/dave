@@ -9,6 +9,9 @@ import {
     MapTileSpecification,
 } from './MapTile';
 
+export const COORDINATES_HEIGHT = 50;
+export const COORDINATES_WIDTH = 40;
+
 export interface MapSpecification {
     /* Width of map in tiles */
     width: number;
@@ -52,7 +55,11 @@ export class MapManager implements IRenderable {
     /* Location of map background image */
     private backgroundImagePath: string | undefined;
 
+    /* Stores the lines drawing the map grid */
     private gridLines: Array<fabric.Line> | undefined;
+
+    /* Stores the map 'coordinates', a-z, 0-26 */
+    private mapCoordinates: Array<fabric.Text> | undefined;
 
     constructor(mapSpecification: MapSpecification) {
         let {
@@ -128,6 +135,11 @@ export class MapManager implements IRenderable {
         this.width = width;
         this.height = height as number;
 
+        /* Labelled A-Z */
+        if (this.width >= 26) {
+            throw new Error('Map can only be 26 tiles wide!');
+        }
+
         const tileDimensions = this.map[0][0].dimensionsOnCanvas();
         
         this.tileWidth = tileDimensions.width;
@@ -143,6 +155,12 @@ export class MapManager implements IRenderable {
         if (this.backgroundImagePath) {
             if (!this.backgroundImage) {
                 this.backgroundImage = await loadImage(this.backgroundImagePath);
+
+                this.backgroundImage.set({
+                    left: COORDINATES_WIDTH,
+                    top: COORDINATES_HEIGHT,
+                });
+
                 canvas.add(this.backgroundImage);
             }
         }
@@ -156,21 +174,74 @@ export class MapManager implements IRenderable {
         this.gridLines = [];
 
         for (let i = 0; i < this.mapHeight; i += this.tileHeight) {
-            const path = new fabric.Line([i, 0, i, this.mapHeight], {
-                stroke: '#F0F0F0',
-            });
+            const path = new fabric.Line(
+                [
+                    i + COORDINATES_WIDTH,
+                    0 + COORDINATES_HEIGHT,
+                    i + COORDINATES_WIDTH,
+                    this.mapHeight + COORDINATES_HEIGHT
+                ],
+                {
+                    stroke: '#F0F0F0',
+                }
+            );
 
             this.gridLines.push(path);
             canvas.add(path);
         }
 
         for (let i = 0; i < this.mapWidth; i += this.tileWidth) {
-            const path = new fabric.Line([0, i, this.mapWidth, i], {
-                stroke: '#F0F0F0',
-            });
+            const path = new fabric.Line(
+                [
+                    0 + COORDINATES_WIDTH,
+                    i + COORDINATES_HEIGHT,
+                    this.mapWidth + COORDINATES_WIDTH,
+                    i + COORDINATES_HEIGHT
+                ],
+                {
+                    stroke: '#F0F0F0',
+                }
+            );
 
             this.gridLines.push(path);
             canvas.add(path);
+        }
+    }
+
+    private async renderMapCoordinates(canvas: fabric.StaticCanvas) {
+        if (this.mapCoordinates) {
+            return;
+        }
+
+        this.mapCoordinates = [];
+
+        for (let i = 0; i < this.height; i++) {
+            const label = new fabric.Text(i.toString(), {
+                top: COORDINATES_HEIGHT + (i * this.tileHeight) + (this.tileHeight * 0.15),
+                strokeWidth: 1,
+                stroke: '#ffffff',
+                fontFamily: 'Delicious',
+                fill: '#e6e6e6',
+            });
+
+            this.mapCoordinates.push(label);
+            canvas.add(label);
+        }
+
+        for (let i = 0; i < this.width; i++) {
+            /* 0 => A, 1 => B, etc */
+            const chr = String.fromCharCode(65 + i);
+
+            const label = new fabric.Text(chr, {
+                left: COORDINATES_WIDTH + (i * this.tileHeight) + (this.tileHeight * 0.27),
+                strokeWidth: 1,
+                stroke: '#ffffff',
+                fontFamily: 'Delicious',
+                fill: '#e6e6e6',
+            });
+
+            this.mapCoordinates.push(label);
+            canvas.add(label);
         }
     }
 
@@ -184,12 +255,14 @@ export class MapManager implements IRenderable {
 
         const promises = [];
 
+        promises.push(this.renderMapCoordinates(canvas));
+
         for (let i = 0; i < this.width; i++) {
             for (let j = 0; j < this.height; j++) {
                 const p = this.map[j][i].render(
                     canvas,
-                    widthOffset + (i * this.tileWidth),
-                    heightOffset + (j * this.tileHeight),
+                    widthOffset + (i * this.tileWidth) + COORDINATES_WIDTH,
+                    heightOffset + (j * this.tileHeight) + COORDINATES_HEIGHT,
                 );
 
                 promises.push(p);
@@ -201,8 +274,8 @@ export class MapManager implements IRenderable {
 
     public dimensionsOnCanvas() {
         return {
-            width: this.mapWidth,
-            height: this.mapHeight,
+            width: this.mapWidth + COORDINATES_WIDTH,
+            height: this.mapHeight + COORDINATES_HEIGHT,
             tileWidth: this.tileWidth,
             tileHeight: this.tileHeight,
         };

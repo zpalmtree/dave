@@ -5,13 +5,18 @@ import {
 } from 'discord.js';
 
 import { fabric } from 'fabric';
-
 import { Database } from 'sqlite3';
 
 import { map1 } from './CustomMaps';
-import { MapManager, MapSpecification } from './Map';
 import { MapTile } from './MapTile';
 import { Player } from './Player';
+
+import {
+    MapManager,
+    MapSpecification,
+    COORDINATES_HEIGHT,
+    COORDINATES_WIDTH,
+} from './Map';
 
 export class Game {
     private canvas: fabric.StaticCanvas;
@@ -21,6 +26,12 @@ export class Game {
     private initialRenderComplete: boolean = false;
 
     private players: Map<string, Player> = new Map();
+
+    private canvasWidth: number;
+    private canvasHeight: number;
+    
+    private tileWidth: number;
+    private tileHeight: number;
 
     constructor(map?: MapSpecification) {
         const canvas = new fabric.StaticCanvas(null, {});
@@ -34,12 +45,21 @@ export class Game {
             });
         }
 
-        const { width, height } = this.map.dimensionsOnCanvas();
+        const {
+            width,
+            height,
+            tileWidth,
+            tileHeight,
+        } = this.map.dimensionsOnCanvas();
 
         canvas.setWidth(width);
         canvas.setHeight(height);
 
         this.canvas = canvas;
+        this.canvasWidth = width;
+        this.canvasHeight = height;
+        this.tileHeight = tileHeight;
+        this.tileWidth = tileWidth;
     }
 
     private async renderMap() {
@@ -61,8 +81,8 @@ export class Game {
             promises.push(
                 player.render(
                     this.canvas,
-                    player.x * tileWidth,
-                    player.y * tileHeight,
+                    (player.x * tileWidth) + COORDINATES_WIDTH,
+                    (player.y * tileHeight) + COORDINATES_HEIGHT,
                     highlight,
                 ),
             );
