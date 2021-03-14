@@ -32,8 +32,20 @@ export const faces = [
 ];
 
 export async function randomTurtle(canvas: fabric.StaticCanvas) {
-    const bodyPromise = loadImage('bodies/10%/' + pickRandomItem(bodies));
-    const facePromise = loadImage('faces/10%/' + pickRandomItem(faces));
+    const body = pickRandomItem(bodies);
+    const face = pickRandomItem(faces);
+
+    await specificTurtle(canvas, face, body);
+}
+
+export async function specificTurtle(
+    canvas: fabric.StaticCanvas,
+    facePath: string,
+    bodyPath: string = 'body1.png',
+) {
+
+    const bodyPromise = loadImage('bodies/10%/' + bodyPath);
+    const facePromise = loadImage('faces/10%/' + facePath);
 
     const [body, face] = await Promise.all([bodyPromise, facePromise]);
 

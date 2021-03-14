@@ -9,17 +9,29 @@ import { fabric } from 'fabric';
 import { Database } from 'sqlite3';
 
 import { Game } from './Game';
-import { randomTurtle } from './Avatar';
+import { randomTurtle, faces, specificTurtle } from './Avatar';
 import { map1 } from './Maps';
 
-export async function handleTurtle(msg: Message) {
+export async function handleTurtle(msg: Message, face: string) {
     const canvas = new fabric.StaticCanvas(null, {});
 
-    await randomTurtle(canvas);
+    const filePath = face
+        ? face + '.png'
+        : '';
+
+    const outputFileName = filePath === ''
+        ? 'turtle.png'
+        : filePath;
+
+    if (faces.includes(filePath)) {
+        await specificTurtle(canvas, filePath);
+    } else {
+        await randomTurtle(canvas);
+    }
 
     canvas.renderAll();
 
-    const attachment = new MessageAttachment((canvas as any).createPNGStream(), 'turtle.png');
+    const attachment = new MessageAttachment((canvas as any).createPNGStream(), outputFileName);
 
     msg.reply(attachment);
 }

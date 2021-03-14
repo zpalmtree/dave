@@ -74,6 +74,10 @@ import {
     handleTurtleTanks,
 } from './TurtleTanks/TurtleTanks';
 
+import {
+    faces,
+} from './TurtleTanks/Avatar';
+
 import { config } from './Config';
 
 export const Commands: Command[] = [
@@ -873,9 +877,21 @@ export const Commands: Command[] = [
     {
         aliases: ['turtle'],
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handleTurtle,
             description: 'Get a random generated turtle',
+            helpDescription: 'Get a random generated or specific turtle. Available turtles: '
+                + faces.map((x) => '`' + x.substr(0, x.length - 4) + '`').join(', '),
+            examples: [
+                {
+                    name: 'Get a random generated turtle',
+                    value: 'turtle',
+                },
+                {
+                    name: 'Get a specific turtle',
+                    value: 'turtle t_smile',
+                },
+            ],
         },
     },
 ];
