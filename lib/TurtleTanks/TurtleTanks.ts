@@ -36,13 +36,15 @@ export async function handleTurtle(msg: Message, face: string) {
     msg.reply(attachment);
 }
 
-let game: undefined | Game;
+let storedGames: Map<string, Game> = new Map();
 
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
-    if (!game) {
-        game = new Game(map1);
+    if (!storedGames.has(msg.channel.id)) {
+        storedGames.set(msg.channel.id, new Game(map1));
         msg.channel.send('Created new game!');
     }
+
+    const game = storedGames.get(msg.channel.id)!;
 
     if (!game.hasPlayer(msg.author.id)) {
         const err = game.join(msg.author.id);
