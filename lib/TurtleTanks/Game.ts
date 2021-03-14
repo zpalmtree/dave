@@ -11,6 +11,7 @@ import { Database } from 'sqlite3';
 import { map1 } from './CustomMaps';
 import { Map } from './Map';
 import { MapTile } from './MapTile';
+import { Player } from './Player';
 
 export class Game {
     private canvas: fabric.StaticCanvas;
@@ -19,10 +20,12 @@ export class Game {
 
     private initialRenderComplete: boolean = false;
 
+    private players: Player[] = [];
+
     constructor() {
         const canvas = new fabric.StaticCanvas(null, {});
 
-        this.map = new Map({ height: 8, width: 8 });
+        this.map = new Map({ height: 10, width: 10 });
 
         const { width, height } = this.map.dimensionsOnCanvas();
 
@@ -39,6 +42,22 @@ export class Game {
             this.initialRenderComplete = true;
         }
 
+        const { tileWidth, tileHeight } = this.map.dimensionsOnCanvas();
+
+        const promises = [];
+
+        for (const player of this.players) {
+            promises.push(
+                player.render(
+                    this.canvas,
+                    player.x * tileWidth,
+                    player.y * tileHeight
+                ),
+            );
+        }
+
+        await Promise.all(promises);
+
         this.canvas.renderAll();
     }
 
@@ -50,5 +69,17 @@ export class Game {
 
     public getGameImageAttachment(): MessageAttachment {
         return new MessageAttachment((this.canvas as any).createPNGStream(), 'turtle-tanks.png');
+    }
+
+    public addPlayer(userId: string) {
+        this.players.push(new Player(userId));
+    }
+
+    public addTestPlayers() {
+        for (let width = 0; width < this.map.width; width++) {
+            for (let height = 0; height < this.map.height; height++) {
+                this.players.push(new Player('', width, height));
+            }
+        }
     }
 }

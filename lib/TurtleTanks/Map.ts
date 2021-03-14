@@ -67,7 +67,15 @@ export class Map implements IRenderable {
                 newMap[i] = [];
 
                 for (let j = 0; j < map[i].length; j++) {
-                    newMap[i][j] = new MapTile(map[i][j]);
+                    const tile = newMap[i][j];
+                    
+                    if (tile === undefined) {
+                        newMap[i][j] = new MapTile({
+                            sparse: true,
+                        });
+                    } else {
+                        newMap[i][j] = new MapTile(map[i][j]);
+                    }
                 }
             }
         } else {
@@ -83,7 +91,9 @@ export class Map implements IRenderable {
                 newMap[i] = [];
 
                 for (let j = 0; j < height; j++) {
-                    newMap[i][j] = new MapTile({});
+                    newMap[i][j] = new MapTile({
+                        color: '#e6e6e6'
+                    });
                 }
             }
         }
@@ -127,6 +137,8 @@ export class Map implements IRenderable {
         return {
             width: this.mapWidth,
             height: this.mapHeight,
+            tileWidth: this.tileWidth,
+            tileHeight: this.tileHeight,
         };
     }
 }

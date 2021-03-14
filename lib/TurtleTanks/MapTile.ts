@@ -3,7 +3,7 @@ import { fabric } from 'fabric';
 import { IRenderable } from './IRenderable';
 import { loadImage } from './Utilities';
 
-export const PIXELS_PER_TILE = 30;
+export const PIXELS_PER_TILE = 50;
 
 export interface MapTileSpecification {
     /* Is this tile utilized? Tiles are stored in a 2d array, but maps do not
