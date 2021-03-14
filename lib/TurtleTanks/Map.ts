@@ -16,6 +16,7 @@ import {
     COORDINATES_OUTLINE,
     COORDINATES_OUTLINE_WIDTH,
     COORDINATES_FONT,
+    COORDINATES_FONT_WEIGHT,
     GRIDLINES_COLOR,
     DEFAULT_TILE_COLOR,
 } from './Constants';
@@ -232,6 +233,7 @@ export class MapManager implements IRenderable {
                 fontFamily: COORDINATES_FONT,
                 fill: COORDINATES_FILL,
                 originX: 'center',
+                fontWeight: COORDINATES_FONT_WEIGHT,
             });
 
             this.mapCoordinates.push(label);
@@ -250,6 +252,7 @@ export class MapManager implements IRenderable {
                 fontFamily: COORDINATES_FONT,
                 fill: COORDINATES_FILL,
                 originY: 'center',
+                fontWeight: COORDINATES_FONT_WEIGHT,
             });
 
             this.mapCoordinates.push(label);

@@ -8,13 +8,16 @@ export const COORDINATES_WIDTH = 60;
 export const COORDINATES_FILL = '#e6e6e6';
 
 /* Color of coordinates text outline */
-export const COORDINATES_OUTLINE = '#ffffff';
+export const COORDINATES_OUTLINE = '#000000';
 
 /* Width of coordinates text outline */
 export const COORDINATES_OUTLINE_WIDTH = 1;
 
 /* Font of coordinates text */
 export const COORDINATES_FONT = 'NotoSans';
+
+/* How thick to make the coordinates font. Can be a weight, or a 'bold', 'normal', etc */
+export const COORDINATES_FONT_WEIGHT = 800;
 
 /* The color of the lines that denote the map grid */
 export const GRIDLINES_COLOR = '#F0F0F0';
