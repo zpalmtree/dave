@@ -1,8 +1,8 @@
 /* The height of the board coordinates - A-Z */
-export const COORDINATES_HEIGHT = 50;
+export const COORDINATES_HEIGHT = 60;
 
 /* The width of the board coordinates - 0-26 */
-export const COORDINATES_WIDTH = 40;
+export const COORDINATES_WIDTH = 60;
 
 /* Text color of coordinates */
 export const COORDINATES_FILL = '#e6e6e6';

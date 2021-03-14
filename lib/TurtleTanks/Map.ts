@@ -226,10 +226,12 @@ export class MapManager implements IRenderable {
         for (let i = 0; i < this.height; i++) {
             const label = new fabric.Text((i + 1).toString(), {
                 top: COORDINATES_HEIGHT + (i * this.tileHeight) + (this.tileHeight * 0.15),
+                left: this.tileWidth * 0.5,
                 strokeWidth: COORDINATES_OUTLINE_WIDTH,
                 stroke: COORDINATES_OUTLINE,
                 fontFamily: COORDINATES_FONT,
                 fill: COORDINATES_FILL,
+                originX: 'center',
             });
 
             this.mapCoordinates.push(label);
@@ -241,11 +243,13 @@ export class MapManager implements IRenderable {
             const chr = String.fromCharCode(65 + i);
 
             const label = new fabric.Text(chr, {
+                top: this.tileHeight * 0.5,
                 left: COORDINATES_WIDTH + (i * this.tileHeight) + (this.tileHeight * 0.27),
                 strokeWidth: COORDINATES_OUTLINE_WIDTH,
                 stroke: COORDINATES_OUTLINE,
                 fontFamily: COORDINATES_FONT,
                 fill: COORDINATES_FILL,
+                originY: 'center',
             });
 
             this.mapCoordinates.push(label);

@@ -39,9 +39,11 @@ export async function handleTurtle(msg: Message, face: string) {
 let storedGames: Map<string, Game> = new Map();
 
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
+    let content = '';
+
     if (!storedGames.has(msg.channel.id)) {
         storedGames.set(msg.channel.id, new Game(map1));
-        msg.channel.send('Created new game!');
+        content = 'Created new game! ';
     }
 
     const game = storedGames.get(msg.channel.id)!;
@@ -50,9 +52,9 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
         const err = game.join(msg.author.id);
 
         if (err) {
-            msg.reply(err);
+            content += err;
         } else {
-            msg.reply('You have successfully joined the game!');
+            content += 'You have successfully joined the game!';
         }
     }
 
@@ -60,5 +62,9 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
 
     const attachment = game.getGameImageAttachment();
 
-    msg.reply(attachment);
+    if (content !== '') {
+        msg.reply(content, attachment);
+    } else {
+        msg.reply(attachment);
+    }
 }
