@@ -47,6 +47,8 @@ export class Player {
             stroke: HIGHLIGHT_COLOR,
             strokeWidth: HIGHLIGHT_OUTLINE_WIDTH,
             fill: 'rgba(0,0,0,0)',
+            originX: 'center',
+            originY: 'center',
         });
 
         canvas.add(this.highlight);
@@ -63,19 +65,23 @@ export class Player {
         await this.init(canvas);
 
         this.body!.set({
-            left: widthOffset,
-            top: heightOffset + (PIXELS_PER_TILE * 0.2),
+            left: widthOffset + (PIXELS_PER_TILE * 0.5),
+            top: heightOffset + (PIXELS_PER_TILE * 0.5),
+            originX: 'center',
+            originY: 'center',
         });
 
         this.face!.set({
-            left: widthOffset,
-            top: heightOffset + (PIXELS_PER_TILE * 0.2),
+            left: widthOffset + (PIXELS_PER_TILE * 0.5),
+            top: heightOffset + (PIXELS_PER_TILE * 0.5),
+            originX: 'center',
+            originY: 'center',
         });
 
         if (highlightPlayer) {
             this.highlight!.set({
-                left: widthOffset + (PIXELS_PER_TILE * 0.06),
-                top: heightOffset + (PIXELS_PER_TILE * 0.06),
+                left: widthOffset + (PIXELS_PER_TILE * 0.5),
+                top: heightOffset + (PIXELS_PER_TILE * 0.5),
             });
         }
 
