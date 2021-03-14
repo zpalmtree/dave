@@ -10,6 +10,7 @@ import { Database } from 'sqlite3';
 
 import { Game } from './Game';
 import { randomTurtle } from './Avatar';
+import { map1 } from './Maps';
 
 export async function handleTurtle(msg: Message) {
     const canvas = new fabric.StaticCanvas(null, {});
@@ -27,7 +28,7 @@ let game: undefined | Game;
 
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
     if (!game) {
-        game = new Game();
+        game = new Game(map1);
         msg.channel.send('Created new game!');
     }
 

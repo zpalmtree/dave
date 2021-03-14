@@ -30,8 +30,8 @@ export class Player {
             return;
         }
 
-        const bodyPromise = loadImage('bodies/1.5%/' + pickRandomItem(bodies));
-        const facePromise = loadImage('faces/1.5%/' + pickRandomItem(faces));
+        const bodyPromise = loadImage('bodies/2%/' + pickRandomItem(bodies));
+        const facePromise = loadImage('faces/2%/' + pickRandomItem(faces));
 
         this.body = await bodyPromise;
         this.face = await facePromise;

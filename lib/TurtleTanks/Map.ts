@@ -2,6 +2,7 @@ import { fabric } from 'fabric';
 
 import { IRenderable } from './IRenderable';
 import { pickRandomItem } from '../Utilities';
+import { loadImage } from './Utilities';
 
 import {
     MapTile,
@@ -9,12 +10,19 @@ import {
 } from './MapTile';
 
 export interface MapSpecification {
-    /* To create a map, either specify the width and height */
-    width?: number;
-    height?: number;
+    /* Width of map in tiles */
+    width: number;
 
-    /* Or provide an array defining the map shape and features. */
-    map?: MapTileSpecification[][];
+    /* Height of map in tiles */
+    height: number;
+
+    backgroundImage?: string;
+
+    /* How to draw every single tile */
+    tileSpecification?: MapTileSpecification;
+
+    /* How to draw specific tiles */
+    map?: Array<Array<MapTileSpecification | undefined>>;
 }
 
 export class MapManager implements IRenderable {
@@ -38,12 +46,22 @@ export class MapManager implements IRenderable {
     /* The width of tiles in pixels */
     private tileWidth: number;
 
-    constructor(specification: MapSpecification) {
+    /* Loaded in background image in memory */
+    private backgroundImage: fabric.Image | undefined;
+    
+    /* Location of map background image */
+    private backgroundImagePath: string | undefined;
+
+    private gridLines: Array<fabric.Line> | undefined;
+
+    constructor(mapSpecification: MapSpecification) {
         let {
             width,
             height,
+            backgroundImage,
+            tileSpecification,
             map,
-        } = specification;
+        } = mapSpecification;
 
         const newMap: MapTile[][] = [];
 
@@ -52,28 +70,33 @@ export class MapManager implements IRenderable {
                 throw new Error('Invalid map');
             }
 
-            width = map.length;
+            for (let i = 0; i < width; i++) {
+                for (let j = 0; j < height; j++) {
+                    if (!map[j]) {
+                        throw new Error('Invalid map');
+                    }
 
-            for (let i = 0; i < map.length; i++) {
-                if (!map[i]) {
-                    throw new Error('Invalid map');
-                }
+                    if (!newMap[j]) {
+                        newMap[j] = [];
+                    }
 
-                if (height && height !== map[i].length) {
-                    throw new Error('Map must be a rectangle');
-                } else {
-                    height = map[i].length;
-                }
+                    const tile = map[j][i];
 
-                newMap[i] = [];
-
-                for (let j = 0; j < map[i].length; j++) {
-                    const tile = newMap[i][j];
-                    
                     if (tile === undefined) {
-                        newMap[i][j] = new MapTile({ sparse: true }, i, j);
+                        newMap[j][i] = new MapTile(
+                            {
+                                sparse: true,
+                            },
+                            { x: i, y: j, },
+                        );
                     } else {
-                        newMap[i][j] = new MapTile(map[i][j], i, j);
+                        newMap[j][i] = new MapTile(
+                            {
+                                ...tileSpecification,
+                                ...tile,
+                            },
+                            { x: i, y: j, },
+                        );
                     }
                 }
             }
@@ -90,7 +113,13 @@ export class MapManager implements IRenderable {
                 newMap[i] = [];
 
                 for (let j = 0; j < height; j++) {
-                    newMap[i][j] = new MapTile({ color: '#e6e6e6', }, i, j);
+                    newMap[i][j] = new MapTile(
+                        {
+                            color: '#e6e6e6',
+                            ...tileSpecification,
+                        },
+                        { x: i, y: j },
+                    );
                 }
             }
         }
@@ -106,6 +135,43 @@ export class MapManager implements IRenderable {
 
         this.mapWidth = this.tileWidth * this.width;
         this.mapHeight = this.tileHeight * this.height;
+
+        this.backgroundImagePath = backgroundImage;
+    }
+
+    private async renderMapBackground(canvas: fabric.StaticCanvas) {
+        if (this.backgroundImagePath) {
+            if (!this.backgroundImage) {
+                this.backgroundImage = await loadImage(this.backgroundImagePath);
+                canvas.add(this.backgroundImage);
+            }
+        }
+    }
+
+    private async renderMapGrid(canvas: fabric.StaticCanvas) {
+        if (this.gridLines) {
+            return;
+        } 
+
+        this.gridLines = [];
+
+        for (let i = 0; i < this.mapHeight; i += this.tileHeight) {
+            const path = new fabric.Line([i, 0, i, this.mapHeight], {
+                stroke: '#F0F0F0',
+            });
+
+            this.gridLines.push(path);
+            canvas.add(path);
+        }
+
+        for (let i = 0; i < this.mapWidth; i += this.tileWidth) {
+            const path = new fabric.Line([0, i, this.mapWidth, i], {
+                stroke: '#F0F0F0',
+            });
+
+            this.gridLines.push(path);
+            canvas.add(path);
+        }
     }
 
     public async render(
@@ -113,11 +179,14 @@ export class MapManager implements IRenderable {
         widthOffset: number,
         heightOffset: number) {
 
+        await this.renderMapBackground(canvas);
+        await this.renderMapGrid(canvas);
+
         const promises = [];
 
         for (let i = 0; i < this.width; i++) {
             for (let j = 0; j < this.height; j++) {
-                const p = this.map[i][j].render(
+                const p = this.map[j][i].render(
                     canvas,
                     widthOffset + (i * this.tileWidth),
                     heightOffset + (j * this.tileHeight),
@@ -154,7 +223,7 @@ export class MapManager implements IRenderable {
 
         for (let i = 0; i < this.width; i++) {
             for (let j = 0; j < this.height; j++) {
-                const tile = this.map[i][j];
+                const tile = this.map[j][i];
 
                 if (!tile.sparse && !tile.occupied) {
                     unoccupiedSquares.push(tile);

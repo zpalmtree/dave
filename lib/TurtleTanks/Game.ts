@@ -9,7 +9,7 @@ import { fabric } from 'fabric';
 import { Database } from 'sqlite3';
 
 import { map1 } from './CustomMaps';
-import { MapManager } from './Map';
+import { MapManager, MapSpecification } from './Map';
 import { MapTile } from './MapTile';
 import { Player } from './Player';
 
@@ -22,10 +22,17 @@ export class Game {
 
     private players: Map<string, Player> = new Map();
 
-    constructor() {
+    constructor(map?: MapSpecification) {
         const canvas = new fabric.StaticCanvas(null, {});
 
-        this.map = new MapManager({ height: 10, width: 10 });
+        if (map) {
+            this.map = new MapManager(map);
+        } else {
+            this.map = new MapManager({
+                height: 10,
+                width: 10,
+            });
+        }
 
         const { width, height } = this.map.dimensionsOnCanvas();
 

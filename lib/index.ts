@@ -184,6 +184,7 @@ async function main() {
         /* Usually discord permissions errors */
         } catch (err) {
             console.error('Caught error: ' + err.toString());
+            console.log(err.stack);
             msg.react('🔥');
         }
     });

@@ -3,7 +3,7 @@ import { fabric } from 'fabric';
 import { IRenderable } from './IRenderable';
 import { loadImage } from './Utilities';
 
-export const PIXELS_PER_TILE = 50;
+export const PIXELS_PER_TILE = 64;
 
 export interface MapTileSpecification {
     /* Is this tile utilized? Tiles are stored in a 2d array, but maps do not
@@ -22,6 +22,9 @@ export interface MapTileSpecification {
 
     /* What color is the outline of this tile? */
     outlineColor?: string;
+
+    /* Width of outline. Default of 0 */
+    strokeWidth?: number;
 }
 
 export class MapTile implements IRenderable {
@@ -34,6 +37,8 @@ export class MapTile implements IRenderable {
     private opacity: number;
 
     private outlineColor: string;
+
+    private strokeWidth: number;
 
     private width: number;
 
@@ -49,15 +54,15 @@ export class MapTile implements IRenderable {
 
     constructor(
         tileSpecification: MapTileSpecification,
-        x: number,
-        y: number,
+        coords: { x: number, y: number },
     ) {
         const {
             sparse = false,
-            color = '#ff8533',
+            color = 'rgba(0, 0, 0, 0)',
             image,
             opacity = 1,
             outlineColor = 'black',
+            strokeWidth = 0,
         } = tileSpecification;
 
         this.sparse = sparse;
@@ -65,10 +70,11 @@ export class MapTile implements IRenderable {
         this.image = image;
         this.opacity = opacity;
         this.outlineColor = outlineColor;
+        this.strokeWidth = strokeWidth;
         this.width = PIXELS_PER_TILE;
         this.height = PIXELS_PER_TILE;
-        this.x = x;
-        this.y = y;
+        this.x = coords.x;
+        this.y = coords.y;
     }
 
     public async render(
@@ -104,6 +110,7 @@ export class MapTile implements IRenderable {
                     left: widthOffset,
                     top: heightOffset,
                     stroke: this.outlineColor,
+                    strokeWidth: this.strokeWidth,
                 });
             }
 
