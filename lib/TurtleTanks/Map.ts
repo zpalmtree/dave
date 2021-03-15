@@ -370,4 +370,12 @@ export class MapManager implements IRenderable {
     public getTile(coords: Coordinate): MapTile {
         return this.map[coords.y][coords.x];
     }
+
+    public tryGetTile(coords: Coordinate) {
+        if (coords.x >= this.width || coords.y >= this.height || coords.x < 0 || coords.y < 0) {
+            return undefined;
+        }
+
+        return this.getTile(coords);
+    }
 } 

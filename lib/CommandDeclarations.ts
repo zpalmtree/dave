@@ -903,7 +903,7 @@ export const Commands: Command[] = [
                 ],
             },
             {
-                argsFormat: Args.DontNeed,
+                argsFormat: Args.Combined,
                 implementation: handleTankStatus,
                 description: 'Get yours or another players tank status',
                 aliases: ['status', 'info'],
@@ -916,6 +916,10 @@ export const Commands: Command[] = [
                     {
                         name: 'Get another players status',
                         value: 'tanks status @bob',
+                    },
+                    {
+                        name: 'Get the status of the player on a square',
+                        value: 'tanks status A1',
                     },
                 ],
             },

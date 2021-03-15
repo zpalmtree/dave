@@ -314,4 +314,14 @@ export class Game {
 
         return player.getStatus();
     }
+
+    public getPlayerAtLocation(coords: Coordinate): Player | undefined {
+        const tile = this.map.tryGetTile(coords);
+
+        if (tile && tile.occupied !== undefined) {
+            return this.players.get(tile.occupied);
+        }
+
+        return undefined;
+    }
 }

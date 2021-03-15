@@ -83,7 +83,7 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
     const mentionedUsers = [...msg.mentions.users.keys()];
 
     if (mentionedUsers.length > 0) {
-        await handleTankStatus(msg, db);
+        await handleTankStatus(msg, args.join(' '), db);
         return;
     }
 
@@ -128,7 +128,7 @@ export async function handleTankMove(msg: Message, coordStr: string, db: Databas
     await game.confirmMove(msg.author.id, msg, coords);
 }
 
-export async function handleTankStatus(msg: Message, db: Database) {
+export async function handleTankStatus(msg: Message, args: string, db: Database) {
     const [game, content] = createAndJoinGameIfNeeded(msg);
 
     const mentionedUsers = [...msg.mentions.users.keys()];
@@ -137,6 +137,26 @@ export async function handleTankStatus(msg: Message, db: Database) {
 
     if (mentionedUsers.length > 0) {
         id = mentionedUsers[0];
+    } else if (args !== '') {
+        const currentCoordinate = game.fetchPlayerLocation(msg.author.id);
+
+        if (currentCoordinate) {
+            const coordinate = parseCoordinate(args, currentCoordinate);
+
+            if (coordinate) {
+                const player = game.getPlayerAtLocation(coordinate);
+
+                if (player) {
+                    id = player.userId;
+                } else {
+                    msg.reply(`Tile ${formatCoordinate(coordinate)} is unoccupied.`);
+                    return;
+                }
+            } else {
+                msg.reply(`Failed to parse coordinate "${args}"`);
+                return;
+            }
+        }
     }
 
     const player = await game.getPlayerStatus(id);
