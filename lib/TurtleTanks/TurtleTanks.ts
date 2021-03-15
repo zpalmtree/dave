@@ -17,7 +17,13 @@ import {
 import {
     parseCoordinate,
     addMoveReactions,
+    formatCoordinate,
 } from './Utilities';
+
+import {
+    capitalize,
+    getUsername,
+} from '../Utilities';
 
 import { Game } from './Game';
 import { map1 } from './Maps';
@@ -74,6 +80,13 @@ function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
 }
 
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
+    const mentionedUsers = [...msg.mentions.users.keys()];
+
+    if (mentionedUsers.length > 0) {
+        await handleTankStatus(msg, db);
+        return;
+    }
+
     const [game, content] = createAndJoinGameIfNeeded(msg);
     const attachment = await game.renderAndGetAttachment(msg.author.id);
 
@@ -88,7 +101,7 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
     await addMoveReactions(sentMessage, game);
 }
 
-export async function handleTankMove(msg: Message, coordStr: string) {
+export async function handleTankMove(msg: Message, coordStr: string, db: Database) {
     const [game, content] = createAndJoinGameIfNeeded(msg);
 
     const currentCoords = game.fetchPlayerLocation(msg.author.id);
@@ -113,4 +126,52 @@ export async function handleTankMove(msg: Message, coordStr: string) {
     }
 
     await game.confirmMove(msg.author.id, msg, coords);
+}
+
+export async function handleTankStatus(msg: Message, db: Database) {
+    const [game, content] = createAndJoinGameIfNeeded(msg);
+
+    const mentionedUsers = [...msg.mentions.users.keys()];
+
+    let id = msg.author.id;
+
+    if (mentionedUsers.length > 0) {
+        id = mentionedUsers[0];
+    }
+
+    const player = await game.getPlayerStatus(id);
+
+    if (!player) {
+        msg.reply('User has not joined the game!');
+        return;
+    }
+
+    const canvas = new fabric.StaticCanvas(null, {});
+
+    await specificTurtle(canvas, player.face, player.body);
+
+    canvas.renderAll();
+
+    const attachment = new MessageAttachment((canvas as any).createPNGStream(), 'status.png');
+
+    const username = await getUsername(id, msg.guild);
+
+    const embed = new MessageEmbed()
+        .setTitle(`${capitalize(username)}'s Stats`)
+        .attachFiles([attachment])
+        .setImage('attachment://status.png')
+        .addFields(
+            {
+                name: 'Coordinates',
+                value: formatCoordinate(player.coords),
+                inline: true,
+            },
+            {
+                name: 'Points',
+                value: player.points,
+                inline: true,
+            },
+        );
+
+    msg.channel.send(embed);
 }

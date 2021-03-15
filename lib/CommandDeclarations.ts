@@ -73,6 +73,7 @@ import {
     handleTurtle,
     handleTurtleTanks,
     handleTankMove,
+    handleTankStatus,
 } from './TurtleTanks/TurtleTanks';
 
 import {
@@ -898,6 +899,23 @@ export const Commands: Command[] = [
                     {
                         name: 'Move diagonally',
                         value: 'tanks move down-left',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleTankStatus,
+                description: 'Get yours or another players tank status',
+                aliases: ['status', 'info'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'Get your status',
+                        value: 'tanks status',
+                    },
+                    {
+                        name: 'Get another players status',
+                        value: 'tanks status @bob',
                     },
                 ],
             },

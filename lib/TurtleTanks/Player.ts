@@ -6,6 +6,7 @@ import { faces, bodies } from './Avatar';
 
 import {
     Coordinate,
+    PlayerStatus,
 } from './Types';
 
 import {
@@ -16,15 +17,28 @@ import {
 } from './Constants';
 
 export class Player {
+    /* Users discord ID */
     public userId: string;
 
+    /* Coordinates of the player on the grid */
     public coords: Coordinate;
 
-    public bodyFilePath: string | undefined;
-    public faceFilePath: string | undefined;
+    /* File path of the body image to use */
+    public bodyFilePath: string;
 
+    /* File path of the face image to use */
+    public faceFilePath: string;
+
+    /* Game points. Need points to make actions. */
+    public points: number;
+
+    /* Loaded body image */
     private body: fabric.Image | undefined;
+
+    /* Loaded face image */
     private face: fabric.Image | undefined;
+
+    /* Loaded player highlight */
     private highlight: fabric.Circle | undefined;
 
     constructor(
@@ -35,17 +49,25 @@ export class Player {
 
         this.userId = userId;
         this.coords = coords;
-        this.bodyFilePath = bodyFilePath;
-        this.faceFilePath = faceFilePath;
+
+        if (bodyFilePath) {
+            this.bodyFilePath = bodyFilePath;
+        } else {
+            this.bodyFilePath = pickRandomItem(bodies);
+        }
+
+        if (faceFilePath) {
+            this.faceFilePath = faceFilePath;
+        } else {
+            this.faceFilePath = pickRandomItem(faces);
+        }
+
+        this.points = 0;
     }
 
     private async init(canvas: fabric.StaticCanvas) {
         if (this.body && this.face && this.highlight) {
             return;
-        }
-
-        if (!this.bodyFilePath) {
-            this.bodyFilePath = pickRandomItem(bodies);
         }
 
         if (!this.faceFilePath) {
@@ -122,5 +144,15 @@ export class Player {
         if (this.highlight) {
             canvas.remove(this.highlight);
         }
+    }
+
+    public getStatus(): PlayerStatus {
+        return {
+            coords: this.coords,
+            points: this.points,
+            userId: this.userId,
+            body: this.bodyFilePath,
+            face: this.faceFilePath,
+        };
     }
 }

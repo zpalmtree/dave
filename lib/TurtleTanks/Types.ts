@@ -13,3 +13,20 @@ export enum Direction {
     West,
     NorthWest,
 }
+
+export interface PlayerStatus {
+    /* Coordinates of the player */
+    coords: Coordinate;
+
+    /* Players points */
+    points: number;
+
+    /* Players discord user id */
+    userId: string;
+
+    /* Body filepath to use */
+    body: string;
+
+    /* Face filepath to use */
+    face: string;
+}

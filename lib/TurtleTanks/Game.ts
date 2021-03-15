@@ -22,6 +22,7 @@ import {
 import {
     Coordinate,
     Direction,
+    PlayerStatus,
 } from './Types';
 
 import {
@@ -302,5 +303,15 @@ export class Game {
         }
 
         return player.coords;
+    }
+
+    public getPlayerStatus(userId: string): PlayerStatus | undefined {
+        const player = this.players.get(userId);
+
+        if (!player) {
+            return undefined;
+        }
+
+        return player.getStatus();
     }
 }
