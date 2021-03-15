@@ -75,7 +75,7 @@ function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
 
 export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
     const [game, content] = createAndJoinGameIfNeeded(msg);
-    const attachment = await game.renderAndGetAttachment();
+    const attachment = await game.renderAndGetAttachment(msg.author.id);
 
     let sentMessage;
 
