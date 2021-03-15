@@ -8,9 +8,21 @@ import { fabric } from 'fabric';
 
 import { Database } from 'sqlite3';
 
+import {
+    randomTurtle,
+    faces,
+    specificTurtle,
+} from './Avatar';
+
+import {
+    parseCoordinate,
+    addMoveReactions,
+} from './Utilities';
+
 import { Game } from './Game';
-import { randomTurtle, faces, specificTurtle } from './Avatar';
 import { map1 } from './Maps';
+import { config } from '../Config';
+
 
 export async function handleTurtle(msg: Message, face: string) {
     const canvas = new fabric.StaticCanvas(null, {});
@@ -38,11 +50,11 @@ export async function handleTurtle(msg: Message, face: string) {
 
 let storedGames: Map<string, Game> = new Map();
 
-export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
+function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
     let content = '';
 
     if (!storedGames.has(msg.channel.id)) {
-        storedGames.set(msg.channel.id, new Game(map1));
+        storedGames.set(msg.channel.id, new Game(map1, msg.guild || undefined));
         content = 'Created new game! ';
     }
 
@@ -58,13 +70,47 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
         }
     }
 
-    const gameImage = await game.render(msg.author.id);
+    return [game, content];
+}
 
-    const attachment = game.getGameImageAttachment();
+export async function handleTurtleTanks(msg: Message, args: string[], db: Database) {
+    const [game, content] = createAndJoinGameIfNeeded(msg);
+    const attachment = await game.renderAndGetAttachment();
+
+    let sentMessage;
 
     if (content !== '') {
-        msg.reply(content, attachment);
+        sentMessage = await msg.reply(content, attachment);
     } else {
-        msg.reply(attachment);
+        sentMessage = await msg.reply(attachment);
     }
+
+    await addMoveReactions(sentMessage, game);
+}
+
+export async function handleTankMove(msg: Message, coordStr: string) {
+    const [game, content] = createAndJoinGameIfNeeded(msg);
+
+    const currentCoords = game.fetchPlayerLocation(msg.author.id);
+
+    if (!currentCoords) {
+        msg.reply('User is not in game');
+        return;
+    }
+
+    const coords = parseCoordinate(coordStr, currentCoords);
+
+    if (!coords) {
+        msg.reply(`Failed to parse coordinates. Try \`${config.prefix}tanks help\``);
+        return;
+    }
+
+    const [canMove, moveErr] = await game.canMove(msg.author.id, coords);
+
+    if (!canMove) {
+        msg.reply(moveErr);
+        return;
+    }
+
+    await game.confirmMove(msg.author.id, msg, coords);
 }

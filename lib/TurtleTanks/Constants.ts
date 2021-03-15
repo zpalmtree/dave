@@ -46,3 +46,9 @@ export const HIGHLIGHT_COLOR = '#ff0000';
 
 /* Width of the highlight circle outline */
 export const HIGHLIGHT_OUTLINE_WIDTH = 5;
+
+/* Color of the preview arrows */
+export const PREVIEW_ARROW_COLOR = '#ff0000';
+
+/* Width of the preview arrows */
+export const PREVIEW_ARROW_WIDTH = 4;

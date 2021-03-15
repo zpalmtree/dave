@@ -72,6 +72,7 @@ import { handleWeather } from './Weather';
 import { 
     handleTurtle,
     handleTurtleTanks,
+    handleTankMove,
 } from './TurtleTanks/TurtleTanks';
 
 import {
@@ -872,6 +873,27 @@ export const Commands: Command[] = [
             needDb: true,
             disabled: false,
         },
+        subCommands: [
+            {
+                argsFormat: Args.Combined,
+                implementation: handleTankMove,
+                description: 'Move your tank to another tile',
+                helpDescription: 'Move your tank to another tile. Tile must be unoccupied ' +
+                    'and not out of bounds or unusable terrain.', 
+                aliases: ['move'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'Move to a specific tile',
+                        value: 'tanks move A1',
+                    },
+                    {
+                        name: 'Move in a direction',
+                        value: 'tanks move up',
+                    },
+                ],
+            },
+        ],
         hidden: true,
     },
     {

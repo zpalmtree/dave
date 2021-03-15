@@ -2,6 +2,9 @@ import {
     Message,
     MessageAttachment,
     MessageEmbed,
+    Guild,
+    User,
+    MessageReaction,
 } from 'discord.js';
 
 import { fabric } from 'fabric';
@@ -9,6 +12,7 @@ import { Database } from 'sqlite3';
 
 import { MapTile } from './MapTile';
 import { Player } from './Player';
+import { Arrow } from './Arrow';
 
 import {
     MapManager,
@@ -25,7 +29,19 @@ import {
     DEFAULT_MAP_WIDTH,
     COORDINATES_HEIGHT,
     COORDINATES_WIDTH,
+    PREVIEW_ARROW_COLOR,
+    PREVIEW_ARROW_WIDTH,
 } from './Constants';
+
+import {
+    formatCoordinate,
+    addMoveReactions,
+} from './Utilities';
+
+import {
+    getUsername,
+    capitalize,
+} from '../Utilities';
 
 export class Game {
     private canvas: fabric.StaticCanvas;
@@ -42,16 +58,18 @@ export class Game {
     private tileWidth: number;
     private tileHeight: number;
 
-    constructor(map?: MapSpecification) {
+    private guild: Guild | undefined;
+
+    constructor(map?: MapSpecification, guild?: Guild) {
         const canvas = new fabric.StaticCanvas(null, {});
 
         if (map) {
-            this.map = new MapManager(map);
+            this.map = new MapManager(map, guild);
         } else {
             this.map = new MapManager({
                 height: DEFAULT_MAP_HEIGHT,
                 width: DEFAULT_MAP_WIDTH,
-            });
+            }, guild);
         }
 
         const {
@@ -69,6 +87,7 @@ export class Game {
         this.canvasHeight = height;
         this.tileHeight = tileHeight;
         this.tileWidth = tileWidth;
+        this.guild = guild;
     }
 
     private async renderMap() {
@@ -79,6 +98,15 @@ export class Game {
         }
     }
 
+    private async renderPlayer(player: Player, highlight: boolean) {
+        return player.render(
+            this.canvas,
+            (player.coords.x * this.tileWidth) + COORDINATES_WIDTH,
+            (player.coords.y * this.tileHeight) + COORDINATES_HEIGHT,
+            highlight,
+        );
+    }
+
     private async renderPlayers(id?: string) {
         const { tileWidth, tileHeight } = this.map.dimensionsOnCanvas();
 
@@ -87,23 +115,44 @@ export class Game {
         for (const [playerID, player] of this.players) {
             const highlight: boolean = id !== undefined && id === playerID;
 
-            promises.push(
-                player.render(
-                    this.canvas,
-                    (player.coords.x * tileWidth) + COORDINATES_WIDTH,
-                    (player.coords.y * tileHeight) + COORDINATES_HEIGHT,
-                    highlight,
-                ),
-            );
+            promises.push(this.renderPlayer(player, highlight));
         }
 
         await Promise.all(promises);
     }
 
-    public async render(id?: string): Promise<void> {
+    public async renderAndGetAttachment(userId?: string): Promise<MessageAttachment> {
+        await this.render(userId);
+        return this.getGameImageAttachment();
+    }
+
+    public async render(userId?: string): Promise<void> {
         await this.renderMap();
-        await this.renderPlayers(id);
+        await this.renderPlayers(userId);
         this.canvas.renderAll();
+    }
+
+    public async renderPlayerPreview(id: string, coords: Coordinate) {
+        const player = this.players.get(id)!;
+
+        const previewPlayer = new Player(id, coords, player.bodyFilePath, player.faceFilePath);
+
+        await this.renderPlayer(previewPlayer, true);
+
+        const arrow = new Arrow(
+            { 
+                x: (player.coords.x * this.tileWidth) + COORDINATES_WIDTH + (this.tileWidth * 0.5),
+                y: (player.coords.y * this.tileHeight) + COORDINATES_HEIGHT + (this.tileHeight * 0.5),
+            },
+            {
+                x: (previewPlayer.coords.x * this.tileWidth) + COORDINATES_WIDTH + (this.tileWidth * 0.5),
+                y: (previewPlayer.coords.y * this.tileHeight) + COORDINATES_HEIGHT + (this.tileWidth * 0.5),
+            },
+        );
+
+        await arrow.render(this.canvas);
+
+        return [previewPlayer, arrow];
     }
 
     /* Note: Note re-rendering here. Only need to re-render when game state
@@ -116,7 +165,7 @@ export class Game {
         return new MessageAttachment((this.canvas as any).createPNGStream(), 'turtle-tanks.png');
     }
 
-    public join(userId: string) {
+    public join(userId: string): string | undefined {
         if (this.players.has(userId)) {
             return 'You are already in the game!';
         }
@@ -128,6 +177,7 @@ export class Game {
         }
 
         this.players.set(userId, new Player(userId, square.coords));
+        square.occupied = userId;
 
         return;
     }
@@ -136,9 +186,115 @@ export class Game {
         return this.players.has(userId);
     }
 
-    public moveToCoord(userId: string, coord: Coordinate) {
+    public async confirmMove(
+        userId: string,
+        msg: Message,
+        coords: Coordinate) {
+
+        const preview = await this.generateMovePreview(userId, coords);
+
+        const player = this.players.get(userId)!;
+
+        const oldCoordsPretty = formatCoordinate(player.coords);
+        const newCoordsPretty = formatCoordinate(coords);
+
+        const username = await getUsername(userId, this.guild);
+
+        const embed = new MessageEmbed()
+            .setTitle(`${capitalize(username)}, are you sure you want to move from ${oldCoordsPretty} to ${newCoordsPretty}?`)
+            .setFooter('React with 👍 to confirm the move')
+            .attachFiles([preview])
+            .setImage('attachment://turtle-tanks.png');
+
+        const sentMessage = await msg.channel.send(embed);
+
+        await sentMessage.react('👍');
+
+        const collector = sentMessage.createReactionCollector((reaction: MessageReaction, user: User) => {
+            return ['👍'].includes(reaction.emoji.name) && user.id === userId
+        }, { time: 60 * 15 * 1000 });
+
+        collector.on('collect', async () => {
+            collector.stop();
+
+            const [success, err] = await this.moveToCoord(userId, coords);
+
+            sentMessage.delete();
+
+            if (success) {
+                const attachment = await this.renderAndGetAttachment(userId);
+                const sentMessage = await msg.reply(`Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}.`, attachment);
+
+                await addMoveReactions(sentMessage, this);
+            } else {
+                msg.reply(`Failed to perform move: ${err}`);
+            }
+        });
     }
 
-    public moveInDirection(userId: string, direction: Direction) {
+    public async generateMovePreview(
+        userId: string,
+        newCoords: Coordinate): Promise<MessageAttachment> {
+        
+        await this.renderMap();
+        await this.renderPlayers(userId);
+
+        const [playerPreview, arrow] = await this.renderPlayerPreview(userId, newCoords);
+
+        this.canvas.renderAll();
+
+        const attachment = this.getGameImageAttachment();
+
+        playerPreview.remove(this.canvas);
+        arrow.remove(this.canvas);
+
+        return attachment;
+    }
+
+    public async canMove(userId: string, coords: Coordinate): Promise<[boolean, string]> {
+        const player = this.players.get(userId);
+
+        if (!player) {
+            return [false, 'User is not in the game'];
+        }
+
+        const [success, err] = await this.map.canMoveTo(coords, userId);
+
+        if (!success) {
+            return [false, err];
+        }
+
+        return [true, ''];
+    }
+
+    public async moveToCoord(userId: string, coords: Coordinate): Promise<[boolean, string]> {
+        const [success, err] = await this.canMove(userId, coords);
+
+        if (!success) {
+            return [false, err];
+        }
+
+        const player = this.players.get(userId)!;
+
+        /* Square they moved from is no longer occupied */
+        this.map.getTile(player.coords).occupied = undefined;
+
+        /* Square they moved to is now occupied */
+        this.map.getTile(coords).occupied = userId;
+
+        /* And update the players position. */
+        player.coords = coords;
+
+        return [true, ''];
+    }
+
+    public fetchPlayerLocation(userId: string): Coordinate | undefined {
+        const player = this.players.get(userId);
+
+        if (!player) {
+            return undefined;
+        }
+
+        return player.coords;
     }
 }

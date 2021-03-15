@@ -42,7 +42,8 @@ export class MapTile implements IRenderable {
 
     private height: number;
 
-    public occupied: undefined | string;
+    /* Either occupied by a userid, or no-one */
+    public occupied: string | undefined;
 
     public sparse: boolean;
 
@@ -66,6 +67,7 @@ export class MapTile implements IRenderable {
         this.width = PIXELS_PER_TILE;
         this.height = PIXELS_PER_TILE;
         this.coords = coords;
+        this.occupied = undefined;
     }
 
     public async render(

@@ -1,8 +1,24 @@
+import {
+    Guild,
+} from 'discord.js';
+
 import { fabric } from 'fabric';
 
 import { IRenderable } from './IRenderable';
-import { pickRandomItem } from '../Utilities';
-import { loadImage } from './Utilities';
+
+import {
+    pickRandomItem,
+    getUsername,
+} from '../Utilities';
+
+import {
+    Coordinate,
+} from './Types';
+
+import {
+    loadImage,
+    formatCoordinate,
+} from './Utilities';
 
 import {
     MapTile,
@@ -70,7 +86,9 @@ export class MapManager implements IRenderable {
     /* Stores the map 'coordinates', a-z, 0-26 */
     private mapCoordinates: Array<fabric.Text> | undefined;
 
-    constructor(mapSpecification: MapSpecification) {
+    private guild: Guild | undefined;
+
+    constructor(mapSpecification: MapSpecification, guild?: Guild) {
         let {
             width,
             height,
@@ -158,6 +176,8 @@ export class MapManager implements IRenderable {
         this.mapHeight = this.tileHeight * this.height;
 
         this.backgroundImagePath = backgroundImage;
+
+        this.guild = guild;
     }
 
     private async renderMapBackground(canvas: fabric.StaticCanvas) {
@@ -296,6 +316,31 @@ export class MapManager implements IRenderable {
         };
     }
 
+    public async canMoveTo(coords: Coordinate, userId: string): Promise<[boolean, string]> {
+        const coordPretty = formatCoordinate(coords);
+
+        if (coords.x >= this.width || coords.y >= this.height || coords.x < 0 || coords.y < 0) {
+            return [false, `Cannot move to ${coordPretty}, tile does not exist`];
+        }
+
+        const tile = this.map[coords.y][coords.x];
+
+        if (tile.occupied) {
+            const username = await getUsername(tile.occupied, this.guild);
+            return [false, `Cannot move to ${coordPretty}, it is occupied by ${username}`];
+        }
+
+        if (tile.sparse) {
+            return [false, `Cannot move to ${coordPretty}, it is out of bounds`];
+        }
+
+        return [true, ''];
+    }
+
+    public isOccupied(coords: Coordinate): boolean {
+        return this.getTile(coords).occupied !== undefined;
+    }
+
     public getUnoccupiedSquare(): MapTile | undefined {
         const squares = this.getUnoccupiedSquares();
 
@@ -320,5 +365,9 @@ export class MapManager implements IRenderable {
         }
 
         return unoccupiedSquares;
+    }
+
+    public getTile(coords: Coordinate): MapTile {
+        return this.map[coords.y][coords.x];
     }
 } 
