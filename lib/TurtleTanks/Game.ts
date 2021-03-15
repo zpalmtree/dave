@@ -223,11 +223,11 @@ export class Game {
 
             if (success) {
                 const attachment = await this.renderAndGetAttachment(userId);
-                const sentMessage = await msg.reply(`Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}.`, attachment);
+                const sentMessage = await msg.channel.send(`<@${userId}> Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}.`, attachment);
 
                 await addMoveReactions(sentMessage, this);
             } else {
-                msg.reply(`Failed to perform move: ${err}`);
+                await msg.channel.send(`<@${userId}> Failed to perform move: ${err}`);
             }
         });
     }

@@ -116,7 +116,11 @@ export async function addMoveReactions(msg: Message, game: Game) {
 
         const newCoords = parseCoordinate(direction, currentCoords) as Coordinate;
 
-        await game.confirmMove(user.id, msg, newCoords);
+        const [allowed] = await game.canMove(user.id, newCoords);
+
+        if (allowed) {
+            await game.confirmMove(user.id, msg, newCoords);
+        }
     });
 
     await msg.react('⬆️');
