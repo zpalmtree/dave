@@ -207,15 +207,18 @@ export class Game {
             .setImage('attachment://turtle-tanks.png');
 
         const sentMessage = await msg.channel.send(embed);
-
-        await sentMessage.react('👍');
-
+        
         const collector = sentMessage.createReactionCollector((reaction: MessageReaction, user: User) => {
-            return ['👍'].includes(reaction.emoji.name) && user.id === userId
+            return ['👍', '👎'].includes(reaction.emoji.name) && user.id === userId
         }, { time: 60 * 15 * 1000 });
 
-        collector.on('collect', async () => {
+        collector.on('collect', async (reaction: MessageReaction) => {
             collector.stop();
+
+            if (reaction.emoji.name === '👎') {
+                sentMessage.delete();
+                return;
+            }
 
             const [success, err] = await this.moveToCoord(userId, coords);
 
@@ -230,6 +233,9 @@ export class Game {
                 await msg.channel.send(`<@${userId}> Failed to perform move: ${err}`);
             }
         });
+
+        await sentMessage.react('👍');
+        await sentMessage.react('👎');
     }
 
     public async generateMovePreview(
