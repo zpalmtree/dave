@@ -94,7 +94,7 @@ export function parseCoordinate(coord: string, currentCoord: Coordinate): Coordi
 export async function addMoveReactions(msg: Message, game: Game) {
     const collector = msg.createReactionCollector((reaction, user) => {
         return ['⬆️', '⬇️', '⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
-    });
+    }, { time: 60 * 15 * 1000 });
 
     const directions =  {
         '⬆️': 'up',
