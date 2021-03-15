@@ -10,6 +10,7 @@ import { Game } from './Game';
 
 import {
     Coordinate,
+    Direction,
 } from './Types';
 
 export async function loadImage(filename: string): Promise<fabric.Image> {
@@ -35,40 +36,61 @@ export function formatCoordinate(coord: Coordinate) {
 export function parseCoordinate(coord: string, currentCoord: Coordinate): Coordinate | undefined {
     coord = coord.toLowerCase();
 
-    if (coord === 'up') {
+    const direction = parseDirection(coord);
+
+    if (direction !== undefined) {
         const { x, y } = currentCoord;
 
-        return {
-            x,
-            y: y - 1,
-        };
-    }
-
-    if (coord === 'down') {
-        const { x, y } = currentCoord;
-
-        return {
-            x,
-            y: y + 1,
-        };
-    }
-
-    if (coord === 'left') {
-        const { x, y } = currentCoord;
-
-        return {
-            x: x - 1,
-            y,
-        };
-    }
-
-    if (coord === 'right') {
-        const { x, y } = currentCoord;
-
-        return {
-            x: x + 1,
-            y,
-        };
+        switch(+direction) {
+            case Direction.North: {
+                return {
+                    x,
+                    y: y - 1,
+                };
+            }
+            case Direction.NorthEast: {
+                return {
+                    x: x + 1,
+                    y: y - 1,
+                };
+            }
+            case Direction.East: {
+                return {
+                    x: x + 1,
+                    y,
+                }
+            }
+            case Direction.SouthEast: {
+                return {
+                    x: x + 1,
+                    y: y + 1,
+                }
+            }
+            case Direction.South: {
+                return {
+                    x,
+                    y: y + 1,
+                }
+            }
+            case Direction.SouthWest: {
+                return {
+                    x: x - 1,
+                    y: y + 1,
+                }
+            }
+            case Direction.West: {
+                return {
+                    x: x - 1,
+                    y,
+                }
+            }
+            case Direction.NorthWest: {
+                return {
+                    x: x - 1,
+                    y: y - 1,
+                }
+            }
+        }
     }
 
     const regex = /^(?:([A-Za-z]) ?(\d+))|(?:(\d+) ?([A-Za-z]))$/;
@@ -91,20 +113,81 @@ export function parseCoordinate(coord: string, currentCoord: Coordinate): Coordi
     return { x, y };
 }
 
+export function parseDirection(direction: string): Direction | undefined {
+    direction = direction.toLowerCase().replace(/[- ]/g, '');
+
+    switch (direction) {
+        case 'up':
+        case 'north':
+        case '⬆️': {
+            return Direction.North;
+        }
+        case 'upright':
+        case 'rightup':
+        case 'northeast':
+        case '↗️': {
+            return Direction.NorthEast;
+        }
+        case 'right':
+        case 'east':
+        case '➡️': {
+            return Direction.East;
+        }
+        case 'downright':
+        case 'rightdown':
+        case 'southeast':
+        case '↘️': {
+            return Direction.SouthEast;
+        }
+        case 'down':
+        case 'south':
+        case '⬇️': {
+            return Direction.South;
+        }
+        case 'downleft':
+        case 'leftdown':
+        case 'southwest':
+        case '↙️': {
+            return Direction.SouthWest;
+        }
+        case 'left':
+        case 'west':
+        case '⬅️': {
+            return Direction.West;
+        }
+        case 'upleft':
+        case 'leftup':
+        case 'northwest':
+        case '↖️': {
+            return Direction.NorthWest;
+        }
+    }
+
+    return undefined;
+}
+
 export async function addMoveReactions(msg: Message, game: Game) {
+    const reactions = [
+        '⬆️',
+        '⬇️',
+        '⬅️',
+        '➡️',
+        '↗️',
+        '↙️',
+        '↖️',
+        '↘️',
+    ];
+
     const collector = msg.createReactionCollector((reaction, user) => {
-        return ['⬆️', '⬇️', '⬅️', '➡️'].includes(reaction.emoji.name) && !user.bot;
+        return reactions.includes(reaction.emoji.name) && !user.bot;
     }, { time: 60 * 15 * 1000 });
 
-    const directions =  {
-        '⬆️': 'up',
-        '⬇️': 'down',
-        '⬅️': 'left',
-        '➡️': 'right',
-    };
-
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
-        reaction.users.remove(user.id);
+        try {
+            reaction.users.remove(user.id);
+        } catch (err) {
+            console.log(err);
+        }
         
         const currentCoords = game.fetchPlayerLocation(user.id);
 
@@ -112,9 +195,7 @@ export async function addMoveReactions(msg: Message, game: Game) {
             return;
         }
 
-        const direction: string = directions[reaction.emoji.name as keyof typeof directions];
-
-        const newCoords = parseCoordinate(direction, currentCoords) as Coordinate;
+        const newCoords = parseCoordinate(reaction.emoji.name, currentCoords) as Coordinate;
 
         const [allowed] = await game.canMove(user.id, newCoords);
 
@@ -123,8 +204,7 @@ export async function addMoveReactions(msg: Message, game: Game) {
         }
     });
 
-    await msg.react('⬆️');
-    await msg.react('⬇️');
-    await msg.react('⬅️');
-    await msg.react('➡️');
+    for (const reaction of reactions) {
+        await msg.react(reaction);
+    }
 }

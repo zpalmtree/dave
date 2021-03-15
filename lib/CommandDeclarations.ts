@@ -891,6 +891,14 @@ export const Commands: Command[] = [
                         name: 'Move in a direction',
                         value: 'tanks move up',
                     },
+                    {
+                        name: 'Move diagonally',
+                        value: 'tanks move northwest',
+                    },
+                    {
+                        name: 'Move diagonally',
+                        value: 'tanks move down-left',
+                    },
                 ],
             },
         ],
