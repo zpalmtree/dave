@@ -103,3 +103,14 @@ export interface Weapon {
     /* Name of this weapon */
     name: string;
 }
+
+export interface LogMessage {
+    /* The log message */
+    message: string;
+
+    /* Whose action triggered this log message */
+    actionInitiator: string;
+
+    /* When was the log message created */
+    timestamp: Date;
+}

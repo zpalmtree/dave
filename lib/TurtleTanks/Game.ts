@@ -25,6 +25,7 @@ import {
     PlayerStatus,
     GameRules,
     Team,
+    LogMessage,
 } from './Types';
 
 import {
@@ -82,6 +83,8 @@ export class Game {
 
     private rules: GameRules;
 
+    private log: LogMessage[] = [];
+
     constructor(
         map?: MapSpecification,
         guild?: Guild,
@@ -134,6 +137,12 @@ export class Game {
         this.tileWidth = tileWidth;
         this.guild = guild;
 
+        this.log.push({
+            message: 'Game was created',
+            timestamp: new Date(),
+            actionInitiator: 'System',
+        });
+
         setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
     }
 
@@ -141,6 +150,14 @@ export class Game {
     private async handleGameTick() {
         for (const [id, player] of this.players) {
             player.points += player.pointsPerTick;
+
+            const username = await getUsername(id, this.guild);
+
+            this.log.push({
+                message: `${username} was awarded ${player.pointsPerTick} points`,
+                actionInitiator: 'System',
+                timestamp: new Date(),
+            });
         }
 
         setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
@@ -417,14 +434,25 @@ export class Game {
             console.log('Error, players points went negative');
         }
 
+        const oldPosition = player.coords;
+
         /* Square they moved from is no longer occupied */
-        this.map.getTile(player.coords).occupied = undefined;
+        this.map.getTile(oldPosition).occupied = undefined;
 
         /* Square they moved to is now occupied */
         this.map.getTile(coords).occupied = userId;
 
         /* And update the players position. */
         player.coords = coords;
+
+        const username = await getUsername(userId, this.guild);
+
+        this.log.push({
+            message: `${username} moved from ${formatCoordinate(oldPosition)} to ${formatCoordinate(coords)}, ` +
+                `consuming ${result.pointsRequired} points`,
+            actionInitiator: username,
+            timestamp: new Date(),
+        });
 
         return [true, ''];
     }
@@ -463,5 +491,9 @@ export class Game {
         const tile = this.map.tryGetTile(coords);
 
         return tile !== undefined;
+    }
+
+    public getLogs(): LogMessage[] {
+        return this.log;
     }
 }

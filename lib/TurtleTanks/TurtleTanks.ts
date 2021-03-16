@@ -4,6 +4,8 @@ import {
     MessageEmbed,
 } from 'discord.js';
 
+import * as moment from 'moment';
+
 import { fabric } from 'fabric';
 
 import { Database } from 'sqlite3';
@@ -27,7 +29,13 @@ import {
 
 import {
     Team,
+    LogMessage,
 } from './Types';
+
+import {
+    Paginate,
+    DisplayType,
+} from '../Paginate';
 
 import { Game } from './Game';
 import { map1 } from './Maps';
@@ -290,4 +298,43 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
     }
 
     msg.channel.send(embed);
+}
+
+export async function handleTankLogs(msg: Message, db: Database) {
+    const [game, content] = createAndJoinGameIfNeeded(msg);
+
+    /* Newer logs are at the end */
+    const logs = game.getLogs().reverse();
+
+    const embed = new MessageEmbed()
+        .setTitle('Game Logs');
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 5,
+        displayFunction: (log: LogMessage) => {
+            return [
+                {
+                    name: 'Message',
+                    value: log.message,
+                    inline: true,
+                },
+                {
+                    name: 'User',
+                    value: log.actionInitiator,
+                    inline: true,
+                },
+                {
+                    name: 'Time',
+                    value: moment(log.timestamp).fromNow(),
+                    inline: true,
+                },
+            ];
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: logs,
+        embed,
+    });
+
+    pages.sendMessage();
 }

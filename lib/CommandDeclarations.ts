@@ -74,6 +74,7 @@ import {
     handleTurtleTanks,
     handleTankMove,
     handleTankStatus,
+    handleTankLogs,
 } from './TurtleTanks/TurtleTanks';
 
 import {
@@ -918,9 +919,22 @@ export const Commands: Command[] = [
                         value: 'tanks status @bob',
                     },
                     {
-                        name: 'Get the status of the player on a square',
+                        name: 'Get the status of the player on a tile',
                         value: 'tanks status A1',
                     },
+                ],
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleTankLogs,
+                description: 'View game logs to see previous actions that occurred',
+                aliases: ['log', 'logs', 'history'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'View game action history',
+                        value: 'tanks log',
+                    }
                 ],
             },
         ],
