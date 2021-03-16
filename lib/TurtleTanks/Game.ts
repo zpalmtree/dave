@@ -40,6 +40,7 @@ import {
     POINTS_PER_SHOT,
     POINTS_PER_KILL,
     POINTS_PER_TICK,
+    MILLISECONDS_PER_TICK,
 } from './Constants';
 
 import {
@@ -94,6 +95,7 @@ export class Game {
 
         const gameRules: GameRules = {
             teams: rules.teams,
+            millisecondsPerTick: rules.millisecondsPerTick || MILLISECONDS_PER_TICK,
             defaultStartingHp: rules.defaultStartingHp || DEFAULT_STARTING_HP,
             defaultStartingPoints: rules.defaultStartingPoints || DEFAULT_STARTING_POINTS,
             defaultPointsPerMove: rules.defaultPointsPerMove || POINTS_PER_MOVE,
@@ -131,6 +133,17 @@ export class Game {
         this.tileHeight = tileHeight;
         this.tileWidth = tileWidth;
         this.guild = guild;
+
+        setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
+    }
+
+    /* Game ticks award users points every time they run. */
+    private async handleGameTick() {
+        for (const [id, player] of this.players) {
+            player.points += player.pointsPerTick;
+        }
+
+        setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
     }
 
     private async renderMap() {
@@ -265,7 +278,7 @@ export class Game {
             userId,
             points: this.rules.defaultStartingPoints,
             hp: this.rules.defaultStartingHp,
-            pointsPerMove: this.rules.defaultStartingPoints,
+            pointsPerMove: this.rules.defaultPointsPerMove,
             pointsPerShot: this.rules.defaultPointsPerShot,
             pointsPerTick: this.rules.defaultPointsPerTick,
             pointsPerKill: this.rules.defaultPointsPerKill,
@@ -334,13 +347,13 @@ export class Game {
             if (success) {
                 const attachment = await this.renderAndGetAttachment(userId);
 
-                const sentMessage = await msg.channel.send(
+                const movedMessage = await msg.channel.send(
                     `<@${userId}> Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}. ` +
                     `You now have ${player.points} points.`,
                     attachment,
                 );
 
-                await addMoveReactions(sentMessage, this);
+                await addMoveReactions(movedMessage, this);
             } else {
                 await msg.channel.send(`<@${userId}> Failed to perform move: ${err}`);
             }

@@ -63,6 +63,9 @@ export interface GameRules {
     /* Does this game support teams. If provided, should be at least 2 teams included. */
     teams?: Team[];
 
+    /* How often to run a game tick and give users points */
+    millisecondsPerTick: number;
+
     /* The amount of hp to start tanks with, minus any modifiers */
     defaultStartingHp: number;
 
