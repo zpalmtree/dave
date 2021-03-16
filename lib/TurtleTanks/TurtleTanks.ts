@@ -67,7 +67,7 @@ export async function handleTurtle(msg: Message, face: string) {
 
 let storedGames: Map<string, Game> = new Map();
 
-function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
+async function createAndJoinGameIfNeeded(msg: Message): Promise<[Game, string]> {
     let content = '';
 
     if (!storedGames.has(msg.channel.id)) {
@@ -99,7 +99,7 @@ function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
     const game = storedGames.get(msg.channel.id)!;
 
     if (!game.hasPlayer(msg.author.id)) {
-        const result = game.join(msg.author.id);
+        const result = await game.join(msg.author.id);
 
         if (result.err) {
             content += result.err;
@@ -123,7 +123,7 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
         return;
     }
 
-    const [game, content] = createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg);
     const attachment = await game.renderAndGetAttachment(msg.author.id);
 
     let sentMessage;
@@ -138,7 +138,7 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
 }
 
 export async function handleTankMove(msg: Message, coordStr: string, db: Database) {
-    const [game, content] = createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg);
 
     const currentCoords = game.fetchPlayerLocation(msg.author.id);
 
@@ -191,7 +191,7 @@ function getUserIdFromCoordinate(coordStr: string, author: string, game: Game): 
 }
 
 export async function handleTankStatus(msg: Message, args: string, db: Database) {
-    const [game, content] = createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg);
 
     const mentionedUsers = [...msg.mentions.users.keys()];
 
@@ -301,7 +301,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
 }
 
 export async function handleTankLogs(msg: Message, db: Database) {
-    const [game, content] = createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg);
 
     /* Newer logs are at the end */
     const logs = game.getLogs().reverse();

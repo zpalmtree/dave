@@ -272,7 +272,7 @@ export class Game {
         return minimumTeam as Team;
     }
 
-    public join(userId: string) {
+    public async join(userId: string) {
         if (this.players.has(userId)) {
             return {
                 err: 'You are already in the game!',
@@ -310,6 +310,20 @@ export class Game {
 
         this.players.set(userId, player);
         square.occupied = userId;
+
+        const username = await getUsername(userId, this.guild);
+
+        let message = `${username} joined the game`;
+
+        if (player.team) {
+            message += ` and was assigned to team ${player.team.name}`;
+        }
+
+        this.log.push({
+            message,
+            timestamp: new Date(),
+            actionInitiator: username,
+        });
 
         return {
             player,
