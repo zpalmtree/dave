@@ -91,12 +91,16 @@ function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
     const game = storedGames.get(msg.channel.id)!;
 
     if (!game.hasPlayer(msg.author.id)) {
-        const err = game.join(msg.author.id);
+        const result = game.join(msg.author.id);
 
-        if (err) {
-            content += err;
-        } else {
-            content += 'You have successfully joined the game!';
+        if (result.err) {
+            content += result.err;
+        } else if (result.player) {
+            if (result.player.team) {
+                content += `You have successfully joined the game and team ${result.player.team.name}!`;
+            } else {
+                content += 'You have successfully joined the game!';
+            }
         }
     }
 

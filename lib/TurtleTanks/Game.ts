@@ -238,15 +238,19 @@ export class Game {
         return minimumTeam as Team;
     }
 
-    public join(userId: string): string | undefined {
+    public join(userId: string) {
         if (this.players.has(userId)) {
-            return 'You are already in the game!';
+            return {
+                err: 'You are already in the game!',
+            };
         }
 
         const square = this.map.getUnoccupiedSquare();
 
         if (square === undefined) {
-            return 'Game is full, sorry.';
+            return {
+                err: 'Game is full, sorry.',
+            };
         }
 
         const team = this.rules.teams
@@ -272,7 +276,9 @@ export class Game {
         this.players.set(userId, player);
         square.occupied = userId;
 
-        return;
+        return {
+            player,
+        };
     }
 
     public hasPlayer(userId: string) {
