@@ -146,14 +146,14 @@ export async function handleTankMove(msg: Message, coordStr: string, db: Databas
         return;
     }
 
-    const [canMove, moveErr] = await game.canMove(msg.author.id, coords);
+    const result = await game.canMove(msg.author.id, coords);
 
-    if (!canMove) {
-        msg.reply(moveErr);
+    if (result.err !== undefined) {
+        msg.reply(result.err);
         return;
     }
 
-    await game.confirmMove(msg.author.id, msg, coords);
+    await game.confirmMove(msg.author.id, msg, coords, result.tilesTraversed, result.pointsRequired);
 }
 
 function getUserIdFromCoordinate(coordStr: string, author: string, game: Game): [boolean, string] {

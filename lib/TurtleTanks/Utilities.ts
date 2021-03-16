@@ -197,10 +197,10 @@ export async function addMoveReactions(msg: Message, game: Game) {
 
         const newCoords = parseCoordinate(reaction.emoji.name, currentCoords) as Coordinate;
 
-        const [allowed] = await game.canMove(user.id, newCoords);
+        const result = await game.canMove(user.id, newCoords);
 
-        if (allowed) {
-            await game.confirmMove(user.id, msg, newCoords);
+        if (result.err === undefined) {
+            await game.confirmMove(user.id, msg, newCoords, result.tilesTraversed, result.pointsRequired);
         }
     });
 

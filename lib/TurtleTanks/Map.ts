@@ -15,6 +15,8 @@ import {
     Coordinate,
 } from './Types';
 
+import { Player } from './Player';
+
 import {
     loadImage,
     formatCoordinate,
@@ -316,25 +318,168 @@ export class MapManager implements IRenderable {
         };
     }
 
-    public async canMoveTo(coords: Coordinate, userId: string): Promise<[boolean, string]> {
+    public async canMoveTo(coords: Coordinate, player: Player) {
         const coordPretty = formatCoordinate(coords);
 
         if (coords.x >= this.width || coords.y >= this.height || coords.x < 0 || coords.y < 0) {
-            return [false, `Cannot move to ${coordPretty}, tile does not exist`];
+            return {
+                err: `Cannot move to ${coordPretty}, tile does not exist`,
+            };
         }
 
         const tile = this.map[coords.y][coords.x];
 
         if (tile.occupied) {
             const username = await getUsername(tile.occupied, this.guild);
-            return [false, `Cannot move to ${coordPretty}, it is occupied by ${username}`];
+            return {
+                err: `Cannot move to ${coordPretty}, it is occupied by ${username}`,
+            };
         }
 
         if (tile.sparse) {
-            return [false, `Cannot move to ${coordPretty}, it is out of bounds`];
+            return {
+                err: `Cannot move to ${coordPretty}, it is out of bounds`,
+            };
         }
 
-        return [true, ''];
+        const tilesTraversed = this.distanceBetween(player.coords, coords);
+
+        const pointsRequired = tilesTraversed * player.pointsPerMove;
+
+        if (player.points < pointsRequired) {
+            return {
+                err: `You don't have enough points required to move ${tilesTraversed} tiles. ` +
+                     `You need ${pointsRequired} points, but have ${player.points} points.`,
+            };
+        }
+
+        return {
+            pointsRequired,
+            tilesTraversed,
+        };
+    }
+
+    private estimateDistanceBetween(start: Coordinate, end: Coordinate) {
+        const diagonalX = Math.abs(end.x - start.x);
+        const diagonalY = Math.abs(end.y - start.y);
+
+        return Math.max(diagonalX, diagonalY);
+    }
+
+    private reconstructPath(cameFrom: Map<Coordinate, Coordinate>, current: Coordinate) {
+        const path = [ current ];
+
+        while (cameFrom.has(current)) {
+            current = cameFrom.get(current)!;
+            path.unshift(current);
+        }
+
+        return path;
+    }
+
+    private distanceBetween(start: Coordinate, end: Coordinate) {
+        const path = this.aStar(start, end);
+
+        if (path.length === 0) {
+            throw new Error(`Cannot find path between ${formatCoordinate(start)} and ${formatCoordinate(end)}`);
+        }
+
+        return path.length - 1;
+    }
+
+    private aStar(start: Coordinate, end: Coordinate) {
+        /* Nodes that we need to visit */
+        const toVisit = new Set([start]);
+
+        /* The node preceeding a node n on the cheapest known path */
+        const cameFrom: Map<Coordinate, Coordinate> = new Map();
+
+        /* Cheapest known path from the start to a coordinate n */
+        const cheapestPathFromStart: Map<Coordinate, number> = new Map();
+
+        /* The cheapest path length from start to end, if we use coordinate n */
+        const cheapestPathLengthUsing: Map<Coordinate, number> = new Map();
+
+        /* Distance from start to start is 0 */
+        cheapestPathFromStart.set(start, 0);
+
+        cheapestPathLengthUsing.set(start, this.estimateDistanceBetween(start, end));
+
+        while (toVisit.size > 0) {
+            let currentNode;
+            let currentScore = Number.MAX_SAFE_INTEGER;
+
+            /* Find the node with the lowest cheapestPathLengthUsing value */
+            for (const node of toVisit) {
+                const distance = cheapestPathLengthUsing.get(node);
+
+                if (distance !== undefined && distance <= currentScore) {
+                    currentNode = node;
+                    currentScore = distance;
+                }
+            }
+
+            if (!currentNode) {
+                throw new Error('Failed to acquire node');
+            }
+
+            if (currentNode.x === end.x && currentNode.y === end.y) {
+                return this.reconstructPath(cameFrom, currentNode);
+            }
+
+            toVisit.delete(currentNode);
+
+            const { x, y } = currentNode;
+
+            const neighbours = [
+                this.tryGetTile({ x, y: y - 1 }),
+                this.tryGetTile({ x: x + 1, y: y - 1 }),
+                this.tryGetTile({ x: x + 1, y }),
+                this.tryGetTile({ x: x + 1, y: y + 1 }),
+                this.tryGetTile({ x, y: y + 1 }),
+                this.tryGetTile({ x: x - 1, y: y + 1 }),
+                this.tryGetTile({ x: x - 1, y }),
+                this.tryGetTile({ x: x - 1, y: y - 1 }),
+            ];
+
+            for (const neighbour of neighbours) {
+                /* Out of map boundary */
+                if (!neighbour) {
+                    continue;
+                }
+
+                /* Cannot pass through this cell */
+                if (neighbour.sparse) {
+                    continue;
+                }
+
+                const cheapestPathToCurrent = cheapestPathFromStart.get(currentNode);
+                const cheapestPathToNeighbour = cheapestPathFromStart.get(neighbour.coords);
+
+                if (cheapestPathToCurrent === undefined) {
+                    continue;
+                }
+
+                const possibleShortestPath = cheapestPathToCurrent + 1;
+
+                if (cheapestPathToNeighbour === undefined || possibleShortestPath < cheapestPathToNeighbour) {
+                    cameFrom.set(neighbour.coords, currentNode);
+
+                    cheapestPathFromStart.set(neighbour.coords, possibleShortestPath);
+
+                    cheapestPathLengthUsing.set(
+                        neighbour.coords,
+                        possibleShortestPath + this.estimateDistanceBetween(neighbour.coords, end),
+                    );
+
+                    if (!toVisit.has(neighbour.coords)) {
+                        toVisit.add(neighbour.coords);
+                    }
+                }
+            }
+        }
+
+        return [];
     }
 
     public isOccupied(coords: Coordinate): boolean {

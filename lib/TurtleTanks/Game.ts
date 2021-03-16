@@ -293,7 +293,9 @@ export class Game {
     public async confirmMove(
         userId: string,
         msg: Message,
-        coords: Coordinate) {
+        coords: Coordinate,
+        tilesTraversed: number,
+        pointsRequired: number) {
 
         const preview = await this.generateMovePreview(userId, coords);
 
@@ -306,6 +308,7 @@ export class Game {
 
         const embed = new MessageEmbed()
             .setTitle(`${capitalize(username)}, are you sure you want to move from ${oldCoordsPretty} to ${newCoordsPretty}?`)
+            .setDescription(`This will cost ${pointsRequired} points. (${tilesTraversed} tile${tilesTraversed > 1 ? 's' : ''})`)
             .setFooter('React with 👍 to confirm the move')
             .attachFiles([preview])
             .setImage('attachment://turtle-tanks.png');
@@ -330,7 +333,12 @@ export class Game {
 
             if (success) {
                 const attachment = await this.renderAndGetAttachment(userId);
-                const sentMessage = await msg.channel.send(`<@${userId}> Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}.`, attachment);
+
+                const sentMessage = await msg.channel.send(
+                    `<@${userId}> Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}. ` +
+                    `You now have ${player.points} points.`,
+                    attachment,
+                );
 
                 await addMoveReactions(sentMessage, this);
             } else {
@@ -361,30 +369,40 @@ export class Game {
         return attachment;
     }
 
-    public async canMove(userId: string, coords: Coordinate): Promise<[boolean, string]> {
+    public async canMove(userId: string, coords: Coordinate) {
         const player = this.players.get(userId);
 
         if (!player) {
-            return [false, 'User is not in the game'];
+            return {
+                err: 'User is not in the game',
+            };
         }
 
-        const [success, err] = await this.map.canMoveTo(coords, userId);
-
-        if (!success) {
-            return [false, err];
-        }
-
-        return [true, ''];
+        return await this.map.canMoveTo(coords, player);
     }
 
     public async moveToCoord(userId: string, coords: Coordinate): Promise<[boolean, string]> {
-        const [success, err] = await this.canMove(userId, coords);
+        const result = await this.canMove(userId, coords);
 
-        if (!success) {
-            return [false, err];
+        if (result.err !== undefined) {
+            return [false, result.err];
         }
 
         const player = this.players.get(userId)!;
+
+        if (player.points >= result.pointsRequired) {
+            player.points -= result.pointsRequired;
+        } else {
+            return [
+                false,
+                `You don't have enough points required to move ${result.tilesTraversed} tiles. ` +
+                `You need ${result.pointsRequired} points, but have ${player.points} points.`,
+            ];
+        }
+
+        if (player.points < 0) {
+            console.log('Error, players points went negative');
+        }
 
         /* Square they moved from is no longer occupied */
         this.map.getTile(player.coords).occupied = undefined;
