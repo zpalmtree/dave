@@ -58,6 +58,10 @@ import {
     faces,
 } from './Avatar';
 
+import {
+    SmallMissile,
+} from './Weapons';
+
 export class Game {
     private canvas: fabric.StaticCanvas;
 
@@ -271,6 +275,7 @@ export class Game {
                 ? team.body
                 : pickRandomItem(bodies),
             face: pickRandomItem(faces),
+            weapon: SmallMissile,
         });
 
         this.players.set(userId, player);

@@ -46,6 +46,9 @@ export interface PlayerStatus {
     face: string;
 
     team?: Team;
+
+    /* The tanks weapon */
+    weapon: Weapon;
 }
 
 export interface Team {
@@ -78,4 +81,22 @@ export interface GameRules {
 
     /* The default amount of points awarded for killing a player */
     defaultPointsPerKill: number;
+}
+
+export interface Weapon {
+    /* How many tiles away can the center of the blast be fired */
+    range: number;
+
+    /* How much damage does this weapon inflict */
+    damage: number;
+
+    /* How big is the radius of the explosion? Value is squared to create
+     * area of effect.
+     * 1 => 1 tile,
+     * 2 => 4 tiles,
+     * 3 => 9 tiles */
+    radius: number;
+
+    /* Name of this weapon */
+    name: string;
 }

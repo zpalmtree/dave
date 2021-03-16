@@ -225,13 +225,58 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
         .setImage('attachment://status.png')
         .addFields(
             {
-                name: 'Coordinates',
-                value: formatCoordinate(player.coords),
+                name: 'HP',
+                value: player.hp,
                 inline: true,
             },
             {
                 name: 'Points',
                 value: player.points,
+                inline: true,
+            },
+            {
+                name: 'Coordinates',
+                value: formatCoordinate(player.coords),
+                inline: true,
+            },
+            {
+                name: 'Weapon',
+                value: player.weapon.name,
+                inline: true,
+            },
+            {
+                name: 'Weapon Range',
+                value: player.weapon.range + ' tiles',
+                inline: true,
+            },
+            {
+                name: 'Weapon Damage',
+                value: player.weapon.damage + ' HP',
+                inline: true,
+            },
+            {
+                name: 'Weapon AoE',
+                value: Math.pow(player.weapon.radius, 2) + ' tiles',
+                inline: true,
+            },
+            {
+                name: 'Cost To Move One Tile',
+                value: player.pointsPerMove + ' points',
+                inline: true,
+            },
+            {
+                name: 'Cost To Fire Weapon',
+                value: player.pointsPerShot + ' points',
+                inline: true,
+            },
+            {
+                name: 'Points On Kill',
+                value: player.pointsPerKill,
+                inline: true,
+            },
+            {
+                name: 'Points On Game Tick',
+                value: player.pointsPerTick,
                 inline: true,
             },
         );

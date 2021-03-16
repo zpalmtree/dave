@@ -8,6 +8,7 @@ import {
     Coordinate,
     PlayerStatus,
     Team,
+    Weapon,
 } from './Types';
 
 import {
@@ -51,6 +52,9 @@ export class Player {
     /* Points awarded for killing a player */
     public pointsPerKill: number;
 
+    /* Players weapon */
+    public weapon: Weapon;
+
     /* Loaded body image */
     private body: fabric.Image | undefined;
 
@@ -76,6 +80,8 @@ export class Player {
         this.pointsPerKill = playerInfo.pointsPerKill;
 
         this.team = playerInfo.team;
+
+        this.weapon = playerInfo.weapon;
     }
 
     private async init(canvas: fabric.StaticCanvas) {
@@ -172,6 +178,7 @@ export class Player {
             pointsPerTick: this.pointsPerTick,
             pointsPerKill: this.pointsPerKill,
             team: this.team,
+            weapon: this.weapon,
         };
     }
 }
