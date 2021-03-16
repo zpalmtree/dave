@@ -23,6 +23,8 @@ import {
     Coordinate,
     Direction,
     PlayerStatus,
+    GameRules,
+    Team,
 } from './Types';
 
 import {
@@ -32,6 +34,12 @@ import {
     COORDINATES_WIDTH,
     PREVIEW_ARROW_COLOR,
     PREVIEW_ARROW_WIDTH,
+    DEFAULT_STARTING_HP,
+    DEFAULT_STARTING_POINTS,
+    POINTS_PER_MOVE,
+    POINTS_PER_SHOT,
+    POINTS_PER_KILL,
+    POINTS_PER_TICK,
 } from './Constants';
 
 import {
@@ -42,7 +50,13 @@ import {
 import {
     getUsername,
     capitalize,
+    pickRandomItem,
 } from '../Utilities';
+
+import {
+    bodies,
+    faces,
+} from './Avatar';
 
 export class Game {
     private canvas: fabric.StaticCanvas;
@@ -61,7 +75,31 @@ export class Game {
 
     private guild: Guild | undefined;
 
-    constructor(map?: MapSpecification, guild?: Guild) {
+    private rules: GameRules;
+
+    constructor(
+        map?: MapSpecification,
+        guild?: Guild,
+        rules: Partial<GameRules> = {}) {
+
+        if (rules.teams !== undefined) {
+            if (rules.teams.length < 2) {
+                throw new Error('Must provide at least two teams!');
+            }
+        }
+
+        const gameRules: GameRules = {
+            teams: rules.teams,
+            defaultStartingHp: rules.defaultStartingHp || DEFAULT_STARTING_HP,
+            defaultStartingPoints: rules.defaultStartingPoints || DEFAULT_STARTING_POINTS,
+            defaultPointsPerMove: rules.defaultPointsPerMove || POINTS_PER_MOVE,
+            defaultPointsPerShot: rules.defaultPointsPerShot || POINTS_PER_SHOT,
+            defaultPointsPerTick: rules.defaultPointsPerTick || POINTS_PER_TICK,
+            defaultPointsPerKill: rules.defaultPointsPerKill || POINTS_PER_KILL,
+        };
+
+        this.rules = gameRules;
+
         const canvas = new fabric.StaticCanvas(null, {});
 
         if (map) {
@@ -136,7 +174,10 @@ export class Game {
     public async renderPlayerPreview(id: string, coords: Coordinate) {
         const player = this.players.get(id)!;
 
-        const previewPlayer = new Player(id, coords, player.bodyFilePath, player.faceFilePath);
+        const previewPlayer = new Player({
+            ...player.getStatus(),
+            coords,
+        });
 
         await this.renderPlayer(previewPlayer, true);
 
@@ -166,6 +207,37 @@ export class Game {
         return new MessageAttachment((this.canvas as any).createPNGStream(), 'turtle-tanks.png');
     }
 
+    private chooseTeam(): Team {
+        if (!this.rules.teams) {
+            throw new Error('Cannot chose team, no teams given!');
+        }
+
+        const teamUserCount: Map<Team, number> = new Map();
+
+        for (const team of this.rules.teams) {
+            teamUserCount.set(team, 0);
+        }
+
+        for (const [id, player] of this.players) {
+            if (player.team) {
+                const n = teamUserCount.get(player.team)! + 1;
+                teamUserCount.set(player.team, n);
+            }
+        }
+
+        let minimumAmount = Number.MAX_SAFE_INTEGER;
+        let minimumTeam;
+
+        for (const [team, count] of teamUserCount) {
+            if (count <= minimumAmount) {
+                minimumTeam = team;
+                minimumAmount = count;
+            }
+        }
+
+        return minimumTeam as Team;
+    }
+
     public join(userId: string): string | undefined {
         if (this.players.has(userId)) {
             return 'You are already in the game!';
@@ -177,7 +249,27 @@ export class Game {
             return 'Game is full, sorry.';
         }
 
-        this.players.set(userId, new Player(userId, square.coords));
+        const team = this.rules.teams
+            ? this.chooseTeam()
+            : undefined;
+
+        const player = new Player({
+            userId,
+            points: this.rules.defaultStartingPoints,
+            hp: this.rules.defaultStartingHp,
+            pointsPerMove: this.rules.defaultStartingPoints,
+            pointsPerShot: this.rules.defaultPointsPerShot,
+            pointsPerTick: this.rules.defaultPointsPerTick,
+            pointsPerKill: this.rules.defaultPointsPerKill,
+            coords: square.coords,
+            team,
+            body: team
+                ? team.body
+                : pickRandomItem(bodies),
+            face: pickRandomItem(faces),
+        });
+
+        this.players.set(userId, player);
         square.occupied = userId;
 
         return;
@@ -323,5 +415,11 @@ export class Game {
         }
 
         return undefined;
+    }
+
+    public coordinateExists(coords: Coordinate): boolean {
+        const tile = this.map.tryGetTile(coords);
+
+        return tile !== undefined;
     }
 }

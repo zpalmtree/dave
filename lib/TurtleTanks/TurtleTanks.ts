@@ -25,10 +25,13 @@ import {
     getUsername,
 } from '../Utilities';
 
+import {
+    Team,
+} from './Types';
+
 import { Game } from './Game';
 import { map1 } from './Maps';
 import { config } from '../Config';
-
 
 export async function handleTurtle(msg: Message, face: string) {
     const canvas = new fabric.StaticCanvas(null, {});
@@ -60,7 +63,28 @@ function createAndJoinGameIfNeeded(msg: Message): [Game, string] {
     let content = '';
 
     if (!storedGames.has(msg.channel.id)) {
-        storedGames.set(msg.channel.id, new Game(map1, msg.guild || undefined));
+        const gameConfig = {
+            teams: [
+                {
+                    body: 'red.png',
+                    name: 'RED',
+                },
+                {
+                    body: 'blu.png',
+                    name: 'BLU',
+                },
+            ],
+        };
+
+        const game = new Game(map1, (msg.guild || undefined), gameConfig);
+
+        if (config.devEnv) {
+            game.join('498258111572738048');
+            game.join('446154284514541579');
+        }
+
+        storedGames.set(msg.channel.id, game);
+
         content = 'Created new game! ';
     }
 
@@ -128,6 +152,32 @@ export async function handleTankMove(msg: Message, coordStr: string, db: Databas
     await game.confirmMove(msg.author.id, msg, coords);
 }
 
+function getUserIdFromCoordinate(coordStr: string, author: string, game: Game): [boolean, string] {
+    const currentCoordinate = game.fetchPlayerLocation(author);
+
+    if (!currentCoordinate) {
+        return [false, 'You need to join the game first.'];
+    }
+
+    const coordinate = parseCoordinate(coordStr, currentCoordinate);
+
+    if (!coordinate) {
+        return [false, `Failed to parse coordinate "${coordStr}".`];
+    }
+
+    if (!game.coordinateExists(coordinate)) {
+        return [false, 'Tile does not exist.'];
+    }
+
+    const player = game.getPlayerAtLocation(coordinate);
+
+    if (player) {
+        return [true, player.userId];
+    }
+
+    return [false, `Tile ${formatCoordinate(coordinate)} is unoccupied.`];
+}
+
 export async function handleTankStatus(msg: Message, args: string, db: Database) {
     const [game, content] = createAndJoinGameIfNeeded(msg);
 
@@ -138,25 +188,14 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
     if (mentionedUsers.length > 0) {
         id = mentionedUsers[0];
     } else if (args !== '') {
-        const currentCoordinate = game.fetchPlayerLocation(msg.author.id);
+        const [success, idOrErr] = getUserIdFromCoordinate(args, msg.author.id, game);
 
-        if (currentCoordinate) {
-            const coordinate = parseCoordinate(args, currentCoordinate);
-
-            if (coordinate) {
-                const player = game.getPlayerAtLocation(coordinate);
-
-                if (player) {
-                    id = player.userId;
-                } else {
-                    msg.reply(`Tile ${formatCoordinate(coordinate)} is unoccupied.`);
-                    return;
-                }
-            } else {
-                msg.reply(`Failed to parse coordinate "${args}"`);
-                return;
-            }
+        if (!success) {
+            msg.reply(idOrErr);
+            return;
         }
+
+        id = idOrErr;
     }
 
     const player = await game.getPlayerStatus(id);
@@ -192,6 +231,14 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
                 inline: true,
             },
         );
+
+    if (player.team) {
+        embed.addFields({
+            name: 'Team',
+            value: player.team.name,
+            inline: true,
+        });
+    }
 
     msg.channel.send(embed);
 }

@@ -52,3 +52,21 @@ export const PREVIEW_ARROW_COLOR = '#ff0000';
 
 /* Width of the preview arrows */
 export const PREVIEW_ARROW_WIDTH = 4;
+
+/* The amount of hp to start tanks with, minus any modifiers */
+export const DEFAULT_STARTING_HP = 100;
+
+/* The amount of points it takes to move one tile, minus any modifiers */
+export const POINTS_PER_MOVE = 5;
+
+/* The amount of points it takes to perform a shot, minus any modifiers */
+export const POINTS_PER_SHOT = 5;
+
+/* The amount of points awarded for killing a player */
+export const POINTS_PER_KILL = 5;
+
+/* The default amount of points awarded for killing a player */
+export const POINTS_PER_TICK = POINTS_PER_MOVE * 3;
+
+/* The amount of points a player starts with, minus any modifiers */
+export const DEFAULT_STARTING_POINTS = POINTS_PER_TICK;

@@ -7,6 +7,7 @@ import { faces, bodies } from './Avatar';
 import {
     Coordinate,
     PlayerStatus,
+    Team,
 } from './Types';
 
 import {
@@ -32,6 +33,24 @@ export class Player {
     /* Game points. Need points to make actions. */
     public points: number;
 
+    /* Optionally member of a team */
+    public team: Team | undefined;
+
+    /* Health points. Die when it reaches zero. */
+    public hp: number;
+
+    /* The amount of points it takes to move one tile */
+    public pointsPerMove: number;
+
+    /* The amount of points it takes to perform a shot */
+    public pointsPerShot: number;
+
+    /* Points gained when a game tick passes */
+    public pointsPerTick: number;
+
+    /* Points awarded for killing a player */
+    public pointsPerKill: number;
+
     /* Loaded body image */
     private body: fabric.Image | undefined;
 
@@ -41,28 +60,22 @@ export class Player {
     /* Loaded player highlight */
     private highlight: fabric.Circle | undefined;
 
-    constructor(
-        userId: string,
-        coords: Coordinate,
-        bodyFilePath?: string,
-        faceFilePath?: string) {
+    constructor(playerInfo: PlayerStatus) {
+        this.userId = playerInfo.userId;
+        this.coords = playerInfo.coords;
 
-        this.userId = userId;
-        this.coords = coords;
+        this.bodyFilePath = playerInfo.body;
+        this.faceFilePath = playerInfo.face;
 
-        if (bodyFilePath) {
-            this.bodyFilePath = bodyFilePath;
-        } else {
-            this.bodyFilePath = pickRandomItem(bodies);
-        }
+        this.points = playerInfo.points;
+        this.hp = playerInfo.hp;
 
-        if (faceFilePath) {
-            this.faceFilePath = faceFilePath;
-        } else {
-            this.faceFilePath = pickRandomItem(faces);
-        }
+        this.pointsPerMove = playerInfo.pointsPerMove;
+        this.pointsPerShot = playerInfo.pointsPerShot;
+        this.pointsPerTick = playerInfo.pointsPerTick;
+        this.pointsPerKill = playerInfo.pointsPerKill;
 
-        this.points = 0;
+        this.team = playerInfo.team;
     }
 
     private async init(canvas: fabric.StaticCanvas) {
@@ -149,10 +162,16 @@ export class Player {
     public getStatus(): PlayerStatus {
         return {
             coords: this.coords,
-            points: this.points,
             userId: this.userId,
             body: this.bodyFilePath,
             face: this.faceFilePath,
+            points: this.points,
+            hp: this.hp,
+            pointsPerMove: this.pointsPerMove,
+            pointsPerShot: this.pointsPerShot,
+            pointsPerTick: this.pointsPerTick,
+            pointsPerKill: this.pointsPerKill,
+            team: this.team,
         };
     }
 }
