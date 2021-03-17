@@ -264,7 +264,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
             },
             {
                 name: 'Weapon AoE',
-                value: Math.pow(player.weapon.radius, 2) + ' tiles',
+                value: Math.pow((player.weapon.radius * 2) - 1, 2) + ' tiles',
                 inline: true,
             },
             {
