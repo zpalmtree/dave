@@ -907,7 +907,7 @@ export const Commands: Command[] = [
                 argsFormat: Args.Combined,
                 implementation: handleTankStatus,
                 description: 'Get yours or another players tank status',
-                aliases: ['status', 'info'],
+                aliases: ['status', 'stats', 'info'],
                 needDb: true,
                 examples: [
                     {
