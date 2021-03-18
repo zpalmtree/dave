@@ -1,3 +1,6 @@
+import { MapTile } from './MapTile';
+import { Player } from './Player';
+
 export interface Coordinate {
     x: number;
     y: number;
@@ -14,7 +17,7 @@ export enum Direction {
     NorthWest,
 }
 
-export interface PlayerStatus {
+export interface PlayerConfig {
     /* Coordinates of the player */
     coords: Coordinate;
 
@@ -113,4 +116,26 @@ export interface LogMessage {
 
     /* When was the log message created */
     timestamp: Date;
+}
+
+export interface PlayerShotEffect {
+    player: Player;
+
+    oldHP: number;
+
+    newHP: number;
+
+    damageTaken: number;
+}
+
+export interface ShotResult {
+    affectedTiles: MapTile[];
+
+    affectedPlayers: PlayerShotEffect[];
+
+    killedPlayers: Player[];
+
+    pointsRequired: number;
+
+    totalDamage: number;
 }

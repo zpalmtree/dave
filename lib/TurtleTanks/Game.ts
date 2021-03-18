@@ -22,10 +22,11 @@ import {
 import {
     Coordinate,
     Direction,
-    PlayerStatus,
     GameRules,
     Team,
     LogMessage,
+    ShotResult,
+    PlayerShotEffect,
 } from './Types';
 
 import {
@@ -47,6 +48,7 @@ import {
 import {
     formatCoordinate,
     addMoveReactions,
+    pointAndRadiusToSquare,
 } from './Utilities';
 
 import {
@@ -72,6 +74,8 @@ export class Game {
     private initialRenderComplete: boolean = false;
 
     private players: Map<string, Player> = new Map();
+
+    private deadPlayers: Map<string, Player> = new Map();
 
     private canvasWidth: number;
     private canvasHeight: number;
@@ -209,8 +213,10 @@ export class Game {
         const player = this.players.get(id)!;
 
         const previewPlayer = new Player({
-            ...player.getStatus(),
+            ...player,
             coords,
+            body: player.bodyFilePath,
+            face: player.faceFilePath,
         });
 
         await this.renderPlayer(previewPlayer, true);
@@ -276,6 +282,12 @@ export class Game {
         if (this.players.has(userId)) {
             return {
                 err: 'You are already in the game!',
+            };
+        }
+
+        if (this.deadPlayers.has(userId)) {
+            return {
+                err: 'Cannot perform action, you are dead.',
             };
         }
 
@@ -390,8 +402,11 @@ export class Game {
             }
         });
 
-        await sentMessage.react('👍');
-        await sentMessage.react('👎');
+        try {
+            await sentMessage.react('👍');
+            await sentMessage.react('👎');
+        } catch (err) {
+        }
     }
 
     public async generateMovePreview(
@@ -409,6 +424,27 @@ export class Game {
 
         playerPreview.remove(this.canvas);
         arrow.remove(this.canvas);
+
+        return attachment;
+    }
+
+    public async generateAttackPreview(
+        player: Player,
+        coord: Coordinate,
+        tilesAffected: MapTile[]): Promise<MessageAttachment> {
+        
+        await this.renderMap();
+        await this.renderPlayers(player.userId);
+
+        const tileMarkers = await this.map.renderAttackPreview(this.canvas, tilesAffected);
+
+        this.canvas.renderAll();
+
+        const attachment = this.getGameImageAttachment();
+
+        for (const marker of tileMarkers) {
+            this.canvas.remove(marker);
+        }
 
         return attachment;
     }
@@ -481,14 +517,8 @@ export class Game {
         return player.coords;
     }
 
-    public getPlayerStatus(userId: string): PlayerStatus | undefined {
-        const player = this.players.get(userId);
-
-        if (!player) {
-            return undefined;
-        }
-
-        return player.getStatus();
+    public getPlayer(userId: string): Player | undefined {
+        return this.players.get(userId);
     }
 
     public getPlayerAtLocation(coords: Coordinate): Player | undefined {
@@ -509,5 +539,339 @@ export class Game {
 
     public getLogs(): LogMessage[] {
         return this.log;
+    }
+
+    public getPlayersInRadius(coord: Coordinate, radius: number) {
+        const [start, end] = pointAndRadiusToSquare(coord, radius);
+
+        return this.getPlayersBetween(start, end);
+    }
+
+    public getPlayersBetween(start: Coordinate, end: Coordinate): Player[] {
+        const tiles = this.map.getTilesBetween(start, end, false);
+
+        const players = [];
+
+        for (const tile of tiles) {
+            if (tile.occupied !== undefined) {
+                const player = this.players.get(tile.occupied);
+
+                if (player !== undefined) {
+                    players.push(player);
+                }
+            }
+        }
+
+        return players;
+    }
+
+    public async canAttack(userId: string, coords: Coordinate) {
+        const player = this.players.get(userId);
+
+        if (player === undefined) {
+            return {
+                err: `Player is not in the game`,
+            };
+        }
+
+        const tile = this.map.tryGetTile(coords);
+
+        const coordPretty = formatCoordinate(coords);
+
+        if (tile === undefined) {
+            return {
+                err: `Cannot attack ${coordPretty}, tile does not exist`,
+            };
+        }
+
+        if (tile.sparse) {
+            return {
+                err: `Cannot attack ${coordPretty}, it is out of bounds`,
+            };
+        }
+
+        const shotDistance = this.map.distanceBetweenStraightLine(player.coords, coords);
+
+        if (shotDistance > player.weapon.range) {
+            return {
+                err: `Cannot attack ${coordPretty}, your weapon has a range of ` +
+                    `${player.weapon.range} tiles, but ${coordPretty} is ${shotDistance} tiles away`,
+            };
+        }
+
+        if (player.points < player.pointsPerShot) {
+            return {
+                err: `Cannot attack ${coordPretty}, you need ${player.pointsPerShot} ` +
+                    `points, but have ${player.points} points`,
+            };
+        }
+
+        const tilesInRadius = this.map.getTilesInRadius(coords, player.weapon.radius, false);
+
+        const affectedPlayers = [];
+        const affectedTiles = [];
+        const killedPlayers = [];
+
+        let totalDamage = 0;
+
+        for (const tile of tilesInRadius) {
+            if (tile.occupied !== undefined) {
+                const tilePlayer = this.players.get(tile.occupied);
+
+                if (tilePlayer !== undefined) {
+                    /* Shooting yourself will still take damage! */
+                    if (tilePlayer.userId !== player.userId) {
+                        /* Player is shooting teammate, no damage */
+                        if (tilePlayer.team && player.team && tilePlayer.team.name === player.team.name) {
+                            continue;
+                        }
+                    }
+
+                    const newHP = Math.max(tilePlayer.hp - player.weapon.damage, 0);
+                    const damageTaken = tilePlayer.hp - newHP;
+
+                    totalDamage += damageTaken;
+
+                    affectedPlayers.push({
+                        player: tilePlayer,
+                        oldHP: tilePlayer.hp,
+                        newHP,
+                        damageTaken,
+                    });
+
+                    if (newHP === 0) {
+                        killedPlayers.push(tilePlayer);
+                    }
+                }
+            }
+
+            affectedTiles.push(tile);
+        }
+
+        return {
+            affectedTiles,
+            affectedPlayers,
+            killedPlayers,
+            pointsRequired: player.pointsPerShot,
+            totalDamage,
+        };
+    }
+
+    private async checkForEndOfGame() {
+        const alivePlayers = [];
+
+        const teams: Set<string> = new Set([]);
+
+        for (const [id, player] of this.players) {
+            if (!player.dead) {
+                alivePlayers.push(player);
+
+                if (player.team) {
+                    teams.add(player.team.name);
+                }
+            }
+        }
+
+        if (alivePlayers.length === 0) {
+            throw new Error('Zero alive players remaining!');
+        }
+
+        /* Only one player or team left standing */
+        if (alivePlayers.length === 1 || teams.size === 1) {
+            return [true, alivePlayers];
+        }
+
+        return [false, undefined];
+    }
+
+    public async doAttack(userId: string, coords: Coordinate) {
+        const result = await this.canAttack(userId, coords);
+
+        if (result.err !== undefined) {
+            return result;
+        }
+
+        const attacker = this.players.get(userId)!;
+        const attackerName = await getUsername(userId, this.guild);
+
+        this.log.push({
+            message: `${attackerName} fired a ${attacker.weapon.name} at ` +
+                `${result.affectedPlayers.length} players for a total of ${result.totalDamage} damage, ` +
+                `consuming ${attacker.pointsPerShot} points`,
+            timestamp: new Date(),
+            actionInitiator: attackerName,
+        });
+
+        attacker.points -= attacker.pointsPerShot;
+
+        for (const player of result.affectedPlayers) {
+            const newHP = player.player.receiveDamage(player.damageTaken);
+
+            if (newHP === 0) {
+                this.deadPlayers.set(player.player.userId, player.player);
+                this.players.delete(player.player.userId);
+            }
+
+            const receiver = await getUsername(player.player.userId, this.guild);
+
+            let message = `${receiver} received ${player.damageTaken} damage from ` +
+                    `${attackerName}'s ${attacker.weapon.name}. They now have ${newHP} HP`;
+
+            if (newHP === 0) {
+                message += `and was killed!`;
+
+                this.log.push({
+                    message: `${attackerName} was awarded ${attacker.pointsPerKill} points for killing a player.`,
+                    timestamp: new Date(),
+                    actionInitiator: attackerName,
+                });
+
+                attacker.points += attacker.pointsPerKill;
+            } else {
+                message += `. They now have ${newHP} HP`;
+            }
+
+            this.log.push({
+                message,
+                timestamp: new Date(),
+                actionInitiator: attackerName,
+            });
+        }
+
+        const [ended, winners] = await this.checkForEndOfGame();
+
+        return {
+            ...result,
+            ended,
+            winners,
+        }
+    }
+
+    private async buildAffectedPlayersMsg(affectedPlayers: PlayerShotEffect[]) {
+        let msg = '';
+
+        if (affectedPlayers.length > 0) {
+            let i = 0;
+
+            for (const player of affectedPlayers) {
+                const finalIteration = i === affectedPlayers.length - 1;
+
+                const username = await getUsername(player.player.userId, this.guild);
+
+                msg += `, `;
+
+                if (finalIteration) {
+                    msg += `and `;
+                }
+
+                msg += `${player.damageTaken} HP in damage to ${username}`;
+
+                if (player.newHP === 0) {
+                    msg += `, killing them`
+                }
+
+                i++;
+            }
+        }
+
+        return msg;
+    }
+
+    public async confirmAttack(
+        userId: string,
+        msg: Message,
+        coords: Coordinate,
+        shotResult: ShotResult): Promise<{ ended: boolean }> {
+        return new Promise(async (resolve) => {
+            const player = this.players.get(userId)!;
+
+            const preview = await this.generateAttackPreview(player, coords, shotResult.affectedTiles);
+
+            const coordPretty = formatCoordinate(coords);
+
+            const username = await getUsername(userId, this.guild);
+
+            let description = `Your ${player.weapon.name} will cause ${shotResult.totalDamage} HP in total damage`;
+
+            description += await this.buildAffectedPlayersMsg(shotResult.affectedPlayers);
+
+            const embed = new MessageEmbed()
+                .setTitle(`${capitalize(username)}, are you sure want to attack ${coordPretty}?`)
+                .setDescription(`${description}. This will cost ${shotResult.pointsRequired} points.`)
+                .setFooter('React with 👍 to confirm the attack')
+                .attachFiles([preview])
+                .setImage('attachment://turtle-tanks.png');
+
+            const sentMessage = await msg.channel.send(embed);
+
+            const collector = sentMessage.createReactionCollector((reaction: MessageReaction, user: User) => {
+                return ['👍', '👎'].includes(reaction.emoji.name) && user.id === userId
+            }, { time: 60 * 15 * 1000 });
+
+            collector.on('collect', async (reaction: MessageReaction) => {
+                collector.stop();
+
+                if (reaction.emoji.name === '👎') {
+                    sentMessage.delete();
+                    resolve({ ended: false });
+                    return;
+                }
+
+                const result = await this.doAttack(userId, coords);
+
+                sentMessage.delete();
+
+                if (result.err === undefined) {
+                    const attachment = await this.renderAndGetAttachment(userId);
+
+                    let damageDescription = `Your ${player.weapon.name} caused ${result.totalDamage} HP in total damage`;
+
+                    damageDescription += await this.buildAffectedPlayersMsg(result.affectedPlayers);
+
+                    const attackMessage = await msg.channel.send(
+                        `<@${userId}> Successfully attacked ${coordPretty}. ${damageDescription}`,
+                        attachment,
+                    );
+
+                    for (const deadPlayer of result.killedPlayers) {
+                        if (deadPlayer.userId === player.userId) {
+                            msg.channel.send(
+                                `<@${deadPlayer.userId}> You killed yourself with your own ` +
+                                `${player.weapon.name}! Good job!`,
+                            );
+                        } else {
+                            msg.channel.send(
+                                `<@${deadPlayer.userId}> You were killed by ${username}'s ` +
+                                `${player.weapon.name}! Better luck next time!`,
+                            );
+                        }
+                    }
+
+                    if (result.ended) {
+                        const winner = (result.winners as Player[])[0];
+
+                        if (winner.team) {
+                            msg.channel.send(`Congratulations, team ${winner.team.name}, you won the game!`);
+                        } else {
+                            msg.channel.send(`Congratulations, <@${winner.userId}>, you won the game!`);
+                        }
+
+                        resolve({ ended: true });
+                    } else {
+                        await addMoveReactions(attackMessage, this);
+                        resolve({ ended: false });
+                    }
+                } else {
+                    await msg.channel.send(`<@${userId}> Failed to perform attack: ${result.err}`);
+                    resolve({ ended: false });
+                }
+            });
+
+            try {
+                await sentMessage.react('👍');
+                await sentMessage.react('👎');
+            } catch (err) {
+            }
+        });
     }
 }

@@ -75,6 +75,7 @@ import {
     handleTankMove,
     handleTankStatus,
     handleTankLogs,
+    handleTankShoot,
 } from './TurtleTanks/TurtleTanks';
 
 import {
@@ -935,6 +936,23 @@ export const Commands: Command[] = [
                         name: 'View game action history',
                         value: 'tanks log',
                     }
+                ],
+            },
+            {
+                argsFormat: Args.Combined,
+                implementation: handleTankShoot,
+                description: 'Shoot at a tile or range of tiles to damage players',
+                aliases: ['shoot', 'fire', 'attack'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'Shoot at a tile',
+                        value: 'tanks shoot B3',
+                    },
+                    {
+                        name: 'Shoot at a player',
+                        value: 'tanks shoot @bob',
+                    },
                 ],
             },
         ],

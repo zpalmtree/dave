@@ -6,9 +6,9 @@ import { faces, bodies } from './Avatar';
 
 import {
     Coordinate,
-    PlayerStatus,
     Team,
     Weapon,
+    PlayerConfig,
 } from './Types';
 
 import {
@@ -55,6 +55,9 @@ export class Player {
     /* Players weapon */
     public weapon: Weapon;
 
+    /* Has the player reached 0hp and died */
+    public dead: boolean = false;
+
     /* Loaded body image */
     private body: fabric.Image | undefined;
 
@@ -64,7 +67,7 @@ export class Player {
     /* Loaded player highlight */
     private highlight: fabric.Circle | undefined;
 
-    constructor(playerInfo: PlayerStatus) {
+    constructor(playerInfo: PlayerConfig) {
         this.userId = playerInfo.userId;
         this.coords = playerInfo.coords;
 
@@ -165,20 +168,15 @@ export class Player {
         }
     }
 
-    public getStatus(): PlayerStatus {
-        return {
-            coords: this.coords,
-            userId: this.userId,
-            body: this.bodyFilePath,
-            face: this.faceFilePath,
-            points: this.points,
-            hp: this.hp,
-            pointsPerMove: this.pointsPerMove,
-            pointsPerShot: this.pointsPerShot,
-            pointsPerTick: this.pointsPerTick,
-            pointsPerKill: this.pointsPerKill,
-            team: this.team,
-            weapon: this.weapon,
-        };
+    public receiveDamage(damage: number) {
+        const newHP = Math.max(this.hp - damage, 0);
+
+        this.hp = newHP;
+        
+        if (this.hp === 0) {
+            this.dead = true;
+        }
+
+        return this.hp;
     }
 }

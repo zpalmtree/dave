@@ -210,7 +210,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
         id = idOrErr;
     }
 
-    const player = await game.getPlayerStatus(id);
+    const player = await game.getPlayer(id);
 
     if (!player) {
         msg.reply('User has not joined the game!');
@@ -219,7 +219,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
 
     const canvas = new fabric.StaticCanvas(null, {});
 
-    await specificTurtle(canvas, player.face, player.body);
+    await specificTurtle(canvas, player.faceFilePath, player.bodyFilePath);
 
     canvas.renderAll();
 
@@ -337,4 +337,42 @@ export async function handleTankLogs(msg: Message, db: Database) {
     });
 
     pages.sendMessage();
+}
+
+export async function handleTankShoot(msg: Message, args: string, db: Database) {
+    const mentionedUsers = [...msg.mentions.users.keys()];
+
+    const [game, content] = await createAndJoinGameIfNeeded(msg);
+
+    const player = game.getPlayer(msg.author.id)!;
+
+    let coord = parseCoordinate(args, player.coords);
+
+    if (mentionedUsers.length > 0) {
+        coord = game.fetchPlayerLocation(mentionedUsers[0]);
+    }
+
+    if (coord === undefined) {
+        msg.reply(`You must provide a coordinate or player to shoot. Try \`${config.prefix}tanks help\``);
+        return;
+    }
+
+    const result = await game.canAttack(msg.author.id, coord);
+
+    if (result.err !== undefined) {
+        msg.reply(result.err);
+        return;
+    }
+
+    const { ended } = await game.confirmAttack(
+        msg.author.id,
+        msg,
+        coord,
+        result,
+    );
+
+    if (ended) {
+        storedGames.delete(msg.channel.id);
+        msg.channel.send(`Game concluded. Type \`${config.prefix}tanks\` to launch a new game!`);
+    }
 }

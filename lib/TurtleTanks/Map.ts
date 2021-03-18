@@ -20,6 +20,7 @@ import { Player } from './Player';
 import {
     loadImage,
     formatCoordinate,
+    pointAndRadiusToSquare,
 } from './Utilities';
 
 import {
@@ -342,7 +343,7 @@ export class MapManager implements IRenderable {
             };
         }
 
-        const tilesTraversed = this.distanceBetween(player.coords, coords);
+        const tilesTraversed = this.distanceBetweenValidPath(player.coords, coords);
 
         const pointsRequired = tilesTraversed * player.pointsPerMove;
 
@@ -359,7 +360,7 @@ export class MapManager implements IRenderable {
         };
     }
 
-    private estimateDistanceBetween(start: Coordinate, end: Coordinate) {
+    public distanceBetweenStraightLine(start: Coordinate, end: Coordinate) {
         const diagonalX = Math.abs(end.x - start.x);
         const diagonalY = Math.abs(end.y - start.y);
 
@@ -377,7 +378,7 @@ export class MapManager implements IRenderable {
         return path;
     }
 
-    private distanceBetween(start: Coordinate, end: Coordinate) {
+    public distanceBetweenValidPath(start: Coordinate, end: Coordinate) {
         const path = this.aStar(start, end);
 
         if (path.length === 0) {
@@ -403,7 +404,7 @@ export class MapManager implements IRenderable {
         /* Distance from start to start is 0 */
         cheapestPathFromStart.set(start, 0);
 
-        cheapestPathLengthUsing.set(start, this.estimateDistanceBetween(start, end));
+        cheapestPathLengthUsing.set(start, this.distanceBetweenStraightLine(start, end));
 
         while (toVisit.size > 0) {
             let currentNode;
@@ -469,7 +470,7 @@ export class MapManager implements IRenderable {
 
                     cheapestPathLengthUsing.set(
                         neighbour.coords,
-                        possibleShortestPath + this.estimateDistanceBetween(neighbour.coords, end),
+                        possibleShortestPath + this.distanceBetweenStraightLine(neighbour.coords, end),
                     );
 
                     if (!toVisit.has(neighbour.coords)) {
@@ -522,5 +523,72 @@ export class MapManager implements IRenderable {
         }
 
         return this.getTile(coords);
+    }
+
+    public getTilesInRadius(coord: Coordinate, radius: number, includeSparse: boolean) {
+        const tile = this.tryGetTile(coord);
+
+        if (!tile) {
+            throw new Error('Coordinate is not on map');
+        }
+
+        const [start, end] = pointAndRadiusToSquare(coord, radius);
+
+        return this.getTilesBetween(start, end, includeSparse);
+    }
+
+    /* Get the tiles contained in the square described by start, end */
+    public getTilesBetween(start: Coordinate, end: Coordinate, includeSparse: boolean): MapTile[] {
+        const startX = Math.min(start.x, end.x);
+        const endX = Math.max(start.x, end.x);
+
+        const startY = Math.min(start.y, end.y);
+        const endY = Math.max(start.y, end.y);
+
+        const tiles = [];
+
+        for (let i = startX; i <= endX; i++) {
+            for (let j = startY; j <= endY; j++) {
+                const tile = this.tryGetTile({ y: j, x: i });
+
+                if (tile === undefined) {
+                    continue;
+                }
+
+                if (!includeSparse && tile.sparse) {
+                    continue;
+                }
+
+                tiles.push(tile);
+            }
+        }
+
+        return tiles;
+    }
+
+    public async renderAttackPreview(
+        canvas: fabric.StaticCanvas,
+        tilesAffected: MapTile[]): Promise<fabric.Image[]> {
+
+        const hatches = [];
+
+        for (const tile of tilesAffected) {
+            const hatch = await loadImage('utility/tile_effected.png');
+
+            if (hatch.width !== this.tileWidth || hatch.height !== this.tileHeight) {
+                hatch.scaleToWidth(this.tileWidth);
+                hatch.scaleToHeight(this.tileHeight);
+            }
+
+            hatch.set({
+                left: COORDINATES_WIDTH + (tile.coords.x * this.tileWidth),
+                top: COORDINATES_HEIGHT + (tile.coords.y * this.tileHeight),
+            });
+
+            canvas.add(hatch);
+            hatches.push(hatch);
+        }
+
+        return hatches;
     }
 } 

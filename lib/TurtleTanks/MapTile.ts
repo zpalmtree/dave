@@ -85,9 +85,9 @@ export class MapTile implements IRenderable {
             if (this.image) {
                 this.tile = await loadImage(this.image);
 
-                if (this.tile.width !== PIXELS_PER_TILE || this.tile.height !== PIXELS_PER_TILE) {
-                    this.tile.scaleToWidth(PIXELS_PER_TILE);
-                    this.tile.scaleToHeight(PIXELS_PER_TILE);
+                if (this.tile.width !== this.width || this.tile.height !== this.height) {
+                    this.tile.scaleToWidth(this.width);
+                    this.tile.scaleToHeight(this.height);
                 }
 
                 this.tile.set({

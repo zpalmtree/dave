@@ -208,3 +208,20 @@ export async function addMoveReactions(msg: Message, game: Game) {
         await msg.react(reaction);
     }
 }
+
+export function pointAndRadiusToSquare(coord: Coordinate, radius: number) {
+    /* Take off one since we occupy a tile */
+    radius = radius - 1;
+
+    const start = {
+        x: coord.x - radius,
+        y: coord.y - radius,
+    };
+
+    const end = {
+        x: coord.x + radius,
+        y: coord.y + radius,
+    };
+
+    return [start, end];
+}
