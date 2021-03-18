@@ -5,6 +5,7 @@ import {
     Guild,
     User,
     MessageReaction,
+    TextChannel,
 } from 'discord.js';
 
 import { fabric } from 'fabric';
@@ -89,7 +90,10 @@ export class Game {
 
     private log: LogMessage[] = [];
 
+    private channel: TextChannel;
+
     constructor(
+        channel: TextChannel,
         map?: MapSpecification,
         guild?: Guild,
         rules: Partial<GameRules> = {}) {
@@ -140,6 +144,7 @@ export class Game {
         this.tileHeight = tileHeight;
         this.tileWidth = tileWidth;
         this.guild = guild;
+        this.channel = channel;
 
         this.log.push({
             message: 'Game was created',
@@ -152,6 +157,14 @@ export class Game {
 
     /* Game ticks award users points every time they run. */
     private async handleGameTick() {
+        /* TextChannels we can spam in */
+        const noisyChannels = [
+            '820837312551714846',
+            '483470443001413675',
+        ];
+
+        let pointMessage = '';
+
         for (const [id, player] of this.players) {
             player.points += player.pointsPerTick;
 
@@ -162,6 +175,12 @@ export class Game {
                 actionInitiator: 'System',
                 timestamp: new Date(),
             });
+
+            pointMessage += `<@${id}> You were awarded ${player.pointsPerTick} points. You now have ${player.points} points\n`;
+        }
+
+        if (noisyChannels.includes(this.channel.id)) {
+            this.channel.send(pointMessage);
         }
 
         setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
