@@ -724,10 +724,10 @@ export class Game {
             const receiver = await getUsername(player.player.userId, this.guild);
 
             let message = `${receiver} received ${player.damageTaken} damage from ` +
-                    `${attackerName}'s ${attacker.weapon.name}. They now have ${newHP} HP`;
+                    `${attackerName}'s ${attacker.weapon.name}`;
 
             if (newHP === 0) {
-                message += ` and were killed!`;
+                message += ` and was killed!`;
 
                 this.log.push({
                     message: `${attackerName} was awarded ${attacker.pointsPerKill} points for killing a player.`,

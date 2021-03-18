@@ -309,7 +309,7 @@ export async function handleTankLogs(msg: Message, db: Database) {
     const [game, content] = await createAndJoinGameIfNeeded(msg);
 
     /* Newer logs are at the end */
-    const logs = game.getLogs().reverse();
+    const logs = [...game.getLogs()].sort((a: LogMessage, b: LogMessage) => b.timestamp.getTime() - a.timestamp.getTime())
 
     const embed = new MessageEmbed()
         .setTitle('Game Logs');
