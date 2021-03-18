@@ -54,7 +54,7 @@ export const PREVIEW_ARROW_COLOR = '#ff0000';
 export const PREVIEW_ARROW_WIDTH = 4;
 
 /* The amount of hp to start tanks with, minus any modifiers */
-export const DEFAULT_STARTING_HP = 100;
+export const DEFAULT_STARTING_HP = 40;
 
 /* The amount of points it takes to move one tile, minus any modifiers */
 export const POINTS_PER_MOVE = 5;
@@ -66,10 +66,10 @@ export const POINTS_PER_SHOT = 5;
 export const POINTS_PER_KILL = 5;
 
 /* The default amount of points awarded for killing a player */
-export const POINTS_PER_TICK = POINTS_PER_MOVE * 3;
+export const POINTS_PER_TICK = POINTS_PER_MOVE;
 
 /* The amount of points a player starts with, minus any modifiers */
 export const DEFAULT_STARTING_POINTS = POINTS_PER_TICK;
 
 /* Every time a tick is executed, users will be awareded POINTS_PER_TICK points. */
-export const MILLISECONDS_PER_TICK = 1000 * 60 * 10;
+export const MILLISECONDS_PER_TICK = 1000 * 60 * 60;
