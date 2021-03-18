@@ -517,8 +517,16 @@ export class Game {
         return player.coords;
     }
 
+    public getPlayerOrDead(userId: string): Player | undefined {
+        return this.players.get(userId) || this.deadPlayers.get(userId);
+    }
+
     public getPlayer(userId: string): Player | undefined {
         return this.players.get(userId);
+    }
+
+    public isDead(userId: string): boolean {
+        return this.deadPlayers.get(userId) !== undefined;
     }
 
     public getPlayerAtLocation(coords: Coordinate): Player | undefined {
@@ -709,6 +717,7 @@ export class Game {
 
             if (newHP === 0) {
                 this.deadPlayers.set(player.player.userId, player.player);
+                player.player.remove(this.canvas);
                 this.players.delete(player.player.userId);
             }
 
@@ -718,7 +727,7 @@ export class Game {
                     `${attackerName}'s ${attacker.weapon.name}. They now have ${newHP} HP`;
 
             if (newHP === 0) {
-                message += `and was killed!`;
+                message += ` and were killed!`;
 
                 this.log.push({
                     message: `${attackerName} was awarded ${attacker.pointsPerKill} points for killing a player.`,

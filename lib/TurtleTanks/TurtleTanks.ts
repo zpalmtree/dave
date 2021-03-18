@@ -143,7 +143,12 @@ export async function handleTankMove(msg: Message, coordStr: string, db: Databas
     const currentCoords = game.fetchPlayerLocation(msg.author.id);
 
     if (!currentCoords) {
-        msg.reply('User is not in game');
+        if (game.isDead(msg.author.id)) {
+            msg.reply('User is dead');
+        } else {
+            msg.reply('User is not in game');
+        }
+
         return;
     }
 
@@ -210,7 +215,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
         id = idOrErr;
     }
 
-    const player = await game.getPlayer(id);
+    const player = await game.getPlayerOrDead(id);
 
     if (!player) {
         msg.reply('User has not joined the game!');
@@ -344,7 +349,17 @@ export async function handleTankShoot(msg: Message, args: string, db: Database) 
 
     const [game, content] = await createAndJoinGameIfNeeded(msg);
 
-    const player = game.getPlayer(msg.author.id)!;
+    const player = game.getPlayer(msg.author.id);
+
+    if (!player) {
+        if (game.isDead(msg.author.id)) {
+            msg.reply('User is dead');
+        } else {
+            msg.reply('User is not in the game');
+        }
+
+        return;
+    }
 
     let coord = parseCoordinate(args, player.coords);
 
