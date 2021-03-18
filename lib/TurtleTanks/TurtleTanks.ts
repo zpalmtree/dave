@@ -84,7 +84,7 @@ async function createAndJoinGameIfNeeded(msg: Message): Promise<[Game, string]> 
             ],
         };
 
-        const game = new Game(map1, (msg.guild || undefined), gameConfig);
+        const game = new Game(map1, (msg.guild || undefined), {});
 
         if (config.devEnv) {
             game.join('498258111572738048');
