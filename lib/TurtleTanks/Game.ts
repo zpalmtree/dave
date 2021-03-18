@@ -92,6 +92,8 @@ export class Game {
 
     private channel: TextChannel;
 
+    private timer: ReturnType<typeof setTimeout>;
+
     constructor(
         channel: TextChannel,
         map?: MapSpecification,
@@ -152,7 +154,7 @@ export class Game {
             actionInitiator: 'System',
         });
 
-        setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
+        this.timer = setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
     }
 
     /* Game ticks award users points every time they run. */
@@ -183,7 +185,7 @@ export class Game {
             this.channel.send(pointMessage);
         }
 
-        setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
+        this.timer = setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
     }
 
     private async renderMap() {
@@ -705,6 +707,7 @@ export class Game {
 
         /* Only one player or team left standing */
         if (alivePlayers.length === 1 || teams.size === 1) {
+            clearTimeout(this.timer);
             return [true, alivePlayers];
         }
 
