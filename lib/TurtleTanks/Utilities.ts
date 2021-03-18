@@ -167,6 +167,12 @@ export function parseDirection(direction: string): Direction | undefined {
 }
 
 export async function addMoveReactions(msg: Message, game: Game) {
+    const enableReactions = false;
+
+    if (!enableReactions) {
+        return;
+    }
+
     const reactions = [
         '⬆️',
         '⬇️',
