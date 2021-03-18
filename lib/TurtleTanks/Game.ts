@@ -92,7 +92,7 @@ export class Game {
 
     private channel: TextChannel;
 
-    private timer: ReturnType<typeof setTimeout>;
+    private timer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(
         channel: TextChannel,
@@ -153,8 +153,6 @@ export class Game {
             timestamp: new Date(),
             actionInitiator: 'System',
         });
-
-        this.timer = setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
     }
 
     /* Game ticks award users points every time they run. */
@@ -357,6 +355,10 @@ export class Game {
             timestamp: new Date(),
             actionInitiator: username,
         });
+
+        if (this.players.size === 2) {
+            this.timer = setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
+        }
 
         return {
             player,
@@ -707,7 +709,10 @@ export class Game {
 
         /* Only one player or team left standing */
         if (alivePlayers.length === 1 || teams.size === 1) {
-            clearTimeout(this.timer);
+            if (this.timer) {
+                clearTimeout(this.timer);
+            }
+
             return [true, alivePlayers];
         }
 
