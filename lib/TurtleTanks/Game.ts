@@ -704,7 +704,7 @@ export class Game {
         }
 
         if (alivePlayers.length === 0) {
-            throw new Error('Zero alive players remaining!');
+            return [true, []];
         }
 
         /* Only one player or team left standing */
@@ -883,13 +883,19 @@ export class Game {
                         }
                     }
 
-                    if (result.ended) {
-                        const winner = (result.winners as Player[])[0];
+                    if (result.ended !== undefined && result.ended) {
+                        const winners = result.winners as Player[];
 
-                        if (winner.team) {
-                            msg.channel.send(`Congratulations, team ${winner.team.name}, you won the game!`);
+                        if (winners.length === 0) {
+                            msg.channel.send(`The game ended with no winner!`);
                         } else {
-                            msg.channel.send(`Congratulations, <@${winner.userId}>, you won the game!`);
+                            const winner = winners[0];
+
+                            if (winner.team) {
+                                msg.channel.send(`Congratulations, team ${winner.team.name}, you won the game!`);
+                            } else {
+                                msg.channel.send(`Congratulations, <@${winner.userId}>, you won the game!`);
+                            }
                         }
 
                         resolve({ ended: true });
