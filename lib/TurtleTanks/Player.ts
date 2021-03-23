@@ -9,6 +9,9 @@ import {
     Team,
     Weapon,
     PlayerConfig,
+    ShotEffect,
+    ShotResult,
+    PlayerShot,
 } from './Types';
 
 import {
@@ -16,6 +19,7 @@ import {
     AVATAR_SIZES,
     HIGHLIGHT_COLOR,
     HIGHLIGHT_OUTLINE_WIDTH,
+    ACCURACY_RAMP_UP_TIME,
 } from './Constants';
 
 export class Player {
@@ -66,6 +70,8 @@ export class Player {
 
     /* Loaded player highlight */
     private highlight: fabric.Circle | undefined;
+
+    private shotHistory: PlayerShot[] = [];
 
     constructor(playerInfo: PlayerConfig) {
         this.userId = playerInfo.userId;
@@ -178,5 +184,54 @@ export class Player {
         }
 
         return this.hp;
+    }
+
+    public attack(coordinates: Coordinate, shotEffects: ShotEffect) {
+        const shotResult = this.getNextShotPercentage(coordinates) > Math.random()
+            ? ShotResult.Hit
+            : ShotResult.Miss;
+
+        this.points -= this.pointsPerShot;
+
+        if (shotResult === ShotResult.Hit) {
+            this.points += shotEffects.killedPlayers.length * this.pointsPerKill;
+        }
+
+        this.shotHistory.push({
+            userId: this.userId,
+            coordinates,
+            weapon: this.weapon,
+            shotEffects,
+            shotResult,
+        });
+
+        return shotResult;
+    }
+
+    public getNextShotPercentage(coordinates: Coordinate) {
+        let baseAccuracy = this.weapon.startingAccuracy;
+
+        /* How much to increase the accuracy per shot */
+        const step = (this.weapon.maxAccuracy - this.weapon.startingAccuracy) / ACCURACY_RAMP_UP_TIME;
+
+        let count = 0;
+
+        for (let i = this.shotHistory.length - 1; i >= 0 && count < ACCURACY_RAMP_UP_TIME; i--) {
+            const shot = this.shotHistory[i];
+
+            /* Keep increasing the accuracy while the shots are on the same
+             * coordinates */
+            if (coordinates.x === shot.coordinates.x
+             && coordinates.y === shot.coordinates.y) {
+                baseAccuracy += step;
+            } else {
+                break;
+            }
+
+            count++;
+        }
+
+        /* Just to be sure */
+        return Math.min(baseAccuracy, this.weapon.maxAccuracy);
     }
 }

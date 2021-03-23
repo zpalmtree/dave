@@ -26,8 +26,9 @@ import {
     GameRules,
     Team,
     LogMessage,
-    ShotResult,
+    ShotEffect,
     PlayerShotEffect,
+    ShotResult,
 } from './Types';
 
 import {
@@ -56,6 +57,7 @@ import {
     getUsername,
     capitalize,
     pickRandomItem,
+    roundToNPlaces,
 } from '../Utilities';
 
 import {
@@ -737,7 +739,17 @@ export class Game {
             actionInitiator: attackerName,
         });
 
-        attacker.points -= attacker.pointsPerShot;
+        const shotResult = attacker.attack(coords, result);
+
+        if (shotResult === ShotResult.Miss) {
+            return {
+                ...result,
+                shotResult,
+                err: undefined,
+                ended: false,
+                winners: [],
+            }
+        }
 
         for (const player of result.affectedPlayers) {
             const newHP = player.player.receiveDamage(player.damageTaken);
@@ -761,8 +773,6 @@ export class Game {
                     timestamp: new Date(),
                     actionInitiator: attackerName,
                 });
-
-                attacker.points += attacker.pointsPerKill;
             } else {
                 message += `. They now have ${newHP} HP`;
             }
@@ -780,6 +790,8 @@ export class Game {
             ...result,
             ended,
             winners,
+            shotResult,
+            err: undefined,
         }
     }
 
@@ -817,23 +829,25 @@ export class Game {
         userId: string,
         msg: Message,
         coords: Coordinate,
-        shotResult: ShotResult): Promise<{ ended: boolean }> {
+        shotEffect: ShotEffect): Promise<{ ended: boolean }> {
         return new Promise(async (resolve) => {
             const player = this.players.get(userId)!;
 
-            const preview = await this.generateAttackPreview(player, coords, shotResult.affectedTiles);
+            const preview = await this.generateAttackPreview(player, coords, shotEffect.affectedTiles);
 
             const coordPretty = formatCoordinate(coords);
 
             const username = await getUsername(userId, this.guild);
 
-            let description = `Your ${player.weapon.name} will cause ${shotResult.totalDamage} HP in total damage`;
+            let description = `Your ${player.weapon.name} will cause ${shotEffect.totalDamage} HP in total damage`;
 
-            description += await this.buildAffectedPlayersMsg(shotResult.affectedPlayers);
+            description += await this.buildAffectedPlayersMsg(shotEffect.affectedPlayers);
+
+            const hitPercentage = roundToNPlaces(player.getNextShotPercentage(coords) * 100, 0) + '%';
 
             const embed = new MessageEmbed()
                 .setTitle(`${capitalize(username)}, are you sure want to attack ${coordPretty}?`)
-                .setDescription(`${description}. This will cost ${shotResult.pointsRequired} points.`)
+                .setDescription(`This will cost ${shotEffect.pointsRequired} points and has a ${hitPercentage} chance of hitting. ${description}.`)
                 .setFooter('React with 👍 to confirm the attack')
                 .attachFiles([preview])
                 .setImage('attachment://turtle-tanks.png');
@@ -857,7 +871,28 @@ export class Game {
 
                 sentMessage.delete();
 
-                if (result.err === undefined) {
+                const nextShotPercentage = roundToNPlaces(player.getNextShotPercentage(coords) * 100, 0) + '%';
+
+                if (result.err !== undefined) {
+                    await msg.channel.send(`<@${userId}> Failed to perform attack: ${result.err}`);
+
+                    resolve({ ended: false });
+
+                    return;
+                }
+
+                if (result.shotResult !== undefined && result.shotResult === ShotResult.Miss) {
+                    await msg.channel.send(
+                        `<@${userId}> Your attack missed! Your next attack to ${coordPretty} ` +
+                        `has a ${nextShotPercentage} chance of hitting.`,
+                    );
+
+                    resolve({ ended: false });
+
+                    return;
+                }
+
+                if (result.shotResult !== undefined && result.shotResult === ShotResult.Hit) {
                     const attachment = await this.renderAndGetAttachment(userId);
 
                     let damageDescription = `Your ${player.weapon.name} caused ${result.totalDamage} HP in total damage`;
@@ -903,9 +938,8 @@ export class Game {
                         await addMoveReactions(attackMessage, this);
                         resolve({ ended: false });
                     }
-                } else {
-                    await msg.channel.send(`<@${userId}> Failed to perform attack: ${result.err}`);
-                    resolve({ ended: false });
+
+                    return;
                 }
             });
 

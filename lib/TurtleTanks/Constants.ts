@@ -73,3 +73,7 @@ export const DEFAULT_STARTING_POINTS = POINTS_PER_TICK;
 
 /* Every time a tick is executed, users will be awareded POINTS_PER_TICK points. */
 export const MILLISECONDS_PER_TICK = 1000 * 60 * 60;
+
+/* How many shots need to be fired on the same location before the max
+ * accuracy is reached */
+export const ACCURACY_RAMP_UP_TIME = 5;

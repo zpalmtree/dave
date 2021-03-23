@@ -105,6 +105,12 @@ export interface Weapon {
 
     /* Name of this weapon */
     name: string;
+
+    /* Chance of a shot landing, on the first shot */
+    startingAccuracy: number;
+
+    /* Chance of a shot landing, after the max buildup */
+    maxAccuracy: number;
 }
 
 export interface LogMessage {
@@ -118,6 +124,28 @@ export interface LogMessage {
     timestamp: Date;
 }
 
+export enum ShotResult {
+    Hit = 0,
+    Miss,
+}
+
+export interface PlayerShot {
+    /* Who fired the shot? */
+    userId: string;
+
+    /* Where were they aiming? */
+    coordinates: Coordinate;
+
+    /* What weapon were they using? */
+    weapon: Weapon;
+
+    /* What will the shot do if it lands? */
+    shotEffects: ShotEffect;
+
+    /* Did the shot land? */
+    shotResult: ShotResult;
+}
+
 export interface PlayerShotEffect {
     player: Player;
 
@@ -128,14 +156,19 @@ export interface PlayerShotEffect {
     damageTaken: number;
 }
 
-export interface ShotResult {
+export interface ShotEffect {
+    /* Tiles that will be hit by the shot */
     affectedTiles: MapTile[];
 
+    /* Players that will be effected by the shot */
     affectedPlayers: PlayerShotEffect[];
 
+    /* Players that will be killed by the shot */
     killedPlayers: Player[];
 
+    /* Points required to fire this shot */
     pointsRequired: number;
 
+    /* Total damage caused to players by this shot */
     totalDamage: number;
 }
