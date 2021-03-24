@@ -94,7 +94,8 @@ async function createAndJoinGameIfNeeded(msg: Message, db: Database): Promise<[G
         );
 
         await game.init();
-        await game.loadFromDB();
+
+        const loaded = await game.loadFromDB();
 
         if (config.devEnv) {
             game.join('498258111572738048');
@@ -103,7 +104,9 @@ async function createAndJoinGameIfNeeded(msg: Message, db: Database): Promise<[G
 
         storedGames.set(msg.channel.id, game);
 
-        content = 'Created new game! ';
+        if (!loaded) {
+            content = 'Created new game! ';
+        }
     }
 
     const game = storedGames.get(msg.channel.id)!;
