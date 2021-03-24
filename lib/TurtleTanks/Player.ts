@@ -1,3 +1,4 @@
+import { Database } from 'sqlite3';
 import { fabric } from 'fabric';
 
 import { loadImage } from './Utilities';
@@ -21,6 +22,10 @@ import {
     HIGHLIGHT_OUTLINE_WIDTH,
     ACCURACY_RAMP_UP_TIME,
 } from './Constants';
+
+import {
+    insertQuery,
+} from '../Database';
 
 export class Player {
     /* Users discord ID */
@@ -233,5 +238,49 @@ export class Player {
 
         /* Just to be sure */
         return Math.min(baseAccuracy, this.weapon.maxAccuracy);
+    }
+
+    public async storeInDB(db: Database, channel: string) {
+        await insertQuery(
+            `INSERT INTO tank_games (
+                user_id,
+                channel_id,
+                coord_x,
+                coord_y,
+                hp,
+                points,
+                team
+            ) VALUES (
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+            ) ON CONFLICT (
+                user_id,
+                channel_id
+            )
+            DO UPDATE
+            SET
+                coord_x = excluded.coord_x,
+                coord_y = excluded.coord_y,
+                hp = excluded.hp,
+                points = excluded.points,
+                team = excluded.team`,
+            db,
+            [
+                this.userId,
+                channel,
+                this.coords.x,
+                this.coords.y,
+                this.hp,
+                this.points,
+                this.team === undefined
+                    ? undefined
+                    : this.team.name
+            ]
+        );
     }
 }

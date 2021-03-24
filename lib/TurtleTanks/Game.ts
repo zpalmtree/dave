@@ -69,6 +69,11 @@ import {
     SmallMissile,
 } from './Weapons';
 
+import {
+    deleteQuery,
+    selectQuery,
+} from '../Database';
+
 export class Game {
     private canvas: fabric.StaticCanvas;
 
@@ -96,8 +101,13 @@ export class Game {
 
     private timer: ReturnType<typeof setTimeout> | undefined;
 
+    private database: Database;
+
+    private ended: boolean = false;
+
     constructor(
         channel: TextChannel,
+        db: Database,
         map?: MapSpecification,
         guild?: Guild,
         rules: Partial<GameRules> = {}) {
@@ -149,12 +159,87 @@ export class Game {
         this.tileWidth = tileWidth;
         this.guild = guild;
         this.channel = channel;
+        this.database = db;
+    }
 
+    public async init() {
         this.log.push({
             message: 'Game was created',
             timestamp: new Date(),
             actionInitiator: 'System',
         });
+    }
+
+    public async cleanup() {
+        if (this.timer) {
+            clearTimeout(this.timer);
+        }
+
+        await this.clearPreviousGames();
+    }
+
+    private async storeInDB() {
+        for (const [id, player] of this.players) {
+            await player.storeInDB(this.database, this.channel.id);
+        }
+
+        /* Need to store dead players to prevent them from rejoining on game restore */
+        for (const [id, player] of this.deadPlayers) {
+            await player.storeInDB(this.database, this.channel.id);
+        }
+    }
+
+    private async killPlayer(player: Player) {
+        this.deadPlayers.set(player.userId, player);
+
+        player.remove(this.canvas);
+
+        this.players.delete(player.userId);
+    }
+
+    public async loadFromDB() {
+        const players = await selectQuery(
+            `SELECT
+                user_id,
+                coord_x,
+                coord_y,
+                hp,
+                points,
+                team
+            FROM
+                tank_games
+            WHERE
+                channel_id = ?`,
+            this.database,
+            [
+                this.channel.id,
+            ],
+        );
+
+        if (players.length === 0) {
+            return false;
+        }
+
+        for (const player of players) {
+            const result = await this.join(
+                player.user_id,
+                player.hp,
+                player.points,
+                { x: player.coord_x, y: player.coord_y },
+                player.team,
+            );
+
+            if (result.err !== undefined) {
+                this.channel.send(result.err);
+                continue;
+            }
+
+            if (player.hp === 0) {
+                this.killPlayer(result.player);
+            }
+        }
+
+        return true;
     }
 
     /* Game ticks award users points every time they run. */
@@ -299,7 +384,19 @@ export class Game {
         return minimumTeam as Team;
     }
 
-    public async join(userId: string) {
+    public async join(
+        userId: string,
+        hp: number = this.rules.defaultStartingHp,
+        points: number = this.rules.defaultStartingPoints,
+        coords?: Coordinate,
+        storedTeam?: string) {
+
+        if (this.ended) {
+            return {
+                err: 'Game has ended',
+            };
+        }
+
         if (this.players.has(userId)) {
             return {
                 err: 'You are already in the game!',
@@ -312,7 +409,15 @@ export class Game {
             };
         }
 
-        const square = this.map.getUnoccupiedSquare();
+        let square = undefined;
+
+        if (coords !== undefined) {
+            square = this.map.tryGetTile(coords);
+        }
+
+        if (square === undefined) {
+            square = this.map.getUnoccupiedSquare();
+        }
 
         if (square === undefined) {
             return {
@@ -320,14 +425,26 @@ export class Game {
             };
         }
 
-        const team = this.rules.teams
-            ? this.chooseTeam()
-            : undefined;
+        let team = undefined;
+
+        if (this.rules.teams) {
+            if (storedTeam) {
+                for (const existingTeam of this.rules.teams) {
+                    if (existingTeam.name === storedTeam) {
+                        team = existingTeam;
+                    }
+                } 
+            }
+
+            if (team === undefined) {
+                team = this.chooseTeam();
+            }
+        }
 
         const player = new Player({
             userId,
-            points: this.rules.defaultStartingPoints,
-            hp: this.rules.defaultStartingHp,
+            points,
+            hp,
             pointsPerMove: this.rules.defaultPointsPerMove,
             pointsPerShot: this.rules.defaultPointsPerShot,
             pointsPerTick: this.rules.defaultPointsPerTick,
@@ -340,6 +457,8 @@ export class Game {
             face: pickRandomItem(faces),
             weapon: SmallMissile,
         });
+
+        await player.storeInDB(this.database, this.channel.id);
 
         this.players.set(userId, player);
         square.occupied = userId;
@@ -475,6 +594,12 @@ export class Game {
     }
 
     public async canMove(userId: string, coords: Coordinate) {
+        if (this.ended) {
+            return {
+                err: 'Game has ended',
+            };
+        }
+
         const player = this.players.get(userId);
 
         if (!player) {
@@ -528,6 +653,8 @@ export class Game {
             actionInitiator: username,
             timestamp: new Date(),
         });
+
+        await player.storeInDB(this.database, this.channel.id);
 
         return [true, ''];
     }
@@ -599,6 +726,12 @@ export class Game {
     }
 
     public async canAttack(userId: string, coords: Coordinate) {
+        if (this.ended) {
+            return {
+                err: 'Game has ended',
+            };
+        }
+
         const player = this.players.get(userId);
 
         if (player === undefined) {
@@ -711,10 +844,6 @@ export class Game {
 
         /* Only one player or team left standing */
         if (alivePlayers.length === 1 || teams.size === 1) {
-            if (this.timer) {
-                clearTimeout(this.timer);
-            }
-
             return [true, alivePlayers];
         }
 
@@ -742,6 +871,8 @@ export class Game {
         const shotResult = attacker.attack(coords, result);
 
         if (shotResult === ShotResult.Miss) {
+            await attacker.storeInDB(this.database, this.channel.id);
+
             return {
                 ...result,
                 shotResult,
@@ -755,9 +886,7 @@ export class Game {
             const newHP = player.player.receiveDamage(player.damageTaken);
 
             if (newHP === 0) {
-                this.deadPlayers.set(player.player.userId, player.player);
-                player.player.remove(this.canvas);
-                this.players.delete(player.player.userId);
+                this.killPlayer(player.player);
             }
 
             const receiver = await getUsername(player.player.userId, this.guild);
@@ -785,6 +914,13 @@ export class Game {
         }
 
         const [ended, winners] = await this.checkForEndOfGame();
+
+        if (ended) {
+            this.ended = true;
+            await this.cleanup();
+        } else {
+            await this.storeInDB();
+        }
 
         return {
             ...result,
@@ -949,5 +1085,17 @@ export class Game {
             } catch (err) {
             }
         });
+    }
+
+    private async clearPreviousGames() {
+        await deleteQuery(
+            `DELETE FROM tank_games
+            WHERE
+                channel_id = ?`,
+            this.database,
+            [
+                this.channel.id,
+            ],
+        );
     }
 }

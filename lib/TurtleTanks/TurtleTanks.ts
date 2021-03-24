@@ -68,7 +68,7 @@ export async function handleTurtle(msg: Message, face: string) {
 
 let storedGames: Map<string, Game> = new Map();
 
-async function createAndJoinGameIfNeeded(msg: Message): Promise<[Game, string]> {
+async function createAndJoinGameIfNeeded(msg: Message, db: Database): Promise<[Game, string]> {
     let content = '';
 
     if (!storedGames.has(msg.channel.id)) {
@@ -85,7 +85,16 @@ async function createAndJoinGameIfNeeded(msg: Message): Promise<[Game, string]> 
             ],
         };
 
-        const game = new Game(msg.channel as TextChannel, map1, (msg.guild || undefined), {});
+        const game = new Game(
+            msg.channel as TextChannel,
+            db,
+            map1,
+            (msg.guild || undefined),
+            {},
+        );
+
+        await game.init();
+        await game.loadFromDB();
 
         if (config.devEnv) {
             game.join('498258111572738048');
@@ -124,7 +133,7 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
         return;
     }
 
-    const [game, content] = await createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg, db);
     const attachment = await game.renderAndGetAttachment(msg.author.id);
 
     let sentMessage;
@@ -139,7 +148,7 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
 }
 
 export async function handleTankMove(msg: Message, coordStr: string, db: Database) {
-    const [game, content] = await createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg, db);
 
     const currentCoords = game.fetchPlayerLocation(msg.author.id);
 
@@ -197,7 +206,7 @@ function getUserIdFromCoordinate(coordStr: string, author: string, game: Game): 
 }
 
 export async function handleTankStatus(msg: Message, args: string, db: Database) {
-    const [game, content] = await createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg, db);
 
     const mentionedUsers = [...msg.mentions.users.keys()];
 
@@ -307,7 +316,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
 }
 
 export async function handleTankLogs(msg: Message, db: Database) {
-    const [game, content] = await createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg, db);
 
     /* Newer logs are at the end */
     const logs = [...game.getLogs()].sort((a: LogMessage, b: LogMessage) => b.timestamp.getTime() - a.timestamp.getTime())
@@ -348,7 +357,7 @@ export async function handleTankLogs(msg: Message, db: Database) {
 export async function handleTankShoot(msg: Message, args: string, db: Database) {
     const mentionedUsers = [...msg.mentions.users.keys()];
 
-    const [game, content] = await createAndJoinGameIfNeeded(msg);
+    const [game, content] = await createAndJoinGameIfNeeded(msg, db);
 
     const player = game.getPlayer(msg.author.id);
 
@@ -389,6 +398,7 @@ export async function handleTankShoot(msg: Message, args: string, db: Database) 
 
     if (ended) {
         storedGames.delete(msg.channel.id);
+
         msg.channel.send(`Game concluded. Type \`${config.prefix}tanks\` to launch a new game!`);
     }
 }

@@ -168,6 +168,18 @@ export async function createTablesIfNeeded(db: Database) {
         args VARCHAR(2000),
         timestamp TIMESTAMP NOT NULL
     )`, db);
+
+    await executeQuery(`CREATE TABLE IF NOT EXISTS tank_games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL,
+        channel_id VARCHAR(255) NOT NULL,
+        coord_x INTEGER NOT NULL,
+        coord_y INTEGER NOT NULL,
+        hp INTEGER NOT NULL,
+        points INTEGER NOT NULL,
+        team VARCHAR(255),
+        CONSTRAINT channel_player UNIQUE (user_id, channel_id)
+    )`, db);
 }
 
 export async function deleteTablesIfNeeded(db: Database) {
@@ -181,6 +193,8 @@ export async function deleteTablesIfNeeded(db: Database) {
             await executeQuery(`DROP TABLE IF EXISTS watch_event`, db);
             await executeQuery(`DROP TABLE IF EXISTS user_watch`, db);
             await executeQuery(`DROP TABLE IF EXISTS timer`, db);
+            await executeQuery(`DROP TABLE IF EXISTS logs`, db);
+            await executeQuery(`DROP TABLE IF EXISTS tank_games`, db);
         }
     }
 }
