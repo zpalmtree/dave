@@ -553,10 +553,10 @@ export async function handleStock(msg: Message, args: string[]) {
 
     const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${config.stockApiKey}`);
 
-    if (res.status == 200) {
+    if (res.status === 200) {
         const stockData = await res.json();
 
-        if (Object.entries(stockData['Global Quote']).length == 0) {
+        if (Object.entries(stockData['Global Quote']).length === 0) {
             msg.channel.send("No ticker " + ticker.toUpperCase());
             return;
         }
