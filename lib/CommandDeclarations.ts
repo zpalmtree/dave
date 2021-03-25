@@ -651,7 +651,7 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleExchange,
             description: 'Convert between REAL currencies',
-            helpDescription: `Convert between currencies. Known currencies: \`${exchangeService.getCurrencies().join(',')}\``,
+            helpDescriptionFunc: () => `Convert between currencies. Known currencies: \`${exchangeService.getCurrencies().join(',')}\``,
             examples: [
                 {
                     value: 'exchange 100 USD to GBP',
@@ -996,11 +996,6 @@ export function handleHelp(msg: Message, args: string): void {
     if (args !== '') {
         for (const c of availableCommands) {
             if (c.aliases.includes(args)) {
-                if (c.primaryCommand.helpFunction) {
-                    c.primaryCommand.helpFunction(msg);
-                    return;
-                }
-
                 const callString = config.prefix + args;
 
                 let examples = [{
@@ -1019,9 +1014,17 @@ export function handleHelp(msg: Message, args: string): void {
                     }
                 }
 
+                let description = c.primaryCommand.description;
+
+                if (c.primaryCommand.helpDescription) {
+                    description = c.primaryCommand.helpDescription;
+                } else if (c.primaryCommand.helpDescriptionFunc) {
+                    description = c.primaryCommand.helpDescriptionFunc();
+                }
+
                 const embed = new MessageEmbed()
                     .setTitle(callString)
-                    .setDescription(c.primaryCommand.helpDescription || c.primaryCommand.description);
+                    .setDescription(description);
 
                 embed.addFields(examples.map((e: any) => {
                     return {

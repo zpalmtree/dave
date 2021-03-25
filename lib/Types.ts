@@ -82,6 +82,10 @@ export interface CommandFunc {
     /* More detailed description of the command for help strings */
     helpDescription?: string;
 
+    /* More detailed description of the command for help strings. Useful if
+     * something must be initialized first. */
+    helpDescriptionFunc?: () => string;
+
     /* Whether we need the DB for this command. Default false. */
     needDb?: boolean;
 
