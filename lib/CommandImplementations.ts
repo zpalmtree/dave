@@ -551,47 +551,59 @@ export async function handleStock(msg: Message, args: string[]) {
     const [ ticker ] = args;
 
     const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker.toUpperCase()}&apikey=${config.stockApiKey}`);
-    const stockData = await res.json();
 
-    const embed = new MessageEmbed()
-    .setColor(Number(stockData['Global Quote']['09. change']) < 0 ? '#C8102E' : '#00853D')
-    .setTitle(ticker.toUpperCase())
-    // .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-    .addFields(
-        {
-            name: 'Price',
-            value: `$${numberWithCommas(stockData['Global Quote']['05. price'])}`,
-            inline: true,
-        },
-        {
-            name: 'Change',
-            value: `${numberWithCommas(stockData['Global Quote']['10. change percent'].replace("%", ""))}%`,
-            inline: true,
-        },
-        {
-            name: 'Volume',
-            value: `$${numberWithCommas(stockData['Global Quote']['06. volume'])}`,
-            inline: true,
-        },
-        {
-            name: 'Open',
-            value: `$${numberWithCommas(stockData['Global Quote']['02. open'])}`,
-            inline: true,
-        },
-        {
-            name: 'Low',
-            value: `$${numberWithCommas(stockData['Global Quote']['04. low'])}`,
-            inline: true,
-        },
-        {
-            name: 'High',
-            value: `$${numberWithCommas(stockData['Global Quote']['03. high'])}`,
-            inline: true,
-        },
-    );
+    if (res.status == 200) {
+        const stockData = await res.json();
+
+        if (Object.entries(stockData['Global Quote']).length == 0) {
+            msg.channel.send("No ticker " + ticker.toUpperCase());
+            return;
+        }
+
+        const embed = new MessageEmbed()
+        .setColor(Number(stockData['Global Quote']['09. change']) < 0 ? '#C8102E' : '#00853D')
+        .setTitle(ticker.toUpperCase())
+        // .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
+        .addFields(
+            {
+                name: 'Price',
+                value: `$${numberWithCommas(stockData['Global Quote']['05. price'])}`,
+                inline: true,
+            },
+            {
+                name: 'Change',
+                value: `${numberWithCommas(stockData['Global Quote']['10. change percent'].replace("%", ""))}%`,
+                inline: true,
+            },
+            {
+                name: 'Volume',
+                value: `$${numberWithCommas(stockData['Global Quote']['06. volume'])}`,
+                inline: true,
+            },
+            {
+                name: 'Open',
+                value: `$${numberWithCommas(stockData['Global Quote']['02. open'])}`,
+                inline: true,
+            },
+            {
+                name: 'Low',
+                value: `$${numberWithCommas(stockData['Global Quote']['04. low'])}`,
+                inline: true,
+            },
+            {
+                name: 'High',
+                value: `$${numberWithCommas(stockData['Global Quote']['03. high'])}`,
+                inline: true,
+            },
+        );
+    
+    
+        msg.channel.send(embed);
+    } else {
+        msg.channel.send("Something went wrong fetching stock info for " + ticker.toUpperCase());
+    }
 
 
-    msg.channel.send(embed);
 }
 
 function numberWithCommas(s: string) {
