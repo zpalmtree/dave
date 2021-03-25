@@ -768,7 +768,12 @@ export const Commands: Command[] = [
             argsFormat: Args.Split,
             implementation: handleStock,
             description: 'Check a stock price',
-            helpDescription: `Check a stock price. ${config.prefix}stock IBM`,
+            examples: [
+                {
+                    name: 'Check Stock Price',
+                    value: 'stock IBM'
+                }
+            ],
             needDb: false,
         }
     },
