@@ -48,6 +48,7 @@ import {
     shuffleArray,
     formatLargeNumber,
     roundToNPlaces,
+    numberWithCommas,
 } from './Utilities';
 
 import {
@@ -540,6 +541,71 @@ function formatVaccineData(data: any, population: number, embed: MessageEmbed) {
             inline: true,
         },
     );
+}
+
+export async function handleStock(msg: Message, args: string[]) {
+    if (args.length === 0) {
+        msg.channel.send(`You need to include a ticker. Example: \`${config.prefix}stock IBM\``);
+        return;
+    }
+
+    const [ ticker ] = args;
+
+    const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${config.stockApiKey}`);
+
+    if (res.status === 200) {
+        const stockData = await res.json();
+
+        if (Object.entries(stockData['Global Quote']).length === 0) {
+            msg.channel.send("No ticker " + ticker.toUpperCase());
+            return;
+        }
+
+        const f = (s: string) => numberWithCommas(String(roundToNPlaces(Number(s), 2)))
+
+        const embed = new MessageEmbed()
+        .setColor(Number(stockData['Global Quote']['09. change']) < 0 ? '#C8102E' : '#00853D')
+        .setTitle(ticker.toUpperCase())
+        .addFields(
+            {
+                name: 'Price',
+                value: `$${f(stockData['Global Quote']['05. price'])}`,
+                inline: true,
+            },
+            {
+                name: 'Change',
+                value: `${f(stockData['Global Quote']['10. change percent'].replace("%", ""))}%`,
+                inline: true,
+            },
+            {
+                name: 'Volume',
+                value: `$${f(stockData['Global Quote']['06. volume'])}`,
+                inline: true,
+            },
+            {
+                name: 'Open',
+                value: `$${f(stockData['Global Quote']['02. open'])}`,
+                inline: true,
+            },
+            {
+                name: 'Low',
+                value: `$${f(stockData['Global Quote']['04. low'])}`,
+                inline: true,
+            },
+            {
+                name: 'High',
+                value: `$${f(stockData['Global Quote']['03. high'])}`,
+                inline: true,
+            },
+        );
+    
+    
+        msg.channel.send(embed);
+    } else {
+        msg.channel.send("Something went wrong fetching stock info for " + ticker.toUpperCase());
+    }
+
+
 }
 
 async function getChinkedWorldData(msg: Message): Promise<void> {

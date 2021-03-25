@@ -32,6 +32,7 @@ import {
     handleImgur,
     handleTime,
     handleDate,
+    handleStock,
     handleCountdown,
     handlePurge,
     handleTranslate,
@@ -760,6 +761,21 @@ export const Commands: Command[] = [
                 ],
             },
         ],
+    },
+    {
+        aliases: ['stock', 'stonk'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleStock,
+            description: 'Check a stock price',
+            examples: [
+                {
+                    name: 'Check Stock Price',
+                    value: 'stock IBM'
+                }
+            ],
+            needDb: false,
+        }
     },
     {
         aliases: ['timers'],
