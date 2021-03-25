@@ -544,7 +544,7 @@ function formatVaccineData(data: any, population: number, embed: MessageEmbed) {
 
 export async function handleStock(msg: Message, args: string[]) {
     if (args.length === 0) {
-        msg.channel.send("You need to include a ticker. Example: $stock IBM");
+        msg.channel.send(`You need to include a ticker. Example: \`${config.ticker}stock IBM\``);
         return;
     }
 
