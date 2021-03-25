@@ -767,7 +767,7 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Split,
             implementation: handleStock,
-            description: 'Check a stock price.',
+            description: 'Check a stock price',
             needDb: false,
         }
     },
