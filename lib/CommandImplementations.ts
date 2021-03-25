@@ -563,7 +563,6 @@ export async function handleStock(msg: Message, args: string[]) {
         const embed = new MessageEmbed()
         .setColor(Number(stockData['Global Quote']['09. change']) < 0 ? '#C8102E' : '#00853D')
         .setTitle(ticker.toUpperCase())
-        // .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
         .addFields(
             {
                 name: 'Price',
