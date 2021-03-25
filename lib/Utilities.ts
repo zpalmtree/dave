@@ -12,6 +12,10 @@ import translate = require('@vitalets/google-translate-api');
 import { RGB } from './Types';
 import { config } from './Config';
 
+export function numberWithCommas(s: string) {
+    return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
+}
+
 export function addReaction(emoji: string, message: Message): void {
     /* Find the reaction */
     const reaction = message.guild!.emojis.resolve(emoji);
