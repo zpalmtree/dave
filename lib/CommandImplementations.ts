@@ -551,7 +551,7 @@ export async function handleStock(msg: Message, args: string[]) {
 
     const [ ticker ] = args;
 
-    const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker.toUpperCase()}&apikey=${config.stockApiKey}`);
+    const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${config.stockApiKey}`);
 
     if (res.status == 200) {
         const stockData = await res.json();
