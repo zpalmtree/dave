@@ -1282,8 +1282,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     }
 
     const embed = new MessageEmbed()
-        .setTitle(`${amountToConvert} ${fromCurrency} is ${amount} ${toCurrency}`)
-        .setFooter('Exchange rates are updated every 8 hours');
+        .setTitle(`${amountToConvert} ${fromCurrency} is ${roundToNPlaces(amount as number, 2)} ${toCurrency}`);
 
     msg.channel.send(embed);
 }
