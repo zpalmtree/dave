@@ -58,6 +58,8 @@ import {
     capitalize,
     pickRandomItem,
     roundToNPlaces,
+    tryDeleteMessage,
+    tryReactMessage,
 } from '../Utilities';
 
 import {
@@ -523,13 +525,13 @@ export class Game {
             collector.stop();
 
             if (reaction.emoji.name === '👎') {
-                sentMessage.delete();
+                tryDeleteMessage(sentMessage);
                 return;
             }
 
             const [success, err] = await this.moveToCoord(userId, coords);
 
-            sentMessage.delete();
+            tryDeleteMessage(sentMessage);
 
             if (success) {
                 const attachment = await this.renderAndGetAttachment(userId);
@@ -546,11 +548,8 @@ export class Game {
             }
         });
 
-        try {
-            await sentMessage.react('👍');
-            await sentMessage.react('👎');
-        } catch (err) {
-        }
+        await tryReactMessage(sentMessage, '👍');
+        await tryReactMessage(sentMessage, '👎');
     }
 
     public async generateMovePreview(
@@ -998,14 +997,14 @@ export class Game {
                 collector.stop();
 
                 if (reaction.emoji.name === '👎') {
-                    sentMessage.delete();
+                    tryDeleteMessage(sentMessage);
                     resolve({ ended: false });
                     return;
                 }
 
                 const result = await this.doAttack(userId, coords);
 
-                sentMessage.delete();
+                tryDeleteMessage(sentMessage);
 
                 const nextShotPercentage = roundToNPlaces(player.getNextShotPercentage(coords) * 100, 0) + '%';
 
@@ -1079,11 +1078,8 @@ export class Game {
                 }
             });
 
-            try {
-                await sentMessage.react('👍');
-                await sentMessage.react('👎');
-            } catch (err) {
-            }
+            await tryReactMessage(sentMessage, '👍');
+            await tryReactMessage(sentMessage, '👎');
         });
     }
 

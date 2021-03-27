@@ -16,20 +16,6 @@ export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
 }
 
-export function addReaction(emoji: string, message: Message): void {
-    /* Find the reaction */
-    const reaction = message.guild!.emojis.resolve(emoji);
-
-    /* Couldn't find the reaction */
-    if (!reaction) {
-        console.error(`Failed to find emoji: ${emoji} on the server!`);
-        return;
-    }
-
-    /* Add the reaction */
-    message.react(reaction).catch(console.error);
-}
-
 export function chunk(arr: string, len: number) {
     const chunks = [];
     let i = 0;
@@ -103,7 +89,7 @@ export function canAccessCommand(msg: Message, react: boolean): boolean {
     }
 
     if (react) {
-        msg.react('❌');
+        tryReactMessage(msg, '❌');
     }
 
     return false;
@@ -198,4 +184,22 @@ export function formatLargeNumber(num: number): string {
     /* Whatever, who the fuck even knows the names of numbers this big. */
     return num.toString();
 
+}
+
+export async function tryDeleteMessage(msg: Message) {
+    try {
+        await msg.delete();
+        console.log(`Deleted message ${msg.id}`);
+    } catch {
+        console.log(`Failed to delete message ${msg.id}`);
+    }
+}
+
+export async function tryReactMessage(msg: Message, reaction: string) {
+    try {
+        await msg.react(reaction);
+        console.log(`Reacted to message ${msg.id} with ${reaction}`);
+    } catch {
+        console.log(`Failed to react with ${reaction} to message ${msg.id}`);
+    }
 }

@@ -13,6 +13,10 @@ import {
     Direction,
 } from './Types';
 
+import {
+    tryReactMessage,
+} from '../Utilities';
+
 export async function loadImage(filename: string): Promise<fabric.Image> {
     return new Promise((resolve, reject) => {
         try {
@@ -211,7 +215,7 @@ export async function addMoveReactions(msg: Message, game: Game) {
     });
 
     for (const reaction of reactions) {
-        await msg.react(reaction);
+        await tryReactMessage(msg, reaction);
     }
 }
 

@@ -25,6 +25,7 @@ import {
     capitalize,
     getUsername,
     shuffleArray,
+    tryReactMessage,
 } from './Utilities';
 
 import {
@@ -727,8 +728,8 @@ async function awaitWatchReactions(
     attendingFieldIndex: number,
     db: Database) {
 
-    await msg.react('👍');
-    await msg.react('👎');
+    await tryReactMessage(msg, '👍');
+    await tryReactMessage(msg, '👎');
 
     const collector = msg.createReactionCollector((reaction, user) => {
         return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;

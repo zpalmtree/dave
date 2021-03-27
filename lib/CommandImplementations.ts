@@ -49,6 +49,8 @@ import {
     formatLargeNumber,
     roundToNPlaces,
     numberWithCommas,
+    tryDeleteMessage,
+    tryReactMessage,
 } from './Utilities';
 
 import {
@@ -350,7 +352,7 @@ export async function handleSuggest(msg: Message, suggestion: string, db: Databa
         [ suggestion, msg.channel.id ]
     );
 
-    await msg.react('👍');
+    await tryReactMessage(msg, '👍');
 }
 
 export async function handleKitty(msg: Message, args: string): Promise<void> {
@@ -930,7 +932,7 @@ export async function handlePurge(msg: Message) {
 
     const sentMessage = await msg.channel.send(embed);
 
-    await sentMessage.react('👍');
+    await tryReactMessage(sentMessage, '👍');
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return reaction.emoji.name === '👍' && user.id === msg.author.id
@@ -968,7 +970,7 @@ export async function handlePurge(msg: Message) {
                 for (const message of messages) {
                     if (message.author.id === msg.author.id) {
                         try {
-                            await message.delete();
+                            await tryDeleteMessage(message);
                             console.log(`Deleted message ${i} for ${msg.author.id}`);
                         } catch (err) {
                             console.log(err);
@@ -1835,8 +1837,6 @@ export async function handleYoutubeScrape(msg: Message, args: string): Promise<u
         .itemSectionRenderer
         .contents;
 
-    console.log(videoData);
-
     const videos = videoData.filter((x: any) => x.videoRenderer).map((x: any) => {
         return {
             url: `https://www.youtube.com/watch?v=${x.videoRenderer.videoId}`,
@@ -1964,7 +1964,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
 
     const sentMessage = await msg.channel.send(embed);
 
-    await sentMessage.react('👍');
+    await tryReactMessage(sentMessage, '👍');
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return ['👍'].includes(reaction.emoji.name) && !user.bot;
@@ -1981,7 +1981,8 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         readyUsers.add(user.id);
 
         if (notReadyUsers.size === 0) {
-            sentMessage.delete();
+            collector.stop('messageDelete');
+            tryDeleteMessage(sentMessage);
             handleCountdown("Let's jam!", msg, '7');
         } else {
             const newFields = await f();
@@ -2038,8 +2039,8 @@ export async function handlePoll(msg: Message, args: string) {
 
     const sentMessage = await msg.channel.send(embed);
 
-    await sentMessage.react('👍');
-    await sentMessage.react('👎');
+    await tryReactMessage(sentMessage, '👍');
+    await tryReactMessage(sentMessage, '👎');
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
@@ -2151,7 +2152,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
     const usedEmojis = emojis.slice(0, options.length);
 
     for (const emoji of usedEmojis) {
-        await sentMessage.react(emoji);
+        await tryReactMessage(sentMessage, emoji);
     }
 
     const collector = sentMessage.createReactionCollector((reaction, user) => {

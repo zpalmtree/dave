@@ -20,6 +20,7 @@ import { dubTypes } from './Dubs';
 
 import {
     canAccessCommand,
+    tryReactMessage,
 } from './Utilities';
 
 import {
@@ -185,7 +186,7 @@ async function main() {
         } catch (err) {
             console.error('Caught error: ' + err.toString());
             console.log(err.stack);
-            msg.react('🔥');
+            tryReactMessage(msg, '🔥');
         }
     });
 

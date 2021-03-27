@@ -8,7 +8,11 @@ import {
     GuildMember,
 } from 'discord.js';
 
-import { getUsername } from './Utilities';
+import {
+    getUsername,
+    tryReactMessage,
+    tryDeleteMessage,
+} from './Utilities';
 
 import { config } from './Config';
 
@@ -191,7 +195,7 @@ export class Paginate<T> {
     }
 
     public async deleteMessage() {
-        return this.sentMessage?.delete();
+        await tryDeleteMessage(this.sentMessage!);
     }
 
     public async getPageFooter() {
@@ -325,18 +329,18 @@ export class Paginate<T> {
         });
 
         for (const reaction of this.customReactions || []) {
-            await this.sentMessage.react(reaction);
+            await tryReactMessage(this.sentMessage, reaction);
         }
 
         if (shouldPaginate) {
-            await this.sentMessage.react('⬅️');
-            await this.sentMessage.react('➡️');
+            await tryReactMessage(this.sentMessage, '⬅️');
+            await tryReactMessage(this.sentMessage, '➡️');
 
             /* Not essential to be ordered or to block execution, lets do these non async */
-            this.sentMessage.react('🔒');
+            tryReactMessage(this.sentMessage, '🔒');
         }
 
-        this.sentMessage.react('❌');
+        tryReactMessage(this.sentMessage, '❌');
 
         return this.sentMessage;
     }
@@ -376,7 +380,7 @@ export class Paginate<T> {
         const guildUser = await this.sourceMessage.guild?.members.fetch(user.id);
 
         if (this.havePermission(guildUser, user)) {
-            this.sentMessage!.delete();
+            tryDeleteMessage(this.sentMessage!);
             return;
         }
 
