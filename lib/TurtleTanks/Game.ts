@@ -107,6 +107,8 @@ export class Game {
 
     private ended: boolean = false;
 
+    private tickLoopLaunched = false;
+
     constructor(
         channel: TextChannel,
         db: Database,
@@ -479,7 +481,8 @@ export class Game {
             actionInitiator: username,
         });
 
-        if (this.players.size === 2) {
+        if (this.players.size + this.deadPlayers.size === 2 && !this.tickLoopLaunched) {
+            this.tickLoopLaunched = true;
             this.timer = setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
         }
 
