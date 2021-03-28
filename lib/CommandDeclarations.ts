@@ -77,6 +77,7 @@ import {
     handleTankStatus,
     handleTankLogs,
     handleTankShoot,
+    handleTankDestroy,
 } from './TurtleTanks/TurtleTanks';
 
 import {
@@ -889,8 +890,24 @@ export const Commands: Command[] = [
             argsFormat: Args.Split,
             implementation: handleTurtleTanks,
             description: 'Play Turtle Tanks!',
+            helpDescription: `Turtle Tanks is a simple game where you must shoot ` +
+                `and destroy other tanks with your weapons.\n\n` +
+                `Moving and shooting both require points. There are a few ways ` +
+                `to get points. You will start with a few points. Points will be awarded ` +
+                `automatically every game tick (Once per hour). Finally, ` +
+                `you get points for killing another tank.\n\n` +
+                `Your tank can move in all 8 directions - vertically, horizontally, ` +
+                `and diagonally. Moving diagonally uses the same amount of points ` +
+                `as a regular move.\n\n` +
+                `Your weapon has a maximum range. It cannot hit tiles beyond this ` +
+                `maximum range. Note that some weapons have a radius, and so hit more ` +
+                `than just one tile. This may give you a slight range advantage, by ` +
+                `instead hitting the tile next to your opponent. This can also ` + 
+                `be used to damage multiple tanks at once.\n` +
+                `Your weapon sometimes will miss. Try increasing your accuracy ` +
+                `by shooting the same tile multiple times. Your accuracy will increase ` +
+                `every shot, up to a maximum.`,
             needDb: true,
-            disabled: false,
         },
         subCommands: [
             {
@@ -908,15 +925,7 @@ export const Commands: Command[] = [
                     },
                     {
                         name: 'Move in a direction',
-                        value: 'tanks move up',
-                    },
-                    {
-                        name: 'Move diagonally',
                         value: 'tanks move northwest',
-                    },
-                    {
-                        name: 'Move diagonally',
-                        value: 'tanks move down-left',
                     },
                 ],
             },
@@ -970,6 +979,12 @@ export const Commands: Command[] = [
                         value: 'tanks shoot @bob',
                     },
                 ],
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleTankDestroy,
+                description: 'Destroy the currently running game (Mod only)',
+                aliases: ['destroy'],
             },
         ],
         hidden: true,

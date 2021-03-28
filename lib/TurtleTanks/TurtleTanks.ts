@@ -26,6 +26,7 @@ import {
 import {
     capitalize,
     getUsername,
+    haveRole,
 } from '../Utilities';
 
 import {
@@ -403,5 +404,24 @@ export async function handleTankShoot(msg: Message, args: string, db: Database) 
         storedGames.delete(msg.channel.id);
 
         msg.channel.send(`Game concluded. Type \`${config.prefix}tanks\` to launch a new game!`);
+    }
+}
+
+export async function handleTankDestroy(msg: Message) {
+    if (msg.author.id === config.god || haveRole(msg, 'Mod')) {
+        const game = storedGames.get(msg.channel.id);
+
+        if (!game) {
+            msg.reply('No game is currently running in this channel.')
+            return;
+        }
+
+        await game.cleanup();
+
+        storedGames.delete(msg.channel.id);
+
+        msg.reply('Game successfully destroyed.');
+    } else {
+        msg.reply('You don\'t have permission to do that.');
     }
 }
