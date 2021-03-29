@@ -274,6 +274,8 @@ export class Game {
             this.channel.send(pointMessage);
         }
 
+        await this.storeInDB();
+
         this.timer = setTimeout(() => this.handleGameTick(), MILLISECONDS_PER_TICK);
     }
 
