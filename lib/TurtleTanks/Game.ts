@@ -29,6 +29,7 @@ import {
     ShotEffect,
     PlayerShotEffect,
     ShotResult,
+    ImageType,
 } from './Types';
 
 import {
@@ -62,10 +63,7 @@ import {
     tryReactMessage,
 } from '../Utilities';
 
-import {
-    bodies,
-    faces,
-} from './Avatar';
+import { loadAvatar } from './Avatar';
 
 import {
     SmallMissile,
@@ -327,8 +325,7 @@ export class Game {
         const previewPlayer = new Player({
             ...player,
             coords,
-            body: player.bodyFilePath,
-            face: player.faceFilePath,
+            avatar: player.avatar,
         });
 
         await this.renderPlayer(previewPlayer, true);
@@ -447,6 +444,16 @@ export class Game {
             }
         }
 
+        const avatar = await loadAvatar(userId, this.database);
+
+        if (team && team.body) {
+            const body = avatar.find((x) => x.imageType === ImageType.Body);
+
+            if (body) {
+                body.filepath = team.body;
+            }
+        }
+
         const player = new Player({
             userId,
             points,
@@ -457,10 +464,7 @@ export class Game {
             pointsPerKill: this.rules.defaultPointsPerKill,
             coords: square.coords,
             team,
-            body: team
-                ? team.body
-                : pickRandomItem(bodies),
-            face: pickRandomItem(faces),
+            avatar,
             weapon: SmallMissile,
         });
 

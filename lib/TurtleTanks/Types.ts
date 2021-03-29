@@ -42,11 +42,8 @@ export interface PlayerConfig {
     /* Players discord user id */
     userId: string;
 
-    /* Body filepath to use */
-    body: string;
-
-    /* Face filepath to use */
-    face: string;
+    /* Users avatar */
+    avatar: AvatarComponent[];
 
     team?: Team;
 
@@ -171,4 +168,17 @@ export interface ShotEffect {
 
     /* Total damage caused to players by this shot */
     totalDamage: number;
+}
+
+export interface AvatarComponent {
+    filepath: string;
+
+    zIndex: number;
+
+    imageType: ImageType;
+}
+
+export enum ImageType {
+    Face = 0,
+    Body = 1,
 }

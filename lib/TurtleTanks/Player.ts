@@ -2,8 +2,6 @@ import { Database } from 'sqlite3';
 import { fabric } from 'fabric';
 
 import { loadImage } from './Utilities';
-import { pickRandomItem } from '../Utilities';
-import { faces, bodies } from './Avatar';
 
 import {
     Coordinate,
@@ -13,6 +11,8 @@ import {
     ShotEffect,
     ShotResult,
     PlayerShot,
+    ImageType,
+    AvatarComponent,
 } from './Types';
 
 import {
@@ -33,12 +33,6 @@ export class Player {
 
     /* Coordinates of the player on the grid */
     public coords: Coordinate;
-
-    /* File path of the body image to use */
-    public bodyFilePath: string;
-
-    /* File path of the face image to use */
-    public faceFilePath: string;
 
     /* Game points. Need points to make actions. */
     public points: number;
@@ -67,14 +61,12 @@ export class Player {
     /* Has the player reached 0hp and died */
     public dead: boolean = false;
 
-    /* Loaded body image */
-    private body: fabric.Image | undefined;
-
-    /* Loaded face image */
-    private face: fabric.Image | undefined;
+    public avatar: AvatarComponent[];
 
     /* Loaded player highlight */
     private highlight: fabric.Circle | undefined;
+
+    private loadedAvatar: fabric.Image[] | undefined;
 
     private shotHistory: PlayerShot[] = [];
 
@@ -82,8 +74,7 @@ export class Player {
         this.userId = playerInfo.userId;
         this.coords = playerInfo.coords;
 
-        this.bodyFilePath = playerInfo.body;
-        this.faceFilePath = playerInfo.face;
+        this.avatar = playerInfo.avatar;
 
         this.points = playerInfo.points;
         this.hp = playerInfo.hp;
@@ -99,19 +90,28 @@ export class Player {
     }
 
     private async init(canvas: fabric.StaticCanvas) {
-        if (this.body && this.face && this.highlight) {
+        if (this.highlight && this.loadedAvatar) {
             return;
         }
 
-        if (!this.faceFilePath) {
-            this.faceFilePath = pickRandomItem(faces);
+        const images = [];
+
+        const sortedItems = this.avatar.sort((a: AvatarComponent, b: AvatarComponent) => a.zIndex - b.zIndex); 
+
+        for (const item of sortedItems) {
+            let folderPath = 'bodies';
+
+            if (item.imageType === ImageType.Face) {
+                folderPath = 'faces';
+            }
+
+            images.push(loadImage(`${folderPath}/${AVATAR_SIZES}/${item.filepath}`));
         }
 
-        const bodyPromise = loadImage(`bodies/${AVATAR_SIZES}/${this.bodyFilePath}`);
-        const facePromise = loadImage(`faces/${AVATAR_SIZES}/${this.faceFilePath}`);
+        const loadedImages = await Promise.all(images);
 
-        this.body = await bodyPromise;
-        this.face = await facePromise;
+        this.loadedAvatar = loadedImages;
+
         this.highlight = new fabric.Circle({
             radius: (PIXELS_PER_TILE / 2) * 0.8,
             stroke: HIGHLIGHT_COLOR,
@@ -121,9 +121,11 @@ export class Player {
             originY: 'center',
         });
 
+        for (const image of this.loadedAvatar) {
+            canvas.add(image);
+        }
+
         canvas.add(this.highlight);
-        canvas.add(this.body);
-        canvas.add(this.face);
     }
 
     public async render(
@@ -134,19 +136,16 @@ export class Player {
 
         await this.init(canvas);
 
-        this.body!.set({
-            left: widthOffset + (PIXELS_PER_TILE * 0.5),
-            top: heightOffset + (PIXELS_PER_TILE * 0.5),
-            originX: 'center',
-            originY: 'center',
-        });
-
-        this.face!.set({
-            left: widthOffset + (PIXELS_PER_TILE * 0.5),
-            top: heightOffset + (PIXELS_PER_TILE * 0.5),
-            originX: 'center',
-            originY: 'center',
-        });
+        if (this.loadedAvatar) {
+            for (const image of this.loadedAvatar) {
+                image.set({
+                    left: widthOffset + (PIXELS_PER_TILE * 0.5),
+                    top: heightOffset + (PIXELS_PER_TILE * 0.5),
+                    originX: 'center',
+                    originY: 'center',
+                });
+            }
+        }
 
         if (highlightPlayer) {
             this.highlight!.set({
@@ -166,12 +165,10 @@ export class Player {
     }
 
     public remove(canvas: fabric.StaticCanvas) {
-        if (this.face) {
-            canvas.remove(this.face);
-        }
-        
-        if (this.body) {
-            canvas.remove(this.body);
+        if (this.loadedAvatar) {
+            for (const image of this.loadedAvatar) {
+                canvas.remove(image);
+            }
         }
 
         if (this.highlight) {

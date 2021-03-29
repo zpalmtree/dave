@@ -32,6 +32,7 @@ import {
 import {
     Team,
     LogMessage,
+    ImageType,
 } from './Types';
 
 import {
@@ -46,16 +47,22 @@ import { config } from '../Config';
 export async function handleTurtle(msg: Message, face: string) {
     const canvas = new fabric.StaticCanvas(null, {});
 
-    const filePath = face
+    const filepath = face
         ? face + '.png'
         : '';
 
-    const outputFileName = filePath === ''
+    const outputFileName = filepath === ''
         ? 'turtle.png'
-        : filePath;
+        : filepath;
 
-    if (faces.includes(filePath)) {
-        await specificTurtle(canvas, filePath);
+    if (faces.includes(filepath)) {
+        const avatar = [{
+            zIndex: 1,
+            imageType: ImageType.Face,
+            filepath,
+        }];
+
+        await specificTurtle(canvas, avatar);
     } else {
         await randomTurtle(canvas);
     }
@@ -238,7 +245,7 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
 
     const canvas = new fabric.StaticCanvas(null, {});
 
-    await specificTurtle(canvas, player.faceFilePath, player.bodyFilePath);
+    await specificTurtle(canvas, player.avatar);
 
     canvas.renderAll();
 

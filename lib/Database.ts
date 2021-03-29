@@ -180,6 +180,14 @@ export async function createTablesIfNeeded(db: Database) {
         team VARCHAR(255),
         CONSTRAINT channel_player UNIQUE (user_id, channel_id)
     )`, db);
+
+    await executeQuery(`CREATE TABLE IF NOT EXISTS turtle_avatars (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL,
+        filepath VARCHAR(255) NOT NULL,
+        z_index INTEGER NOT NULL,
+        image_type INTEGER NOT NULL
+    )`, db);
 }
 
 export async function deleteTablesIfNeeded(db: Database) {

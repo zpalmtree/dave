@@ -170,7 +170,10 @@ async function main() {
 
     db.on('error', console.error);
 
-    const client = new Client();
+    const client = new Client({
+        restRequestTimeout: 5000,
+        retryLimit: 3,
+    });
 
     client.on('ready', async () => {
         console.log('Logged in');
@@ -184,13 +187,16 @@ async function main() {
             await handleMessage(msg as Message, db);
         /* Usually discord permissions errors */
         } catch (err) {
-            console.error('Caught error: ' + err.toString());
-            console.log(err.stack);
+            console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${err.toString()}`);
+            console.log(`Error stack trace: ${err.stack}`);
             tryReactMessage(msg, '🔥');
         }
     });
 
-    client.on('error', console.error);
+    client.on('error', (err) => {
+        console.log(`Caught error from discord client: ${err.toString()}`);
+        console.log(`Error stack trace: ${err.stack}`);
+    });
 
     client.login(config.token)
           .catch((err) => {
