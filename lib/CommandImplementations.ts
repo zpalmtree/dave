@@ -50,6 +50,7 @@ import {
     roundToNPlaces,
     numberWithCommas,
     tryDeleteMessage,
+    tryDeleteReaction,
     tryReactMessage,
 } from './Utilities';
 
@@ -941,7 +942,7 @@ export async function handlePurge(msg: Message) {
     let inProgress = false;
 
     collector.on('collect', async (reaction, user) => {
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
 
         if (inProgress) {
             return;
@@ -1971,7 +1972,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     }, { time: 60 * 5 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
 
         if (!notReadyUsers.has(user.id)) {
             return;
@@ -2047,7 +2048,7 @@ export async function handlePoll(msg: Message, args: string) {
     }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
 
         if (reaction.emoji.name === '👍') {
             yesUsers.add(user.id);
@@ -2160,7 +2161,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
     }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction, user) => {
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
 
         const index = emojiToIndexMap.get(reaction.emoji.name) || 0;
 

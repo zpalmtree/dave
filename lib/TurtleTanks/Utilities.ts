@@ -15,6 +15,7 @@ import {
 
 import {
     tryReactMessage,
+    tryDeleteReaction,
 } from '../Utilities';
 
 export async function loadImage(filename: string): Promise<fabric.Image> {
@@ -193,11 +194,7 @@ export async function addMoveReactions(msg: Message, game: Game) {
     }, { time: 60 * 15 * 1000 });
 
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
-        try {
-            reaction.users.remove(user.id);
-        } catch (err) {
-            console.log(err);
-        }
+        tryDeleteReaction(reaction, user.id);
         
         const currentCoords = game.fetchPlayerLocation(user.id);
 

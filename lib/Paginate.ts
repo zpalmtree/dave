@@ -12,6 +12,7 @@ import {
     getUsername,
     tryReactMessage,
     tryDeleteMessage,
+    tryDeleteReaction,
 } from './Utilities';
 
 import { config } from './Config';
@@ -349,7 +350,7 @@ export class Paginate<T> {
         const guildUser = await this.sourceMessage.guild?.members.fetch(user.id);
 
         if (!this.havePermission(guildUser, user)) {
-            reaction.users.remove(user.id);
+            tryDeleteReaction(reaction, user.id);
             return;
         }
 
@@ -364,7 +365,7 @@ export class Paginate<T> {
             return;
         }
 
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
 
         /* Locker is the current user, remove the lock */
         if (this.lockID === user.id) {
@@ -384,7 +385,7 @@ export class Paginate<T> {
             return;
         }
 
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
     }
 
     private async changePage(
@@ -392,7 +393,7 @@ export class Paginate<T> {
         reaction: MessageReaction,
         user: User) {
 
-        reaction.users.remove(user.id);
+        tryDeleteReaction(reaction, user.id);
 
         if (this.locked && user.id !== this.lockID) {
             return;
