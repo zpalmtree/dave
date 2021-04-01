@@ -7,6 +7,8 @@ import {
     TextChannel,
 } from 'discord.js';
 
+import fetch from 'node-fetch';
+import * as FormData from 'form-data';
 import translate = require('@vitalets/google-translate-api');
 
 import { RGB } from './Types';
@@ -211,4 +213,28 @@ export async function tryDeleteReaction(reaction: MessageReaction, id: string) {
     } catch (err) {
         console.log(`Failed to remove reaction ${reaction.emoji.name} for ${id}, ${err.toString()}, ${err.stack}`);
     }
+}
+
+export async function uploadToImgur(image: any, filename?: string): Promise<string> {
+    const form = new FormData();
+
+    form.append('image', image, {
+        filename,
+    });
+
+    const response = await fetch(`https://api.imgur.com/3/image`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Client-ID ${config.imgurClientId}`,
+        },
+        body: form,
+    });
+
+    const data = await response.json();
+
+    if (!data.success) {
+        throw new Error(data.data.error.message);
+    }
+
+    return data.data.link;
 }

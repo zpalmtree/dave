@@ -1,8 +1,23 @@
+import {
+    Message,
+    MessageAttachment,
+    MessageEmbed,
+    MessageReaction,
+    User,
+} from 'discord.js';
+
+import * as FormData from 'form-data';
+import fetch from 'node-fetch';
+
 import { fabric } from 'fabric';
 import { Database } from 'sqlite3';
 
 import { loadImage } from './Utilities';
-import { pickRandomItem } from '../Utilities';
+
+import {
+    pickRandomItem,
+    uploadToImgur,
+} from '../Utilities';
 
 import {
     selectQuery,
@@ -13,6 +28,14 @@ import {
     AvatarComponent,
     ImageType,
 } from './Types';
+
+import {
+    Paginate,
+    DisplayType,
+    ModifyEmbed,
+} from '../Paginate';
+
+import { config } from '../Config';
 
 export const bodies = [
     'body1.png',
@@ -185,4 +208,74 @@ export async function saveAvatar(images: AvatarComponent[], userId: string, db: 
             ],
         );
     }
+}
+
+/* Discord is fucking shit and we can't edit a message attachment. Instead,
+ * we have to use an image link. So, we upload our generated images to
+ * imgur, and store them in this map to avoid doing it twice */
+const uploadedImageMap = new Map<string, string>();
+
+export async function customizeAvatar(msg: Message, db: Database) {
+    const avatar = await loadAvatar(msg.author.id, db);
+
+    const embed = new MessageEmbed()
+        .setTitle('Modify your Turtle Tank Avatar');
+
+    const f = async (item: string, embed: MessageEmbed) => {
+        embed.setDescription('Scroll through the faces and react with 👍 to confirm your chosen avatar.');
+
+        const imgurURL = uploadedImageMap.get(item);
+
+        if (imgurURL !== undefined) {
+            embed.setImage(imgurURL);
+            return embed;
+        }
+
+        const canvas = new fabric.StaticCanvas(null, {});
+
+        const avatar = await specificTurtle(canvas, [{
+            filepath: item,
+            zIndex: 1,
+            imageType: ImageType.Face,
+        }]);
+
+        canvas.renderAll();
+
+        const image = await uploadToImgur((canvas as any).createPNGStream(), item);
+
+        uploadedImageMap.set(item, image);
+
+        embed.setImage(image);
+
+        return embed;
+    }
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        displayType: DisplayType.EmbedData,
+        displayFunction: f,
+        data: faces,
+        embed,
+        customReactions: ['👍'],
+        customReactionFunction: async (items: string[], embed: MessageEmbed, reaction: MessageReaction, user: User) => {
+            const selectedFace = avatar.find((x) => x.imageType === ImageType.Face) as AvatarComponent;
+
+            selectedFace.filepath = items[0];
+
+            await saveAvatar(avatar, msg.author.id, db);
+
+            embed.setDescription('Avatar updated. Will not effect currently running games.');
+
+            return embed;
+        },
+        permittedUsers: [msg.author.id],
+    });
+
+    const selectedFace = avatar.find((x) => x.imageType === ImageType.Face);
+
+    if (selectedFace) {
+        pages.setPage(faces.findIndex((x) => x === selectedFace.filepath) as number);
+    }
+
+    await pages.sendMessage();
 }

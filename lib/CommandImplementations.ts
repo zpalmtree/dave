@@ -826,7 +826,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
         
         const response = await fetch(`https://api.imgur.com/3/gallery/${gallery}/top/all/${index}`, {
             headers: {
-                'Authorization': 'Client-ID de8a61d6a484c39',
+                'Authorization': `Client-ID ${config.imgurClientId}`,
             },
         });
 

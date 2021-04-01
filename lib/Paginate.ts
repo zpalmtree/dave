@@ -1,5 +1,7 @@
 import {
+    APIMessage,
     Message,
+    MessageAttachment,
     MessageEmbed,
     User,
     MessageReaction,
@@ -25,6 +27,8 @@ export enum DisplayType {
 
 type Asyncable<T> = T | Promise<T>
 
+export type EditableResponse = string | MessageEmbed | MessageAttachment;
+
 export type DisplayItem<T> = (
     this: Paginate<T>,
     item: T,
@@ -34,13 +38,13 @@ export type ModifyEmbed<T> = (
     this: Paginate<T>,
     item: T,
     embed: MessageEmbed,
-) => any;
+) => Asyncable<any>;
 
 export type ModifyMessage<T> = (
     this: Paginate<T>,
     items: T[],
     message: Message,
-) => Asyncable<string>;
+) => Asyncable<EditableResponse>;
 
 export type CustomReactionEmbedCallback<T> = (
     this: Paginate<T>,
@@ -56,7 +60,7 @@ export type CustomReactionCallback<T> = (
     message: Message,
     reaction: MessageReaction,
     user: User,
-) => Asyncable<string>;
+) => Asyncable<EditableResponse>;
 
 export type PaginateFunction<T> = DisplayItem<T>
                                 | ModifyEmbed<T>
@@ -90,6 +94,8 @@ export interface PaginateOptions<T> {
     customReactions?: string[];
 
     customReactionFunction?: CustomReactionFunction<T>;
+
+    permittedUsers?: string[];
 }
 
 export class Paginate<T> {
@@ -131,6 +137,8 @@ export class Paginate<T> {
 
     private customReactionFunction: CustomReactionFunction<T> | undefined;
 
+    private permittedUsers: string[] | undefined;
+
     public constructor(options: PaginateOptions<T>) {
         const {
             sourceMessage,
@@ -143,6 +151,7 @@ export class Paginate<T> {
             determineDisplayTypeFunction,
             customReactions,
             customReactionFunction,
+            permittedUsers,
         } = options;
 
         this.sourceMessage = sourceMessage;
@@ -157,6 +166,7 @@ export class Paginate<T> {
                          + (data.length % this.itemsPerPage ? 1 : 0);
         this.customReactionFunction = customReactionFunction;
         this.customReactions = customReactions;
+        this.permittedUsers = permittedUsers;
 
         if (customReactions && !customReactionFunction) {
             throw new Error('Must provide custom reaction function with custom reactions!');
@@ -288,6 +298,10 @@ export class Paginate<T> {
         }, { time: 60 * 15 * 1000, dispose: true });
 
         this.collector.on('collect', async (reaction: MessageReaction, user: User) => {
+            if (this.permittedUsers && !this.permittedUsers.includes(user.id)) {
+                return;
+            }
+
             switch (reaction.emoji.name) {
                 case '⬅️': {
                     this.changePage(-1, reaction, user);
@@ -318,6 +332,10 @@ export class Paginate<T> {
         });
 
         this.collector.on('remove', async (reaction: MessageReaction, user: User) => {
+            if (this.permittedUsers && !this.permittedUsers.includes(user.id)) {
+                return;
+            }
+
             switch (reaction.emoji.name) {
                 case '🔒': {
                     this.lockEmbed(reaction, user);
@@ -344,6 +362,14 @@ export class Paginate<T> {
         tryReactMessage(this.sentMessage, '❌');
 
         return this.sentMessage;
+    }
+
+    public setPage(page: number) {
+        if (page < 0 || page >= this.totalPages) {
+            throw new Error(`Invalid set page value: ${page}`);
+        }
+
+        this.currentPage = page;
     }
 
     private async lockEmbed(reaction: MessageReaction, user: User) {

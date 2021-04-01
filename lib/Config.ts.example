@@ -14,7 +14,9 @@ class Config {
 
     public weatherApiKey: string = 'enter weather api key here';
 
-    public stockApiKey: string = "enter alpha vantage api key here";
+    public stockApiKey: string = 'enter alpha vantage api key here';
+
+    public imgurClientId: string = 'enter imgur client id here';
 
     public doggoBreedLink: string = 'https://pastebin.com/BS8JKb7V';
 

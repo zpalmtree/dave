@@ -81,6 +81,7 @@ import {
 } from './TurtleTanks/TurtleTanks';
 
 import {
+    customizeAvatar,
     faces,
 } from './TurtleTanks/Avatar';
 
@@ -985,6 +986,19 @@ export const Commands: Command[] = [
                 implementation: handleTankDestroy,
                 description: 'Destroy the currently running game (Mod only)',
                 aliases: ['destroy'],
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: customizeAvatar,
+                description: 'Customize your turtle tank avatar',
+                aliases: ['customize', 'personalize', 'avatar'],
+                examples: [
+                    {
+                        name: 'Customize your tank avatar',
+                        value: 'tanks customize',
+                    },
+                ],
+                needDb: true,
             },
         ],
         hidden: true,
