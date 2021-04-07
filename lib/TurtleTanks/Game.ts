@@ -8,6 +8,8 @@ import {
     TextChannel,
 } from 'discord.js';
 
+import * as moment from 'moment';
+
 import { fabric } from 'fabric';
 import { Database } from 'sqlite3';
 
@@ -167,7 +169,7 @@ export class Game {
     public async init() {
         this.log.push({
             message: 'Game was created',
-            timestamp: new Date(),
+            timestamp: moment.utc(),
             actionInitiator: 'System',
         });
     }
@@ -262,7 +264,7 @@ export class Game {
             this.log.push({
                 message: `${username} was awarded ${player.pointsPerTick} points`,
                 actionInitiator: 'System',
-                timestamp: new Date(),
+                timestamp: moment.utc(),
             });
 
             pointMessage += `<@${id}> You were awarded ${player.pointsPerTick} points. You now have ${player.points} points\n`;
@@ -483,7 +485,7 @@ export class Game {
 
         this.log.push({
             message,
-            timestamp: new Date(),
+            timestamp: moment.utc(),
             actionInitiator: username,
         });
 
@@ -659,7 +661,7 @@ export class Game {
             message: `${username} moved from ${formatCoordinate(oldPosition)} to ${formatCoordinate(coords)}, ` +
                 `consuming ${result.pointsRequired} points`,
             actionInitiator: username,
-            timestamp: new Date(),
+            timestamp: moment.utc(),
         });
 
         await player.storeInDB(this.database, this.channel.id);
@@ -872,7 +874,7 @@ export class Game {
             message: `${attackerName} fired a ${attacker.weapon.name} at ` +
                 `${result.affectedPlayers.length} players for a total of ${result.totalDamage} damage, ` +
                 `consuming ${attacker.pointsPerShot} points`,
-            timestamp: new Date(),
+            timestamp: moment.utc(),
             actionInitiator: attackerName,
         });
 
@@ -907,7 +909,7 @@ export class Game {
 
                 this.log.push({
                     message: `${attackerName} was awarded ${attacker.pointsPerKill} points for killing a player.`,
-                    timestamp: new Date(),
+                    timestamp: moment.utc(),
                     actionInitiator: attackerName,
                 });
             } else {
@@ -916,7 +918,7 @@ export class Game {
 
             this.log.push({
                 message,
-                timestamp: new Date(),
+                timestamp: moment.utc(),
                 actionInitiator: attackerName,
             });
         }

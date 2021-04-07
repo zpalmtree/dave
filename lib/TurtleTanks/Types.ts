@@ -1,3 +1,5 @@
+import * as moment from 'moment';
+
 import { MapTile } from './MapTile';
 import { Player } from './Player';
 
@@ -118,7 +120,7 @@ export interface LogMessage {
     actionInitiator: string;
 
     /* When was the log message created */
-    timestamp: Date;
+    timestamp: moment.Moment;
 }
 
 export enum ShotResult {

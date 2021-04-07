@@ -330,7 +330,7 @@ export async function handleTankLogs(msg: Message, db: Database) {
     const [game, content] = await createAndJoinGameIfNeeded(msg, db);
 
     /* Newer logs are at the end */
-    const logs = [...game.getLogs()].sort((a: LogMessage, b: LogMessage) => b.timestamp.getTime() - a.timestamp.getTime())
+    const logs = [...game.getLogs()].sort((a: LogMessage, b: LogMessage) => b.timestamp.valueOf() - a.timestamp.valueOf())
 
     const embed = new MessageEmbed()
         .setTitle('Game Logs');
@@ -352,7 +352,7 @@ export async function handleTankLogs(msg: Message, db: Database) {
                 },
                 {
                     name: 'Time',
-                    value: moment(log.timestamp).fromNow(),
+                    value: moment.utc(log.timestamp).fromNow(),
                     inline: true,
                 },
             ];

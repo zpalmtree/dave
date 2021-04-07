@@ -117,9 +117,9 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
             {
                 name: 'Time',
                 /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-                value: moment().isBefore(moment(watch.time).subtract(6, 'hours'))
-                    ? moment(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                    : `${capitalize(moment(watch.time).fromNow())}, ${moment(watch.time).utcOffset(-6).format('HH:mm')} CST`,
+                value: moment.utc().isBefore(moment.utc(watch.time).subtract(6, 'hours'))
+                    ? moment.utc(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
+                    : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(-6).format('HH:mm')} CST`,
                 inline: true,
             },
             {
@@ -267,7 +267,7 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
             const hours = Number(hoursStr) || 0;
             const minutes = Number(minutesStr) || 0;
 
-            parsedTime = moment().add({
+            parsedTime = moment.utc().add({
                 days,
                 hours,
                 minutes,
@@ -630,7 +630,7 @@ export async function scheduleWatch(
             const hours = Number(hoursStr) || 0;
             const minutes = Number(minutesStr) || 0;
 
-            timeObject = moment().add({
+            timeObject = moment.utc().add({
                 days,
                 hours,
                 minutes,
@@ -932,8 +932,8 @@ export async function handleWatchNotifications(client: Client, db: Database) {
             const twentyMinuteReminder = moment.utc(watch.time).subtract(20, 'minutes');
 
             /* Get our watch 'window' */
-            const nMinsAgo = moment().subtract(config.watchPollInterval / 2, 'milliseconds');
-            const nMinsAhead = moment().add(config.watchPollInterval / 2, 'milliseconds');
+            const nMinsAgo = moment.utc().subtract(config.watchPollInterval / 2, 'milliseconds');
+            const nMinsAhead = moment.utc().add(config.watchPollInterval / 2, 'milliseconds');
 
             const mention = watch.attending.map((x) => `<@${x}>`).join(' ');
 

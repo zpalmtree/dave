@@ -93,7 +93,7 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
                     msg.channel.id,
                     c.aliases[0],
                     args.join(' '),
-                    moment().utc().format('YYYY-MM-DD HH:mm:ss'),
+                    moment.utc().format('YYYY-MM-DD HH:mm:ss'),
                 ]
             );
 

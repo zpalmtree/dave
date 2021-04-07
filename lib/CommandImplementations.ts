@@ -332,7 +332,7 @@ export async function handleQuote(msg: Message, db: Database): Promise<void> {
     }
 
     if (timestamp) {
-        msg.channel.send(`${quote} - ${moment(timestamp).format('YYYY-MM-DD')}`);
+        msg.channel.send(`${quote} - ${moment.utc(timestamp).format('YYYY-MM-DD')}`);
     } else {
         msg.channel.send(quote);
     }
@@ -484,7 +484,7 @@ function formatChinkedData(data: any, location?: string): MessageEmbed {
             },
             {
                 name: 'Last Updated',
-                value: moment(data.updated).fromNow(),
+                value: moment.utc(data.updated).fromNow(),
                 inline: true,
             },
         );
@@ -862,7 +862,7 @@ export function handleTime(msg: Message, args: string) {
         offset = args;
     }
 
-    msg.reply(`The current time is ${moment().utcOffset(offset).format('HH:mm Z')}`);
+    msg.reply(`The current time is ${moment.utc().utcOffset(offset).format('HH:mm Z')}`);
 }
 
 export function handleDate(msg: Message, args: string) {
@@ -872,7 +872,7 @@ export function handleDate(msg: Message, args: string) {
         offset = args;
     }
 
-    msg.reply(`The current date is ${moment().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
+    msg.reply(`The current date is ${moment.utc().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
 }
 
 export async function handleCountdown(
@@ -2212,7 +2212,7 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
         displayFunction: (quote: any) => {
             return {
                 name: quote.timestamp
-                    ? moment(quote.timestamp).format('YYYY-MM-DD')
+                    ? moment.utc(quote.timestamp).format('YYYY-MM-DD')
                     : 'The Before Times',
                 value: quote.quote,
                 inline: false,

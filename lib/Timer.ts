@@ -105,7 +105,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         return;
     }
 
-    const time = moment().add(totalTimeSeconds, 'seconds');
+    const time = moment.utc().add(totalTimeSeconds, 'seconds');
 
     const timerID = await insertQuery(
         `INSERT INTO timer
@@ -113,7 +113,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         VALUES
             (?, ?, ?, ?)`,
         db,
-        [ msg.author.id, msg.channel.id, description, time.utc().format('YYYY-MM-DD HH:mm:ss') ],
+        [ msg.author.id, msg.channel.id, description, time.format('YYYY-MM-DD HH:mm:ss') ],
     );
 
     sendTimer(
@@ -131,7 +131,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         .addFields(
             {
                 name: 'Time',
-                value: `${capitalize(moment(time).fromNow())}, ${moment(time).utcOffset(-6).format('HH:mm')} CST`,
+                value: `${capitalize(moment.utc(time).fromNow())}, ${moment.utc(time).utcOffset(-6).format('HH:mm')} CST`,
             }
         );
 
@@ -249,7 +249,7 @@ export async function restoreTimers(db: Database, client: Client) {
             }
         }
 
-        const milliseconds = moment.utc(timer.expire_time).diff(moment());
+        const milliseconds = moment.utc(timer.expire_time).diff(moment.utc());
 
         if (milliseconds < 0) {
             continue;
