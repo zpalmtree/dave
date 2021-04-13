@@ -159,15 +159,15 @@ const states = [
     "West Virginia",
 ];
 
-export function handleFortune(msg: Message): void {
-    msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
+export async function handleFortune(msg: Message): Promise<void> {
+    await msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
 }
 
-export function handleMath(msg: Message, args: string): void {
+export async function handleMath(msg: Message, args: string): Promise<void> {
     try {
-        msg.reply(evaluate(args).toString());
+        await msg.reply(evaluate(args).toString());
     } catch (err) {
-        msg.reply('Bad mathematical expression: ' + err.toString());
+        await msg.reply('Bad mathematical expression: ' + err.toString());
     }
 }
 
@@ -176,7 +176,7 @@ function diceRoll(die: number): number {
     return Math.ceil(Math.random() * die);
 }
 
-export function handleDiceRoll(msg: Message, args: string): void {
+export async function handleDiceRoll(msg: Message, args: string): Promise<void> {
     const badRoll: string = 'Invalid roll. Examples: 5d20, d8 + 3, 10d10 * 2'
 
     /* Optional number of rolls (for example 5d20), 'd', (to indicate a roll),
@@ -198,12 +198,12 @@ export function handleDiceRoll(msg: Message, args: string): void {
     }
 
     if (numDice > 100) {
-        msg.reply("Can't roll more than 100 dice!");
+        await msg.reply("Can't roll more than 100 dice!");
         return;
     }
 
     if (dieStr === undefined || Number.isNaN(numDice) || Number.isNaN(die)) {
-        msg.reply(badRoll);
+        await msg.reply(badRoll);
         return;
     }
 
@@ -231,7 +231,7 @@ export function handleDiceRoll(msg: Message, args: string): void {
             response += mathExpression;
             result = evaluate(expression);
         } catch (err) {
-            msg.reply('Bad mathematical expression: ' + err.toString());
+            await msg.reply('Bad mathematical expression: ' + err.toString());
             return;
         }
     }
@@ -240,12 +240,12 @@ export function handleDiceRoll(msg: Message, args: string): void {
         response += ' = ' + result.toString();
     }
 
-    msg.reply(response);
+    await msg.reply(response);
 }
 
-export function handleRoll(msg: Message, args: string): void {
+export async function handleRoll(msg: Message, args: string): Promise<void> {
     if (haveRole(msg, 'Baby Boy')) {
-        msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
+        await msg.reply('little bitches are NOT allowed to use the roll bot. Obey the rolls, faggot!');
         return;
     }
 
@@ -253,12 +253,12 @@ export function handleRoll(msg: Message, args: string): void {
 
     /* Is it a dice roll - d + number, for example, d20, 5d20, d6 + 3 */
     if (/d\d/.test(args)) {
-        handleDiceRoll(msg, args);
+        await handleDiceRoll(msg, args);
         return;
     }
 
     const dubsReaction: string = dubsType(msg.id);
-    msg.reply(`Your post number is: ${msg.id} ${dubsReaction}`);
+    await msg.reply(`Your post number is: ${msg.id} ${dubsReaction}`);
 }
 
 function dubsType(roll: string): string {
@@ -327,20 +327,20 @@ export async function handleQuote(msg: Message, db: Database): Promise<void> {
     ) || {};
 
     if (!quote) {
-        msg.reply(`No quotes in the database! Use ${config.prefix}addquote to suggest one.`);
+        await msg.reply(`No quotes in the database! Use ${config.prefix}addquote to suggest one.`);
         return;
     }
 
     if (timestamp) {
-        msg.channel.send(`${quote} - ${moment.utc(timestamp).format('YYYY-MM-DD')}`);
+        await msg.channel.send(`${quote} - ${moment.utc(timestamp).format('YYYY-MM-DD')}`);
     } else {
-        msg.channel.send(quote);
+        await msg.channel.send(quote);
     }
 }
 
 export async function handleSuggest(msg: Message, suggestion: string, db: Database): Promise<void> {
     if (!suggestion || suggestion.length <= 1) {
-        msg.reply('Enter a fucking suggestion you wank stain');
+        await msg.reply('Please enter a suggestion.');
         return;
     }
 
@@ -362,7 +362,7 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
     const breedId = catBreeds.find((x) => x.name.toLowerCase() === breed);
 
     if (breed !== '' && breedId === undefined) {
-        msg.reply(`Unknown breed. Available breeds: <${config.kittyBreedLink}>`);
+        await msg.reply(`Unknown breed. Available breeds: <${config.kittyBreedLink}>`);
     }
 
     let kittyParams = {
@@ -379,15 +379,15 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
         const data = await response.json();
 
         if (!data || data.length < 1 || !data[0].url) {
-            msg.reply(`Failed to get kitty pic :( [ ${JSON.stringify(data)} ]`);
+            await msg.reply(`Failed to get kitty pic :( [ ${JSON.stringify(data)} ]`);
             return;
         }
 
         const attachment = new MessageAttachment(data[0].url);
 
-        msg.channel.send(attachment);
+        await msg.channel.send(attachment);
     } catch (err) {
-        msg.reply(`Failed to get kitty pic :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get kitty pic :( [ ${err.toString()} ]`);
     }
 }
 
@@ -406,7 +406,7 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
         } else if (y && dogBreeds.hasOwnProperty(y)) {
             mainBreed = y;
         } else {
-            msg.reply(`Unknown breed. Available breeds: <${config.doggoBreedLink}>`);
+            await msg.reply(`Unknown breed. Available breeds: <${config.doggoBreedLink}>`);
         }
     }
 
@@ -416,7 +416,7 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
         } else if (dogBreeds[mainBreed].includes(y)) {
             subBreed = y;
         } else {
-            msg.reply(`Unknown breed. Available breeds: <${config.doggoBreedLink}>`);
+            await msg.reply(`Unknown breed. Available breeds: <${config.doggoBreedLink}>`);
         }
     }
 
@@ -432,15 +432,15 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
         const data = await response.json();
 
         if (data.status !== 'success' || !data.message) {
-            msg.reply(`Failed to get doggo pic :( [ ${JSON.stringify(data)} ]`);
+            await msg.reply(`Failed to get doggo pic :( [ ${JSON.stringify(data)} ]`);
             return;
         }
 
         const attachment = new MessageAttachment(data.message);
 
-        msg.channel.send(attachment);
+        await msg.channel.send(attachment);
     } catch (err) {
-        msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
@@ -548,7 +548,7 @@ function formatVaccineData(data: any, population: number, embed: MessageEmbed) {
 
 export async function handleStock(msg: Message, args: string[]) {
     if (args.length === 0) {
-        msg.channel.send(`You need to include a ticker. Example: \`${config.prefix}stock IBM\``);
+        await msg.channel.send(`You need to include a ticker. Example: \`${config.prefix}stock IBM\``);
         return;
     }
 
@@ -560,7 +560,7 @@ export async function handleStock(msg: Message, args: string[]) {
         const stockData = await res.json();
 
         if (Object.entries(stockData['Global Quote']).length === 0) {
-            msg.channel.send("No ticker " + ticker.toUpperCase());
+            await msg.channel.send("No ticker " + ticker.toUpperCase());
             return;
         }
 
@@ -603,12 +603,10 @@ export async function handleStock(msg: Message, args: string[]) {
         );
     
     
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
     } else {
-        msg.channel.send("Something went wrong fetching stock info for " + ticker.toUpperCase());
+        await msg.channel.send("Something went wrong fetching stock info for " + ticker.toUpperCase());
     }
-
-
 }
 
 async function getChinkedWorldData(msg: Message): Promise<void> {
@@ -628,10 +626,10 @@ async function getChinkedWorldData(msg: Message): Promise<void> {
 
         formatVaccineData(vaccineData, worldData.population, embed);
 
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
 
     } catch (err) {
-        msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
@@ -646,7 +644,7 @@ async function getChinkedCountryData(msg: Message, country: string): Promise<voi
         const countryData = await countryResponse.json();
 
         if (countryData.message) {
-            msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
+            await msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
             return;
         }
 
@@ -658,9 +656,9 @@ async function getChinkedCountryData(msg: Message, country: string): Promise<voi
 
         formatVaccineData(vaccineData.timeline, countryData.population, embed);
 
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
     } catch (err) {
-        msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
@@ -672,12 +670,12 @@ async function getChinkedStateData(msg: Message, state: string): Promise<void> {
 
         const embed = formatChinkedData(data, data.state);
 
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
     } catch (err) {
         if (err.statusCode === 404) {
-            msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
+            await msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
         } else {
-            msg.reply(`Failed to get data: ${err.toString()}`);
+            await msg.reply(`Failed to get data: ${err.toString()}`);
         }
     }
 }
@@ -694,13 +692,13 @@ async function getChinkedCountries(msg: Message): Promise<void> {
         if (countries.length > 2000) {
             /* This splits in the middle of words, but we don't give a shit */
             for (const message of chunk(countries, 1700)) {
-                msg.channel.send(message);
+                await msg.channel.send(message);
             }
         } else {
-            msg.reply(countries);
+            await msg.reply(countries);
         }
     } catch (err) {
-        msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${err.toString()}`);
     }
 }
 
@@ -709,10 +707,10 @@ async function getChinkedStates(msg: Message): Promise<void> {
 
     if (stateData.length > 2000) {
         for (const message of chunk(stateData, 1700)) {
-            msg.channel.send(message);
+            await msg.channel.send(message);
         }
     } else {
-        msg.reply(stateData);
+        await msg.reply(stateData);
     }
 }
 
@@ -721,22 +719,22 @@ export async function handleChinked(msg: Message, country: string): Promise<void
 
     switch(country) {
         case '': {
-            getChinkedWorldData(msg);
+            await getChinkedWorldData(msg);
             break;
         }
         case 'countries': {
-            getChinkedCountries(msg);
+            await getChinkedCountries(msg);
             break;
         }
         case 'states': {
-            getChinkedStates(msg);
+            await getChinkedStates(msg);
             break;
         }
         default: {
             if (states.map((x) => x.toLowerCase()).includes(country)) {
-                getChinkedStateData(msg, country);
+                await getChinkedStateData(msg, country);
             } else {
-                getChinkedCountryData(msg, country);
+                await getChinkedCountryData(msg, country);
             }
 
             break;
@@ -772,7 +770,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
             renderDot(),
         ]);
     } catch (err) {
-        msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
         return;
     }
 
@@ -810,7 +808,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
         .setImage('attachment://dot-graph.png')
         .setDescription(description);
 
-    msg.channel.send(embed);
+    await msg.channel.send(embed);
 }
 
 
@@ -849,30 +847,30 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
             }
         })
 
-        pages.sendMessage();
+        await pages.sendMessage();
     } catch (err) {
-        msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
     }
 }
 
-export function handleTime(msg: Message, args: string) {
+export async function handleTime(msg: Message, args: string) {
     let offset: string | number = 0;
 
     if (args.length > 0) {
         offset = args;
     }
 
-    msg.reply(`The current time is ${moment.utc().utcOffset(offset).format('HH:mm Z')}`);
+    await msg.reply(`The current time is ${moment.utc().utcOffset(offset).format('HH:mm Z')}`);
 }
 
-export function handleDate(msg: Message, args: string) {
+export async function handleDate(msg: Message, args: string) {
     let offset: string | number = 0;
 
     if (args.length > 0) {
         offset = args;
     }
 
-    msg.reply(`The current date is ${moment.utc().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
+    await msg.reply(`The current date is ${moment.utc().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
 }
 
 export async function handleCountdown(
@@ -887,17 +885,17 @@ export async function handleCountdown(
     let secs = Number(args);
 
     if (Number.isNaN(secs)) {
-        msg.reply(`Invalid input, try \`${config.prefix}help countdown\``);
+        await msg.reply(`Invalid input, try \`${config.prefix}help countdown\``);
         return;
     }
 
     if (secs > 120) {
-        msg.reply('Countdowns longer than 120 are not supported.');
+        await msg.reply('Countdowns longer than 120 are not supported.');
         return;
     }
 
     if (secs < 1) {
-        msg.reply('Countdowns less than 1 are not supported.');
+        await msg.reply('Countdowns less than 1 are not supported.');
         return;
     }
 
@@ -914,7 +912,7 @@ export async function handleCountdown(
          * in 5 seconds. Experienced limiting with 1200ms delay. */
         await sleep(1500);
 
-        sentMessage.edit(message);
+        await sentMessage.edit(message);
     }
 }
 
@@ -922,7 +920,7 @@ export async function handlePurge(msg: Message) {
     const allowed = ['389071148421218330'];
 
     if (!haveRole(msg, 'Mod') && !allowed.includes(msg.author.id)) {
-        msg.reply('fuck off');
+        await msg.reply('fuck off');
         return;
     }
 
@@ -982,7 +980,7 @@ export async function handlePurge(msg: Message) {
                 }
             } while (messages.length > 0);
 
-            msg.reply(`Message deletion complete.`);
+            await msg.reply(`Message deletion complete.`);
         } catch (err) {
             console.log('err: ' + err.toString());
         }
@@ -1034,16 +1032,16 @@ async function handleTranslateImpl(
             embed.setFooter(`Did you mean "${res.from.text.value}"?`);
         }
 
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
 
     } catch (err) {
-        msg.reply(`Failed to translate: ${err}`);
+        await msg.reply(`Failed to translate: ${err}`);
     }
 }
 
 export async function handleTranslateFrom(msg: Message, args: string[]): Promise<void> {
     if (args.length < 2) {
-        msg.reply(`No language or translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
+        await msg.reply(`No language or translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
         return;
     }
 
@@ -1051,7 +1049,7 @@ export async function handleTranslateFrom(msg: Message, args: string[]): Promise
     let toLanguage = getLanguage(args[1]);
 
     if (fromLanguage === undefined) {
-        msg.reply(`Unknown language "${args[0]}". Try \`${config.prefix}help translatefrom\` to see available languages.`);
+        await msg.reply(`Unknown language "${args[0]}". Try \`${config.prefix}help translatefrom\` to see available languages.`);
         return;
     }
 
@@ -1063,12 +1061,12 @@ export async function handleTranslateFrom(msg: Message, args: string[]): Promise
         toLanguage = 'en';
     }
 
-    handleTranslateImpl(msg, toLanguage, fromLanguage, translateString);
+    await handleTranslateImpl(msg, toLanguage, fromLanguage, translateString);
 }
 
 export async function handleTranslate(msg: Message, args: string[]): Promise<void> {
     if (args.length === 0) {
-        msg.reply(`No translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
+        await msg.reply(`No translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
         return;
     }
 
@@ -1082,7 +1080,7 @@ export async function handleTranslate(msg: Message, args: string[]): Promise<voi
         toLanguage = 'en';
     }
 
-    handleTranslateImpl(msg, toLanguage, undefined, translateString);
+    await handleTranslateImpl(msg, toLanguage, undefined, translateString);
 }
 
 async function getQueryResults(query: string): Promise<false | HTMLElement> {
@@ -1208,7 +1206,7 @@ async function getInstantAnswerResults(query: string) {
 
 async function displayInstantAnswerResult(data: any, msg: Message) {
     if (data.Redirect) {
-        msg.reply(data.Redirect);
+        await msg.reply(data.Redirect);
         return;
     }
 
@@ -1279,13 +1277,13 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
 
         pages.sendMessage();
     } else {
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
     }
 }
 
 export async function handleQuery(msg: Message, args: string): Promise<void> {
     if (args.trim() === '') {
-        msg.reply('No query given');
+        await msg.reply('No query given');
         return;
     }
 
@@ -1298,7 +1296,7 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
         const data = await instantAnswerPromise;
 
         if (data) {
-            displayInstantAnswerResult(data, msg);
+            await displayInstantAnswerResult(data, msg);
         } else {
             /* If not then use HTML scrape result */
             const html = await queryPromise;
@@ -1307,10 +1305,10 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
                 throw new Error();
             }
 
-            displayQueryResults(html, msg);
+            await displayQueryResults(html, msg);
         }
     } catch (err) {
-        msg.reply(`Error getting query results: ${err.toString()}`);
+        await msg.reply(`Error getting query results: ${err.toString()}`);
     }
 }
 
@@ -1320,7 +1318,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     const result = regex.exec(args);
 
     if (!result) {
-        msg.reply(`Failed to parse input. It should be in the form \`${config.prefix}exchange 100 ABC to XYZ\`. \`${config.prefix}help exchange\` to view currencies.`);
+        await msg.reply(`Failed to parse input. It should be in the form \`${config.prefix}exchange 100 ABC to XYZ\`. \`${config.prefix}help exchange\` to view currencies.`);
         return;
     }
 
@@ -1332,7 +1330,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     const asNum = Number(amountToConvert);
 
     if (Number.isNaN(asNum)) {
-        msg.reply(`Failed to parse amount: ${amountToConvert}`);
+        await msg.reply(`Failed to parse amount: ${amountToConvert}`);
         return;
     }
 
@@ -1346,14 +1344,14 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     } = exchangeService.exchange(from, to, asNum);
 
     if (!success) {
-        msg.reply(error as string);
+        await msg.reply(error as string);
         return;
     }
 
     const embed = new MessageEmbed()
         .setTitle(`${amountToConvert} ${fromCurrency} is ${roundToNPlaces(amount as number, 2)} ${toCurrency}`);
 
-    msg.channel.send(embed);
+    await msg.channel.send(embed);
 }
 
 export async function handleAvatar(msg: Message): Promise<void> {
@@ -1365,14 +1363,14 @@ export async function handleAvatar(msg: Message): Promise<void> {
         user = mentionedUsers[0];
     }
 
-    msg.channel.send(user.displayAvatarURL({
+    await msg.channel.send(user.displayAvatarURL({
         format: 'png',
         dynamic: true,
         size: 4096,
     }));
 }
 
-export function handleNikocado(msg: Message): void {
+export async function handleNikocado(msg: Message): Promise<void> {
     const nikocados = [
         "ORLINS BACK!",
         "Orlins leaving!",
@@ -1380,7 +1378,7 @@ export function handleNikocado(msg: Message): void {
         "I sharted the bed!",
     ];
 
-    msg.reply(pickRandomItem(nikocados));
+    await msg.reply(pickRandomItem(nikocados));
 }
 
 export async function handleYoutube(msg: Message, args: string): Promise<void> {
@@ -1400,7 +1398,7 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
         embed,
     });
 
-    pages.sendMessage();
+    await pages.sendMessage();
 }
 
 async function displayYoutube (this: Paginate<any>, items: any[], message: Message) {
@@ -1449,12 +1447,12 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         embed,
     });
 
-    pages.sendMessage();
+    await pages.sendMessage();
 }
 
 export async function handleImageImpl(msg: Message, args: string, site?: string): Promise<undefined | any[]> {
     if (args.trim() === '') {
-        msg.reply('No query given');
+        await msg.reply('No query given');
         return;
     }
 
@@ -1488,7 +1486,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const response = await fetch(tokenURL, tokenOptions);
         data = await response.text();
     } catch (err) {
-        msg.reply(err);
+        await msg.reply(err);
         return;
     }
 
@@ -1498,7 +1496,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     const [, token ] = regex.exec(data) || [ undefined, undefined ];
 
     if (!token) {
-        msg.reply('Failed to get token!');
+        await msg.reply('Failed to get token!');
         return;
     }
 
@@ -1537,12 +1535,12 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const response = await fetch(imageURL, options);
         imageData = await response.json();
     } catch (err) {
-        msg.reply(err);
+        await msg.reply(err);
         return;
     }
 
     if (!imageData.results || imageData.results.length === 0) {
-        msg.reply('No results found!');
+        await msg.reply('No results found!');
         return;
     }
 
@@ -1594,7 +1592,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     });
 
     if (filtered.length === 0) {
-        msg.reply('No results found!');
+        await msg.reply('No results found!');
         return;
     }
 
@@ -1623,7 +1621,7 @@ async function handleUserStats(msg: Message, db: Database, user: string): Promis
     );
 
     if (commands.length === 0) {
-        msg.reply('User has never used the bot!');
+        await msg.reply('User has never used the bot!');
         return;
     }
 
@@ -1725,7 +1723,7 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         embed,
     });
 
-    pages.sendMessage();
+    await pages.sendMessage();
 }
 
 export async function handleStats(msg: Message, args: string[], db: Database): Promise<void> {
@@ -1733,7 +1731,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
 
     /* Get stats on commands used by a specific user */
     if (mentionedUsers.length > 0) {
-        handleUserStats(msg, db, mentionedUsers[0].id);
+        await handleUserStats(msg, db, mentionedUsers[0].id);
         return;
     }
 
@@ -1741,7 +1739,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         for (const command of Commands) {
             if (command.aliases.includes(args[0])) {
                 /* Get stats on which users used a specific command the most */
-                handleCommandStats(msg, db, command.aliases[0]);
+                await handleCommandStats(msg, db, command.aliases[0]);
                 return;
             }
         }
@@ -1783,7 +1781,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         embed,
     });
 
-    pages.sendMessage();
+    await pages.sendMessage();
 }
 
 export async function handleYoutubeScrape(msg: Message, args: string): Promise<undefined | any[]> {
@@ -1854,7 +1852,7 @@ export async function handleYoutubeScrape(msg: Message, args: string): Promise<u
 
 export async function handleYoutubeApi(msg: Message, args: string): Promise<undefined | any[]> {
     if (args.trim() === '') {
-        msg.reply('No query given');
+        await msg.reply('No query given');
         return;
     }
 
@@ -1877,7 +1875,7 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
         const response = await fetch(url);
         data = await response.json();
     } catch (err) {
-        msg.reply(err);
+        await msg.reply(err);
         return;
     }
 
@@ -1888,7 +1886,7 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
     });
 
     if (videos.length === 0) {
-        msg.reply('No results found!');
+        await msg.reply('No results found!');
         return;
     }
 
@@ -1926,7 +1924,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     }
 
     if (notReadyUsers.size === 0) {
-        msg.reply(`At least one user other than yourself must be mentioned or attending the movie ID. See \`${config.prefix}help ready\``);
+        await msg.reply(`At least one user other than yourself must be mentioned or attending the movie ID. See \`${config.prefix}help ready\``);
         return;
     }
 
@@ -1984,11 +1982,11 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         if (notReadyUsers.size === 0) {
             collector.stop('messageDelete');
             tryDeleteMessage(sentMessage);
-            handleCountdown("Let's jam!", msg, '7');
+            await handleCountdown("Let's jam!", msg, '7');
         } else {
             const newFields = await f();
             embed.spliceFields(0, 2, newFields);
-            sentMessage.edit(embed);
+            await sentMessage.edit(embed);
         }
     });
 
@@ -1996,7 +1994,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         if (reason !== 'messageDelete') {
             const notReadyNames = await Promise.all([...notReadyUsers].map((user) => getUsername(user, msg.guild)));
             embed.setDescription(`Countdown cancelled! ${notReadyNames.join(', ')} did not ready up in time.`);
-            sentMessage.edit(embed);
+            await sentMessage.edit(embed);
         }
     });
 }
@@ -2115,19 +2113,19 @@ export async function handleMultiPoll(msg: Message, args: string) {
     const questionEndIndex = args.indexOf('/');
 
     if (questionEndIndex === -1) {
-        msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll\` help`);
+        await msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll\` help`);
         return;
     }
 
     const options = args.slice(questionEndIndex + 1).split('/').map((x) => x.trim());
 
     if (options.length > 11) {
-        msg.reply('Multipoll only supports up to 11 different options.');
+        await msg.reply('Multipoll only supports up to 11 different options.');
         return;
     }
 
     if (options.length <= 1) {
-        msg.reply('Multipoll requires at least 2 different options.');
+        await msg.reply('Multipoll requires at least 2 different options.');
         return;
     }
 
@@ -2200,7 +2198,7 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
     );
 
     if (quotes.length === 0) {
-        msg.reply(`No quotes in the database! Use ${config.prefix}addquote to suggest one.`);
+        await msg.reply(`No quotes in the database! Use ${config.prefix}addquote to suggest one.`);
         return;
     }
 
