@@ -2,6 +2,7 @@ import * as moment from 'moment';
 
 import { MapTile } from './MapTile';
 import { Player } from './Player';
+import { PerkType } from './Perks';
 
 export interface Coordinate {
     x: number;
@@ -51,6 +52,9 @@ export interface PlayerConfig {
 
     /* The tanks weapon */
     weapon: Weapon;
+
+    /* The users perk */
+    perk: PerkType;
 }
 
 export interface Team {

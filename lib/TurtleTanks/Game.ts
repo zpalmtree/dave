@@ -72,6 +72,12 @@ import {
 } from './Weapons';
 
 import {
+    Perk,
+    PerkType,
+    loadPerk,
+} from './Perks';
+
+import {
     deleteQuery,
     selectQuery,
 } from '../Database';
@@ -254,24 +260,14 @@ export class Game {
             '483470443001413675',
         ];
 
-        let pointMessage = '';
+        let message = '';
 
         for (const [id, player] of this.players) {
-            player.points += player.pointsPerTick;
-
-            const username = await getUsername(id, this.guild);
-
-            this.log.push({
-                message: `${username} was awarded ${player.pointsPerTick} points`,
-                actionInitiator: 'System',
-                timestamp: moment.utc(),
-            });
-
-            pointMessage += `<@${id}> You were awarded ${player.pointsPerTick} points. You now have ${player.points} points\n`;
+            message += await player.handleGameTick(this.log, this.guild);
         }
 
         if (noisyChannels.includes(this.channel.id)) {
-            this.channel.send(pointMessage);
+            this.channel.send(message);
         }
 
         await this.storeInDB();
@@ -456,6 +452,8 @@ export class Game {
             }
         }
 
+        const perk = await loadPerk(userId, this.database);
+
         const player = new Player({
             userId,
             points,
@@ -468,6 +466,7 @@ export class Game {
             team,
             avatar,
             weapon: SmallMissile,
+            perk,
         });
 
         await player.storeInDB(this.database, this.channel.id);
@@ -782,28 +781,48 @@ export class Game {
             };
         }
 
-        const tilesInRadius = this.map.getTilesInRadius(coords, player.weapon.radius, false);
-
         const affectedPlayers = [];
         const affectedTiles = [];
         const killedPlayers = [];
 
         let totalDamage = 0;
 
+        const isKamikaze = player.coords.x === coords.x
+                        && player.coords.y === coords.y
+                        && player.perk === PerkType.Kamikaze;
+
+        const radius = isKamikaze
+            ? 2
+            : player.weapon.radius;
+
+        const tilesInRadius = this.map.getTilesInRadius(coords, radius, false);
+
         for (const tile of tilesInRadius) {
             if (tile.occupied !== undefined) {
                 const tilePlayer = this.players.get(tile.occupied);
 
                 if (tilePlayer !== undefined) {
-                    /* Shooting yourself will still take damage! */
-                    if (tilePlayer.userId !== player.userId) {
-                        /* Player is shooting teammate, no damage */
-                        if (tilePlayer.team && player.team && tilePlayer.team.name === player.team.name) {
+                    /* Player is shooting teammate, no damage */
+                    if (
+                        tilePlayer.userId !== player.userId
+                        && tilePlayer.team
+                        && player.team
+                        && tilePlayer.team.name === player.team.name) {
                             continue;
+                    }
+
+                    let damage = player.weapon.damage;
+
+                    if (isKamikaze) {
+                        /* Kamikaze kills the player */
+                        if (tilePlayer.userId === player.userId) {
+                            damage = player.hp;
+                        } else {
+                            damage = Math.floor(DEFAULT_STARTING_HP / 2);
                         }
                     }
 
-                    const newHP = Math.max(tilePlayer.hp - player.weapon.damage, 0);
+                    const newHP = Math.max(tilePlayer.hp - damage, 0);
                     const damageTaken = tilePlayer.hp - newHP;
 
                     totalDamage += damageTaken;
@@ -870,15 +889,26 @@ export class Game {
         const attacker = this.players.get(userId)!;
         const attackerName = await getUsername(userId, this.guild);
 
+        const isKamikaze = attacker.coords.x === coords.x
+            && attacker.coords.y === coords.y
+            && attacker.perk === PerkType.Kamikaze;
+
+        let message = `${attackerName} fired a ${attacker.weapon.name} at ` +
+            `${result.affectedPlayers.length} players for a total of ${result.totalDamage} damage, ` +
+            `consuming ${attacker.pointsPerShot} points`;
+
+        if (isKamikaze) {
+            message = `${attackerName} kamikazed, damaging ${result.affectedPlayers.length} players ` +
+                `for a total of ${result.totalDamage} damage.`;
+        }
+
         this.log.push({
-            message: `${attackerName} fired a ${attacker.weapon.name} at ` +
-                `${result.affectedPlayers.length} players for a total of ${result.totalDamage} damage, ` +
-                `consuming ${attacker.pointsPerShot} points`,
+            message,
             timestamp: moment.utc(),
             actionInitiator: attackerName,
         });
 
-        const shotResult = attacker.attack(coords, result);
+        const shotResult = attacker.attack(coords, result, isKamikaze);
 
         if (shotResult === ShotResult.Miss) {
             await attacker.storeInDB(this.database, this.channel.id);
@@ -903,6 +933,10 @@ export class Game {
 
             let message = `${receiver} received ${player.damageTaken} damage from ` +
                     `${attackerName}'s ${attacker.weapon.name}`;
+
+            if (isKamikaze) {
+                message = `${receiver} received ${player.damageTaken} damage from ${attackerName} kamikazing`;
+            }
 
             if (newHP === 0) {
                 message += ` and was killed!`;
@@ -985,15 +1019,34 @@ export class Game {
 
             const username = await getUsername(userId, this.guild);
 
-            let description = `Your ${player.weapon.name} will cause ${shotEffect.totalDamage} HP in total damage`;
+            const isKamikaze = player.coords.x === coords.x
+                        && player.coords.y === coords.y
+                        && player.perk === PerkType.Kamikaze;
 
-            description += await this.buildAffectedPlayersMsg(shotEffect.affectedPlayers);
+            let damageDescription = `Your ${player.weapon.name} will cause ${shotEffect.totalDamage} HP in total damage`;
 
-            const hitPercentage = roundToNPlaces(player.getNextShotPercentage(coords) * 100, 0) + '%';
+            if (isKamikaze) {
+                damageDescription = `Your kamikaze will cause ${shotEffect.totalDamage} HP in total damage`;
+            }
+
+            damageDescription += await this.buildAffectedPlayersMsg(shotEffect.affectedPlayers);
+
+            const hitPercentage = isKamikaze
+                ? '100%'
+                : roundToNPlaces(player.getNextShotPercentage(coords) * 100, 0) + '%';
+
+            let title = `${capitalize(username)}, are you sure you want to attack ${coordPretty}?`;
+
+            if (isKamikaze) {
+                title = `${capitalize(username)}, are you sure you want to kamikaze?`;
+            }
+
+            let description = `This will cost ${shotEffect.pointsRequired} ` +
+                `points and has a ${hitPercentage} chance of hitting. ${damageDescription}.`;
 
             const embed = new MessageEmbed()
-                .setTitle(`${capitalize(username)}, are you sure want to attack ${coordPretty}?`)
-                .setDescription(`This will cost ${shotEffect.pointsRequired} points and has a ${hitPercentage} chance of hitting. ${description}.`)
+                .setTitle(title)
+                .setDescription(description)
                 .setFooter('React with 👍 to confirm the attack')
                 .attachFiles([preview])
                 .setImage('attachment://turtle-tanks.png');
@@ -1043,24 +1096,41 @@ export class Game {
 
                     let damageDescription = `Your ${player.weapon.name} caused ${result.totalDamage} HP in total damage`;
 
+                    if (isKamikaze) {
+                        damageDescription = `Your kamikaze caused ${result.totalDamage} HP in total damage`;
+                    }
+
                     damageDescription += await this.buildAffectedPlayersMsg(result.affectedPlayers);
 
                     const attackMessage = await msg.channel.send(
-                        `<@${userId}> Successfully attacked ${coordPretty}. ${damageDescription}`,
+                        `<@${userId}> Successfully ${isKamikaze ? 'kamikazed' : 'attacked'} ${coordPretty}. ${damageDescription}`,
                         attachment,
                     );
 
                     for (const deadPlayer of result.killedPlayers) {
                         if (deadPlayer.userId === player.userId) {
-                            msg.channel.send(
-                                `<@${deadPlayer.userId}> You killed yourself with your own ` +
-                                `${player.weapon.name}! Good job!`,
-                            );
+                            if (isKamikaze) {
+                                msg.channel.send(
+                                    `<@${deadPlayer.userId}> You killed yourself in a fiery blaze of glory!`
+                                );
+                            } else {
+                                msg.channel.send(
+                                    `<@${deadPlayer.userId}> You killed yourself with your own ` +
+                                    `${player.weapon.name}! Good job!`,
+                                );
+                            }
                         } else {
-                            msg.channel.send(
-                                `<@${deadPlayer.userId}> You were killed by ${username}'s ` +
-                                `${player.weapon.name}! Better luck next time!`,
-                            );
+                            if (isKamikaze) {
+                                msg.channel.send(
+                                    `<@${deadPlayer.userId}> You were killed by ${username}'s ` +
+                                    `${player.weapon.name}! Better luck next time!`,
+                                );
+                            } else {
+                                msg.channel.send(
+                                    `<@${deadPlayer.userId}> You were killed by ${username} kamikazing! ` +
+                                    `Better luck next time!`,
+                                );
+                            }
                         }
                     }
 

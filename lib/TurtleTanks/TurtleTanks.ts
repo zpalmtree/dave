@@ -40,6 +40,11 @@ import {
     DisplayType,
 } from '../Paginate';
 
+import {
+    perks,
+    PerkType,
+} from './Perks';
+
 import { Game } from './Game';
 import { map1 } from './Maps';
 import { config } from '../Config';
@@ -271,6 +276,11 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
             {
                 name: 'Coordinates',
                 value: formatCoordinate(player.coords),
+                inline: true,
+            },
+            {
+                name: 'Perk',
+                value: perks.find((x) => x.perkType === player.perk)!.name,
                 inline: true,
             },
             {

@@ -1,7 +1,14 @@
+import {
+    Guild,
+} from 'discord.js';
+
+import * as moment from 'moment';
+
 import { Database } from 'sqlite3';
 import { fabric } from 'fabric';
 
 import { loadImage } from './Utilities';
+import { getUsername } from '../Utilities';
 
 import {
     Coordinate,
@@ -13,6 +20,7 @@ import {
     PlayerShot,
     ImageType,
     AvatarComponent,
+    LogMessage,
 } from './Types';
 
 import {
@@ -22,6 +30,10 @@ import {
     HIGHLIGHT_OUTLINE_WIDTH,
     ACCURACY_RAMP_UP_TIME,
 } from './Constants';
+
+import {
+    PerkType,
+} from './Perks';
 
 import {
     insertQuery,
@@ -63,6 +75,8 @@ export class Player {
 
     public avatar: AvatarComponent[];
 
+    public perk: PerkType;
+
     /* Loaded player highlight */
     private highlight: fabric.Circle | undefined;
 
@@ -87,6 +101,22 @@ export class Player {
         this.team = playerInfo.team;
 
         this.weapon = playerInfo.weapon;
+
+        this.perk = playerInfo.perk;
+
+        switch (this.perk) {
+            case PerkType.Sonic: {
+                this.pointsPerMove = Math.floor(this.pointsPerMove / 2);
+
+                break;
+            }
+            case PerkType.Juggernaut: {
+                this.pointsPerMove = Math.floor(this.pointsPerMove * 2);
+                this.hp = Math.floor(this.hp * 2);
+
+                break;
+            }
+        }
     }
 
     private async init(canvas: fabric.StaticCanvas) {
@@ -188,15 +218,27 @@ export class Player {
         return this.hp;
     }
 
-    public attack(coordinates: Coordinate, shotEffects: ShotEffect) {
-        const shotResult = this.getNextShotPercentage(coordinates) > Math.random()
-            ? ShotResult.Hit
-            : ShotResult.Miss;
+    public attack(
+        coordinates: Coordinate,
+        shotEffects: ShotEffect,
+        isKamikaze: boolean) {
+
+        let shotResult = ShotResult.Hit;
+
+        if (!isKamikaze) {
+            shotResult = this.getNextShotPercentage(coordinates) > Math.random()
+                ? ShotResult.Hit
+                : ShotResult.Miss;
+        }
 
         this.points -= this.pointsPerShot;
 
         if (shotResult === ShotResult.Hit) {
             this.points += shotEffects.killedPlayers.length * this.pointsPerKill;
+        }
+
+        if (isKamikaze) {
+            return shotResult;
         }
 
         this.shotHistory.push({
@@ -279,5 +321,39 @@ export class Player {
                     : this.team.name
             ]
         );
+    }
+
+    public async handleGameTick(log: LogMessage[], guild: Guild | undefined) {
+        this.points += this.pointsPerTick;
+
+        const username = await getUsername(this.userId, guild);
+
+        log.push({
+            message: `${username} was awarded ${this.pointsPerTick} points`,
+            actionInitiator: 'System',
+            timestamp: moment.utc(),
+        });
+
+        let message = `<@${this.userId}> You were awarded ${this.pointsPerTick} ` +
+            `points. You now have ${this.points} points\n`;
+
+        switch (this.perk) {
+            case PerkType.Medic: {
+                this.hp += 2;
+
+                message += `<@${this.userId}> You regenerated 2 HP. You now have ` +
+                    `${this.hp} HP.\n`;
+
+                log.push({
+                    message: `${username} regenerated 2 HP.`,
+                    actionInitiator: 'System',
+                    timestamp: moment.utc(),
+                });
+
+                break;
+            }
+        }
+
+        return message;
     }
 }

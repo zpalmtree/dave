@@ -43,7 +43,7 @@ export const perks = [
     {
         name: 'Medic',
         description: `Every ${Math.floor(MILLISECONDS_PER_TICK / 1000 / 60)} minutes, ` +
-            `you regenerate 2 health points.`,
+            `you regenerate 2 HP.`,
         perkType: PerkType.Medic,
     },
     {
