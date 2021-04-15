@@ -85,6 +85,10 @@ import {
     faces,
 } from './TurtleTanks/Avatar';
 
+import {
+    customizePerk,
+} from './TurtleTanks/Perks';
+
 import { config } from './Config';
 
 export const Commands: Command[] = [
@@ -996,6 +1000,19 @@ export const Commands: Command[] = [
                     {
                         name: 'Customize your tank avatar',
                         value: 'tanks customize',
+                    },
+                ],
+                needDb: true,
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: customizePerk,
+                description: 'Customize your turtle tanks perks',
+                aliases: ['perk', 'perks'],
+                examples: [
+                    {
+                        name: 'Change your tank perk',
+                        value: 'tanks perk',
                     },
                 ],
                 needDb: true,

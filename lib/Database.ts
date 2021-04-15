@@ -188,6 +188,13 @@ export async function createTablesIfNeeded(db: Database) {
         z_index INTEGER NOT NULL,
         image_type INTEGER NOT NULL
     )`, db);
+
+    await executeQuery(`CREATE TABLE IF NOT EXISTS tank_preferences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL UNIQUE,
+        notifications BOOLEAN NOT NULL DEFAULT 1,
+        perk INTEGER NOT NULL
+    )`, db);
 }
 
 export async function deleteTablesIfNeeded(db: Database) {
@@ -203,6 +210,7 @@ export async function deleteTablesIfNeeded(db: Database) {
             await executeQuery(`DROP TABLE IF EXISTS timer`, db);
             await executeQuery(`DROP TABLE IF EXISTS logs`, db);
             await executeQuery(`DROP TABLE IF EXISTS tank_games`, db);
+            await executeQuery(`DROP TABLE IF EXISTS turtle_avatars`, db);
         }
     }
 }

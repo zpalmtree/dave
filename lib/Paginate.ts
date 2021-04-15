@@ -32,6 +32,7 @@ export type EditableResponse = string | MessageEmbed | MessageAttachment;
 export type DisplayItem<T> = (
     this: Paginate<T>,
     item: T,
+    embed: MessageEmbed,
 ) => Asyncable<EmbedFieldData | Array<EmbedFieldData>>;
 
 export type ModifyEmbed<T> = (
@@ -249,7 +250,7 @@ export class Paginate<T> {
                 const f = (this.displayFunction as DisplayItem<T>).bind(this);
 
                 for (const item of items) {
-                    const newFields = await f(item);
+                    const newFields = await f(item, this.embed!);
 
                     if (Array.isArray(newFields)) {
                         this.embed!.addFields(newFields);
