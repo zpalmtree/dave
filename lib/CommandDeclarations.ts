@@ -911,7 +911,9 @@ export const Commands: Command[] = [
                 `be used to damage multiple tanks at once.\n` +
                 `Your weapon sometimes will miss. Try increasing your accuracy ` +
                 `by shooting the same tile multiple times. Your accuracy will increase ` +
-                `every shot, up to a maximum.`,
+                `every shot, up to a maximum.\n` +
+                `To customize your play style, try changing your perk, using the ` +
+                `\`${config.prefix}tank perk\` command.`,
             needDb: true,
         },
         subCommands: [
@@ -1011,7 +1013,7 @@ export const Commands: Command[] = [
                 aliases: ['perk', 'perks'],
                 examples: [
                     {
-                        name: 'Change your tank perk',
+                        name: 'Change your tanks perk',
                         value: 'tanks perk',
                     },
                 ],
