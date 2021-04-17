@@ -1982,6 +1982,8 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         if (notReadyUsers.size === 0) {
             collector.stop('messageDelete');
             tryDeleteMessage(sentMessage);
+            const ping = [...readyUsers].map((x) => `<@${x}>`).join(' ');
+            await msg.channel.send(`${ping} Everyone is ready, lets go!`);
             await handleCountdown("Let's jam!", msg, '7');
         } else {
             const newFields = await f();
