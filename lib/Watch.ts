@@ -26,6 +26,7 @@ import {
     getUsername,
     shuffleArray,
     tryReactMessage,
+    getDefaultTimeZone,
 } from './Utilities';
 
 import {
@@ -103,6 +104,8 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
     const embed = new MessageEmbed()
         .setTitle('Scheduled Movies/Series To Watch');
 
+    const { offset, label } = getDefaultTimeZone();
+
     const f = async (watch: ScheduledWatch) => {
         const names = await Promise.all(watch.attending.map((user) => getUsername(user, msg.guild)));
 
@@ -116,10 +119,10 @@ export async function displayScheduledWatches(msg: Message, db: Database): Promi
             },
             {
                 name: 'Time',
-                /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-                value: moment.utc().isBefore(moment.utc(watch.time).subtract(6, 'hours'))
-                    ? moment.utc(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                    : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(-6).format('HH:mm')} CST`,
+                /* If we're watching in less than a day, give a relative time. Otherwise, give date. */
+                value: moment.utc().isBefore(moment.utc(watch.time).subtract(1, 'day'))
+                    ? `${moment.utc(watch.time).utcOffset(offset).format('dddd, MMMM Do, HH:mm')} ${label}`
+                    : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(offset).format('HH:mm')} ${label}`,
                 inline: true,
             },
             {
@@ -155,6 +158,8 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
         return;
     }
 
+    const { offset } = getDefaultTimeZone();
+
     const f = async (watch: ScheduledWatch) => {
         const names = await Promise.all(watch.attending.map((user) => getUsername(user, msg.guild)));
 
@@ -168,7 +173,7 @@ export async function displayAllWatches(msg: Message, db: Database): Promise<voi
             },
             {
                 name: 'Time',
-                value : moment.utc(watch.time).utcOffset(-6).format('YYYY/MM/DD'),
+                value : moment.utc(watch.time).utcOffset(offset).format('YYYY/MM/DD'),
                 inline: true,
             },
             {
@@ -297,7 +302,9 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
             [ parsedTime.utc().format('YYYY-MM-DD HH:mm:ss'), parsedID ],
         );
 
-        msg.reply(`Successfully updated time for ${watch.title} to ${parsedTime.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`);
+        const { offset, label } = getDefaultTimeZone();
+
+        msg.reply(`Successfully updated time for ${watch.title} to ${parsedTime.utcOffset(offset).format('dddd, MMMM Do, HH:mm')} ${label}!`);
     } else {
         msg.reply(`Invalid input. Try \`${config.prefix}help watch\``);
     }
@@ -389,6 +396,8 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
 
     const attending = new Set(watch.attending);
 
+    const { offset, label } = getDefaultTimeZone();
+
     const getFields = async (currentPage: number, totalPage: number) => {
         const names = await Promise.all([...attending].map((user) => getUsername(user, msg.guild)));
 
@@ -397,10 +406,10 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
         fields.push(
             {
                 name: 'Time',
-                /* If we're watching in less than 6 hours, give a relative time. Otherwise, give date. */
-                value: moment.utc().isBefore(moment.utc(watch.time).subtract(6, 'hours'))
-                    ? moment.utc(watch.time).utcOffset(-6).format('dddd, MMMM Do, HH:mm') + ' CST'
-                    : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(-6).format('HH:mm')} CST`,
+                /* If we're watching in less than a day, give a relative time. Otherwise, give date. */
+                value: moment.utc().isBefore(moment.utc(watch.time).subtract(1, 'day'))
+                    ? `${moment.utc(watch.time).utcOffset(offset).format('dddd, MMMM Do, HH:mm')} ${label}`
+                    : `${capitalize(moment.utc(watch.time).fromNow())}, ${moment.utc(watch.time).utcOffset(offset).format('HH:mm')} ${label}`,
             },
             {
                 name: 'Attending',
@@ -703,9 +712,11 @@ export async function createWatch(
 
     const user = await getUsername(msg.author.id, msg.guild);
 
+    const { offset, label } = getDefaultTimeZone();
+
     const embed = new MessageEmbed()
         .setTitle(`ID: ${movieID} - ${title}`)
-        .setDescription(`${title} has been successfully scheduled for ${time.utcOffset(-6).format('dddd, MMMM Do, HH:mm')} CST!`)
+        .setDescription(`${title} has been successfully scheduled for ${time.utcOffset(offset).format('dddd, MMMM Do, HH:mm')} ${label}!`)
         .setFooter('React with 👍 if you want to attend this movie night')
         .addFields(
             {

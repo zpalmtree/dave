@@ -7,6 +7,7 @@ import {
     TextChannel,
 } from 'discord.js';
 
+import * as moment from 'moment';
 import fetch from 'node-fetch';
 import * as FormData from 'form-data';
 import translate = require('@vitalets/google-translate-api');
@@ -237,4 +238,18 @@ export async function uploadToImgur(image: any, filename?: string): Promise<stri
     }
 
     return data.data.link;
+}
+
+export function getDefaultTimeZone() {
+    if (moment().isDST()) {
+        return {
+            offset: -5,
+            label: 'CDT',
+        };
+    } else {
+        return {
+            offset: -6,
+            label: 'CST',
+        };
+    }
 }
