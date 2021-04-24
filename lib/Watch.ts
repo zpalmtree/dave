@@ -316,7 +316,7 @@ export async function deleteWatch(msg: Message, args: string, db: Database): Pro
         return;
     }
 
-    const id = Number(args[0]);
+    const id = Number(args);
 
     if (Number.isNaN(id)) {
         msg.reply(`Invalid input, non numeric ID. Try \`${config.prefix}help watch\``);
