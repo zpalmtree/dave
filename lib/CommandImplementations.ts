@@ -73,16 +73,7 @@ import {
 } from './Exchange';
 
 import {
-    displayScheduledWatches,
-    displayAllWatches,
-    addLink,
-    updateTime,
-    deleteWatch,
-    displayWatchById,
-    scheduleWatch,
     getWatchDetailsById,
-    handleMovieBank,
-    addToBank,
 } from './Watch';
 
 import {

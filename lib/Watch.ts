@@ -310,7 +310,7 @@ export async function updateTime(msg: Message, args: string, db: Database): Prom
     }
 }
 
-export async function deleteWatch(msg: Message, args: string[], db: Database): Promise<void> {
+export async function deleteWatch(msg: Message, args: string, db: Database): Promise<void> {
     if (args.length === 0) {
         msg.reply(`Invalid input. No movie ID given. Try \`${config.prefix}help watch\``);
         return;
