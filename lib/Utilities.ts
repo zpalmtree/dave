@@ -192,7 +192,6 @@ export function formatLargeNumber(num: number): string {
 export async function tryDeleteMessage(msg: Message) {
     try {
         await msg.delete();
-        console.log(`Deleted message ${msg.id}`);
     } catch (err) {
         console.log(`Failed to delete message ${msg.id}, ${err.toString()}, ${err.stack}`);
     }
@@ -201,7 +200,6 @@ export async function tryDeleteMessage(msg: Message) {
 export async function tryReactMessage(msg: Message, reaction: string) {
     try {
         await msg.react(reaction);
-        console.log(`Reacted to message ${msg.id} with ${reaction}`);
     } catch (err) {
         console.log(`Failed to react with ${reaction} to message ${msg.id}, ${err.toString()}, ${err.stack}`);
     }
@@ -210,7 +208,6 @@ export async function tryReactMessage(msg: Message, reaction: string) {
 export async function tryDeleteReaction(reaction: MessageReaction, id: string) {
     try {
         await reaction.users.remove(id);
-        console.log(`Removed reaction ${reaction.emoji.name} for ${id}`);
     } catch (err) {
         console.log(`Failed to remove reaction ${reaction.emoji.name} for ${id}, ${err.toString()}, ${err.stack}`);
     }
