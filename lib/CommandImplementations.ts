@@ -2031,9 +2031,6 @@ export async function handlePoll(msg: Message, args: string) {
 
     const sentMessage = await msg.channel.send(embed);
 
-    await tryReactMessage(sentMessage, '👍');
-    await tryReactMessage(sentMessage, '👎');
-
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
     }, { time: 60 * 15 * 1000 });
@@ -2055,6 +2052,9 @@ export async function handlePoll(msg: Message, args: string) {
 
         sentMessage.edit(embed);
     });
+
+    await tryReactMessage(sentMessage, '👍');
+    await tryReactMessage(sentMessage, '👎');
 }
 
 export async function handleMultiPoll(msg: Message, args: string) {
@@ -2142,11 +2142,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
     const sentMessage = await msg.channel.send(embed);
     
     const usedEmojis = emojis.slice(0, options.length);
-
-    for (const emoji of usedEmojis) {
-        await tryReactMessage(sentMessage, emoji);
-    }
-
+    
     const collector = sentMessage.createReactionCollector((reaction, user) => {
         return usedEmojis.includes(reaction.emoji.name) && !user.bot;
     }, { time: 60 * 15 * 1000 });
@@ -2174,6 +2170,10 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
         sentMessage.edit(embed);
     });
+
+    for (const emoji of usedEmojis) {
+        await tryReactMessage(sentMessage, emoji);
+    }
 }
 
 export async function handleQuotes(msg: Message, db: Database): Promise<void> {
