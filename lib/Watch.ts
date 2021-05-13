@@ -1155,7 +1155,7 @@ export async function handleWatchStats(msg: Message, db: Database) {
         itemsPerPage: 9,
         displayFunction: async (watch: any) => {
             return {
-                name: await getUsername(watch.user, msg.guild),
+                name: watch.user,
                 value: watch.count,
                 inline: true,
             };
