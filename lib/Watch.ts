@@ -1125,7 +1125,7 @@ export async function handleWatchStats(msg: Message, db: Database) {
 
     const embed = new MessageEmbed()
         .setTitle('Movies attended with more than one attendee')
-        .setDescription(watchesWithMultipleAttendees.length);
+        .setDescription(`In Total: ${watchesWithMultipleAttendees.length}`);
 
     const userMapping = new Map();
 
@@ -1137,7 +1137,18 @@ export async function handleWatchStats(msg: Message, db: Database) {
         }
     }
 
-    const userArray = Array.from(userMapping, ([user, count]) => ({ user, count }));
+    const userArray = Array.from(userMapping, ([user, count]) => {
+        return {
+            user,
+            count,
+        }
+    });
+
+    for (const user of userArray) {
+        user.user = await getUsername(user.user, msg.guild);
+    }
+
+    userArray.sort((a, b) => b.count - a.count);
 
     const pages = new Paginate({
         sourceMessage: msg,
