@@ -1121,11 +1121,7 @@ export async function handleWatchStats(msg: Message, db: Database) {
         return;
     }
 
-    console.log(data);
-
-    const watchesWithMultipleAttendees = data.filter((x) => x.attending.length >= 1);
-
-    console.log(watchesWithMultipleAttendees);
+    const watchesWithMultipleAttendees = data.filter((x) => x.attending.length > 1);
 
     const embed = new MessageEmbed()
         .setTitle('Movies attended with more than one attendee')
