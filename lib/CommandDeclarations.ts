@@ -64,6 +64,7 @@ import {
     displayAllWatches,
     updateTime,
     addLink,
+    handleWatchStats,
 } from './Watch';
 
 import { exchangeService } from './Exchange';
@@ -420,6 +421,19 @@ export const Commands: Command[] = [
                     },
                 ],
                 disabled: true,
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleWatchStats,
+                description: 'View stats on previously watched movies',
+                aliases: ['stats'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'View stats on previously watched movies',
+                        value: 'watch stats',
+                    },
+                ],
             },
         ],
         relatedCommands: [

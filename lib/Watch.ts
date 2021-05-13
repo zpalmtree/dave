@@ -1108,3 +1108,55 @@ export async function handleMovieBank(msg: Message, db: Database) {
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
     });
 }
+
+export async function handleWatchStats(msg: Message, db: Database) {
+    const data = await getWatchDetails(db, {
+            excludeIncomplete: true,
+            channelID: msg.channel.id,
+        },
+    );
+
+    if (!data) {
+        msg.reply('Nothing has been watched yet.');
+        return;
+    }
+
+    console.log(data);
+
+    const watchesWithMultipleAttendees = data.filter((x) => x.attending.length >= 1);
+
+    console.log(watchesWithMultipleAttendees);
+
+    const embed = new MessageEmbed()
+        .setTitle('Movies attended with more than one attendee')
+        .setDescription(watchesWithMultipleAttendees.length);
+
+    const userMapping = new Map();
+
+    for (const watch of watchesWithMultipleAttendees) {
+        for (const user of watch.attending) {
+            let watchCount = userMapping.get(user) || 0;
+            watchCount++;
+            userMapping.set(user, watchCount);
+        }
+    }
+
+    const userArray = Array.from(userMapping, ([user, count]) => ({ user, count }));
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: async (watch: any) => {
+            return {
+                name: await getUsername(watch.user, msg.guild),
+                value: watch.count,
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: userArray,
+        embed,
+    });
+
+    pages.sendMessage();
+}
