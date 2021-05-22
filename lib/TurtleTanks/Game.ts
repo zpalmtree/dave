@@ -1120,7 +1120,7 @@ export class Game {
                                 );
                             }
                         } else {
-                            if (isKamikaze) {
+                            if (!isKamikaze) {
                                 msg.channel.send(
                                     `<@${deadPlayer.userId}> You were killed by ${username}'s ` +
                                     `${player.weapon.name}! Better luck next time!`,
