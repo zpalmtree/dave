@@ -183,10 +183,14 @@ export class Paginate<T> {
             ? data
             : null;
 
-        this.sentMessage!.edit({
-            embed,
-            content,
-        });
+        try {
+            this.sentMessage!.edit({
+                embed,
+                content,
+            });
+        } catch (err) {
+            console.log(err);
+        }
     }
 
     private async setPageFooter(editMessage: boolean = false) {
