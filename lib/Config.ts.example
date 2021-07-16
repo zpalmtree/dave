@@ -35,6 +35,9 @@ class Config {
     public god: string = 'enter user here';
 
     public dbFile: string = 'example.sqlite3';
+
+    /* coingecko coin ids to monitor e.g. ['bitcoin', 'ethereum'], see coingecko api docs for details */
+    public coins: string[] = [];
 }
 
 export let config = new Config();

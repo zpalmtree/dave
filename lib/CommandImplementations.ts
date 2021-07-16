@@ -304,33 +304,22 @@ function dubsType(roll: string): string {
 
 export async function handlePrice(msg: Message) {
     try {
-        const data = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin%2Cethereum%2Cturtlecoin%2Cmonero&vs_currencies=usd&include_24hr_change=true")
+        const data = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${config.coins.join("%2C")}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`)
         if (data.status === 200) {
-            const prices = await data.json();
+            const values = await data.json();
+            const prices = Object.keys(values).map((key) => {
+                return {
+                    name: key,
+                    ...values[key]
+                }
+            }).sort((a, b) => {
+                return b.usd_market_cap - a.usd_market_cap;
+            });
     
-            const embed = new MessageEmbed()
-            .addFields(
-                {
-                    name: `BTC`,
-                    value: `$${numberWithCommas(prices.bitcoin.usd.toString())} (${prices.bitcoin.usd_24h_change.toFixed(2)}%)`,
-                    inline: true,
-                },
-                {
-                    name: `ETH`,
-                    value: `$${numberWithCommas(prices.ethereum.usd.toString())} (${prices.ethereum.usd_24h_change.toFixed(2)}%)`,
-                    inline: true,
-                },
-                {
-                    name: `XMR`,
-                    value: `$${numberWithCommas(prices.monero.usd.toString())} (${prices.monero.usd_24h_change.toFixed(2)}%)`,
-                    inline: true,
-                },
-                {
-                    name: `MTRTL`,
-                    value: `$${numberWithCommas((prices.turtlecoin.usd * 1000000).toString())} (${prices.turtlecoin.usd_24h_change.toFixed(2)}%)`,
-                    inline: true,
-                },
-            );
+            const embed = new MessageEmbed();
+            for (const price of prices) {
+                embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`, true);
+            }
     
             msg.channel.send(embed);
         } else {
