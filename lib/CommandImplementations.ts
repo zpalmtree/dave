@@ -303,37 +303,42 @@ function dubsType(roll: string): string {
 }
 
 export async function handlePrice(msg: Message) {
-    const data = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin%2Cethereum%2Cturtlecoin%2Cmonero&vs_currencies=usd&include_24hr_change=true")
-    if (data.status === 200) {
-        const prices = await data.json();
-
-        const embed = new MessageEmbed()
-        .addFields(
-            {
-                name: `BTC`,
-                value: `$${numberWithCommas(prices.bitcoin.usd.toString())} (${prices.bitcoin.usd_24h_change.toFixed(2)}%)`,
-                inline: true,
-            },
-            {
-                name: `ETH`,
-                value: `$${numberWithCommas(prices.ethereum.usd.toString())} (${prices.ethereum.usd_24h_change.toFixed(2)}%)`,
-                inline: true,
-            },
-            {
-                name: `XMR`,
-                value: `$${numberWithCommas(prices.monero.usd.toString())} (${prices.monero.usd_24h_change.toFixed(2)}%)`,
-                inline: true,
-            },
-            {
-                name: `MTRTL`,
-                value: `$${numberWithCommas((prices.turtlecoin.usd * 1000000).toString())} (${prices.turtlecoin.usd_24h_change.toFixed(2)}%)`,
-                inline: true,
-            },
-        );
-
-        msg.channel.send(embed);
+    try {
+        const data = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin%2Cethereum%2Cturtlecoin%2Cmonero&vs_currencies=usd&include_24hr_change=true")
+        if (data.status === 200) {
+            const prices = await data.json();
+    
+            const embed = new MessageEmbed()
+            .addFields(
+                {
+                    name: `BTC`,
+                    value: `$${numberWithCommas(prices.bitcoin.usd.toString())} (${prices.bitcoin.usd_24h_change.toFixed(2)}%)`,
+                    inline: true,
+                },
+                {
+                    name: `ETH`,
+                    value: `$${numberWithCommas(prices.ethereum.usd.toString())} (${prices.ethereum.usd_24h_change.toFixed(2)}%)`,
+                    inline: true,
+                },
+                {
+                    name: `XMR`,
+                    value: `$${numberWithCommas(prices.monero.usd.toString())} (${prices.monero.usd_24h_change.toFixed(2)}%)`,
+                    inline: true,
+                },
+                {
+                    name: `MTRTL`,
+                    value: `$${numberWithCommas((prices.turtlecoin.usd * 1000000).toString())} (${prices.turtlecoin.usd_24h_change.toFixed(2)}%)`,
+                    inline: true,
+                },
+            );
+    
+            msg.channel.send(embed);
+        } else {
+            throw new Error("Fetch threw an exception")
+        }
+    } catch(err) {
+        await msg.reply(`Failed to get data: ${err.toString()}`);
     }
-
 }
 
 export async function handleQuote(msg: Message, db: Database): Promise<void> {
@@ -607,7 +612,7 @@ export async function handleStock(msg: Message, args: string[]) {
             },
             {
                 name: 'Volume',
-                value: `$${f(stockData['Global Quote']['06. volume'])}`,
+                value: `${f(stockData['Global Quote']['06. volume'])}`,
                 inline: true,
             },
             {
