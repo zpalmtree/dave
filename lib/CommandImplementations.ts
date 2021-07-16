@@ -316,7 +316,7 @@ export async function handlePrice(msg: Message) {
                 return b.usd_market_cap - a.usd_market_cap;
             });
     
-            const embed = new MessageEmbed()
+            const embed = new MessageEmbed();
             for (const price of prices) {
                 embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${price.usd_24h_change.toFixed(2)}%)`, true)
             }
