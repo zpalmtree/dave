@@ -48,6 +48,7 @@ import {
     handleReady,
     handlePoll,
     handleMultiPoll,
+    handlePrice,
 } from './CommandImplementations';
 
 import {
@@ -235,6 +236,14 @@ export const Commands: Command[] = [
         relatedCommands: [
             'doggo',
         ],
+    },
+    {
+        aliases: ['price'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handlePrice,
+            description: "Displays cryptocurrency prices",
+        },
     },
     {
         aliases: ['help'],
