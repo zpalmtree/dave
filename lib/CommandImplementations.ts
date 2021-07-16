@@ -304,7 +304,7 @@ function dubsType(roll: string): string {
 
 export async function handlePrice(msg: Message) {
     try {
-        const data = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin%2Cethereum%2Cturtlecoin%2Cmonero&vs_currencies=usd&include_24hr_change=true")
+        const data = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin%2Cethereum%2Clink%2Cmonero%2Cturtlecoin%2Clitecoin&vs_currencies=usd&include_24hr_change=true")
         if (data.status === 200) {
             const prices = await data.json();
     
@@ -318,6 +318,16 @@ export async function handlePrice(msg: Message) {
                 {
                     name: `ETH`,
                     value: `$${numberWithCommas(prices.ethereum.usd.toString())} (${prices.ethereum.usd_24h_change.toFixed(2)}%)`,
+                    inline: true,
+                },
+                {
+                    name: `LTC`,
+                    value: `$${numberWithCommas(prices.litecoin.usd.toString())} (${prices.litecoin.usd_24h_change.toFixed(2)}%)`,
+                    inline: true,
+                },
+                {
+                    name: `LINK`,
+                    value: `$${numberWithCommas(prices.link.usd.toString())} (${prices.link.usd_24h_change.toFixed(2)}%)`,
                     inline: true,
                 },
                 {
