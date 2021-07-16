@@ -307,7 +307,6 @@ export async function handlePrice(msg: Message) {
         const data = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${config.coins.join("%2C")}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`)
         if (data.status === 200) {
             const values = await data.json();
-            console.log(values);
             const prices = Object.keys(values).map((key) => {
                 return {
                     name: key,
