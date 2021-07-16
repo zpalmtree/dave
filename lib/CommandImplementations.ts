@@ -318,7 +318,7 @@ export async function handlePrice(msg: Message) {
     
             const embed = new MessageEmbed();
             for (const price of prices) {
-                embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${price.usd_24h_change.toFixed(2)}%)`, true)
+                embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`, true);
             }
     
             msg.channel.send(embed);
