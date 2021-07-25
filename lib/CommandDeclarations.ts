@@ -676,7 +676,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['exchange', 'convert'],
+        aliases: ['exchange'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleExchange,
