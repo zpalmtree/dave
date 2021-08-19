@@ -76,7 +76,9 @@ export async function handleTurtle(msg: Message, face: string) {
 
     const attachment = new MessageAttachment((canvas as any).createPNGStream(), outputFileName);
 
-    msg.reply(attachment);
+    msg.reply({
+        files: [attachment],
+    });
 }
 
 let storedGames: Map<string, Game> = new Map();
@@ -155,9 +157,14 @@ export async function handleTurtleTanks(msg: Message, args: string[], db: Databa
     let sentMessage;
 
     if (content !== '') {
-        sentMessage = await msg.reply(content, attachment);
+        sentMessage = await msg.reply({
+            content,
+            files: [attachment],
+        });
     } else {
-        sentMessage = await msg.reply(attachment);
+        sentMessage = await msg.reply({
+            files: [attachment],
+        });
     }
 
     await addMoveReactions(sentMessage, game);
@@ -260,17 +267,16 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
 
     const embed = new MessageEmbed()
         .setTitle(`${capitalize(username)}'s Stats`)
-        .attachFiles([attachment])
         .setImage('attachment://status.png')
-        .addFields(
+        .addFields([
             {
                 name: 'HP',
-                value: player.hp,
+                value: player.hp.toString(),
                 inline: true,
             },
             {
                 name: 'Points',
-                value: player.points,
+                value: player.points.toString(),
                 inline: true,
             },
             {
@@ -315,15 +321,15 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
             },
             {
                 name: 'Points On Kill',
-                value: player.pointsPerKill,
+                value: player.pointsPerKill.toString(),
                 inline: true,
             },
             {
                 name: 'Points On Game Tick',
-                value: player.pointsPerTick,
+                value: player.pointsPerTick.toString(),
                 inline: true,
             },
-        );
+        ]);
 
     if (player.team) {
         embed.addFields({
@@ -333,7 +339,10 @@ export async function handleTankStatus(msg: Message, args: string, db: Database)
         });
     }
 
-    msg.channel.send(embed);
+    msg.channel.send({
+        embeds: [embed],
+        files: [attachment],
+    });
 }
 
 export async function handleTankLogs(msg: Message, db: Database) {

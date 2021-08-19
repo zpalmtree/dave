@@ -189,9 +189,16 @@ export async function addMoveReactions(msg: Message, game: Game) {
         '↘️',
     ];
 
-    const collector = msg.createReactionCollector((reaction, user) => {
-        return reactions.includes(reaction.emoji.name) && !user.bot;
-    }, { time: 60 * 15 * 1000 });
+    const collector = msg.createReactionCollector({
+        filter: (reaction, user) => {
+            if (!reaction.emoji.name) {
+                return false;
+            }
+
+            return reactions.includes(reaction.emoji.name) && !user.bot;
+        },
+        time: 60 * 15 * 1000,
+    });
 
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
         tryDeleteReaction(reaction, user.id);
@@ -202,7 +209,7 @@ export async function addMoveReactions(msg: Message, game: Game) {
             return;
         }
 
-        const newCoords = parseCoordinate(reaction.emoji.name, currentCoords) as Coordinate;
+        const newCoords = parseCoordinate(reaction.emoji.name as string, currentCoords) as Coordinate;
 
         const result = await game.canMove(user.id, newCoords);
 

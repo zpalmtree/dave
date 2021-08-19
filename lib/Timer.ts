@@ -142,7 +142,9 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         });
     }
 
-    msg.channel.send(embed);
+    msg.channel.send({
+        embeds: [embed],
+    });
 }
 
 export async function handleTimers(msg: Message, db: Database): Promise<void> {

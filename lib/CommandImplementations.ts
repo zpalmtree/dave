@@ -18,7 +18,8 @@ import {
     User,
     MessageEmbed,
     MessageAttachment,
-    GuildMember
+    GuildMember,
+    ColorResolvable,
 } from 'discord.js';
 
 import {
@@ -155,6 +156,11 @@ export async function handleFortune(msg: Message): Promise<void> {
 }
 
 export async function handleMath(msg: Message, args: string): Promise<void> {
+    if (args === '') {
+        await msg.reply(`Invalid input, try \`${config.prefix}help math\``);
+        return;
+    }
+
     try {
         await msg.reply(evaluate(args).toString());
     } catch (err) {
@@ -321,7 +327,9 @@ export async function handlePrice(msg: Message) {
                 embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`, true);
             }
     
-            msg.channel.send(embed);
+            msg.channel.send({
+                embeds: [embed],
+            });
         } else {
             throw new Error("Fetch threw an exception")
         }
@@ -404,7 +412,9 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
 
         const attachment = new MessageAttachment(data[0].url);
 
-        await msg.channel.send(attachment);
+        await msg.channel.send({
+            files: [attachment],
+        });
     } catch (err) {
         await msg.reply(`Failed to get kitty pic :( [ ${err.toString()} ]`);
     }
@@ -457,7 +467,9 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
 
         const attachment = new MessageAttachment(data.message);
 
-        await msg.channel.send(attachment);
+        await msg.channel.send({
+            files: [attachment],
+        });
     } catch (err) {
         await msg.reply(`Failed to get data: ${err.toString()}`);
     }
@@ -622,7 +634,9 @@ export async function handleStock(msg: Message, args: string[]) {
         );
     
     
-        await msg.channel.send(embed);
+        await msg.channel.send({
+            embeds: [embed],
+        });
     } else {
         await msg.channel.send("Something went wrong fetching stock info for " + ticker.toUpperCase());
     }
@@ -645,7 +659,9 @@ async function getChinkedWorldData(msg: Message): Promise<void> {
 
         formatVaccineData(vaccineData, worldData.population, embed);
 
-        await msg.channel.send(embed);
+        await msg.channel.send({
+            embeds: [embed],
+        });
 
     } catch (err) {
         await msg.reply(`Failed to get data: ${err.toString()}`);
@@ -675,7 +691,9 @@ async function getChinkedCountryData(msg: Message, country: string): Promise<voi
 
         formatVaccineData(vaccineData.timeline, countryData.population, embed);
 
-        await msg.channel.send(embed);
+        await msg.channel.send({
+            embeds: [embed],
+        });
     } catch (err) {
         await msg.reply(`Failed to get data: ${err.toString()}`);
     }
@@ -689,7 +707,9 @@ async function getChinkedStateData(msg: Message, state: string): Promise<void> {
 
         const embed = formatChinkedData(data, data.state);
 
-        await msg.channel.send(embed);
+        await msg.channel.send({
+            embeds: [embed],
+        });
     } catch (err) {
         if (err.statusCode === 404) {
             await msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
@@ -820,14 +840,16 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     const percentage = Math.floor(currentDotValue * 100);
 
     const embed = new MessageEmbed()
-        .setColor(currentDotColor)
-        .attachFiles([dotAttachment, dotGraphAttachment])
+        .setColor(currentDotColor as ColorResolvable)
         .setTitle(`${percentage}% Network Variance`)
         .setThumbnail('attachment://dot.png')
         .setImage('attachment://dot-graph.png')
         .setDescription(description);
 
-    await msg.channel.send(embed);
+    await msg.channel.send({
+        embeds: [embed],
+        files: [dotAttachment, dotGraphAttachment],
+    });
 }
 
 
@@ -948,13 +970,18 @@ export async function handlePurge(msg: Message) {
         .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take several hours.')
         .setFooter('React with 👍 to confirm the deletion');
 
-    const sentMessage = await msg.channel.send(embed);
+    const sentMessage = await msg.channel.send({
+        embeds: [embed],
+    });
 
     await tryReactMessage(sentMessage, '👍');
 
-    const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return reaction.emoji.name === '👍' && user.id === msg.author.id
-    }, { time: 60 * 15 * 1000 });
+    const collector = sentMessage.createReactionCollector({
+        filter: (reaction, user) => {
+            return reaction.emoji.name === '👍' && user.id === msg.author.id
+        },
+        time: 60 * 15 * 1000,
+    });
 
     let inProgress = false;
 
@@ -972,7 +999,9 @@ export async function handlePurge(msg: Message) {
         inProgress = true;
 
         embed.setDescription('Deletion started. You will be notified when it is complete.');
-        sentMessage.edit(embed);
+        sentMessage.edit({
+            embeds: [embed],
+        });
 
         let messages: Message[] = [];
 
@@ -983,7 +1012,7 @@ export async function handlePurge(msg: Message) {
                 const firstMessage = messages.length === 0 ? undefined : messages[0].id;
 
                 /* Fetch messages, convert to array and sort by timestamp, oldest first */
-                messages = (await msg.channel.messages.fetch({ before: firstMessage })).array().sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+                messages = [...(await msg.channel.messages.fetch({ before: firstMessage })).values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
                 for (const message of messages) {
                     if (message.author.id === msg.author.id) {
@@ -1051,7 +1080,9 @@ async function handleTranslateImpl(
             embed.setFooter(`Did you mean "${res.from.text.value}"?`);
         }
 
-        await msg.channel.send(embed);
+        await msg.channel.send({
+            embeds: [embed],
+        });
 
     } catch (err) {
         await msg.reply(`Failed to translate: ${err}`);
@@ -1296,7 +1327,9 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
 
         pages.sendMessage();
     } else {
-        await msg.channel.send(embed);
+        await msg.channel.send({
+            embeds: [embed],
+        });
     }
 }
 
@@ -1370,7 +1403,9 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     const embed = new MessageEmbed()
         .setTitle(`${amountToConvert} ${fromCurrency} is ${roundToNPlaces(amount as number, 2)} ${toCurrency}`);
 
-    await msg.channel.send(embed);
+    await msg.channel.send({
+        embeds: [embed],
+    });
 }
 
 export async function handleAvatar(msg: Message): Promise<void> {
@@ -1768,7 +1803,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
     const commands = await selectQuery(
         `SELECT
             command AS command,
-            COUNT(*) AS usage
+            CAST(COUNT(*) AS TEXT) AS usage
         FROM
             logs
         WHERE
@@ -1980,13 +2015,18 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         .setDescription(description)
         .addFields(fields);
 
-    const sentMessage = await msg.channel.send(embed);
+    const sentMessage = await msg.channel.send({
+        embeds: [embed],
+    });
 
     await tryReactMessage(sentMessage, '👍');
 
-    const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return ['👍'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 60 * 5 * 1000 });
+    const collector = sentMessage.createReactionCollector({
+        filter: (reaction, user) => {
+            return reaction.emoji.name === '👍' && !user.bot;
+        },
+        time: 60 * 15 * 1000,
+    });
 
     collector.on('collect', async (reaction, user) => {
         tryDeleteReaction(reaction, user.id);
@@ -2002,12 +2042,16 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
             collector.stop('messageDelete');
             tryDeleteMessage(sentMessage);
             const ping = [...readyUsers].map((x) => `<@${x}>`).join(' ');
-            await msg.channel.send(`${ping} Everyone is ready, lets go!`);
+            await msg.channel.send({
+                content: `${ping} Everyone is ready, lets go!`,
+            });
             await handleCountdown("Let's jam!", msg, '7');
         } else {
             const newFields = await f();
             embed.spliceFields(0, 2, newFields);
-            await sentMessage.edit(embed);
+            await sentMessage.edit({
+                embeds: [embed],
+            });
         }
     });
 
@@ -2015,7 +2059,9 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         if (reason !== 'messageDelete') {
             const notReadyNames = await Promise.all([...notReadyUsers].map((user) => getUsername(user, msg.guild)));
             embed.setDescription(`Countdown cancelled! ${notReadyNames.join(', ')} did not ready up in time.`);
-            await sentMessage.edit(embed);
+            await sentMessage.edit({
+                embeds: [embed],
+            });
         }
     });
 }
@@ -2057,11 +2103,20 @@ export async function handlePoll(msg: Message, args: string) {
         .setTitle(title)
         .setFooter('React with 👍 or 👎 to vote');
 
-    const sentMessage = await msg.channel.send(embed);
+    const sentMessage = await msg.channel.send({
+        embeds: [embed],
+    });
 
-    const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 60 * 15 * 1000 });
+    const collector = sentMessage.createReactionCollector({
+        filter: (reaction, user) => {
+            if (!reaction.emoji.name) {
+                return false;
+            }
+
+            return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
+        },
+        time: 60 * 15 * 1000,
+    });
 
     collector.on('collect', async (reaction, user) => {
         tryDeleteReaction(reaction, user.id);
@@ -2078,7 +2133,9 @@ export async function handlePoll(msg: Message, args: string) {
 
         embed.spliceFields(0, 2, newFields);
 
-        sentMessage.edit(embed);
+        sentMessage.edit({
+            embeds: [embed],
+        });
     });
 
     await tryReactMessage(sentMessage, '👍');
@@ -2134,7 +2191,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
     const questionEndIndex = args.indexOf('/');
 
     if (questionEndIndex === -1) {
-        await msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll\` help`);
+        await msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll help\``);
         return;
     }
 
@@ -2167,18 +2224,27 @@ export async function handleMultiPoll(msg: Message, args: string) {
         .addFields(fields)
         .setFooter('React with the emoji indicated to cast your vote');
 
-    const sentMessage = await msg.channel.send(embed);
+    const sentMessage = await msg.channel.send({
+        embeds: [embed]
+    });
     
     const usedEmojis = emojis.slice(0, options.length);
     
-    const collector = sentMessage.createReactionCollector((reaction, user) => {
-        return usedEmojis.includes(reaction.emoji.name) && !user.bot;
-    }, { time: 60 * 15 * 1000 });
+    const collector = sentMessage.createReactionCollector({
+        filter: (reaction, user) => {
+            if (!reaction.emoji.name) {
+                return false;
+            }
+
+            return usedEmojis.includes(reaction.emoji.name) && !user.bot;
+        },
+        time: 60 * 15 * 1000,
+    });
 
     collector.on('collect', async (reaction, user) => {
         tryDeleteReaction(reaction, user.id);
 
-        const index = emojiToIndexMap.get(reaction.emoji.name) || 0;
+        const index = emojiToIndexMap.get(reaction.emoji.name as string) || 0;
 
         let i = 0;
 
@@ -2196,7 +2262,9 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
         embed.spliceFields(0, 11, newFields);
 
-        sentMessage.edit(embed);
+        sentMessage.edit({
+            embeds: [embed],
+        });
     });
 
     for (const emoji of usedEmojis) {

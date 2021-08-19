@@ -2,6 +2,7 @@ import * as moment from 'moment';
 import { Database } from 'sqlite3';
 
 import {
+    Intents,
     Message,
     Client,
     TextChannel,
@@ -173,6 +174,11 @@ async function main() {
     const client = new Client({
         restRequestTimeout: 5000,
         retryLimit: 3,
+        intents: [
+            Intents.FLAGS.GUILDS,
+            Intents.FLAGS.GUILD_MESSAGES,
+            Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
+        ],
     });
 
     client.on('ready', async () => {
@@ -182,7 +188,7 @@ async function main() {
         restoreTimers(db, client);
     });
 
-    client.on('message', async (msg) => {
+    client.on('messageCreate', async (msg) => {
         try {
             await handleMessage(msg as Message, db);
         /* Usually discord permissions errors */

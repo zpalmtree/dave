@@ -1,5 +1,4 @@
 import {
-    APIMessage,
     Message,
     MessageAttachment,
     MessageEmbed,
@@ -45,7 +44,7 @@ export type ModifyMessage<T> = (
     this: Paginate<T>,
     items: T[],
     message: Message,
-) => Asyncable<EditableResponse>;
+) => Asyncable<string>;
 
 export type CustomReactionEmbedCallback<T> = (
     this: Paginate<T>,
@@ -175,19 +174,8 @@ export class Paginate<T> {
     }
 
     private editMessage(data: any) {
-        const embed = this.displayType === DisplayType.MessageData
-            ? null
-            : data;
-
-        const content = this.displayType === DisplayType.MessageData
-            ? data
-            : null;
-
         try {
-            this.sentMessage!.edit({
-                embed,
-                content,
-            });
+            this.sentMessage!.edit(data);
         } catch (err) {
             console.log(err);
         }
@@ -204,7 +192,7 @@ export class Paginate<T> {
                 this.embed.setFooter(footer);
 
                 if (editMessage) {
-                    this.editMessage(this.embed);
+                    this.editMessage({ embeds: [this.embed] });
                 }
             }
         }
@@ -229,7 +217,7 @@ export class Paginate<T> {
         return `Page ${this.currentPage + 1} of ${this.totalPages}${lockMessage}`;
     }
 
-    private async getPageContent() {
+    private async getPageContent(): Promise<({ embeds: MessageEmbed[] } | { content: string })> {
         const startIndex = this.currentPage * this.itemsPerPage;
         const endIndex = (this.currentPage + 1) * this.itemsPerPage;
 
@@ -263,7 +251,9 @@ export class Paginate<T> {
                     }
                 }
 
-                return this.embed;
+                return {
+                    embeds: [this.embed!],
+                };
             }
             case DisplayType.EmbedData: {
                 for (const item of items) {
@@ -271,11 +261,15 @@ export class Paginate<T> {
                     await f(item, this.embed!);
                 }
 
-                return this.embed;
+                return {
+                    embeds: [this.embed!],
+                };
             }
             case DisplayType.MessageData: {
                 const f = (this.displayFunction as ModifyMessage<T>).bind(this);
-                return await f(items, this.sentMessage!);
+                return {
+                    content: await f(items, this.sentMessage!),
+                };
             }
         }
     }
@@ -287,9 +281,9 @@ export class Paginate<T> {
     public async sendMessage(): Promise<Message> {
         const shouldPaginate = this.data.length > this.itemsPerPage;
 
-        const content = await this.getPageContent();
-
-        this.sentMessage = await this.sourceMessage.channel.send(content!);
+        this.sentMessage = await this.sourceMessage.channel.send({
+            ...await this.getPageContent(),
+        });
 
         let reactions = ['❌'].concat(this.customReactions || []);
 
@@ -298,11 +292,23 @@ export class Paginate<T> {
             reactions = reactions.concat(['⬅️', '➡️', '🔒']);
         }
 
-        this.collector = this.sentMessage.createReactionCollector((reaction, user) => {
-            return reactions.includes(reaction.emoji.name) && !user.bot;
-        }, { time: 60 * 15 * 1000, dispose: true });
+        this.collector = this.sentMessage.createReactionCollector({
+            filter: (reaction, user) => {
+                if (!reaction.emoji.name) {
+                    return false;
+                }
+
+                return reactions.includes(reaction.emoji.name) && !user.bot;
+            },
+            time: 60 * 15 * 1000,
+            dispose: true,
+        });
 
         this.collector.on('collect', async (reaction: MessageReaction, user: User) => {
+            if (!reaction.emoji.name) {
+                return;
+            }
+
             if (this.permittedUsers && !this.permittedUsers.includes(user.id)) {
                 return;
             }
@@ -390,8 +396,7 @@ export class Paginate<T> {
             this.locked = true;
             this.lockID = user.id;
 
-            const content = await this.getPageContent();
-            this.editMessage(content);
+            this.editMessage(await this.getPageContent());
 
             return;
         }
@@ -403,8 +408,7 @@ export class Paginate<T> {
             this.locked = false;
             this.lockID = '';
 
-            const content = await this.getPageContent();
-            this.editMessage(content);
+            this.editMessage(await this.getPageContent());
         }
     }
 
@@ -436,9 +440,7 @@ export class Paginate<T> {
 
         this.currentPage = mod(this.currentPage + amount, this.totalPages);
 
-        const content = await this.getPageContent();
-
-        this.editMessage(content);
+        this.editMessage(await this.getPageContent());
     }
 
     private async getCustomReactionContent(reaction: MessageReaction, user: User) {

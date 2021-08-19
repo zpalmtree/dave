@@ -90,7 +90,7 @@ export async function updateQuery(query: string, db: Database, params: any = [])
     });
 }
 
-export async function serializeQueries(callback: () => any, db: Database) {
+export async function serializeQueries(callback: () => any, db: Database): Promise<void> {
     return new Promise((resolve, reject) => {
         db.serialize();
 

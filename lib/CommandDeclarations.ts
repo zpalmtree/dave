@@ -59,8 +59,6 @@ import {
 
 import {
     handleWatch,
-    addToBank,
-    handleMovieBank,
     deleteWatch,
     displayAllWatches,
     updateTime,
@@ -398,38 +396,6 @@ export const Commands: Command[] = [
                         value: 'watch updatetime 1 10m',
                     },
                 ],
-            },
-            {
-                argsFormat: Args.DontNeed,
-                implementation: handleMovieBank,
-                description: 'Find an unwatched movie',
-                aliases: ['bank'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Find an unwatched movie',
-                        value: 'watch bank',
-                    },
-                    {
-                        name: 'Find a movie unwatched by a group',
-                        value: 'watch bank @tom @bob',
-                    },
-                ],
-                disabled: true,
-            },
-            {
-                argsFormat: Args.Combined,
-                implementation: addToBank,
-                description: 'Add a movie to the movie bank',
-                aliases: ['addbank'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Add a movie to the movie bank',
-                        value: 'watch addbank Rocky https://www.imdb.com/title/tt0075148/?ref_=fn_al_tt_1',
-                    },
-                ],
-                disabled: true,
             },
             {
                 argsFormat: Args.DontNeed,
@@ -887,7 +853,7 @@ export const Commands: Command[] = [
     {
         aliases: ['weather', 'forecast'],
         primaryCommand: {
-            argsFormat: Args.Split,
+            argsFormat: Args.Combined,
             implementation: handleWeather,
             description: 'Retrieve the weather forecast for a region',
             helpDescription: 'Retrieve the weather forecast for a region. Returns ' +
@@ -898,16 +864,16 @@ export const Commands: Command[] = [
                     value: 'weather Paris',
                 },
                 {
-                    name: 'Get the weather in a specific city',
-                    value: 'Weather Paris,US',
+                    name: 'Get the weather in a specific country',
+                    value: 'Weather Paris, US',
                 },
                 {
                     name: 'Get the weather in a zip code',
-                    value: 'weather 10001,US',
+                    value: 'weather 10001, US',
                 },
                 {
                     name: 'Get the weather in a post code',
-                    value: 'weather SW1,GB',
+                    value: 'weather SW1, GB',
                 },
             ],
         },
@@ -1134,7 +1100,9 @@ export function handleHelp(msg: Message, args: string): void {
                     });
                 }
 
-                msg.channel.send(embed);
+                msg.channel.send({
+                    embeds: [embed],
+                });
 
                 return;
             }

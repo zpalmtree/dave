@@ -528,72 +528,6 @@ export async function displayWatchById(msg: Message, id: number, db: Database): 
     await pages.sendMessage();
 }
 
-export async function addToBank(
-    msg: Message,
-    args: string,
-    db: Database): Promise<void> {
-
-    /* Non greedy title match, optional imdb/myanimelist link, time, optional magnet/youtube link */
-    const regex = /^(.+?)(?: (https:\/\/.*imdb\.com\/\S+|https:\/\/.*myanimelist\.net\/\S+))?(?: (magnet:\?.+|https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+))?$/
-
-    const results = regex.exec(args);
-
-    if (results) {
-        const [ , title, infoLink, downloadLink ] = results;
-
-        if (infoLink && infoLink.length > 1000) {
-            msg.reply('Info link is too long. Must be less than 1000 chars.');
-            return;
-        }
-
-        if (downloadLink && downloadLink.length > 1000) {
-            msg.reply('Download link is too long. Must be less than 1000 chars.');
-            return;
-        }
-
-        if (title && title.length > 1000) {
-            msg.reply('Title is too long. Must be less than 1000 chars.');
-            return;
-        }
-
-        const movieID = await insertQuery(
-            `INSERT INTO movie
-                (title, channel_id)
-            VALUES
-                (?, ?)`,
-            db,
-            [ title, msg.channel.id ]
-        );
-
-        if (infoLink) {
-            await insertQuery(
-                `INSERT INTO movie_link
-                    (link, movie_id, is_download)
-                VALUES
-                    (?, ?, 0)`,
-                db,
-                [ infoLink, movieID ]
-            );
-        }
-
-        if (downloadLink) {
-            await insertQuery(
-                `INSERT INTO movie_link
-                    (link, movie_id, is_download)
-                VALUES
-                    (?, ?, 1)`,
-                db,
-                [ downloadLink, movieID ]
-            );
-        }
-
-        msg.reply(`Successfully added ${title} to movie bank!`);
-        return;
-    }
-
-    msg.reply(`Invalid input. Try \`${config.prefix}help watch\``);
-}
-
 export async function scheduleWatch(
     msg: Message,
     args: string,
@@ -726,7 +660,9 @@ export async function createWatch(
             },
         );
 
-    const sentMessage = await msg.channel.send(embed);
+    const sentMessage = await msg.channel.send({
+        embeds: [embed]
+    });
 
     awaitWatchReactions(sentMessage, title, movieID, new Set([msg.author.id]), 0, db);
 }
@@ -742,9 +678,16 @@ async function awaitWatchReactions(
     await tryReactMessage(msg, '👍');
     await tryReactMessage(msg, '👎');
 
-    const collector = msg.createReactionCollector((reaction, user) => {
-        return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
-    }, { time: 60 * 15 * 1000 });
+    const collector = msg.createReactionCollector({
+        filter: (reaction, user) => {
+            if (!reaction.emoji.name) {
+                return false;
+            }
+
+            return ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
+        },
+        time: 60 * 15 * 1000,
+    });
 
     collector.on('collect', async (reaction, user) => {
         const embed = new MessageEmbed(msg.embeds[0]);
@@ -793,7 +736,9 @@ async function awaitWatchReactions(
             }
         }, db);
 
-        msg.edit(embed);
+        msg.edit({
+            embeds: [embed],
+        });
     });
 }
 
@@ -977,136 +922,6 @@ export async function handleWatchNotifications(client: Client, db: Database) {
     }
 
     setTimeout(handleWatchNotifications, config.watchPollInterval, client, db);
-}
-
-export async function handleMovieBank(msg: Message, db: Database) {
-    const mentionedUsers = new Set<string>([...msg.mentions.users.keys()]);
-
-    mentionedUsers.add(msg.author.id);
-
-    const movies = await selectQuery(
-        `SELECT
-            id AS movieID,
-            title AS title
-        FROM
-            movie
-        WHERE
-            channel_id = ?`,
-        db,
-        [ msg.channel.id ]
-    );
-
-    if (movies.length === 0) {
-        msg.reply(`No stored movies. Use \`${config.prefix}help watch\` for info on how to add movies.`);
-        return;
-    }
-
-    const validOptions = [];
-
-    for (let movie of movies) {
-        const links = await selectQuery(
-            `SELECT
-                link,
-                is_download
-            FROM
-                movie_link
-            WHERE
-                movie_id = ?`,
-            db,
-            [ movie.movieID ],
-        );
-
-        movie.downloadLinks = [];
-        movie.infoLinks = [];
-
-        for (const link of links) {
-            if (link.is_download) {
-                movie.downloadLinks.push(link.link);
-            } else {
-                movie.infoLinks.push(link.link);
-            }
-        }
-
-        const previouslyAttended = await selectQuery(
-            `SELECT
-                uw.user_id
-            FROM user_watch AS uw
-            INNER JOIN watch_event AS we
-                ON we.id = uw.watch_event
-            WHERE
-                we.movie_id = ?`,
-            db,
-            [ movie.watchID ]
-        );
-
-        /* Check none of the users have seen this before */
-        for (const attendee of previouslyAttended) {
-            if (mentionedUsers.has(attendee)) {
-                continue;
-            }
-        }
-
-        validOptions.push(movie);
-    }
-
-    /* Shuffle so we can pick a few suggestions */
-    shuffleArray(validOptions);
-
-    const embed = new MessageEmbed()
-        .setTitle('Movie Suggestions')
-        .setDescription('Here are a few movies that you have not seen')
-        .setFooter('React with the movie number to mark this movie as seen')
-
-    /* Pick 3 suggestions and display them */
-    const options = validOptions.slice(0, 3);
-
-    if (options.length === 0) {
-        msg.reply(`No stored movies that you haven't seen. Use \`${config.prefix}help watch\` for info on how to add movies.`);
-        return;
-    }
-
-    for (const option of options) {
-        embed.addFields([
-            {
-                name: 'Title',
-                value: option.title,
-                inline: true,
-            },
-            {
-                name: 'Info Link',
-                value: option.infoLinks.length > 0
-                    ? option.infoLinks[0]
-                    : 'N/A',
-                inline: true,
-            },
-            {
-                name: 'Download Link',
-                value: option.downloadLinks.length > 0
-                    ? option.downloadLinks[0]
-                    : 'N/A',
-                inline: true,
-            },
-        ]);
-    }
-
-    const sentMessage = await msg.channel.send(embed);
-
-    const reactions = ['1⃣'];
-
-    if (options.length >= 2) {
-        reactions.push('2⃣');
-    }
-
-    if (options.length >= 3) {
-        reactions.push('3⃣');
-    }
-
-    const collector = msg.createReactionCollector((reaction, user) => {
-        return reactions.includes(reaction.emoji.name) && !user.bot;
-    }, { time: 60 * 15 * 1000 });
-
-    collector.on('collect', async (reaction: MessageReaction, user: User) => {
-    });
 }
 
 export async function handleWatchStats(msg: Message, db: Database) {

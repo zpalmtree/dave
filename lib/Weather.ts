@@ -320,8 +320,8 @@ function displayWeather(embed: MessageEmbed, data: any, cityData: any) {
         );
 }
 
-export async function handleWeather(msg: Message, args: string[]): Promise<void> {
-    let query = args[0].trim();
+export async function handleWeather(msg: Message, args: string): Promise<void> {
+    let query = args.trim();
 
     /* Prevent leaking our IP */
     if (query.includes('auto:ip')) {
@@ -329,7 +329,7 @@ export async function handleWeather(msg: Message, args: string[]): Promise<void>
     }
 
     if (query === '') {
-        msg.reply(`No location given. Try \`${config.prefix}weather\` help`);
+        msg.reply(`No location given. Try \`${config.prefix}weather help\``);
         return;
     }
 

@@ -522,14 +522,23 @@ export class Game {
             .setTitle(`${capitalize(username)}, are you sure you want to move from ${oldCoordsPretty} to ${newCoordsPretty}?`)
             .setDescription(`This will cost ${pointsRequired} points. (${tilesTraversed} tile${tilesTraversed > 1 ? 's' : ''})`)
             .setFooter('React with 👍 to confirm the move')
-            .attachFiles([preview])
             .setImage('attachment://turtle-tanks.png');
 
-        const sentMessage = await msg.channel.send(embed);
+        const sentMessage = await msg.channel.send({
+            embeds: [embed],
+            files: [preview],
+        });
         
-        const collector = sentMessage.createReactionCollector((reaction: MessageReaction, user: User) => {
-            return ['👍', '👎'].includes(reaction.emoji.name) && user.id === userId
-        }, { time: 60 * 15 * 1000 });
+        const collector = sentMessage.createReactionCollector({
+            filter: (reaction: MessageReaction, user: User) => {
+                if (!reaction.emoji.name) {
+                    return false;
+                }
+
+                return ['👍', '👎'].includes(reaction.emoji.name) && user.id === userId
+            },
+            time: 60 * 15 * 1000,
+        });
 
         collector.on('collect', async (reaction: MessageReaction) => {
             collector.stop();
@@ -546,11 +555,11 @@ export class Game {
             if (success) {
                 const attachment = await this.renderAndGetAttachment(userId);
 
-                const movedMessage = await msg.channel.send(
-                    `<@${userId}> Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}. ` +
-                    `You now have ${player.points} points.`,
-                    attachment,
-                );
+                const movedMessage = await msg.channel.send({
+                    content: `<@${userId}> Successfully moved from ${oldCoordsPretty} to ${newCoordsPretty}. ` +
+                        `You now have ${player.points} points.`,
+                    files: [attachment],
+                });
 
                 await addMoveReactions(movedMessage, this);
             } else {
@@ -1048,14 +1057,23 @@ export class Game {
                 .setTitle(title)
                 .setDescription(description)
                 .setFooter('React with 👍 to confirm the attack')
-                .attachFiles([preview])
                 .setImage('attachment://turtle-tanks.png');
 
-            const sentMessage = await msg.channel.send(embed);
+            const sentMessage = await msg.channel.send({
+                embeds: [embed],
+                files: [preview],
+            });
 
-            const collector = sentMessage.createReactionCollector((reaction: MessageReaction, user: User) => {
-                return ['👍', '👎'].includes(reaction.emoji.name) && user.id === userId
-            }, { time: 60 * 15 * 1000 });
+            const collector = sentMessage.createReactionCollector({
+                filter: (reaction: MessageReaction, user: User) => {
+                    if (!reaction.emoji.name) {
+                        return false;
+                    }
+
+                    return ['👍', '👎'].includes(reaction.emoji.name) && user.id === userId
+                },
+                time: 60 * 15 * 1000,
+            });
 
             collector.on('collect', async (reaction: MessageReaction) => {
                 collector.stop();
@@ -1073,7 +1091,9 @@ export class Game {
                 const nextShotPercentage = roundToNPlaces(player.getNextShotPercentage(coords) * 100, 0) + '%';
 
                 if (result.err !== undefined) {
-                    await msg.channel.send(`<@${userId}> Failed to perform attack: ${result.err}`);
+                    await msg.channel.send({
+                        content: `<@${userId}> Failed to perform attack: ${result.err}`,
+                    });
 
                     resolve({ ended: false });
 
@@ -1081,10 +1101,10 @@ export class Game {
                 }
 
                 if (result.shotResult !== undefined && result.shotResult === ShotResult.Miss) {
-                    await msg.channel.send(
-                        `<@${userId}> Your attack missed! Your next attack to ${coordPretty} ` +
-                        `has a ${nextShotPercentage} chance of hitting.`,
-                    );
+                    await msg.channel.send({
+                        content: `<@${userId}> Your attack missed! Your next attack to ${coordPretty} ` +
+                            `has a ${nextShotPercentage} chance of hitting.`,
+                    });
 
                     resolve({ ended: false });
 
@@ -1102,10 +1122,10 @@ export class Game {
 
                     damageDescription += await this.buildAffectedPlayersMsg(result.affectedPlayers);
 
-                    const attackMessage = await msg.channel.send(
-                        `<@${userId}> Successfully ${isKamikaze ? 'kamikazed' : 'attacked'} ${coordPretty}. ${damageDescription}`,
-                        attachment,
-                    );
+                    const attackMessage = await msg.channel.send({
+                        content: `<@${userId}> Successfully ${isKamikaze ? 'kamikazed' : 'attacked'} ${coordPretty}. ${damageDescription}`,
+                        files: [attachment],
+                    });
 
                     for (const deadPlayer of result.killedPlayers) {
                         if (deadPlayer.userId === player.userId) {
