@@ -140,8 +140,8 @@ export async function renderDot(): Promise<[string, number, Canvas]> {
     const shadowImage = new Image();
     shadowImage.width = dotWidth;
     shadowImage.height = dotHeight;
+    shadowImage.onload = () => dotContext.drawImage(shadowImage, 0, 0);
     shadowImage.src = `data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`;
-    dotContext.drawImage(shadowImage, 0, 0);
 
     let blendRGB: RGB = {r: 255, g: 255, b: 255}; // if the final output is white you know shit's fucked
     for (let i = 0; i < dotColors.length - 1; i++) {
