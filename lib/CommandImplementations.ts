@@ -36,6 +36,7 @@ import { dubTypes } from './Dubs';
 import {
     renderDotGraph,
     renderDot,
+    initDot,
 } from './Dot';
 
 import {
@@ -782,6 +783,8 @@ export async function handleChinked(msg: Message, country: string): Promise<void
 }
 
 export async function handleDot(msg: Message, arg: string): Promise<void> {
+    await initDot();
+
     /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
     const timeRegex = /^([0-9]+)([YMWdhms])/;
 

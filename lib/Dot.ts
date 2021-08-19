@@ -5,7 +5,8 @@ import { xml2json } from 'xml-js';
 import {
     Canvas,
     Image,
-    createCanvas
+    createCanvas,
+    loadImage,
 } from 'canvas';
 
 import { RGB } from './Types';
@@ -15,23 +16,15 @@ import {
     rgbToHex
 } from './Utilities';
 
-const dotWidth = 120;
-const dotHeight = 120;
+const DOT_WIDTH = 120;
+const DOT_HEIGHT = 120;
 
-const dotGraphWidth = 400;
-const dotGraphHeight = 150;
+const DOT_GRAPH_WIDTH = 400;
+const DOT_GRAPH_HEIGHT = 150;
 
-const shadowBlur = 2.75;
-const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}' style='opacity:0.7'>
-    <defs>
-        <filter id='fh'>
-            <feGaussianBlur in='SourceGraphic' stdDeviation='${shadowBlur} ${shadowBlur}' />
-        </filter>
-    </defs>
-    <circle filter='url(#fh)' fill='black' cx='50%' cy='49%' r='45%'/>
-</svg>`;
+const SHADOW_BLUR = 2.75;
 
-const colors: {color1: string, color2: string}[] = [
+const COLORS: {color1: string, color2: string}[] = [
     {color1: '#CDCDCD', color2: '#505050'},
     {color1: '#FFA8C0', color2: '#FF0064'},
     {color1: '#FF1E1E', color2: '#840607'},
@@ -48,7 +41,33 @@ const colors: {color1: string, color2: string}[] = [
     {color1: '#5655CA', color2: '#2400A0'}
 ];
 
-var dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotWidth}' height='${dotHeight}'>
+// generate dot color stops
+let DOT_IMAGES: Image[] = [];
+let DOT_COLORS: { tail: number, mc: Image }[] = [];
+
+export async function initDot() {
+    if (DOT_IMAGES.length === 0) {
+        DOT_IMAGES = await generateDotImages();
+        DOT_COLORS = [
+            {tail: 0.00,    mc: DOT_IMAGES[1]},
+            {tail: 0.01,    mc: DOT_IMAGES[2]},
+            {tail: 0.05,    mc: DOT_IMAGES[3]},
+            {tail: 0.08,    mc: DOT_IMAGES[4]},
+            {tail: 0.15,    mc: DOT_IMAGES[5]},
+            {tail: 0.23,    mc: DOT_IMAGES[6]},
+            {tail: 0.30,    mc: DOT_IMAGES[7]},
+            {tail: 0.40,    mc: DOT_IMAGES[8]},
+            {tail: 0.90,    mc: DOT_IMAGES[9]},
+            {tail: 0.9125,  mc: DOT_IMAGES[10]},
+            {tail: 0.93,    mc: DOT_IMAGES[11]},
+            {tail: 0.98,    mc: DOT_IMAGES[12]},
+            {tail: 1.00,    mc: DOT_IMAGES[13]}
+        ];
+    }
+}
+
+async function generateDotImages(): Promise<Image[]> {
+    const dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_WIDTH}' height='${DOT_HEIGHT}'>
     <defs>
         <filter id='f1'>
             <feGaussianBlur in='SourceGraphic' stdDeviation='9 3' />
@@ -71,7 +90,105 @@ var dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidY
     </g>
 </svg>`;
 
-var graphSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${dotGraphWidth}' height='${dotGraphHeight}'>
+    // generate dot color stops
+    const DOT_IMAGES: Image[] = [];
+
+    for (const { color1, color2 } of COLORS) {
+        const svg = dotSvg.replace('$$COLOR1$$', color1).replace('$$COLOR2$$', color2);
+        const img = new Image();
+
+        const image = await loadImage(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+
+        image.width = DOT_WIDTH;
+        image.height = DOT_HEIGHT;
+
+        DOT_IMAGES.push(image);
+    }
+
+    return DOT_IMAGES;
+}
+
+export async function renderDot(): Promise<[string, number, Canvas]> {
+    const response = await fetch('http://gcpdot.com/gcpindex.php');
+
+    const dotXML = await response.text();
+
+    const dotData = JSON.parse(xml2json(dotXML)).elements[0].elements;
+
+    const serverTime = dotData[0].elements[0].text;
+
+    /* Server sends back a full minute of data, we only need the current second */
+    const currentDotValue = Number(dotData[1].elements.find((item: any) => {
+        return item.attributes.t === serverTime
+    }).elements[0].text);
+
+    const dotCanvas = createCanvas(DOT_WIDTH, DOT_HEIGHT);
+    const dotContext = dotCanvas.getContext('2d');
+
+    const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_WIDTH}' height='${DOT_HEIGHT}' style='opacity:0.7'>
+    <defs>
+        <filter id='fh'>
+            <feGaussianBlur in='SourceGraphic' stdDeviation='${SHADOW_BLUR} ${SHADOW_BLUR}' />
+        </filter>
+    </defs>
+    <circle filter='url(#fh)' fill='black' cx='50%' cy='49%' r='45%'/>
+</svg>`;
+
+    /* Generate dot drop shadow */
+    const shadowImage = await loadImage(`data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`);
+    shadowImage.width = DOT_WIDTH;
+    shadowImage.height = DOT_HEIGHT;
+
+    dotContext.drawImage(shadowImage, 0, 0);
+
+    let blendRGB: RGB = {r: 255, g: 255, b: 255}; // if the final output is white you know shit's fucked
+    for (let i = 0; i < DOT_COLORS.length - 1; i++) {
+        const opacity = (currentDotValue - DOT_COLORS[i].tail) / (DOT_COLORS[i + 1].tail - DOT_COLORS[i].tail);
+
+        if (opacity >= 0 && opacity <= 1) {
+            blendRGB = hexToRGB(COLORS[i + 1].color2);
+            dotContext.drawImage(DOT_COLORS[i].mc, 0, 0);
+
+            if (DOT_COLORS[i].mc !== DOT_COLORS[i + 1].mc) {
+                const color_RGB = hexToRGB(COLORS[i + 2].color2);
+                const inv_opacity = 1 - opacity;
+
+                blendRGB.r = Math.floor(
+                  color_RGB.r * opacity + inv_opacity * blendRGB.r
+                );
+                blendRGB.g = Math.floor(
+                  color_RGB.g * opacity + inv_opacity * blendRGB.g
+                );
+                blendRGB.b = Math.floor(
+                  color_RGB.b * opacity + inv_opacity * blendRGB.b
+                );
+
+                dotContext.globalAlpha = opacity;
+                dotContext.drawImage(DOT_COLORS[i + 1].mc, 0, 0);
+            }
+
+            break;
+        }
+    }
+
+    return [ rgbToHex(blendRGB), currentDotValue, dotCanvas ];
+};
+
+export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
+    const inv_ch = 1.0 / DOT_GRAPH_HEIGHT;
+
+    var canvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    var context = canvas.getContext('2d');
+    var outCanvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    var outContext = outCanvas.getContext("2d");
+
+    const response = await fetch(`http://global-mind.org/gcpdot/gcpgraph.php?pixels=${DOT_GRAPH_WIDTH}&seconds=${timespan}`);
+
+    const dotXML = await response.text();
+
+    const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
+
+    const graphSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_GRAPH_WIDTH}' height='${DOT_GRAPH_HEIGHT}'>
     <defs>
         <linearGradient id='g' x1='0%' y1='0%' x2='0%' y2='100%'>
             <stop offset='0%' style='stop-color:#FF00FF;stop-opacity:1'/>
@@ -90,115 +207,15 @@ var graphSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMi
     <rect width='100%' height='100%' fill='url(#g)'/>
 </svg>`;
 
-// generate dot color stops
-let dotImages: Image[] = [];
+    const bgImage = await loadImage(`data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`);
 
-for (let i = 0; i < colors.length; i++) {
-    let svg = dotSvg.replace('$$COLOR1$$', colors[i].color1).replace('$$COLOR2$$', colors[i].color2);
+    context.drawImage(bgImage, 0, 0);
 
-    let img = new Image();
-    img.width = dotWidth;
-    img.height = dotHeight;
-    img.onload = () => dotImages[i] = img;
-    img.src = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-}
+    const imgBuffer = context.getImageData(0, 0, DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
 
-const dotColors: { tail: number, mc: Image }[] = [
-    {tail: 0.00,    mc: dotImages[1]},
-    {tail: 0.01,    mc: dotImages[2]},
-    {tail: 0.05,    mc: dotImages[3]},
-    {tail: 0.08,    mc: dotImages[4]},
-    {tail: 0.15,    mc: dotImages[5]},
-    {tail: 0.23,    mc: dotImages[6]},
-    {tail: 0.30,    mc: dotImages[7]},
-    {tail: 0.40,    mc: dotImages[8]},
-    {tail: 0.90,    mc: dotImages[9]},
-    {tail: 0.9125,  mc: dotImages[10]},
-    {tail: 0.93,    mc: dotImages[11]},
-    {tail: 0.98,    mc: dotImages[12]},
-    {tail: 1.00,    mc: dotImages[13]}
-];
-
-export async function renderDot(): Promise<[string, number, Canvas]> {
-    const response = await fetch('http://gcpdot.com/gcpindex.php');
-
-    const dotXML = await response.text();
-
-    const dotData = JSON.parse(xml2json(dotXML)).elements[0].elements;
-
-    const serverTime = dotData[0].elements[0].text;
-
-    /* Server sends back a full minute of data, we only need the current second */
-    const currentDotValue = Number(dotData[1].elements.find((item: any) => {
-        return item.attributes.t === serverTime
-    }).elements[0].text);
-
-    const dotCanvas = createCanvas(dotWidth, dotHeight);
-    const dotContext = dotCanvas.getContext('2d');
-
-    /* Generate dot drop shadow */
-    const shadowImage = new Image();
-    shadowImage.width = dotWidth;
-    shadowImage.height = dotHeight;
-    shadowImage.onload = () => dotContext.drawImage(shadowImage, 0, 0);
-    shadowImage.src = `data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`;
-
-    let blendRGB: RGB = {r: 255, g: 255, b: 255}; // if the final output is white you know shit's fucked
-    for (let i = 0; i < dotColors.length - 1; i++) {
-        const opacity = (currentDotValue - dotColors[i].tail) / (dotColors[i + 1].tail - dotColors[i].tail);
-
-        if (opacity >= 0 && opacity <= 1) {
-            blendRGB = hexToRGB(colors[i + 1].color2);
-            dotContext.drawImage(dotColors[i].mc, 0, 0);
-
-            if (dotColors[i].mc !== dotColors[i + 1].mc) {
-                const color_RGB = hexToRGB(colors[i + 2].color2);
-                const inv_opacity = 1 - opacity;
-
-                blendRGB.r = Math.floor(
-                  color_RGB.r * opacity + inv_opacity * blendRGB.r
-                );
-                blendRGB.g = Math.floor(
-                  color_RGB.g * opacity + inv_opacity * blendRGB.g
-                );
-                blendRGB.b = Math.floor(
-                  color_RGB.b * opacity + inv_opacity * blendRGB.b
-                );
-
-                dotContext.globalAlpha = opacity;
-                dotContext.drawImage(dotColors[i + 1].mc, 0, 0);
-            }
-
-            break;
-        }
-    }
-
-    return [ rgbToHex(blendRGB), currentDotValue, dotCanvas ];
-};
-
-export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
-    const inv_ch = 1.0 / dotGraphHeight;
-
-    var canvas = createCanvas(dotGraphWidth, dotGraphHeight);
-    var context = canvas.getContext('2d');
-    var outCanvas = createCanvas(dotGraphWidth, dotGraphHeight);
-    var outContext = outCanvas.getContext("2d");
-
-    const response = await fetch(`http://global-mind.org/gcpdot/gcpgraph.php?pixels=${dotGraphWidth}&seconds=${timespan}`);
-
-    const dotXML = await response.text();
-
-    const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
-
-    const bgImage = new Image();
-    bgImage.onload = () => context.drawImage(bgImage, 0, 0);
-    bgImage.src = `data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`;
-
-    const imgBuffer = context.getImageData(0, 0, dotGraphWidth, dotGraphHeight);
-
-    for (let y = 0; y < dotGraphHeight; y++) {
-        for (let x = 0; x < dotGraphWidth; x++) {
-            imgBuffer.data[(y * dotGraphWidth + x) * 4 + 3] = 0;
+    for (let y = 0; y < DOT_GRAPH_HEIGHT; y++) {
+        for (let x = 0; x < DOT_GRAPH_WIDTH; x++) {
+            imgBuffer.data[(y * DOT_GRAPH_WIDTH + x) * 4 + 3] = 0;
         }
     }
 
@@ -214,8 +231,8 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
             }
         }
 
-        for (let y = Math.floor(top * dotGraphHeight); y < bottom * dotGraphHeight; y++) {
-            const ys = y / dotGraphHeight;
+        for (let y = Math.floor(top * DOT_GRAPH_HEIGHT); y < bottom * DOT_GRAPH_HEIGHT; y++) {
+            const ys = y / DOT_GRAPH_HEIGHT;
             let a = 0;
 
             if (ys > q1 && ys <= q3 || (bottom - top) < inv_ch * 1.5) {
