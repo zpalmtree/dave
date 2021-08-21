@@ -38,6 +38,9 @@ class Config {
 
     /* coingecko coin ids to monitor e.g. ['bitcoin', 'ethereum'], see coingecko api docs for details */
     public coins: string[] = [];
+
+    /* Cache deletions of messages of these users */
+    public usersToCacheDeletions: string[] = [];
 }
 
 export let config = new Config();
