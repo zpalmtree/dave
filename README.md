@@ -32,7 +32,7 @@ Dave is a discord bot.
 
 ## Configuration
 
-Copy `src/Config.ts.example` to `src/Config.ts` and fill in the relevant fields.
+Copy `lib/Config.ts.example` to `lib/Config.ts` and fill in the relevant fields.
 
 You can disable functions in `lib/CommandDefinitions.ts` if you can't be bothered to get the API keys and don't want errors.
 
