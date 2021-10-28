@@ -167,23 +167,6 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['image'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleImage,
-            description: 'Query duckduckgo images',
-            examples: [
-                {
-                    value: 'image sunset',
-                },
-            ],
-        },
-        relatedCommands: [
-            'query',
-            'youtube',
-        ],
-    },
-    {
         aliases: ['youtube', 'video'],
         primaryCommand: {
             argsFormat: Args.Combined,
