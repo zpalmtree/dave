@@ -24,7 +24,6 @@ import {
 import {
     Command,
     CommandFunc,
-    ScheduledWatch,
     Args,
     DontNeedArgsCommandDb,
     DontNeedArgsCommand,
@@ -36,16 +35,9 @@ import {
 } from './Types';
 
 import {
-    handleWatchNotifications,
-} from './Watch';
-
-import {
     Commands,
     handleHelp,
 } from './CommandDeclarations';
-
-import { restoreTimers } from './Timer';
-import { handleDeletedMessage } from './Muf';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: Database): Promise<void> {
@@ -175,9 +167,6 @@ async function main() {
 
     client.on('ready', async () => {
         console.log('Logged in');
-
-        handleWatchNotifications(client, db);
-        restoreTimers(db, client);
     });
 
     client.on('messageCreate', async (msg) => {
@@ -188,16 +177,6 @@ async function main() {
             console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${err.toString()}`);
             console.log(`Error stack trace: ${err.stack}`);
             tryReactMessage(msg, '🔥');
-        }
-    });
-
-    client.on('messageDelete', async (msg) => {
-        try {
-            await handleDeletedMessage(msg as Message);
-        } catch (err) {
-            console.error(`Caught error while processing deleted message: ${err.toString()}`)
-            console.log(`Error stack trace: ${err.stack}`);
-            tryReactMessage(msg as Message, '🔥');
         }
     });
 
