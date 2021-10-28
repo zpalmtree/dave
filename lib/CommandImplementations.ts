@@ -1335,16 +1335,28 @@ export async function handleAvatar(msg: Message): Promise<void> {
     const mentionedUsers = [...msg.mentions.users.values()];
 
     let user = msg.author;
-
+    
     if (mentionedUsers.length > 0) {
         user = mentionedUsers[0];
     }
 
-    await msg.channel.send(user.displayAvatarURL({
-        format: 'png',
-        dynamic: true,
-        size: 4096,
-    }));
+    if (msg.guild) {
+        let guildUser = await msg.guild.members.fetch(user.id);
+
+        if (guildUser) {
+            await msg.channel.send(user.displayAvatarURL({
+                format: 'png',
+                dynamic: true,
+                size: 4096,
+            }));
+        }
+    } else {
+        await msg.channel.send(user.displayAvatarURL({
+            format: 'png',
+            dynamic: true,
+            size: 4096,
+        }));
+    }
 }
 
 export async function handleNikocado(msg: Message): Promise<void> {
