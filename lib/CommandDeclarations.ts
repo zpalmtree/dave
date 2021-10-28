@@ -28,7 +28,6 @@ import {
     handleKitty,
     handleDoggo,
     handleChinked,
-    handleDot,
     handleImgur,
     handleTime,
     handleDate,
@@ -69,25 +68,6 @@ import {
 import { exchangeService } from './Exchange';
 
 import { handleWeather } from './Weather';
-
-import { 
-    handleTurtle,
-    handleTurtleTanks,
-    handleTankMove,
-    handleTankStatus,
-    handleTankLogs,
-    handleTankShoot,
-    handleTankDestroy,
-} from './TurtleTanks/TurtleTanks';
-
-import {
-    customizeAvatar,
-    faces,
-} from './TurtleTanks/Avatar';
-
-import {
-    customizePerk,
-} from './TurtleTanks/Perks';
 
 import { config } from './Config';
 

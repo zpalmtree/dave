@@ -34,12 +34,6 @@ import { fortunes } from './Fortunes';
 import { dubTypes } from './Dubs';
 
 import {
-    renderDotGraph,
-    renderDot,
-    initDot,
-} from './Dot';
-
-import {
     chunk,
     capitalize,
     sleep,
@@ -781,80 +775,6 @@ export async function handleChinked(msg: Message, country: string): Promise<void
         }
     }
 }
-
-export async function handleDot(msg: Message, arg: string): Promise<void> {
-    await initDot();
-
-    /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
-    const timeRegex = /^([0-9]+)([YMWdhms])/;
-
-    let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
-    let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
-
-    /* Timespan cannot be larger than 498 days */
-    /* Default timespan is 24h */
-    if (timeSpan > 86400 * 498) {
-        timeSpan = 86400 * 498;
-        timeString = '1w';
-    } else if (timeSpan <= 0) {
-        timeSpan = 86400;
-        timeString = '24h';
-    }
-
-    let dotGraph;
-    let currentDotColor = '#000000';
-    let currentDotValue = 0;
-    let dot;
-
-    try {
-        [ [ , dotGraph ], [ currentDotColor, currentDotValue, dot ] ] = await Promise.all([
-            renderDotGraph(timeSpan * -1),
-            renderDot(),
-        ]);
-    } catch (err) {
-        await msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
-        return;
-    }
-
-    let description: string = '';
-
-    if (currentDotValue < 0.05) {
-        description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
-    }
-    else if (currentDotValue < 0.1) {
-        description = 'Strongly increased network variance. May be chance fluctuation.';
-    }
-    else if (currentDotValue < 0.4) {
-        description = 'Slightly increased network variance. Probably chance fluctuation.';
-    }
-    else if (currentDotValue < 0.9) {
-        description = 'Normally random network variance. This is average or expected behavior.';
-    }
-    else if (currentDotValue < 0.95) {
-        description = 'Small network variance. Probably chance fluctuation.';
-    }
-    else if (currentDotValue <= 1.0) {
-        description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
-    }
-
-    const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
-    const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
-
-    const percentage = Math.floor(currentDotValue * 100);
-
-    const embed = new MessageEmbed()
-        .setColor(currentDotColor as ColorResolvable)
-        .setTitle(`${percentage}% Network Variance`)
-        .setThumbnail('attachment://dot.png')
-        .setImage('attachment://dot-graph.png')
-        .setDescription(description);
-
-    await msg.channel.send({
-        embeds: [embed],
-        files: [dotAttachment, dotGraphAttachment],
-    });
-}
-
 
 export async function handleImgur(gallery: string, msg: Message): Promise<void> {
     try {
