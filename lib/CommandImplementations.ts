@@ -1140,7 +1140,7 @@ async function getQueryResults(query: string): Promise<false | HTMLElement> {
     const params = {
         q: query,
         kl: 'us-en', // US location
-        kp: -2, // safe search off
+        kp: 1, // safe search on
         kac: -1, // auto suggest off
         kav: 1, // load all results
     };
