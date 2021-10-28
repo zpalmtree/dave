@@ -1455,7 +1455,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     const tokenParams = {
         q: query,
         kl: 'us-en', // US location
-        kp: -2, // safe search off
+        kp: 1, // safe search off
         kac: -1, // auto suggest off
         kav: 1, // load all results
     };
@@ -1467,7 +1467,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     };
 
     // gotta get our magic token to perform an image search
-    const tokenURL = `https://duckduckgo.com/?${stringify(tokenParams)}`;
+    const tokenURL = `https://safe.duckduckgo.com/?${stringify(tokenParams)}`;
 
     let data: any;
 
@@ -1494,7 +1494,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         l: 'us-en', // US location
         ac: -1, // auto suggest off
         av: 1, // load all results
-        p: -1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
+        p: 1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
         vqd: token, // magic token!
         f: ',,,',
         v7exp: 'a',
@@ -1516,7 +1516,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         },
     };
 
-    const imageURL = `https://duckduckgo.com/i.js?${stringify(imageParams)}`;
+    const imageURL = `https://safe.duckduckgo.com/i.js?${stringify(imageParams)}`;
 
     let imageData: any;
 
