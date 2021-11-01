@@ -111,6 +111,14 @@ export const Commands: Command[] = [
         },
     },
     {
+        aliases: ['price'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handlePrice,
+            description: "Displays cryptocurrency prices",
+        },
+    },
+    {
         aliases: ['help'],
         primaryCommand: {
             argsFormat: Args.Combined,
