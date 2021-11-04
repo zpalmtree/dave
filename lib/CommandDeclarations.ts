@@ -191,6 +191,50 @@ export const Commands: Command[] = [
             'image',
         ],
     },
+    {
+        aliases: ['quote'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleQuote,
+            description: 'Gets a random quote',
+            needDb: true,
+        },
+        relatedCommands: [
+            'addquote',
+            'quotes',
+        ],
+    },
+    {
+        aliases: ['addquote', 'suggest', 'suggestquote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleSuggest,
+            description: 'Suggest a new quote',
+            needDb: true,
+            examples: [
+                {
+                    value: 'suggest "im a prancing lala boy" - you',
+                },
+            ],
+        },
+        relatedCommands: [
+            'quote',
+            'quotes',
+        ],
+    },
+    {
+        aliases: ['quotes'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleQuotes,
+            description: 'View all quotes',
+            needDb: true,
+        },
+        relatedCommands: [
+            'addquote',
+            'quote',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
