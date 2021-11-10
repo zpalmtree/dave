@@ -2247,3 +2247,76 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
 
     pages.sendMessage();
 }
+
+async function handleBing(
+    msg: Message,
+    queries: string[],
+    count: number,
+) {
+    const maxOffset = 1000 - count;
+
+    const randomOffset = Math.round(Math.random() * maxOffset);
+
+    const params = {
+        q: pickRandomItem(queries),
+        safeSearch: 'Strict',
+        offset: randomOffset,
+        count,
+    };
+
+    const url = `https://api.bing.microsoft.com/v7.0/images/search?${stringify(params)}`;
+
+    try {
+        const response = await fetch(url, {
+            headers: {
+                'Ocp-Apim-Subscription-Key': config.bingApiKey,
+            },
+        });
+
+        const data = await response.json();
+
+        return data.value.map((i: any) => ({
+            thumbnail: i.thumbnailUrl,
+            fullsizeImage: i.contentUrl,
+            pageURL: i.hostPageUrl,
+            description: i.name,
+        }));
+    } catch (err) {
+        console.log(err.toString());
+        return undefined;
+    }
+}
+
+export async function handleSlug(msg: Message): Promise<void> {
+    const queries = [
+        'slug',
+        'slug animal',
+        'cute slug',
+        'sexy slug',
+        'slug reproduction',
+        'garden slug',
+        'slug parasite',
+        'leopard slug',
+        'sea slug',
+        'cartoon slug',
+        'pixel slug',
+    ];
+
+    const images = await handleBing(msg, queries, 1);
+
+    if (!images) {
+        msg.reply('Failed to fetch image, sorry!');
+        return;
+    }
+
+    const { thumbnail, fullsizeImage, pageURL, description } = images[0];
+
+    const embed = new MessageEmbed()
+        .setTitle(description)
+        .setDescription(pageURL)
+        .setImage(thumbnail);
+
+    msg.reply({
+        embeds: [embed],
+    });
+}

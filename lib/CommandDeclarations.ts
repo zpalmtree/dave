@@ -48,6 +48,7 @@ import {
     handlePoll,
     handleMultiPoll,
     handlePrice,
+    handleSlug,
 } from './CommandImplementations';
 
 import {
@@ -234,6 +235,15 @@ export const Commands: Command[] = [
             'addquote',
             'quote',
         ],
+    },
+    {
+        aliases: ['slug'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSlug,
+            description: 'Get a random slug image',
+            needDb: false,
+        },
     },
 ];
 
