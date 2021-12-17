@@ -2253,7 +2253,7 @@ async function handleBing(
     queries: string[],
     count: number,
 ) {
-    const maxOffset = 1000 - count;
+    const maxOffset = 100 - count;
 
     const randomOffset = Math.round(Math.random() * maxOffset);
 
