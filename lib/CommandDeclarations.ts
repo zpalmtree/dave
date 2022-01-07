@@ -245,6 +245,41 @@ export const Commands: Command[] = [
             needDb: false,
         },
     },
+    {
+        aliases: ['poll', 'vote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handlePoll,
+            description: 'Propose a yes/no query and let users vote',
+            examples: [
+                {
+                    value: 'poll Do you like peanut butter?',
+                },
+            ],
+        },
+        relatedCommands: [
+            'multipoll',
+        ],
+    },
+    {
+        aliases: ['multipoll', 'multivote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMultiPoll,
+            description: 'Create a query with multiple options and let users vote',
+            helpDescription: 'Create a query with multiple options and let users vote. ' +
+                'Multipoll should start with the query, then be followed by a forward slash (`/`). ' +
+                'Then, enter the poll options, each one again separated by a forward slash.',
+            examples: [
+                {
+                    value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
+                },
+            ],
+        },
+        relatedCommands: [
+            'poll',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
