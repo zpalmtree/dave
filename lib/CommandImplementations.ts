@@ -2206,7 +2206,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
             return usedEmojis.includes(reaction.emoji.name) && !user.bot;
         },
-        time: 60 * 15 * 1000,
+        time: 60 * 60 * 8 * 1000,
         dispose: true,
     });
 
