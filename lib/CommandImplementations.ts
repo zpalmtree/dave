@@ -2086,7 +2086,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
         args = args.slice(0, -1);
     }
 
-    const responseMapping = new Map<string, Set<string>>();
+    const responseMapping = new Map<number, Set<string>>();
 
     const emojiToIndexMap = new Map([
         ['0️⃣', 0],
@@ -2104,26 +2104,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
     const emojis = [...emojiToIndexMap.keys()];
 
-    const f = async () => {
-        const fields = [];
-
-        let i = 0;
-
-        for (const [response, users] of responseMapping) {
-            const names = await Promise.all([...users].map((user) => getUsername(user, msg.guild)));
-
-            fields.push({
-                name: `${emojis[i]} ${response}: ${users.size}`,
-                value: names.join(', ') || 'None',
-            })
-
-            i++;
-        }
-
-        return fields;
-    }
-
-    const questionEndIndex = args.indexOf('/');
+        const questionEndIndex = args.indexOf('/');
 
     if (questionEndIndex === -1) {
         await msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll help\``);
@@ -2142,14 +2123,42 @@ export async function handleMultiPoll(msg: Message, args: string) {
         return;
     }
 
-    for (const option of options) {
-        responseMapping.set(option, new Set());
+    let i = 0;
+
+    for (let i = 0; i < options.length; i++) {
+        responseMapping.set(i, new Set());
     }
 
     let title = capitalize(args.slice(0, questionEndIndex)).trim();
 
     if (!title.endsWith('?')) {
         title += '?';
+    }
+
+    const f = async () => {
+        const fields = [];
+
+        let i = 0;
+
+        for (const option of options) {
+            const users = responseMapping.get(i);
+
+            if (!users) {
+                i++;
+                continue;
+            }
+
+            const names = await Promise.all([...users].map((user) => getUsername(user, msg.guild)));
+
+            fields.push({
+                name: `${emojis[i]} ${option}: ${users.size}`,
+                value: names.join(', ') || 'None',
+            })
+
+            i++;
+        }
+
+        return fields;
     }
 
     const fields = await f();
@@ -2164,6 +2173,30 @@ export async function handleMultiPoll(msg: Message, args: string) {
     });
     
     const usedEmojis = emojis.slice(0, options.length);
+
+    async function toggleSelect(reaction: any, user: any) {
+        const index = emojiToIndexMap.get(reaction.emoji.name as string) || 0;
+
+        const users = responseMapping.get(index);
+
+        if (!users) {
+            return;
+        }
+
+        if (users.has(user.id)) {
+            users.delete(user.id);
+        } else {
+            users.add(user.id);
+        }
+
+        const newFields = await f();
+
+        embed.spliceFields(0, 11, newFields);
+
+        sentMessage.edit({
+            embeds: [embed],
+        });
+    }
     
     const collector = sentMessage.createReactionCollector({
         filter: (reaction, user) => {
@@ -2174,33 +2207,19 @@ export async function handleMultiPoll(msg: Message, args: string) {
             return usedEmojis.includes(reaction.emoji.name) && !user.bot;
         },
         time: 60 * 15 * 1000,
+        dispose: true,
     });
 
     collector.on('collect', async (reaction, user) => {
         tryDeleteReaction(reaction, user.id);
-
-        const index = emojiToIndexMap.get(reaction.emoji.name as string) || 0;
-
-        let i = 0;
-
-        for (let [response, users] of responseMapping) {
-            if (i === index) {
-                users.add(user.id);
-            } else {
-                users.delete(user.id);
-            }
-
-            i++;
-        }
-
-        const newFields = await f();
-
-        embed.spliceFields(0, 11, newFields);
-
-        sentMessage.edit({
-            embeds: [embed],
-        });
+        toggleSelect(reaction, user);
     });
+
+    collector.on('remove', async (reaction, user) => {
+        tryDeleteReaction(reaction, user.id);
+        toggleSelect(reaction, user);
+    });
+
 
     for (const emoji of usedEmojis) {
         await tryReactMessage(sentMessage, emoji);
