@@ -2215,12 +2215,6 @@ export async function handleMultiPoll(msg: Message, args: string) {
         toggleSelect(reaction, user);
     });
 
-    collector.on('remove', async (reaction, user) => {
-        tryDeleteReaction(reaction, user.id);
-        toggleSelect(reaction, user);
-    });
-
-
     for (const emoji of usedEmojis) {
         await tryReactMessage(sentMessage, emoji);
     }
