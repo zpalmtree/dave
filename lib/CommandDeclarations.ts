@@ -280,6 +280,23 @@ export const Commands: Command[] = [
             'poll',
         ],
     },
+    {
+        aliases: ['math'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMath,
+            description: 'Perform math or conversions',
+            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
+            examples: [
+                {
+                    value: 'math 123 * 456',
+                },
+                {
+                    value: 'math 100 fahrenheit to celsius',
+                }
+            ],
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
