@@ -130,3 +130,8 @@ export interface RGB {
     g: number;
     b: number;
 }
+
+export interface Coin {
+    label: string;
+    id: string;
+}
