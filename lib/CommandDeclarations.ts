@@ -51,6 +51,7 @@ import {
     handleSlug,
     handleGroundhog,
     handleGroove,
+    handleKek,
 } from './CommandImplementations.js';
 
 import {
@@ -324,6 +325,19 @@ export const Commands: Command[] = [
             examples: [
                 {
                     value: 'groove Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['kek', 'lmao'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKek,
+            description: 'Kek slug say thing',
+            examples: [
+                {
+                    value: 'kek Slorg',
                 },
             ],
         },

@@ -2342,7 +2342,7 @@ export async function handleSlug(msg: Message): Promise<void> {
     });
 }
 
-async function handleGif(msg: Message, args: string, gif: string, colors: number = 128): Promise<void> {
+async function handleGif(msg: Message, args: string, gif: string, colors: number = 128, fontMultiplier: number = 1): Promise<void> {
     const mentionedUsers = [...msg.mentions.users.values()];
 
     let text = args;
@@ -2365,21 +2365,23 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
         text += '!';
     }
 
-    let fontSize = '48px';
+    let fontPixels = 48;
 
     if (text.length >= 1000) {
-        fontSize = '6px';
+        fontPixels = 6;
     } else if (text.length >= 500) {
-        fontSize = '8px';
+        fontPixels = 8;
     } else if (text.length >= 250) {
-        fontSize = '12px';
+        fontPixels = 12;
     } else if (text.length >= 100) {
-        fontSize = '18px';
+        fontPixels = 18;
     } else if (text.length >= 50) {
-        fontSize = '24px';
+        fontPixels = 24;
     } else if (text.length >= 20) {
-        fontSize = '40px';
+        fontPixels = 40;
     }
+
+    const fontSize = `${fontPixels * fontMultiplier}px`;
 
     const gifObject = new TextOnGif({
         file_path: `./images/${gif}`,
@@ -2397,7 +2399,7 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
     console.log(`Original file size: ${(newGif.length / 1024 / 1024).toFixed(2)} MB`);
 
     const minified = await imageminGifsicle({
-        optimizationLevel: 3,
+        optimizationLevel: 1,
         colors,
     })(newGif);
 
@@ -2416,4 +2418,8 @@ export async function handleGroundhog(msg: Message, args: string): Promise<void>
 
 export async function handleGroove(msg: Message, args: string): Promise<void> {
     await handleGif(msg, args, 'dance.gif', 200);
+}
+
+export async function handleKek(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'kek.gif', 16, 2);
 }
