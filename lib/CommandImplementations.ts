@@ -2356,7 +2356,7 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
         ? mentionedChannels[0] as TextChannel
         : msg.channel as TextChannel;
 
-    let text = Util.cleanContent(args, msg.channel).toUpperCase().replace(/#\w+/g, '').trim();
+    let text = Util.cleanContent(args.replace(/<#\d{16,20}>/g, ''), msg.channel).toUpperCase().trim();
 
     if (text === '') {
         await msg.channel.send({
