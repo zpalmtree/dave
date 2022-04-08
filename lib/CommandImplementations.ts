@@ -23,6 +23,7 @@ import {
     MessageAttachment,
     GuildMember,
     ColorResolvable,
+    Util,
 } from 'discord.js';
 
 import {
@@ -1357,6 +1358,12 @@ export async function handleAvatar(msg: Message): Promise<void> {
                 dynamic: true,
                 size: 4096,
             }));
+        } else {
+            await msg.channel.send(user.displayAvatarURL({
+                format: 'png',
+                dynamic: true,
+                size: 4096,
+            }));
         }
     } else {
         await msg.channel.send(user.displayAvatarURL({
@@ -2343,17 +2350,15 @@ export async function handleSlug(msg: Message): Promise<void> {
 }
 
 async function handleGif(msg: Message, args: string, gif: string, colors: number = 128, fontMultiplier: number = 1): Promise<void> {
-    const mentionedUsers = [...msg.mentions.users.values()];
+    const mentionedChannels = [...msg.mentions.channels.values()];
 
-    let text = args;
+    let channel: TextChannel = mentionedChannels.length > 0
+        ? mentionedChannels[0] as TextChannel
+        : msg.channel as TextChannel;
 
-    if (mentionedUsers.length > 0) {
-        text = await getUsername(mentionedUsers[0].id, msg.guild);
-    }
+    let text = Util.cleanContent(args, msg.channel).toUpperCase().replace(/#\w+/g, '').trim();
 
-    text = text.toUpperCase();
-
-    if (text.trim() === '') {
+    if (text === '') {
         await msg.channel.send({
             files: [new MessageAttachment(`./images/${gif}`, gif)],
         });
@@ -2420,7 +2425,7 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
 
     console.log(`Compressed file size: ${(minified.length / 1024 / 1024).toFixed(2)} MB`);
 
-    await msg.channel.send({
+    await channel.send({
         files: [attachment],
     });
 }
