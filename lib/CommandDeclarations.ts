@@ -50,6 +50,7 @@ import {
     handlePrice,
     handleSlug,
     handleGroundhog,
+    handleGroove,
 } from './CommandImplementations.js';
 
 import {
@@ -314,6 +315,20 @@ export const Commands: Command[] = [
             ],
         },
     },
+    {
+        aliases: ['dance', 'groove'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGroove,
+            description: 'Dance for me',
+            examples: [
+                {
+                    value: 'groove Slorg',
+                },
+            ],
+        },
+    },
+
 ];
 
 export function handleHelp(msg: Message, args: string): void {

@@ -2342,7 +2342,7 @@ export async function handleSlug(msg: Message): Promise<void> {
     });
 }
 
-export async function handleGroundhog(msg: Message, args: string): Promise<void> {
+async function handleGif(msg: Message, args: string, gif: string, colors: number = 128): Promise<void> {
     const mentionedUsers = [...msg.mentions.users.values()];
 
     let text = args;
@@ -2355,7 +2355,7 @@ export async function handleGroundhog(msg: Message, args: string): Promise<void>
 
     if (text.trim() === '') {
         await msg.channel.send({
-            files: [new MessageAttachment('./images/hog.gif', 'hog.gif')],
+            files: [new MessageAttachment(`./images/${gif}`, gif)],
         });
 
         return;
@@ -2382,7 +2382,7 @@ export async function handleGroundhog(msg: Message, args: string): Promise<void>
     }
 
     const gifObject = new TextOnGif({
-        file_path: './images/hog.gif',
+        file_path: `./images/${gif}`,
         font_size: fontSize,
         font_color: 'white',
         stroke_color: 'black',
@@ -2394,14 +2394,26 @@ export async function handleGroundhog(msg: Message, args: string): Promise<void>
         get_as_buffer: true,
     });
 
+    console.log(`Original file size: ${(newGif.length / 1024 / 1024).toFixed(2)} MB`);
+
     const minified = await imageminGifsicle({
         optimizationLevel: 3,
-        colors: 128,
+        colors,
     })(newGif);
 
-    const attachment = new MessageAttachment(minified, 'hog.gif');
+    const attachment = new MessageAttachment(minified, gif);
+
+    console.log(`Compressed file size: ${(minified.length / 1024 / 1024).toFixed(2)} MB`);
 
     await msg.channel.send({
         files: [attachment],
     });
+}
+
+export async function handleGroundhog(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'hog.gif');
+}
+
+export async function handleGroove(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'dance.gif', 200);
 }
