@@ -2365,9 +2365,25 @@ export async function handleGroundhog(msg: Message, args: string): Promise<void>
         text += '!';
     }
 
+    let fontSize = '48px';
+
+    if (text.length >= 1000) {
+        fontSize = '6px';
+    } else if (text.length >= 500) {
+        fontSize = '8px';
+    } else if (text.length >= 250) {
+        fontSize = '12px';
+    } else if (text.length >= 100) {
+        fontSize = '18px';
+    } else if (text.length >= 50) {
+        fontSize = '24px';
+    } else if (text.length >= 20) {
+        fontSize = '40px';
+    }
+
     const gifObject = new TextOnGif({
         file_path: './images/hog.gif',
-        font_size: '48px',
+        font_size: fontSize,
         font_color: 'white',
         stroke_color: 'black',
         stroke_width: 3,
@@ -2378,18 +2394,12 @@ export async function handleGroundhog(msg: Message, args: string): Promise<void>
         get_as_buffer: true,
     });
 
-    console.log(`Gif Size: ${newGif.length / 1024 / 1024} MB`);
-
-    /*
     const minified = await imageminGifsicle({
         optimizationLevel: 3,
-        interlaced: true,
+        colors: 128,
     })(newGif);
 
-    console.log(`Minified Size: ${minified.length / 1024 / 1024} MB`);
-    */
-
-    const attachment = new MessageAttachment(newGif, 'hog.gif');
+    const attachment = new MessageAttachment(minified, 'hog.gif');
 
     await msg.channel.send({
         files: [attachment],
