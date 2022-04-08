@@ -53,6 +53,7 @@ import {
     handleGroove,
     handleKek,
     handleNut,
+    handleMoney,
 } from './CommandImplementations.js';
 
 import {
@@ -356,7 +357,19 @@ export const Commands: Command[] = [
             ],
         },
     },
-
+    {
+        aliases: ['money', 'cash'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMoney,
+            description: 'money man say thing',
+            examples: [
+                {
+                    value: 'money Slorg',
+                },
+            ],
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
