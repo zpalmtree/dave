@@ -2461,5 +2461,5 @@ export async function handleMoney(msg: Message, args: string): Promise<void> {
 }
 
 export async function handleViper(msg: Message, args: string): Promise<void> {
-    await handleGif(msg, args, 'viper.gif', 256);
+    await handleGif(msg, args, 'viper.gif', 256, 0.8);
 }
