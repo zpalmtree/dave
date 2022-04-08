@@ -2365,6 +2365,19 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
         text += '!';
     }
 
+    const words = text.split(' ');
+
+    let fixedWords: string[] = [];
+
+    for (const word of words) {
+        if (word.length >= 8) {
+            fixedWords = fixedWords.concat(chunk(word, 8));
+        } else {
+            fixedWords.push(word);
+        }
+    }
+    let finalText = fixedWords.join(' ');
+
     let fontPixels = 48;
 
     if (text.length >= 1000) {
@@ -2392,7 +2405,7 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
     });
 
     const newGif = await gifObject.textOnGif({
-        text,
+        text: finalText,
         get_as_buffer: true,
     });
 
