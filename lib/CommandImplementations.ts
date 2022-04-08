@@ -2441,3 +2441,7 @@ export async function handleGroove(msg: Message, args: string): Promise<void> {
 export async function handleKek(msg: Message, args: string): Promise<void> {
     await handleGif(msg, args, 'kek.gif', 16, 2);
 }
+
+export async function handleNut(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'nut.gif', 16, 2);
+}

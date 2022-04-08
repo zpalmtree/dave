@@ -52,6 +52,7 @@ import {
     handleGroundhog,
     handleGroove,
     handleKek,
+    handleNut,
 } from './CommandImplementations.js';
 
 import {
@@ -338,6 +339,19 @@ export const Commands: Command[] = [
             examples: [
                 {
                     value: 'kek Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['nut', 'nutnut'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleNut,
+            description: 'Nut slug say thing',
+            examples: [
+                {
+                    value: 'nut Slorg',
                 },
             ],
         },
