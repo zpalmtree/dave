@@ -2349,7 +2349,14 @@ export async function handleSlug(msg: Message): Promise<void> {
     });
 }
 
-async function handleGif(msg: Message, args: string, gif: string, colors: number = 128, fontMultiplier: number = 1): Promise<void> {
+async function handleGif(
+    msg: Message,
+    args: string,
+    gif: string,
+    colors: number = 128,
+    fontMultiplier: number = 1,
+    flipPalette: boolean = false): Promise<void> {
+
     const mentionedChannels = [...msg.mentions.channels.values()];
 
     let channel: TextChannel = mentionedChannels.length > 0
@@ -2375,8 +2382,8 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
     let fixedWords: string[] = [];
 
     for (const word of words) {
-        if (word.length >= 8) {
-            fixedWords = fixedWords.concat(chunk(word, 8));
+        if (word.length >= 16) {
+            fixedWords = fixedWords.concat(chunk(word, 16));
         } else {
             fixedWords.push(word);
         }
@@ -2399,13 +2406,16 @@ async function handleGif(msg: Message, args: string, gif: string, colors: number
         fontPixels = 40;
     }
 
+    let primaryColour = flipPalette ? 'black' : 'white';
+    let secondaryColour = flipPalette ? 'white' : 'black';
+
     const fontSize = `${fontPixels * fontMultiplier}px`;
 
     const gifObject = new TextOnGif({
         file_path: `./images/${gif}`,
         font_size: fontSize,
-        font_color: 'white',
-        stroke_color: 'black',
+        font_color: primaryColour,
+        stroke_color: secondaryColour,
         stroke_width: 3,
     });
 
