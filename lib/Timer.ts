@@ -5,27 +5,27 @@ import {
     TextChannel,
 } from 'discord.js';
 
-import * as moment from 'moment';
+import moment from 'moment';
 
 import { Database } from 'sqlite3';
 
 import {
     Paginate,
     DisplayType,
-} from './Paginate';
+} from './Paginate.js';
 
 import {
     insertQuery,
     selectQuery,
     deleteQuery,
-} from './Database';
+} from './Database.js';
 
 import {
     capitalize,
     getUsername,
-} from './Utilities';
+} from './Utilities.js';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
 export async function deleteTimer(msg: Message, args: string[], db: Database) {
     if (args.length === 0) {

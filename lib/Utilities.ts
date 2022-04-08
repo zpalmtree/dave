@@ -7,13 +7,13 @@ import {
     TextChannel,
 } from 'discord.js';
 
-import * as moment from 'moment';
+import moment from 'moment';
 import fetch from 'node-fetch';
-import * as FormData from 'form-data';
-import translate = require('@vitalets/google-translate-api');
+import FormData from 'form-data';
+import translate from '@vitalets/google-translate-api';
 
-import { RGB } from './Types';
-import { config } from './Config';
+import { RGB } from './Types.js';
+import { config } from './Config.js';
 
 export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");

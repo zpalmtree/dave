@@ -1,14 +1,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as moment from 'moment';
+import moment from 'moment';
 
-import translate = require('@vitalets/google-translate-api');
+import translate from '@vitalets/google-translate-api';
 
 import fetch from 'node-fetch';
 
+import imageminGifsicle from 'imagemin-gifsicle';
+import TextOnGif from 'text-on-gif';
+
 import { stringify, unescape } from 'querystring';
 import { evaluate } from 'mathjs';
-import { decode } from 'he';
+import he from 'he';
 import { Database } from 'sqlite3';
 
 import {
@@ -27,11 +30,11 @@ import {
     HTMLElement
 } from 'node-html-parser';
 
-import { config } from './Config';
-import { catBreeds } from './Cats';
-import { dogBreeds } from './Dogs';
-import { fortunes } from './Fortunes';
-import { dubTypes } from './Dubs';
+import { config } from './Config.js';
+import { catBreeds } from './Cats.js';
+import { dogBreeds } from './Dogs.js';
+import { fortunes } from './Fortunes.js';
+import { dubTypes } from './Dubs.js';
 
 import {
     chunk,
@@ -48,39 +51,39 @@ import {
     tryDeleteMessage,
     tryDeleteReaction,
     tryReactMessage,
-} from './Utilities';
+} from './Utilities.js';
 
 import {
     insertQuery,
     selectQuery,
     selectOneQuery,
     deleteQuery,
-} from './Database';
+} from './Database.js';
 
 import {
     TimeUnits,
     Quote,
     ScheduledWatch,
     Command,
-} from './Types';
+} from './Types.js';
 
 import {
     exchangeService
-} from './Exchange';
+} from './Exchange.js';
 
 import {
     getWatchDetailsById,
-} from './Watch';
+} from './Watch.js';
 
 import {
     Paginate,
     DisplayType,
     ModifyMessage,
-} from './Paginate';
+} from './Paginate.js';
 
 import {
     Commands,
-} from './CommandDeclarations';
+} from './CommandDeclarations.js';
 
 const timeUnits: TimeUnits = {
     Y: 31536000,
@@ -1103,8 +1106,8 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
         const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
         const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
 
-        const linkTitle = decode(linkNode.childNodes[0].text.trim());
-        const link = decode(resultNode.querySelector('.result__url').childNodes[0].text.trim());
+        const linkTitle = he.decode(linkNode.childNodes[0].text.trim());
+        const link = he.decode(resultNode.querySelector('.result__url').childNodes[0].text.trim());
         const snippetNode = resultNode.querySelector('.result__snippet');
 
         /* sometimes we just have a url with no snippet */
@@ -1112,7 +1115,7 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
             continue;
         }
 
-        const snippet = snippetNode.childNodes.map((n) => decode(n.text)).join('');
+        const snippet = snippetNode.childNodes.map((n) => he.decode(n.text)).join('');
         const linkURL = `${protocol}://${link}`;
 
         if (linkTitle === '' || link === '' || snippet === '') {
@@ -2336,5 +2339,59 @@ export async function handleSlug(msg: Message): Promise<void> {
 
     msg.reply({
         embeds: [embed],
+    });
+}
+
+export async function handleGroundhog(msg: Message, args: string): Promise<void> {
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    let text = args;
+
+    if (mentionedUsers.length > 0) {
+        text = await getUsername(mentionedUsers[0].id, msg.guild);
+    }
+
+    text = text.toUpperCase();
+
+    if (text.trim() === '') {
+        await msg.channel.send({
+            files: [new MessageAttachment('./images/hog.gif', 'hog.gif')],
+        });
+
+        return;
+    }
+
+    if (!text.endsWith('!')) {
+        text += '!';
+    }
+
+    const gifObject = new TextOnGif({
+        file_path: './images/hog.gif',
+        font_size: '48px',
+        font_color: 'white',
+        stroke_color: 'black',
+        stroke_width: 3,
+    });
+
+    const newGif = await gifObject.textOnGif({
+        text,
+        get_as_buffer: true,
+    });
+
+    console.log(`Gif Size: ${newGif.length / 1024 / 1024} MB`);
+
+    /*
+    const minified = await imageminGifsicle({
+        optimizationLevel: 3,
+        interlaced: true,
+    })(newGif);
+
+    console.log(`Minified Size: ${minified.length / 1024 / 1024} MB`);
+    */
+
+    const attachment = new MessageAttachment(newGif, 'hog.gif');
+
+    await msg.channel.send({
+        files: [attachment],
     });
 }

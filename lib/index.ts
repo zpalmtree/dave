@@ -1,5 +1,5 @@
-import * as moment from 'moment';
-import { Database } from 'sqlite3';
+import moment from 'moment';
+import sqlite3 from 'sqlite3';
 
 import {
     Intents,
@@ -9,17 +9,17 @@ import {
 
 import { evaluate } from 'mathjs';
 
-import { config } from './Config';
+import { config } from './Config.js';
 import {
     canAccessCommand,
     tryReactMessage,
-} from './Utilities';
+} from './Utilities.js';
 
 import {
     insertQuery,
     createTablesIfNeeded,
     deleteTablesIfNeeded,
-} from './Database';
+} from './Database.js';
 
 import {
     Command,
@@ -32,15 +32,15 @@ import {
     CombinedArgsCommandDb,
     CombinedArgsCommand,
     Quote,
-} from './Types';
+} from './Types.js';
 
 import {
     Commands,
     handleHelp,
-} from './CommandDeclarations';
+} from './CommandDeclarations.js';
 
 /* This is the main entry point to handling messages. */
-async function handleMessage(msg: Message, db: Database): Promise<void> {
+async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
     if (!msg.content.startsWith(config.prefix)) {
         return;
     }
@@ -113,7 +113,7 @@ async function handleMessage(msg: Message, db: Database): Promise<void> {
 async function dispatchCommand(
     command: CommandFunc,
     msg: Message,
-    db: Database,
+    db: sqlite3.Database,
     args: string[]) {
 
     switch (command.argsFormat) {
@@ -148,7 +148,7 @@ async function dispatchCommand(
 }
 
 async function main() {
-    const db: Database = new Database(config.dbFile);
+    const db: sqlite3.Database = new sqlite3.Database(config.dbFile);
 
     await deleteTablesIfNeeded(db);
     await createTablesIfNeeded(db);

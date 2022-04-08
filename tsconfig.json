@@ -6,14 +6,18 @@
       "dom",
       "scripthost"
     ],
-    "module": "commonjs",
+    "module": "ES2020",
     "declaration": true,
     "outDir": "./dist",
     "strict": true,
     "baseUrl": "./lib",
     "downlevelIteration": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
     "paths": {
-        "@vitalets/google-translate-api": ["typings/google-translate-api"]
+        "@vitalets/google-translate-api": ["typings/google-translate-api"],
+        "imagemin-gifsicle": ["typings/imagemin-gifsicle"],
+        "text-on-gif": ["typings/text-on-gif"]
     }
   }
 }

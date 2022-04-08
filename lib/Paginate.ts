@@ -14,9 +14,9 @@ import {
     tryReactMessage,
     tryDeleteMessage,
     tryDeleteReaction,
-} from './Utilities';
+} from './Utilities.js';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
 export enum DisplayType {
     EmbedFieldData = 1,

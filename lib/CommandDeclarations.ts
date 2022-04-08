@@ -6,17 +6,17 @@ import {
 import {
     Args,
     Command,
-} from './Types';
+} from './Types.js';
 
 import {
     Paginate,
     DisplayType,
-} from './Paginate';
+} from './Paginate.js';
 
 import {
     canAccessCommand,
     getLanguageNames,
-} from './Utilities';
+} from './Utilities.js';
 
 import {
     handleFortune,
@@ -49,13 +49,14 @@ import {
     handleMultiPoll,
     handlePrice,
     handleSlug,
-} from './CommandImplementations';
+    handleGroundhog,
+} from './CommandImplementations.js';
 
 import {
     handleTimers,
     handleTimer,
     deleteTimer,
-} from './Timer';
+} from './Timer.js';
 
 import {
     handleWatch,
@@ -64,13 +65,13 @@ import {
     updateTime,
     addLink,
     handleWatchStats,
-} from './Watch';
+} from './Watch.js';
 
-import { exchangeService } from './Exchange';
+import { exchangeService } from './Exchange.js';
 
-import { handleWeather } from './Weather';
+import { handleWeather } from './Weather.js';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
 export const Commands: Command[] = [
     {
@@ -294,6 +295,22 @@ export const Commands: Command[] = [
                 {
                     value: 'math 100 fahrenheit to celsius',
                 }
+            ],
+        },
+    },
+    {
+        aliases: ['groundhog', 'woodchuck', 'hog'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGroundhog,
+            description: 'Make the groundhog say something',
+            examples: [
+                {
+                    value: 'groundhog Slorg',
+                },
+                {
+                    value: 'groundhog @Slorg',
+                },
             ],
         },
     },
