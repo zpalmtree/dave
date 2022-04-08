@@ -54,6 +54,7 @@ import {
     handleKek,
     handleNut,
     handleMoney,
+    handleViper,
 } from './CommandImplementations.js';
 
 import {
@@ -366,6 +367,19 @@ export const Commands: Command[] = [
             examples: [
                 {
                     value: 'money Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['viper'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleViper,
+            description: 'viper say thing',
+            examples: [
+                {
+                    value: 'viper Slorg',
                 },
             ],
         },

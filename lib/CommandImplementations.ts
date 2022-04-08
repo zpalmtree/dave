@@ -2459,3 +2459,7 @@ export async function handleNut(msg: Message, args: string): Promise<void> {
 export async function handleMoney(msg: Message, args: string): Promise<void> {
     await handleGif(msg, args, 'money.gif', 256);
 }
+
+export async function handleViper(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'viper.gif', 256);
+}
