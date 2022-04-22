@@ -310,13 +310,18 @@ function dubsType(roll: string): string {
 }
 
 export async function handlePrice(msg: Message) {
+    const currencies = config.coins;
+    const toFetch = currencies.map((c) => c.id).join('%2C');
+
+    const lookupMap = new Map(currencies.map(({ id, label }) => [id, label]));
+
     try {
-        const data = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${config.coins.join("%2C")}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`)
+        const data = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${toFetch}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`)
         if (data.status === 200) {
             const values = await data.json();
             const prices = Object.keys(values).map((key) => {
                 return {
-                    name: key,
+                    name: lookupMap.get(key),
                     ...values[key]
                 }
             }).sort((a, b) => {

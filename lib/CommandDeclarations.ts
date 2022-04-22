@@ -51,8 +51,6 @@ import {
     handlePrice,
 } from './CommandImplementations';
 
-import { handleMuf } from './Muf';
-
 import {
     handleTimers,
     handleTimer,
@@ -1032,15 +1030,6 @@ export const Commands: Command[] = [
                 },
             ],
         },
-    },
-    {
-        aliases: ['muf'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleMuf,
-            description: 'View muf\'s deleted messages',
-        },
-        hidden: true,
     },
 ];
 

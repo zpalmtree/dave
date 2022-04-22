@@ -45,7 +45,6 @@ import {
 } from './CommandDeclarations';
 
 import { restoreTimers } from './Timer';
-import { handleDeletedMessage } from './Muf';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: Database): Promise<void> {
@@ -188,16 +187,6 @@ async function main() {
             console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${err.toString()}`);
             console.log(`Error stack trace: ${err.stack}`);
             tryReactMessage(msg, '🔥');
-        }
-    });
-
-    client.on('messageDelete', async (msg) => {
-        try {
-            await handleDeletedMessage(msg as Message);
-        } catch (err) {
-            console.error(`Caught error while processing deleted message: ${err.toString()}`)
-            console.log(`Error stack trace: ${err.stack}`);
-            tryReactMessage(msg as Message, '🔥');
         }
     });
 
