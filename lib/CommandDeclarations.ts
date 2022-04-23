@@ -55,6 +55,7 @@ import {
     handleNut,
     handleMoney,
     handleViper,
+    handleCock,
 } from './CommandImplementations.js';
 
 import {
@@ -382,6 +383,14 @@ export const Commands: Command[] = [
                     value: 'viper Slorg',
                 },
             ],
+        },
+    },
+    {
+        aliases: ['cock', 'downbad', 'stepbro'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleCock,
+            description: 'get a compliment',
         },
     },
 ];
