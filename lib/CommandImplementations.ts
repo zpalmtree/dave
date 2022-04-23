@@ -2465,5 +2465,11 @@ export async function handleViper(msg: Message, args: string): Promise<void> {
 }
 
 export async function handleCock(msg: Message): Promise<void> {
-    msg.reply(`Nice cock!`);
+    const guwap = '238350296093294592';
+
+    if (msg.author.id === guwap) {
+        msg.reply(`Nice balls!`);
+    } else {
+        msg.reply(`Nice cock!`);
+    }
 }
