@@ -401,7 +401,51 @@ export const Commands: Command[] = [
             implementation: handleUtility,
             description: 'Explain Slugs utility and burning',
         },
-    }
+    },
+    {
+        aliases: ['doggo', 'dog', 'doggy'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleDoggo,
+            description: 'Get a random dog picture',
+            examples: [
+                {
+                    value: 'doggo',
+                },
+                {
+                    value: 'doggo corgi',
+                },
+                {
+                    value: 'doggo golden retriever',
+                },
+            ],
+        },
+        relatedCommands: [
+            'kitty',
+        ],
+    },
+    {
+        aliases: ['kitty', 'cat'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKitty,
+            description: 'Get a random cat picture',
+            examples: [
+                {
+                    value: 'kitty',
+                },
+                {
+                    value: 'kitty persian',
+                },
+                {
+                    value: 'kitty european burmese',
+                },
+            ],
+        },
+        relatedCommands: [
+            'doggo',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
