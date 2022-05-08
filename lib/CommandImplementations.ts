@@ -2473,3 +2473,28 @@ export async function handleCock(msg: Message): Promise<void> {
         msg.reply(`Nice cock!`);
     }
 }
+
+export async function handleUtility(msg: Message): Promise<void> {
+    msg.channel.send(`To burn a slug, go to <https://www.sol-incinerator.com/#/>, then verify your wallet at <https://solslugs.com/#/verify> to get your discord roles. Then, you will have access to our slug gang tools and functionality.
+
+**Why burn a slug?**
+Burning a slug will get you access to a special role and colour, and:
+
+**Channels**
+* Alpha channel - Get the latest hot slug tips
+* Slug gang channel - Holder channel for fellow slug burners.
+* Slugfi - In depth analysis of the crypto and tradfi markets
+* Whitelists - Get whitelist to the hottest upcoming projects, only for slug burners
+* NSFW Zone - Only for the brave hearted. Proceed with extreme caution
+
+**Bots**
+* Trending collection bot - Shows magiceden buys and listings, ordered by volume, every 5 minute interval. This helps catch pumps and dumps as they are in progress.
+* Mint finder - A bot that tracks new candy machines that are uploaded, may assist in getting whitelist on projects early
+* Twitter watch - A bot that tracks influencers twitters, and posts new accounts they start following. May assist in getting whitelist on promising projects early.
+
+**Future Slug Generations**
+As part of Sol Slugs deflationary mechanism, burning slugs allows you to claim future generations, which will have new rare traits. The future generation three will take three burns for one generation three slug.
+
+**Slug Exclusive**
+For those crazy enough to burn 50 slugs, they gain access to a special channel where the Slug Devs share information about future plans and sneak peaks of upcoming functionality.`);
+}

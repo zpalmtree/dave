@@ -56,6 +56,7 @@ import {
     handleMoney,
     handleViper,
     handleCock,
+    handleUtility,
 } from './CommandImplementations.js';
 
 import {
@@ -393,6 +394,14 @@ export const Commands: Command[] = [
             description: 'get a compliment',
         },
     },
+    {
+        aliases: ['burn', 'utility'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleUtility,
+            description: 'Explain Slugs utility and burning',
+        },
+    }
 ];
 
 export function handleHelp(msg: Message, args: string): void {
