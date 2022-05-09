@@ -2500,7 +2500,7 @@ For those crazy enough to burn 50 slugs, they gain access to a special channel w
 }
 
 export async function handle3d(msg: Message): Promise<void> {
-    msg.channel.send(`3D slugs or Slugs Regenesis are a separate collection by the same team but the supply is much lower. They've got rocket launchers and katanas, they're cool as fuck. <https://magiceden.io/marketplace/slugs_regenesis>`);
+    msg.channel.send(`3D slugs or Slugs Regenesis are a separate collection by the same team but the supply is much lower. As a free mint for rug victims, they don't have any defined utility yet, but they've got rocket launchers and katanas, they're cool as fuck. <https://magiceden.io/marketplace/slugs_regenesis>`);
 }
 
 export async function handleGen2(msg: Message): Promise<void> {
