@@ -57,6 +57,8 @@ import {
     handleViper,
     handleCock,
     handleUtility,
+    handle3d,
+    handleGen2,
 } from './CommandImplementations.js';
 
 import {
@@ -445,6 +447,22 @@ export const Commands: Command[] = [
         relatedCommands: [
             'doggo',
         ],
+    },
+    {
+        aliases: ['3dslugs', '3d'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handle3d,
+            description: 'Get info on 3d slugs',
+        },
+    },
+    {
+        aliases: ['gen2', 'generation2'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen2,
+            description: 'Get info on gen 2',
+        },
     },
 ];
 

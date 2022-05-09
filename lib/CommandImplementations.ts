@@ -2498,3 +2498,11 @@ As part of Sol Slugs deflationary mechanism, burning slugs allows you to claim f
 **Slug Exclusive**
 For those crazy enough to burn 50 slugs, they gain access to a special channel where the Slug Devs share information about future plans and sneak peaks of upcoming functionality.`);
 }
+
+export async function handle3d(msg: Message): Promise<void> {
+    msg.channel.send(`3D slugs or Slugs Regenesis are a separate collection by the same team but the supply is much lower. They've got rocket launchers and katanas, they're cool as fuck. <https://magiceden.io/marketplace/slugs_regenesis>`);
+}
+
+export async function handleGen2(msg: Message): Promise<void> {
+    msg.channel.send(`Generation 2 slugs can be found by filtering for Arena, Temple, and Pyramid backgrounds. They are part of the same slugs collection, with new, rarer traits. They were awarded to users who burnt two slugs.`);
+}
