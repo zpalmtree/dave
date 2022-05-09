@@ -2506,3 +2506,7 @@ export async function handle3d(msg: Message): Promise<void> {
 export async function handleGen2(msg: Message): Promise<void> {
     msg.channel.send(`Generation 2 slugs can be found by filtering for Arena, Temple, and Pyramid backgrounds. They are part of the same slugs collection, with new, rarer traits. They were awarded to users who burnt two slugs.`);
 }
+
+export async function handleBuy(msg: Message): Promise<void> {
+    msg.channel.send(`<https://magiceden.io/marketplace/sol_slugs>`);
+}

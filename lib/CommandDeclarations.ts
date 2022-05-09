@@ -59,6 +59,7 @@ import {
     handleUtility,
     handle3d,
     handleGen2,
+    handleBuy,
 } from './CommandImplementations.js';
 
 import {
@@ -462,6 +463,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleGen2,
             description: 'Get info on gen 2',
+        },
+    },
+    {
+        aliases: ['buy', 'market'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleBuy,
+            description: 'Get a link to markets',
         },
     },
 ];
