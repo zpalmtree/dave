@@ -2514,3 +2514,7 @@ export async function handleBuy(msg: Message): Promise<void> {
 export async function handleVerify(msg: Message): Promise<void> {
     msg.channel.send(`Get your holder and burner roles here: <https://solslugs.com/#/verify>`);
 }
+
+export async function handleIncinerator(msg: Message): Promise<void> {
+    msg.channel.send(`Burn your slugs, rugs, or scams here: <https://sol-incinerator.com/>`);
+}

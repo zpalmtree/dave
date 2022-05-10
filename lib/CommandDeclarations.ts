@@ -61,6 +61,7 @@ import {
     handleGen2,
     handleBuy,
     handleVerify,
+    handleIncinerator,
 } from './CommandImplementations.js';
 
 import {
@@ -480,6 +481,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleVerify,
             description: 'Get a verify link',
+        },
+    },
+    {
+        aliases: ['incinerator'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleIncinerator,
+            description: 'Get incinerator link',
         },
     },
 ];
