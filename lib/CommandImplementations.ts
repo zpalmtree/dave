@@ -2510,3 +2510,7 @@ export async function handleGen2(msg: Message): Promise<void> {
 export async function handleBuy(msg: Message): Promise<void> {
     msg.channel.send(`<https://magiceden.io/marketplace/sol_slugs>`);
 }
+
+export async function handleVerify(msg: Message): Promise<void> {
+    msg.channel.send(`Get your holder and burner roles here: <https://solslugs.com/#/verify>`);
+}

@@ -60,6 +60,7 @@ import {
     handle3d,
     handleGen2,
     handleBuy,
+    handleVerify,
 } from './CommandImplementations.js';
 
 import {
@@ -471,6 +472,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleBuy,
             description: 'Get a link to markets',
+        },
+    },
+    {
+        aliases: ['verify'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleVerify,
+            description: 'Get a verify link',
         },
     },
 ];
