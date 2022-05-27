@@ -491,6 +491,50 @@ export const Commands: Command[] = [
             description: 'Get incinerator link',
         },
     },
+    {
+        aliases: ['translate'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTranslate,
+            description: 'Translate text from one language to another',
+            helpDescription: `Translate text from one language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
+            examples: [
+                {
+                    name: 'Translate to english',
+                    value: 'translate C\'est la vie',
+                },
+                {
+                    name: 'Translate to another language',
+                    value: 'translate french Such is life',
+                }
+            ],
+        },
+        relatedCommands: [
+            'translatefrom',
+        ],
+    },
+    {
+        aliases: ['translatefrom'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTranslateFrom,
+            description: 'Translate text from a specific language to another',
+            helpDescription: `Translate text from a specific language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
+            examples: [
+                {
+                    name: 'Translate to english',
+                    value: 'translatefrom french C\'est la vie',
+                },
+                {
+                    name: 'Translate to another language',
+                    value: 'translatefrom french spanish C\'est la vie',
+                }
+            ],
+        },
+        relatedCommands: [
+            'translate',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
