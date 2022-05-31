@@ -2518,3 +2518,19 @@ export async function handleVerify(msg: Message): Promise<void> {
 export async function handleIncinerator(msg: Message): Promise<void> {
     msg.channel.send(`Burn your slugs, rugs, or scams here: <https://sol-incinerator.com/>`);
 }
+
+export async function handleTrending(msg: Message): Promise<void> {
+    msg.channel.send(`The trending bot is separated into 6 different channels, by window of time. The 1m channel, for example, will show the hottest collections within a 1 minute interval. A hot collection is defined as having the greatest NUMBER of sales within that interval.
+
+So a collection that sells 100 units in 1 minute would be hotter than one that sold 50 units in 1 minute.
+
+The colors indicate the sold to listed balance.
+
+Green: Sold > Listed
+Yellow: Sold = Listed
+Red: Sold < Listed
+
+Volume is the total amount of Solana transacted within the interval. Low is the lowest sale price, High is the highest sale price, and Average is the average sale price.
+
+It is useful to look at how these collection are trending - is the number of sold going up each interval, for example? Is there a high average, indicating people are sniping rares? There's a strategy to develop using the trending bot, but if use effectively, can lead to great trading success.`);
+}

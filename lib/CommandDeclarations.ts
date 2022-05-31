@@ -62,6 +62,7 @@ import {
     handleBuy,
     handleVerify,
     handleIncinerator,
+    handleTrending,
 } from './CommandImplementations.js';
 
 import {
@@ -534,6 +535,14 @@ export const Commands: Command[] = [
         relatedCommands: [
             'translate',
         ],
+    },
+    {
+        aliases: ['trending'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleTrending,
+            description: 'Get info on using the trending bot',
+        },
     },
 ];
 
