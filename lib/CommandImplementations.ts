@@ -2532,5 +2532,5 @@ Red: Sold < Listed
 
 Volume is the total amount of Solana transacted within the interval. Low is the lowest sale price, High is the highest sale price, and Average is the average sale price.
 
-It is useful to look at how these collection are trending - is the number of sold going up each interval, for example? Is there a high average, indicating people are sniping rares? There's a strategy to develop using the trending bot, but if use effectively, can lead to great trading success.`);
+It is useful to look at how these collections are trending - is the number of sold going up each interval, for example? Is there a high average, indicating people are sniping rares? There's a strategy to develop using the trending bot, but if use effectively, can lead to great trading success.`);
 }
