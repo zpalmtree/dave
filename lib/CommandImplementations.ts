@@ -2534,3 +2534,7 @@ Volume is the total amount of Solana transacted within the interval. Low is the 
 
 It is useful to look at how these collections are trending - is the number of sold going up each interval, for example? Is there a high average, indicating people are sniping rares? There's a strategy to develop using the trending bot, but if use effectively, can lead to great trading success.`);
 }
+
+export async function handleSign(msg: Message): Promise<void> {
+    msg.channel.send('https://media.discordapp.net/attachments/891081495706480690/981347925248577617/unknown.png');
+}
