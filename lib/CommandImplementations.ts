@@ -1697,7 +1697,7 @@ async function handleUserStats(msg: Message, db: Database, user: string): Promis
         displayFunction: (command: any) => {
             return {
                 name: command.command,
-                value: command.usage,
+                value: command.usage.toString(),
                 inline: true,
             };
         },
