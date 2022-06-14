@@ -63,7 +63,8 @@ import {
     handleVerify,
     handleIncinerator,
     handleTrending,
-        handleSign,
+    handleSign,
+    handleBurnt,
     } from './CommandImplementations.js';
 
     import {
@@ -88,6 +89,14 @@ import {
     import { config } from './Config.js';
 
     export const Commands: Command[] = [
+        {
+            aliases: ['burnt'],
+            primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleBurnt,
+            description: 'Displays the current number of slugs burnt by the incinerator',
+            }
+        },
         {
             aliases: ['roll', 'reroll'],
             primaryCommand: {
