@@ -155,7 +155,7 @@ export async function handleBurnt(msg: Message, args: string): Promise<void> {
     const res = await fetch(url);
 
     if (!res.ok) {
-      throw new Error("error fetching data");
+        throw new Error("error fetching data");
     }
     const data = await res.json();
     await msg.reply(`${data.slugs.burnt.length} slugs have been burnt!`);
