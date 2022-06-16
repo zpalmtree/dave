@@ -150,6 +150,17 @@ const states = [
     "West Virginia",
 ];
 
+export async function handleBurnt(msg: Message, args: string): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    if (!res.ok) {
+        throw new Error("error fetching data");
+    }
+    const data = await res.json();
+    await msg.reply(`${data.slugs.burnt.length} slugs have been burnt!`);
+}
+
 export async function handleFortune(msg: Message): Promise<void> {
     await msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
 }
