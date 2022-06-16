@@ -90,7 +90,7 @@ import { config } from './Config.js';
 
 export const Commands: Command[] = [
     {
-        aliases: ['burnt'],
+        aliases: ['burnt', 'burned'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleBurnt,
