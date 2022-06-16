@@ -150,13 +150,15 @@ const states = [
     "West Virginia",
 ];
 
-export async function handleBurnt(msg: Message, args: string): Promise<void> {
+export async function handleBurnt(msg: Message): Promise<void> {
     const url = "https://letsalllovelain.com/slugs/";
     const res = await fetch(url);
 
     if (!res.ok) {
-        throw new Error("error fetching data");
+        await msg.reply('Failed to fetch burnt count from API!');
+        return;
     }
+
     const data = await res.json();
     await msg.reply(`${data.slugs.burnt.length} slugs have been burnt!`);
 }
