@@ -158,8 +158,7 @@ export async function handleBurnt(msg: Message, args: string): Promise<void> {
       throw new Error("error fetching data");
     }
     const data = await res.json();
-    let response = String(data.slugs.burnt.length);
-    await msg.reply(response + " slugs have been burnt by the incinerator!");
+    await msg.reply(`${data.slugs.burnt.length} slugs have been burnt!`);
 }
 
 export async function handleFortune(msg: Message): Promise<void> {
