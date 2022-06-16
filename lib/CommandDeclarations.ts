@@ -92,7 +92,7 @@ export const Commands: Command[] = [
     {
         aliases: ['burnt'],
         primaryCommand: {
-            argsFormat: Args.Combined,
+            argsFormat: Args.DontNeed,
             implementation: handleBurnt,
             description: 'Displays the current number of slugs burnt by the incinerator',
         }
