@@ -69,7 +69,7 @@ import {
 
 import {
     handleGPT3,
-} from './GPT3';
+} from './GPT3.js';
 
 import {
     handleTimers,
