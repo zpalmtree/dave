@@ -10,7 +10,7 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 const DEFAULT_TEMPERATURE = 0.9;
-const DEFAULT_MAX_TOKENS = 1000;
+const DEFAULT_MAX_TOKENS = 900;
 const DEFAULT_AI_MODEL = 'text-davinci-002';
 const DEFAULT_TIMEOUT = 1000 * 30;
 
