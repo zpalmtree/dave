@@ -68,6 +68,10 @@ import {
 } from './CommandImplementations.js';
 
 import {
+    handleGPT3,
+} from './GPT3';
+
+import {
     handleTimers,
     handleTimer,
     deleteTimer,
@@ -560,6 +564,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleSign,
             description: 'Tap the sign',
+        },
+    },
+    {
+        aliases: ['ai', 'gpt3', 'prompt'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGPT3,
+            description: 'Provide a prompt to the GPT3 AI and get a completion',
         },
     },
 ];

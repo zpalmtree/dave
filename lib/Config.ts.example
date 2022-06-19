@@ -24,6 +24,10 @@ class Config {
 
     public imageHostPath: string = 'https://raw.githubusercontent.com/zpalmtree/dave/master/images/';
 
+    public bingApiKey: string = 'enter bing api key here';
+
+    public openaiApiKey: string = 'enter open ai api key here';
+
     public watchPollInterval: number = 10000;
 
     public devEnv: boolean = false;
@@ -36,11 +40,8 @@ class Config {
 
     public dbFile: string = 'example.sqlite3';
 
-    /* coingecko coin ids to monitor e.g. ['bitcoin', 'ethereum'], see coingecko api docs for details */
+    /* coingecko coin ids to monitor e.g. [{id: 'bitcoin', label: 'bitcoin' }], see coingecko api docs for details */
     public coins: string[] = [];
-
-    /* Cache deletions of messages of these users */
-    public usersToCacheDeletions: string[] = [];
 }
 
 export let config = new Config();
