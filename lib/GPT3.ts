@@ -22,7 +22,7 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const tempRegex = /(^[\d.]+)?(.*)/;
+    const tempRegex = /(^[\d.]+)?(.*)/s;
 
     const results = tempRegex.exec(prompt);
 
