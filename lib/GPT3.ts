@@ -12,6 +12,7 @@ const openai = new OpenAIApi(configuration);
 const DEFAULT_TEMPERATURE = 0.9;
 const DEFAULT_MAX_TOKENS = 1000;
 const DEFAULT_AI_MODEL = 'text-davinci-002';
+const DEFAULT_TIMEOUT = 1000 * 30;
 
 export async function handleGPT3(msg: Message, args: string): Promise<void> {
     const prompt = args.trim();
@@ -64,14 +65,14 @@ export async function handleGPT3Request(
             temperature,
             echo: true,
         }, {
-            timeout: 10000,
+            timeout: DEFAULT_TIMEOUT,
         });
 
         if (completion.data.choices && completion.data.choices.length > 0) {
             return completion.data.choices[0].text!;
         }
     } catch (err) {
-        console.log(err);
+        console.log(err.toString());
         return undefined;
     }
     
