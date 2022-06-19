@@ -43,7 +43,7 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
 
     if (completion) {
         /* Ensure we don't hit discord api limits */
-        const stripped = Util.escapeMarkdown(completion.substr(0, 1999));
+        const stripped = Util.escapeMarkdown(completion.substr(0, 1900));
 
         await msg.reply(stripped);
     } else {
