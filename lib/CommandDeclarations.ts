@@ -572,6 +572,7 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleGPT3,
             description: 'Provide a prompt to the GPT3 AI and get a completion',
+            disabled: true,
         },
     },
 ];
