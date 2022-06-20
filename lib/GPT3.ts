@@ -39,6 +39,7 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
         undefined,
         undefined,
         Number(temp) || undefined,
+        msg.author.id,
     );
 
     if (result) {
@@ -56,6 +57,7 @@ export async function handleGPT3Request(
     model: string = DEFAULT_AI_MODEL,
     maxTokens: number = DEFAULT_MAX_TOKENS,
     temperature: number = DEFAULT_TEMPERATURE,
+    user: string = '',
 ) {
     try {
         const completion = await openai.createCompletion({
@@ -64,6 +66,7 @@ export async function handleGPT3Request(
             max_tokens: maxTokens,
             temperature,
             echo: true,
+            user,
         }, {
             timeout: DEFAULT_TIMEOUT,
         });
