@@ -34,20 +34,20 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
     /* Extract temp if present */
     const [ , temp, query ] = results;
 
-    const completion = await handleGPT3Request(
+    const { result, error } = await handleGPT3Request(
         query,
         undefined,
         undefined,
         Number(temp) || undefined,
     );
 
-    if (completion) {
+    if (result) {
         /* Ensure we don't hit discord api limits */
-        const stripped = Util.escapeMarkdown(completion.substr(0, 1999));
+        const stripped = Util.escapeMarkdown(result.substr(0, 1900));
 
         await msg.reply(stripped);
     } else {
-        await msg.reply('Timed out getting result.');
+        await msg.reply(error);
     }
 }
 
@@ -69,12 +69,20 @@ export async function handleGPT3Request(
         });
 
         if (completion.data.choices && completion.data.choices.length > 0) {
-            return completion.data.choices[0].text!;
+            return {
+                result: completion.data.choices[0].text!,
+                error: undefined,
+            };
         }
     } catch (err) {
-        console.log(err.toString());
-        return undefined;
+        return {
+            result: undefined,
+            error: err.toString(),
+        };
     }
     
-    return undefined;
+    return {
+        result: undefined,
+        error: 'Failed to get response from API',
+    };
 }
