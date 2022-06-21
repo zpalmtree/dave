@@ -76,7 +76,7 @@ export async function handleGPT3Request(
     if (badWordFilter.isProfane(prompt)) {
         return {
             result: undefined,
-            error: `Banned search term. Please try a different prompt to avoid the bot breaking the OpenAI terms of service.`,
+            error: `Banned search term. Please try a different prompt to avoid the bot breaking the OpenAI terms of service: <https://beta.openai.com/docs/usage-guidelines/content-policy>`,
         };
     }
 
