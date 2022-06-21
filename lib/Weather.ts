@@ -3,20 +3,20 @@ import {
     MessageEmbed,
 } from 'discord.js';
 
-import * as moment from 'moment';
+import moment from 'moment';
 
 import fetch from 'node-fetch';
 
 import { stringify } from 'querystring';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
-import { capitalizeAllWords } from './Utilities';
+import { capitalizeAllWords } from './Utilities.js';
 
 import {
     Paginate,
     DisplayType,
-} from './Paginate';
+} from './Paginate.js';
 
 export interface IWeatherIcon {
     day: string;

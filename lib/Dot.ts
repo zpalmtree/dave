@@ -2,19 +2,14 @@ import fetch from 'node-fetch';
 
 import { xml2json } from 'xml-js';
 
-import {
-    Canvas,
-    Image,
-    createCanvas,
-    loadImage,
-} from 'canvas';
+import canvas from 'canvas';
 
-import { RGB } from './Types';
+import { RGB } from './Types.js';
 
 import {
     hexToRGB,
     rgbToHex
-} from './Utilities';
+} from './Utilities.js';
 
 const DOT_WIDTH = 120;
 const DOT_HEIGHT = 120;
@@ -42,8 +37,8 @@ const COLORS: {color1: string, color2: string}[] = [
 ];
 
 // generate dot color stops
-let DOT_IMAGES: Image[] = [];
-let DOT_COLORS: { tail: number, mc: Image }[] = [];
+let DOT_IMAGES: canvas.Image[] = [];
+let DOT_COLORS: { tail: number, mc: canvas.Image }[] = [];
 
 export async function initDot() {
     if (DOT_IMAGES.length === 0) {
@@ -66,7 +61,7 @@ export async function initDot() {
     }
 }
 
-async function generateDotImages(): Promise<Image[]> {
+async function generateDotImages(): Promise<canvas.Image[]> {
     const dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_WIDTH}' height='${DOT_HEIGHT}'>
     <defs>
         <filter id='f1'>
@@ -91,13 +86,13 @@ async function generateDotImages(): Promise<Image[]> {
 </svg>`;
 
     // generate dot color stops
-    const DOT_IMAGES: Image[] = [];
+    const DOT_IMAGES: canvas.Image[] = [];
 
     for (const { color1, color2 } of COLORS) {
         const svg = dotSvg.replace('$$COLOR1$$', color1).replace('$$COLOR2$$', color2);
-        const img = new Image();
+        const img = new canvas.Image();
 
-        const image = await loadImage(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+        const image = await canvas.loadImage(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 
         image.width = DOT_WIDTH;
         image.height = DOT_HEIGHT;
@@ -108,7 +103,7 @@ async function generateDotImages(): Promise<Image[]> {
     return DOT_IMAGES;
 }
 
-export async function renderDot(): Promise<[string, number, Canvas]> {
+export async function renderDot(): Promise<[string, number, canvas.Canvas]> {
     const response = await fetch('http://gcpdot.com/gcpindex.php');
 
     const dotXML = await response.text();
@@ -122,7 +117,7 @@ export async function renderDot(): Promise<[string, number, Canvas]> {
         return item.attributes.t === serverTime
     }).elements[0].text);
 
-    const dotCanvas = createCanvas(DOT_WIDTH, DOT_HEIGHT);
+    const dotCanvas = canvas.createCanvas(DOT_WIDTH, DOT_HEIGHT);
     const dotContext = dotCanvas.getContext('2d');
 
     const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_WIDTH}' height='${DOT_HEIGHT}' style='opacity:0.7'>
@@ -135,7 +130,7 @@ export async function renderDot(): Promise<[string, number, Canvas]> {
 </svg>`;
 
     /* Generate dot drop shadow */
-    const shadowImage = await loadImage(`data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`);
+    const shadowImage = await canvas.loadImage(`data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`);
     shadowImage.width = DOT_WIDTH;
     shadowImage.height = DOT_HEIGHT;
 
@@ -174,12 +169,12 @@ export async function renderDot(): Promise<[string, number, Canvas]> {
     return [ rgbToHex(blendRGB), currentDotValue, dotCanvas ];
 };
 
-export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
+export async function renderDotGraph(timespan: number): Promise<[ number, canvas.Canvas ]> {
     const inv_ch = 1.0 / DOT_GRAPH_HEIGHT;
 
-    var canvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
-    var context = canvas.getContext('2d');
-    var outCanvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    var canvasData = canvas.createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    var context = canvasData.getContext('2d');
+    var outCanvas = canvas.createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
     var outContext = outCanvas.getContext("2d");
 
     const response = await fetch(`http://global-mind.org/gcpdot/gcpgraph.php?pixels=${DOT_GRAPH_WIDTH}&seconds=${timespan}`);
@@ -207,7 +202,7 @@ export async function renderDotGraph(timespan: number): Promise<[ number, Canvas
     <rect width='100%' height='100%' fill='url(#g)'/>
 </svg>`;
 
-    const bgImage = await loadImage(`data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`);
+    const bgImage = await canvas.loadImage(`data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`);
 
     context.drawImage(bgImage, 0, 0);
 

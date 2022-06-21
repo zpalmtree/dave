@@ -6,17 +6,17 @@ import {
 import {
     Args,
     Command,
-} from './Types';
+} from './Types.js';
 
 import {
     Paginate,
     DisplayType,
-} from './Paginate';
+} from './Paginate.js';
 
 import {
     canAccessCommand,
     getLanguageNames,
-} from './Utilities';
+} from './Utilities.js';
 
 import {
     handleFortune,
@@ -49,17 +49,17 @@ import {
     handlePoll,
     handleMultiPoll,
     handlePrice,
-} from './CommandImplementations';
+} from './CommandImplementations.js';
 
 import {
     handleGPT3,
-} from './GPT3';
+} from './GPT3.js';
 
 import {
     handleTimers,
     handleTimer,
     deleteTimer,
-} from './Timer';
+} from './Timer.js';
 
 import {
     handleWatch,
@@ -68,32 +68,13 @@ import {
     updateTime,
     addLink,
     handleWatchStats,
-} from './Watch';
+} from './Watch.js';
 
-import { exchangeService } from './Exchange';
+import { exchangeService } from './Exchange.js';
 
-import { handleWeather } from './Weather';
+import { handleWeather } from './Weather.js';
 
-import { 
-    handleTurtle,
-    handleTurtleTanks,
-    handleTankMove,
-    handleTankStatus,
-    handleTankLogs,
-    handleTankShoot,
-    handleTankDestroy,
-} from './TurtleTanks/TurtleTanks';
-
-import {
-    customizeAvatar,
-    faces,
-} from './TurtleTanks/Avatar';
-
-import {
-    customizePerk,
-} from './TurtleTanks/Perks';
-
-import { config } from './Config';
+import { config } from './Config.js';
 
 export const Commands: Command[] = [
     {
@@ -878,159 +859,6 @@ export const Commands: Command[] = [
                 {
                     name: 'Get the weather in a post code',
                     value: 'weather SW1, GB',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['tanks', 'tank', 'game'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTurtleTanks,
-            description: 'Play Turtle Tanks!',
-            helpDescription: `Turtle Tanks is a simple game where you must shoot ` +
-                `and destroy other tanks with your weapons.\n\n` +
-                `Moving and shooting both require points. There are a few ways ` +
-                `to get points. You will start with a few points. Points will be awarded ` +
-                `automatically every game tick (Once per hour). Finally, ` +
-                `you get points for killing another tank.\n\n` +
-                `Your tank can move in all 8 directions - vertically, horizontally, ` +
-                `and diagonally. Moving diagonally uses the same amount of points ` +
-                `as a regular move.\n\n` +
-                `Your weapon has a maximum range. It cannot hit tiles beyond this ` +
-                `maximum range. Note that some weapons have a radius, and so hit more ` +
-                `than just one tile. This may give you a slight range advantage, by ` +
-                `instead hitting the tile next to your opponent. This can also ` + 
-                `be used to damage multiple tanks at once.\n` +
-                `Your weapon sometimes will miss. Try increasing your accuracy ` +
-                `by shooting the same tile multiple times. Your accuracy will increase ` +
-                `every shot, up to a maximum.\n` +
-                `To customize your play style, try changing your perk, using the ` +
-                `\`${config.prefix}tank perk\` command.`,
-            needDb: true,
-        },
-        subCommands: [
-            {
-                argsFormat: Args.Combined,
-                implementation: handleTankMove,
-                description: 'Move your tank to another tile',
-                helpDescription: 'Move your tank to another tile. Tile must be unoccupied ' +
-                    'and not out of bounds or unusable terrain.', 
-                aliases: ['move'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Move to a specific tile',
-                        value: 'tanks move A1',
-                    },
-                    {
-                        name: 'Move in a direction',
-                        value: 'tanks move northwest',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.Combined,
-                implementation: handleTankStatus,
-                description: 'Get yours or another players tank status',
-                aliases: ['status', 'stats', 'info'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Get your status',
-                        value: 'tanks status',
-                    },
-                    {
-                        name: 'Get another players status',
-                        value: 'tanks status @bob',
-                    },
-                    {
-                        name: 'Get the status of the player on a tile',
-                        value: 'tanks status A1',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.DontNeed,
-                implementation: handleTankLogs,
-                description: 'View game logs to see previous actions that occurred',
-                aliases: ['log', 'logs', 'history'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'View game action history',
-                        value: 'tanks log',
-                    }
-                ],
-            },
-            {
-                argsFormat: Args.Combined,
-                implementation: handleTankShoot,
-                description: 'Shoot at a tile or range of tiles to damage players',
-                aliases: ['shoot', 'fire', 'attack'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Shoot at a tile',
-                        value: 'tanks shoot B3',
-                    },
-                    {
-                        name: 'Shoot at a player',
-                        value: 'tanks shoot @bob',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.DontNeed,
-                implementation: handleTankDestroy,
-                description: 'Destroy the currently running game (Mod only)',
-                aliases: ['destroy'],
-            },
-            {
-                argsFormat: Args.DontNeed,
-                implementation: customizeAvatar,
-                description: 'Customize your turtle tank avatar',
-                aliases: ['customize', 'personalize', 'avatar'],
-                examples: [
-                    {
-                        name: 'Customize your tank avatar',
-                        value: 'tanks customize',
-                    },
-                ],
-                needDb: true,
-            },
-            {
-                argsFormat: Args.DontNeed,
-                implementation: customizePerk,
-                description: 'Customize your turtle tanks perks',
-                aliases: ['perk', 'perks'],
-                examples: [
-                    {
-                        name: 'Change your tanks perk',
-                        value: 'tanks perk',
-                    },
-                ],
-                needDb: true,
-            },
-        ],
-        hidden: true,
-    },
-    {
-        aliases: ['turtle'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleTurtle,
-            description: 'Get a random generated turtle',
-            helpDescription: 'Get a random generated or specific turtle. Available turtles: '
-                + faces.map((x) => '`' + x.substr(0, x.length - 4) + '`').join(', '),
-            examples: [
-                {
-                    name: 'Get a random generated turtle',
-                    value: 'turtle',
-                },
-                {
-                    name: 'Get a specific turtle',
-                    value: 'turtle t_smile',
                 },
             ],
         },

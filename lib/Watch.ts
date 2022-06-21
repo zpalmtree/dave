@@ -1,4 +1,4 @@
-import * as moment from 'moment';
+import moment from 'moment';
 
 import {
     Client,
@@ -18,7 +18,7 @@ import {
     deleteQuery,
     updateQuery,
     serializeQueries,
-} from './Database';
+} from './Database.js';
 
 import {
     haveRole,
@@ -27,18 +27,18 @@ import {
     shuffleArray,
     tryReactMessage,
     getDefaultTimeZone,
-} from './Utilities';
+} from './Utilities.js';
 
 import {
     ScheduledWatch,
-} from './Types';
+} from './Types.js';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
 import {
     Paginate,
     DisplayType,
-} from './Paginate';
+} from './Paginate.js';
 
 interface IGetWatchDetails {
     excludeComplete?: boolean;

@@ -4,7 +4,7 @@ import {
     verbose,
 } from 'sqlite3';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
 export async function executeQuery(query: string, db: Database, params: any = []): Promise<void> {
     return new Promise((resolve, reject) => {

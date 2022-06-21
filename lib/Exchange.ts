@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 
-import { config } from './Config';
+import { config } from './Config.js';
 
 interface Rates {
     [index: string]: number;
