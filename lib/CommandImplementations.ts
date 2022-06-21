@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as moment from 'moment';
 
-import translate = require('@vitalets/google-translate-api');
+import translate from '@vitalets/google-translate-api';
 
 import fetch from 'node-fetch';
 

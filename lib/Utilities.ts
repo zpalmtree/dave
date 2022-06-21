@@ -10,7 +10,7 @@ import {
 import * as moment from 'moment';
 import fetch from 'node-fetch';
 import * as FormData from 'form-data';
-import translate = require('@vitalets/google-translate-api');
+import translate from '@vitalets/google-translate-api';
 
 import { RGB } from './Types';
 import { config } from './Config';

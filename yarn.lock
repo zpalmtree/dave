@@ -114,6 +114,11 @@
   resolved "https://registry.yarnpkg.com/@tootallnate/once/-/once-1.1.2.tgz#ccb91445360179a04e7fe6aff78c00ffc1eeaf82"
   integrity sha512-RbzJvlNzmRq5c3O09UipeuXno4tA1FE6ikOjxZK0tuxVv3412l64l5t1W5pj4+rJq9vpkm/kwiR07aZXnsKPxw==
 
+"@types/bad-words@^3.0.1":
+  version "3.0.1"
+  resolved "https://registry.yarnpkg.com/@types/bad-words/-/bad-words-3.0.1.tgz#6a20fb08814af5e1f2428fa9e0098ca7b36f730a"
+  integrity sha512-7la3ZDJG1tlRqySO+pnXycZpacaMEw/iLEm8kc4l+I+jN8KjBfoQVwO6jm98xzXVLrxV8vDrB5TaMoop8sKclQ==
+
 "@types/fabric@^4.2.2":
   version "4.2.2"
   resolved "https://registry.yarnpkg.com/@types/fabric/-/fabric-4.2.2.tgz#b28d934aed0c06b0aa87fd7f892254d76634e16c"
@@ -348,6 +353,18 @@ axios@^0.26.0:
   integrity sha512-fPwcX4EvnSHuInCMItEhAGnaSEXRBjtzh9fOtsE6E1G6p7vl7edEeZe11QHf18+6+9gR5PbKV/sGKNaD8YaMeA==
   dependencies:
     follow-redirects "^1.14.8"
+
+bad-words@^3.0.4:
+  version "3.0.4"
+  resolved "https://registry.yarnpkg.com/bad-words/-/bad-words-3.0.4.tgz#044c83935c4c363a905d47b5e0179f7241fecaec"
+  integrity sha512-v/Q9uRPH4+yzDVLL4vR1+S9KoFgOEUl5s4axd6NIAq8SV2mradgi4E8lma/Y0cw1ltVdvyegCQQKffCPRCp8fg==
+  dependencies:
+    badwords-list "^1.0.0"
+
+badwords-list@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/badwords-list/-/badwords-list-1.0.0.tgz#5e9856dbf13482a295c3b0b304afb9d4cfc5c579"
+  integrity sha512-oWhaSG67e+HQj3OGHQt2ucP+vAPm1wTbdp2aDHeuh4xlGXBdWwzZ//pfu6swf5gZ8iX0b7JgmSo8BhgybbqszA==
 
 balanced-match@^1.0.0:
   version "1.0.0"
