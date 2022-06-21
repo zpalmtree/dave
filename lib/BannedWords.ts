@@ -25,4 +25,10 @@ export const BannedWords = [
     'ethnicity',
     'deepfake',
     'cybercrime',
+    'midget',
+    'dwarf',
+    'naked',
+    '1488',
+    'racist',
+    'racism',
 ];
