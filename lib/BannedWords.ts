@@ -31,4 +31,7 @@ export const BannedWords = [
     '1488',
     'racist',
     'racism',
+    'gender',
+    'superior',
+    'inferior',
 ];
