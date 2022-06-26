@@ -255,7 +255,7 @@ export async function renderDotGraph(timespan: number): Promise<[ number, canvas
 
     outContext.fillStyle = '#2F3136';
     outContext.fillRect(0, 0, outCanvas.width, outCanvas.height);
-    outContext.drawImage(canvas, 0, 0);
+    outContext.drawImage(canvasData, 0, 0);
 
     return [ variance, outCanvas ];
 }
