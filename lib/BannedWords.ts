@@ -34,4 +34,10 @@ export const BannedWords = [
     'gender',
     'superior',
     'inferior',
+    '2 girls 1 cup',
+    'phallus',
+    'molest',
+    'cuck',
+    'gay',
+    'Jack Idema',
 ];
