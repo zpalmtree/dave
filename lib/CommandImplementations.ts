@@ -1811,7 +1811,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
     const commands = await selectQuery(
         `SELECT
             command AS command,
-            CAST(COUNT(*) AS TEXT) AS usage
+            COUNT(*) AS usage
         FROM
             logs
         WHERE
@@ -1834,7 +1834,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         displayFunction: (command: any) => {
             return {
                 name: command.command,
-                value: command.usage,
+                value: command.usage.toString(),
                 inline: true,
             };
         },
