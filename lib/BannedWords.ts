@@ -40,4 +40,7 @@ export const BannedWords = [
     'cuck',
     'gay',
     'Jack Idema',
+    'lesbian',
+    'scissoring',
+    'pegging',
 ];

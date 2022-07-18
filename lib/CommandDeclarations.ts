@@ -574,6 +574,14 @@ export const Commands: Command[] = [
             description: 'Provide a prompt to the GPT3 AI and get a completion',
         },
     },
+    {
+        aliases: ['clowns', 'sendintheclowns'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: (msg: Message) => msg.reply('https://www.youtube.com/watch?v=ZG15oP7q4fI'),
+            description: 'Send in the clowns',
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
