@@ -582,6 +582,45 @@ export const Commands: Command[] = [
             description: 'Send in the clowns',
         },
     },
+    {
+        aliases: ['stats'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleStats,
+            description: 'View bot usage statistics',
+            needDb: true,
+            examples: [
+                {
+                    name: `View most used commands`,
+                    value: 'stats',
+                },
+                {
+                    name: `View number of times users have used a specific command`,
+                    value: 'stats fortune',
+                },
+                {
+                    name: 'View most used commands for a user',
+                    value: 'stats @bob',
+                },
+            ],
+        },
+        subCommands: [
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleUsersStats,
+                description: 'View number of times users have used the bot',
+                aliases: ['users', 'user'],
+                needDb: true,
+                examples: [
+                    {
+                        name: `View number of times users have used the bot`,
+                        value: 'stats users',
+                    },
+                ],
+            },
+        ],
+    },
+
 ];
 
 export function handleHelp(msg: Message, args: string): void {
