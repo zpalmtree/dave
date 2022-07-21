@@ -1691,7 +1691,7 @@ export async function handleUsersStats(msg: Message, db: Database): Promise<void
         displayFunction: async (user: any) => {
             return {
                 name: await getUsername(user.user, msg.guild),
-                value: user.usage,
+                value: user.usage.toString(),
                 inline: true,
             };
         },
