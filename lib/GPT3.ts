@@ -80,29 +80,41 @@ export async function handleGPT3Request(
         };
     }
 
-    try {
-        const completion = await openai.createCompletion({
-            model,
-            prompt,
-            max_tokens: maxTokens,
-            temperature,
-            echo: true,
-            user,
-        }, {
-            timeout: DEFAULT_TIMEOUT,
-        });
+    let maxAttempts = 3;
+    let attempt = 0;
 
-        if (completion.data.choices && completion.data.choices.length > 0) {
+    while (attempt <= maxAttempts) {
+        attempt++;
+
+        try {
+            const completion = await openai.createCompletion({
+                model,
+                prompt,
+                max_tokens: maxTokens,
+                temperature,
+                echo: true,
+                user,
+            }, {
+                timeout: DEFAULT_TIMEOUT,
+            });
+
+            if (completion.data.choices && completion.data.choices.length > 0) {
+                if (completion.data.choices[0].text === prompt) {
+                    console.log('retry');
+                    continue;
+                }
+
+                return {
+                    result: completion.data.choices[0].text!,
+                    error: undefined,
+                };
+            }
+        } catch (err) {
             return {
-                result: completion.data.choices[0].text!,
-                error: undefined,
+                result: undefined,
+                error: err.toString(),
             };
         }
-    } catch (err) {
-        return {
-            result: undefined,
-            error: err.toString(),
-        };
     }
     
     return {
