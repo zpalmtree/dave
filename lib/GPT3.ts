@@ -74,10 +74,7 @@ export async function handleGPT3Request(
     user: string = '',
 ) {
     if (badWordFilter.isProfane(prompt)) {
-        return {
-            result: undefined,
-            error: `Banned search term. Please try a different prompt to avoid the bot breaking the OpenAI terms of service: <https://beta.openai.com/docs/usage-guidelines/content-policy>`,
-        };
+        prompt = badWordFilter.clean(prompt);
     }
 
     let maxAttempts = 3;
@@ -100,7 +97,6 @@ export async function handleGPT3Request(
 
             if (completion.data.choices && completion.data.choices.length > 0) {
                 if (completion.data.choices[0].text === prompt) {
-                    console.log('retry');
                     continue;
                 }
 
