@@ -2551,3 +2551,7 @@ It is useful to look at how these collections are trending - is the number of so
 export async function handleSign(msg: Message): Promise<void> {
     msg.channel.send('https://media.discordapp.net/attachments/891081495706480690/981347925248577617/unknown.png');
 }
+
+export async function handleFrozen(msg: Message): Promise<void> {
+    msg.channel.send(`Some scam tokens are freezing the token accounts so you can’t get burn or transfer them. Our dev has posted about the issue on Solana’s GitHub in hopes they fix it, but we will be pushing an update soon with our redesign that makes it more obvious the token is frozen and cannot be burnt.\n\nIf you have a GitHub account, you could let the Solana devs know you would like to see this fixed - <https://github.com/solana-labs/solana-program-library/issues/3295>`);
+}

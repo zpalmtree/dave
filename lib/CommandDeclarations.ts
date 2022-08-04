@@ -65,6 +65,7 @@ import {
     handleTrending,
     handleSign,
     handleBurnt,
+    handleFrozen,
 } from './CommandImplementations.js';
 
 import {
@@ -620,7 +621,14 @@ export const Commands: Command[] = [
             },
         ],
     },
-
+    {
+        aliases: ['frozen', 'freeze'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleFrozen,
+            description: 'Get info on frozen tokens',
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
