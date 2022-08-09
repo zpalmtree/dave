@@ -2555,3 +2555,17 @@ export async function handleSign(msg: Message): Promise<void> {
 export async function handleFrozen(msg: Message): Promise<void> {
     msg.channel.send(`Some scam tokens are freezing the token accounts so you can’t get burn or transfer them. Our dev has posted about the issue on Solana’s GitHub in hopes they fix it, but we will be pushing an update soon with our redesign that makes it more obvious the token is frozen and cannot be burnt.\n\nIf you have a GitHub account, you could let the Solana devs know you would like to see this fixed - <https://github.com/solana-labs/solana-program-library/issues/3295>`);
 }
+
+export async function handleIncineratorFAQ(msg: Message): Promise<void> {
+    msg.channel.send(`Q. Where is the money coming from?
+A. Its liberating a small storage fee 
+
+Q. I only got 0.002 for an NFT. What gives!?
+A. The MAJORITY of NFTs give 0.01. Non-master editions(non unique) tokens, like scams, still give 0.002
+
+Q. Theres an NFT in my wallet that wont burn. Why?
+A. Some nfts, scams in particular, abuse the freeze instruction - you cant send them out or burn them.
+
+Q. I burned and it doesnt seem like I got anything. What happened?
+A. The amount you get is very small, unless youre burning a lot of NFTs. You need to burn at least 100 to get 1 sol!`);
+}

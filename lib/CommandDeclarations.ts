@@ -66,6 +66,7 @@ import {
     handleSign,
     handleBurnt,
     handleFrozen,
+    handleIncineratorFAQ,
 } from './CommandImplementations.js';
 
 import {
@@ -627,6 +628,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleFrozen,
             description: 'Get info on frozen tokens',
+        },
+    },
+    {
+        aliases: ['incin', 'incinFAQ', 'tokens'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleIncineratorFAQ,
+            description: 'Frequently asked questions about the incinerator',
         },
     },
 ];
