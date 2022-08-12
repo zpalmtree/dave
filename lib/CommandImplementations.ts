@@ -165,7 +165,6 @@ export async function replyWithMention(msg: Message, reply: string): Promise<voi
     }
 }
 
-
 export async function handleBurnt(msg: Message): Promise<void> {
     const url = "https://letsalllovelain.com/slugs/";
     const res = await fetch(url);
