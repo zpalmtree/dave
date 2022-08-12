@@ -161,7 +161,7 @@ export async function replyWithMention(msg: Message, reply: string): Promise<voi
         }
         msg.reply(usersMentioned + "\n" + reply)
     } else {
-        msg.reply(reply);
+        msg.channel.send(reply);
     }
 }
 
