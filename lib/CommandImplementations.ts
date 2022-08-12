@@ -151,15 +151,9 @@ const states = [
 ];
 
 export async function replyWithMention(msg: Message, reply: string): Promise<void> {
-    if (msg.mentions.users.size > 0 || msg.mentions.repliedUser)   {
-        let usersMentioned = "";
-        msg.mentions.users.forEach((value, key) => {
-            usersMentioned = '<@'+value+'> ' + usersMentioned;
-        })
-        if (msg.mentions.repliedUser)   {
-        usersMentioned = '<@'+msg.mentions.repliedUser+'> ' + usersMentioned;
-        }
-        msg.reply(usersMentioned + "\n" + reply)
+    if (msg.mentions.users.size > 0)   {
+        const usersMentioned = [...msg.mentions.users.keys()].map((id) => `<@${id}>`).join(' ');
+        msg.reply(`${usersMentioned} ${reply}`);
     } else {
         msg.channel.send(reply);
     }
