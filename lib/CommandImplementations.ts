@@ -24,7 +24,6 @@ import {
     GuildMember,
     ColorResolvable,
     Util,
-    UserFlags,
 } from 'discord.js';
 
 import {
