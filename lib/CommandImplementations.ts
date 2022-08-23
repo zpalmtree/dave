@@ -1776,7 +1776,7 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         displayFunction: async (user: any) => {
             return {
                 name: await getUsername(user.user, msg.guild),
-                value: user.usage,
+                value: user.usage.toString(),
                 inline: true,
             };
         },
