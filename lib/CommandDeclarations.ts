@@ -97,7 +97,7 @@ import { config } from './Config.js';
 
 export const Commands: Command[] = [
     {
-        aliases: ['gen3', 'gen3count'],
+        aliases: ['gen3', 'gen3count', 'gen3supply'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleGen3Count,
