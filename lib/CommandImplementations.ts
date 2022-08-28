@@ -174,14 +174,14 @@ export async function handleGen3Count(msg: Message): Promise<void> {
     const users = data.burnStats.users;
   
     for (const user of users) {
-    let timestamp = user.transactions[0].timestamp
-  
-    if (new Date(timestamp) >= new Date('2022-01-01'))  {
-      eligibleBurns ++;
+        let timestamp = user.transactions[0].timestamp;
+    
+        if (new Date(timestamp) >= new Date('2022-01-01'))  {
+        eligibleBurns++;
+        }
     }
-  }
-  gen3Count = Math.floor(eligibleBurns / 3);
-  replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
+    gen3Count += Math.floor(eligibleBurns / 3);
+    replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
   }
 
   
