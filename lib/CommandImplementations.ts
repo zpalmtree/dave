@@ -177,7 +177,7 @@ export async function handleGen3Count(msg: Message): Promise<void> {
         let timestamp = user.transactions[0].timestamp;
     
         if (new Date(timestamp) >= new Date('2022-01-01'))  {
-        eligibleBurns++;
+            eligibleBurns++;
         }
     }
     gen3Count += Math.floor(eligibleBurns / 3);
