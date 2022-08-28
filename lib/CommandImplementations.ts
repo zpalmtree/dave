@@ -180,9 +180,7 @@ export async function handleGen3Count(msg: Message): Promise<void> {
       eligibleBurns ++;
     }
   }
-  console.log(eligibleBurns);
   gen3Count = Math.floor(eligibleBurns / 3);
-  console.log(gen3Count)
   replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
   }
 
