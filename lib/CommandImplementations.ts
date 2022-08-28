@@ -159,6 +159,35 @@ export async function replyWithMention(msg: Message, reply: string): Promise<voi
     }
 }
 
+export async function handleGen3Count(msg: Message): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+  
+    if (!res.ok) {
+        await msg.reply('Failed to fetch Gen3 count from API!');
+        return;
+    }
+    const data = await res.json();
+    let gen3Count = 0
+    let eligibleBurns = 0;
+  
+    const users = data.burnStats.users;
+  
+    for (const user of users) {
+    let timestamp = user.transactions[0].timestamp
+  
+    if (new Date(timestamp) >= new Date('2022-01-01'))  {
+      eligibleBurns ++;
+    }
+  }
+  console.log(eligibleBurns);
+  gen3Count = Math.floor(eligibleBurns / 3);
+  console.log(gen3Count)
+  replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
+  }
+
+  
+
 export async function handleBurnt(msg: Message): Promise<void> {
     const url = "https://letsalllovelain.com/slugs/";
     const res = await fetch(url);

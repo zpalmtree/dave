@@ -67,6 +67,7 @@ import {
     handleBurnt,
     handleFrozen,
     handleIncineratorFAQ,
+    handleGen3Count,
 } from './CommandImplementations.js';
 
 import {
@@ -95,6 +96,14 @@ import { handleWeather } from './Weather.js';
 import { config } from './Config.js';
 
 export const Commands: Command[] = [
+    {
+        aliases: ['gen3', 'gen3count'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen3Count,
+            description: 'Displays the current Generation 3 slug supply',
+        }
+    },
     {
         aliases: ['burnt', 'burned'],
         primaryCommand: {
