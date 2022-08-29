@@ -125,12 +125,9 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
     );
 
     const embed = new MessageEmbed()
-        .setTitle('Success')
-        .setDescription(`Timer #${timerID} has been scheduled.`)
-        .setFooter(`Type ${config.prefix}timer delete ${timerID} to cancel this timer`)
         .addFields(
             {
-                name: 'Time',
+                name: `Timer #${timerID}`,
                 value: `${capitalize(moment.utc(time).fromNow())}, ${moment.utc(time).utcOffset(-6).format('HH:mm')} CST`,
             }
         );
