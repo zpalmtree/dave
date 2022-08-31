@@ -169,14 +169,16 @@ export async function handleGen3Count(msg: Message): Promise<void> {
     }
 
     const data = await res.json();
-    let gen3Count = 0;
-    const users = data.burnStats.users;
 
-    for (let user of users) {
+    const gen2Date = new Date('2022-01-01');
+
+    let gen3Count = 0;
+
+    for (const user of data.burnStats.users) {
         let eligibleBurns = 0;
 
-        for (let burn of user.transactions) {
-            if (new Date(burn.timestamp) >= new Date('2022-01-01')) {
+        for (const burn of user.transactions) {
+            if (new Date(burn.timestamp) >= gen2Date) {
                 eligibleBurns += burn.slugsBurnt.length;
             }
         }
