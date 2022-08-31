@@ -168,18 +168,18 @@ export async function handleGen3Count(msg: Message): Promise<void> {
         return;
     }
     const data = await res.json();
-    let gen3Count = 0
+    let gen3Count = 0;
     const users = data.burnStats.users;
 
     for (let user of users) {
-      let eligibleBurns = 0
-      for (let burn of user.transactions) {
+        let eligibleBurns = 0;
+        for (let burn of user.transactions) {
         if (new Date(burn.timestamp) >= new Date('2022-01-01')) {
-          eligibleBurns += burn.slugsBurnt.length
+            eligibleBurns += burn.slugsBurnt.length;
         }
-      }
+    }
     
-      gen3Count += Math.floor(eligibleBurns / 3);
+    gen3Count += Math.floor(eligibleBurns / 3);
     }
 
     replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
