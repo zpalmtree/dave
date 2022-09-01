@@ -99,7 +99,7 @@ export const Commands: Command[] = [
     {
         aliases: ['gen3', 'gen3count', 'gen3supply'],
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handleGen3Count,
             description: 'Displays the current Generation 3 slug supply',
         }

@@ -159,9 +159,11 @@ export async function replyWithMention(msg: Message, reply: string): Promise<voi
     }
 }
 
-export async function handleGen3Count(msg: Message): Promise<void> {
+export async function handleGen3Count(msg: Message, args: string): Promise<void> {
     const url = "https://letsalllovelain.com/slugs/";
     const res = await fetch(url);
+
+    const address = args.trim();
   
     if (!res.ok) {
         await msg.reply('Failed to fetch Gen3 count from API!');
@@ -173,8 +175,13 @@ export async function handleGen3Count(msg: Message): Promise<void> {
     const gen2Date = new Date('2022-01-01');
 
     let gen3Count = 0;
+    let burns = 0;
 
     for (const user of data.burnStats.users) {
+        if (address !== '' && user.address !== address) {
+            continue;
+        }
+
         let eligibleBurns = 0;
 
         for (const burn of user.transactions) {
@@ -184,9 +191,14 @@ export async function handleGen3Count(msg: Message): Promise<void> {
         }
 
         gen3Count += Math.floor(eligibleBurns / 3);
+        burns += eligibleBurns;
     }
 
-    replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
+    if (address !== '') {
+        replyWithMention(msg, `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! (${burns} eligible burns)`);
+    } else {
+        replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
+    }
 }
 
 export async function handleBurnt(msg: Message): Promise<void> {
