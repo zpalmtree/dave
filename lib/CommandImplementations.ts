@@ -13,6 +13,7 @@ import { stringify, unescape } from 'querystring';
 import { evaluate } from 'mathjs';
 import he from 'he';
 import { Database } from 'sqlite3';
+import { PublicKey } from '@solana/web3.js'
 
 import {
     Message,
@@ -149,6 +150,14 @@ const states = [
     "South Dakota",
     "West Virginia",
 ];
+export function isValidSolAddress(address: string) {
+    try {
+        const pubkey = new PublicKey(address)
+        return PublicKey.isOnCurve(pubkey.toBuffer())
+    } catch (error) {
+        return false
+    }
+}
 
 export async function replyWithMention(msg: Message, reply: string): Promise<void> {
     if (msg.mentions.users.size > 0)   {
@@ -164,7 +173,11 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
     const res = await fetch(url);
 
     const address = args.trim();
-  
+    if (address != '' && !isValidSolAddress(address)) {
+        replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
     if (!res.ok) {
         await msg.reply('Failed to fetch Gen3 count from API!');
         return;
@@ -195,7 +208,12 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
     }
 
     if (address !== '') {
-        replyWithMention(msg, `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! (${burns} eligible burns)`);
+        if (gen3Count < 1) {
+            replyWithMention(msg, `You have ${burns} eligible burns. Every three 3 slugs burnt will get you one generation 3 slug. Burn ${3 - burns} ${burns > 0 ? `more ` : ''}slugs to get your first generation 3 slug.`);
+        } else { 
+            replyWithMention(msg, `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${3 - burns} more slugs to get another generation 3 slug!`);
+        }
+
     } else {
         replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
     }
