@@ -11,12 +11,22 @@ import moment from 'moment';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import translate from '@vitalets/google-translate-api';
+import { PublicKey } from '@solana/web3.js'
 
 import { RGB } from './Types.js';
 import { config } from './Config.js';
 
 export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function isValidSolAddress(address: string) {
+    try {
+        const pubkey = new PublicKey(address);
+        return PublicKey.isOnCurve(pubkey.toBuffer());
+    } catch (error) {
+        return false;
+    }
 }
 
 export function chunk(arr: string, len: number) {
