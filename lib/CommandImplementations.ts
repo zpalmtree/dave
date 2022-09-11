@@ -199,12 +199,12 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
         gen3Count += Math.floor(eligibleBurns / 3);
         burns += eligibleBurns;
     }
-
+    burns = 0;
     if (address !== '') {
         if (gen3Count === 0) {
-            replyWithMention(msg, `You have ${burns} eligible burns. Every three 3 slugs burnt will get you one generation 3 slug. Burn ${3 - burns} ${burns > 0 ? `more ` : ''}slugs to get your first generation 3 slug.`);
+            replyWithMention(msg, `You have ${burns} eligible burns. Every three 3 slugs burnt will get you one generation 3 slug. Burn ${3 - burns} ${burns > 0 ? `more ` : ''}slug${burns <= 1 ? 's' : ''} to get your first generation 3 slug.`);
         } else { 
-            replyWithMention(msg, `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${3 - burns} more slugs to get another generation 3 slug!`);
+            replyWithMention(msg, `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${3 - burns%3} more slug${3 - burns%3 > 1 ? 's' : ''} to get another generation 3 slug!`);
         }
 
     } else {
