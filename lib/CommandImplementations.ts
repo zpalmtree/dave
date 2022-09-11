@@ -13,7 +13,6 @@ import { stringify, unescape } from 'querystring';
 import { evaluate } from 'mathjs';
 import he from 'he';
 import { Database } from 'sqlite3';
-import { PublicKey } from '@solana/web3.js'
 
 import {
     Message,
@@ -53,6 +52,7 @@ import {
     tryDeleteMessage,
     tryDeleteReaction,
     tryReactMessage,
+    isValidSolAddress,
 } from './Utilities.js';
 
 import {
@@ -150,14 +150,7 @@ const states = [
     "South Dakota",
     "West Virginia",
 ];
-export function isValidSolAddress(address: string) {
-    try {
-        const pubkey = new PublicKey(address)
-        return PublicKey.isOnCurve(pubkey.toBuffer())
-    } catch (error) {
-        return false
-    }
-}
+
 
 export async function replyWithMention(msg: Message, reply: string): Promise<void> {
     if (msg.mentions.users.size > 0)   {
@@ -173,7 +166,7 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
     const res = await fetch(url);
 
     const address = args.trim();
-    if (address != '' && !isValidSolAddress(address)) {
+    if (address !== '' && !isValidSolAddress(address)) {
         replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
         return;
     }
@@ -208,7 +201,7 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
     }
 
     if (address !== '') {
-        if (gen3Count < 1) {
+        if (gen3Count === 0) {
             replyWithMention(msg, `You have ${burns} eligible burns. Every three 3 slugs burnt will get you one generation 3 slug. Burn ${3 - burns} ${burns > 0 ? `more ` : ''}slugs to get your first generation 3 slug.`);
         } else { 
             replyWithMention(msg, `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${3 - burns} more slugs to get another generation 3 slug!`);

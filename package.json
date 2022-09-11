@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@discordjs/rest": "^0.1.0-canary.0",
+    "@solana/web3.js": "^1.60.0",
     "@types/bad-words": "^3.0.1",
     "@types/fabric": "^4.2.2",
     "@types/imagemin": "^8.0.0",
