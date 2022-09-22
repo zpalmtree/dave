@@ -2447,6 +2447,15 @@ async function handleGif(
         ? mentionedChannels[0] as TextChannel
         : msg.channel as TextChannel;
 
+    const bannedChannels = [
+        '891080925163704352',
+    ];
+
+    if (bannedChannels.includes(channel.id)) {
+        await msg.reply(`Cannot send messages to that channel.`);
+        return;
+    }
+
     let text = Util.cleanContent(args.replace(/<#\d{16,20}>/g, ''), msg.channel).toUpperCase().trim();
 
     if (text === '') {
