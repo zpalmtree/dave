@@ -647,6 +647,23 @@ export const Commands: Command[] = [
             description: 'Frequently asked questions about the incinerator',
         },
     },
+    {
+        aliases: ['image'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleImage,
+            description: 'Query duckduckgo images',
+            examples: [
+                {
+                    value: 'image sunset',
+                },
+            ],
+        },
+        relatedCommands: [
+            'query',
+            'youtube',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
