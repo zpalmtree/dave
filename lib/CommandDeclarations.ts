@@ -48,7 +48,6 @@ import {
     handlePoll,
     handleMultiPoll,
     handlePrice,
-    handleSlug,
     handleGroundhog,
     handleGroove,
     handleKek,
@@ -274,15 +273,6 @@ export const Commands: Command[] = [
             'addquote',
             'quote',
         ],
-    },
-    {
-        aliases: ['slug'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSlug,
-            description: 'Get a random slug image',
-            needDb: false,
-        },
     },
     {
         aliases: ['poll', 'vote'],

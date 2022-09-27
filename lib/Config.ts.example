@@ -24,8 +24,6 @@ class Config {
 
     public imageHostPath: string = 'https://raw.githubusercontent.com/zpalmtree/dave/master/images/';
 
-    public bingApiKey: string = 'enter bing api key here';
-
     public openaiApiKey: string = 'enter open ai api key here';
 
     public watchPollInterval: number = 10000;
