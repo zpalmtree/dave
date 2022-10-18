@@ -2384,8 +2384,8 @@ async function handleGif(
     }
 
     const hasPermissionInChannel = channel
-    .permissionsFor(msg.member!)
-    .has('SEND_MESSAGES', false);
+        .permissionsFor(msg.member!)
+        .has('SEND_MESSAGES', false);
 
     if (!hasPermissionInChannel) {
         await msg.reply(`You do not have permission to send messages to that channel.`);
