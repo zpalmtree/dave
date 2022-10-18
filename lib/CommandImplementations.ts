@@ -2383,10 +2383,19 @@ async function handleGif(
         return;
     }
 
+    const hasPermissionInChannel = channel
+        .permissionsFor(msg.member!)
+        .has('SEND_MESSAGES', false);
+
+    if (!hasPermissionInChannel) {
+        await msg.reply(`You do not have permission to send messages to that channel.`);
+        return;
+    }
+
     let text = Util.cleanContent(args.replace(/<#\d{16,20}>/g, ''), msg.channel).toUpperCase().trim();
 
     if (text === '') {
-        await msg.channel.send({
+        await channel.send({
             files: [new MessageAttachment(`./images/${gif}`, gif)],
         });
 
