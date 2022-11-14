@@ -209,12 +209,12 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
         if (gen3Count === 0) {
             await replyWithMention(
                 msg,
-                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every three slugs burnt will get you one generation 3 slug. Burn ${burnsForNextSlug} ${burns > 0 ? 'more ' : ''}${slugStr} to be eligible for your first generation 3 slug.`
+                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Unfortunately, you missed out on the gen 3 burn period!`,
             );
         } else {
             await replyWithMention(
                 msg,
-                `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${burnsForNextSlug} more ${slugStr} to be eligible for another generation 3 slug.`,
+                `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns.`,
             );
         }
     } else {
