@@ -67,6 +67,7 @@ import {
     handleFrozen,
     handleIncineratorFAQ,
     handleGen3Count,
+    handleGen4Count,
 } from './CommandImplementations.js';
 
 import {
@@ -103,6 +104,15 @@ export const Commands: Command[] = [
             description: 'Displays the current Generation 3 slug supply',
         }
     },
+    {
+        aliases: ['gen4', 'gen4count', 'gen4supply'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen4Count,
+            description: 'Displays the current Generation 4 slug supply',
+        }
+    },
+
     {
         aliases: ['burnt', 'burned'],
         primaryCommand: {

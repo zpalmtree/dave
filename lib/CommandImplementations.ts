@@ -180,6 +180,7 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
     const data = await res.json();
 
     const gen2Date = new Date('2022-01-01');
+    const gen3Date = new Date('2022-11-14');
 
     let gen3Count = 0;
     let burns = 0;
@@ -192,7 +193,7 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
         let eligibleBurns = 0;
 
         for (const burn of user.transactions) {
-            if (new Date(burn.timestamp) >= gen2Date) {
+            if (new Date(burn.timestamp) >= gen2Date && new Date(burn.timestamp) <= gen3Date) {
                 eligibleBurns += burn.slugsBurnt.length;
             }
         }
@@ -220,6 +221,68 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
         await replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
     }
 }
+
+export async function handleGen4Count(msg: Message, args: string): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    const address = args.trim();
+
+    if (address !== '' && !isValidSolAddress(address)) {
+        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch Gen3 count from API!');
+        return;
+    }
+
+    const data = await res.json();
+
+    const gen3Date = new Date('2022-11-14');
+    const gen4Date = new Date('2030-11-14');
+
+    let gen3Count = 0;
+    let burns = 0;
+
+    for (const user of data.burnStats.users) {
+        if (address !== '' && user.address !== address) {
+            continue;
+        }
+
+        let eligibleBurns = 0;
+
+        for (const burn of user.transactions) {
+            if (new Date(burn.timestamp) > gen3Date && new Date(burn.timestamp) <= gen4Date) {
+                eligibleBurns += burn.slugsBurnt.length;
+            }
+        }
+
+        gen3Count += Math.floor(eligibleBurns / 4);
+        burns += eligibleBurns;
+    }
+
+    if (address !== '') {
+        const burnsForNextSlug = 4 - (burns % 4);
+        const slugStr = burnsForNextSlug === 1 ? 'slug' : 'slugs';
+
+        if (gen3Count === 0) {
+            await replyWithMention(
+                msg,
+                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every four slugs burnt will get you one generation 4 slug. Burn ${burnsForNextSlug} ${burns > 0 ? 'more ' : ''}${slugStr} to be eligible for your first generation 4 slug.`
+            );
+        } else {
+            await replyWithMention(
+                msg,
+                `You are currently set to receive ${gen3Count} generation 4 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${burnsForNextSlug} more ${slugStr} to be eligible for another generation 4 slug.`,
+            );
+        }
+    } else {
+        await replyWithMention(msg, `The current projected Generation 4 slug supply is ${gen3Count}`);
+    }
+}
+
 
 export async function handleBurnt(msg: Message): Promise<void> {
     const url = "https://letsalllovelain.com/slugs/";
