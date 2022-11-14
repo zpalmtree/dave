@@ -218,7 +218,7 @@ export async function handleGen3Count(msg: Message, args: string): Promise<void>
             );
         }
     } else {
-        await replyWithMention(msg, `The current projected Generation 3 slug supply is ${gen3Count}`);
+        await replyWithMention(msg, `The Generation 3 slug supply will be 800.`);
     }
 }
 
