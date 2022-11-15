@@ -1,8 +1,8 @@
 import {
     Client,
     Message,
-    MessageEmbed,
     TextChannel,
+    EmbedBuilder,
 } from 'discord.js';
 
 import moment from 'moment';
@@ -124,10 +124,10 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         description
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Success')
         .setDescription(`Timer #${timerID} has been scheduled.`)
-        .setFooter(`Type ${config.prefix}timer delete ${timerID} to cancel this timer`)
+        .setFooter({ text: `Type ${config.prefix}timer delete ${timerID} to cancel this timer` })
         .addFields(
             {
                 name: 'Time',
@@ -170,7 +170,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Running Timers');
 
     const pages = new Paginate({

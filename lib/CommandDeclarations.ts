@@ -1,6 +1,6 @@
 import {
     Message,
-    MessageEmbed,
+    EmbedBuilder,
 } from 'discord.js';
 
 import {
@@ -27,7 +27,6 @@ import {
     handleSuggest,
     handleKitty,
     handleDoggo,
-    handleChinked,
     handleImgur,
     handleTime,
     handleDate,
@@ -80,15 +79,6 @@ import {
     deleteTimer,
 } from './Timer.js';
 
-import {
-    handleWatch,
-    deleteWatch,
-    displayAllWatches,
-    updateTime,
-    addLink,
-    handleWatchStats,
-} from './Watch.js';
-
 import { exchangeService } from './Exchange.js';
 
 import { handleWeather } from './Weather.js';
@@ -116,7 +106,7 @@ export const Commands: Command[] = [
     {
         aliases: ['burnt', 'burned'],
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handleBurnt,
             description: 'Displays the current number of slugs burnt by the incinerator',
         }
@@ -874,7 +864,7 @@ export function handleHelp(msg: Message, args: string): void {
                     description = c.primaryCommand.helpDescriptionFunc();
                 }
 
-                const embed = new MessageEmbed()
+                const embed = new EmbedBuilder()
                     .setTitle(callString)
                     .setDescription(description);
 
@@ -908,7 +898,7 @@ export function handleHelp(msg: Message, args: string): void {
         }
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Available commands')
         .setDescription(`Enter \`${config.prefix}command help\` for more info and examples on a specific command`);
 

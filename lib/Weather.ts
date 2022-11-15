@@ -1,6 +1,6 @@
 import {
     Message,
-    MessageEmbed,
+    EmbedBuilder,
 } from 'discord.js';
 
 import moment from 'moment';
@@ -250,8 +250,8 @@ export const weatherIconMapping: IWeatherIcons = {
     },
 };
 
-function displayWeather(embed: MessageEmbed, data: any, cityData: any) {
-    embed.fields = [];
+function displayWeather(embed: EmbedBuilder, data: any, cityData: any) {
+    embed.setFields([]);
 
     const weather = data.weather[0];
 
@@ -353,20 +353,20 @@ export async function handleWeather(msg: Message, args: string): Promise<void> {
 
         const cityData = data.city;
 
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         const pages = new Paginate({
             sourceMessage: msg,
             embed,
             data: data.list,
             displayType: DisplayType.EmbedData,
-            displayFunction: (item: any, embed: MessageEmbed) => {
+            displayFunction: (item: any, embed: EmbedBuilder) => {
                 displayWeather(embed, item, cityData);
             }
         });
 
         await pages.sendMessage();
     } catch (err) {
-        msg.reply(`Failed to get weather: ${err.toString()}`);
+        msg.reply(`Failed to get weather: ${(err as any).toString()}`);
     }
 }

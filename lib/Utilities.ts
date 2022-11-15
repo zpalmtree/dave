@@ -1,10 +1,10 @@
 import {
     Guild,
     Message,
-    MessageEmbed,
     MessageReaction,
     User,
     TextChannel,
+    escapeMarkdown,
 } from 'discord.js';
 
 import moment from 'moment';
@@ -203,7 +203,7 @@ export async function tryDeleteMessage(msg: Message) {
     try {
         await msg.delete();
     } catch (err) {
-        console.log(`Failed to delete message ${msg.id}, ${err.toString()}, ${err.stack}`);
+        console.log(`Failed to delete message ${msg.id}, ${(err as any).toString()}, ${(err as any).stack}`);
     }
 }
 
@@ -211,7 +211,7 @@ export async function tryReactMessage(msg: Message, reaction: string) {
     try {
         await msg.react(reaction);
     } catch (err) {
-        console.log(`Failed to react with ${reaction} to message ${msg.id}, ${err.toString()}, ${err.stack}`);
+        console.log(`Failed to react with ${reaction} to message ${msg.id}, ${(err as any).toString()}, ${(err as any).stack}`);
     }
 }
 
@@ -219,7 +219,7 @@ export async function tryDeleteReaction(reaction: MessageReaction, id: string) {
     try {
         await reaction.users.remove(id);
     } catch (err) {
-        console.log(`Failed to remove reaction ${reaction.emoji.name} for ${id}, ${err.toString()}, ${err.stack}`);
+        console.log(`Failed to remove reaction ${reaction.emoji.name} for ${id}, ${(err as any).toString()}, ${(err as any).stack}`);
     }
 }
 
@@ -259,4 +259,26 @@ export function getDefaultTimeZone() {
             label: 'CST',
         };
     }
+}
+
+export function escapeDiscordMarkdown(text: string) {
+    return escapeMarkdown(
+        text,
+        {
+            codeBlock: true,
+            inlineCode: true,
+            bold: true,
+            italic: true,
+            underline: true,
+            strikethrough: true,
+            spoiler: true,
+            codeBlockContent: true,
+            inlineCodeContent: true,
+            escape: true,
+            heading: true,
+            bulletedList: true,
+            numberedList: true,
+            maskedLink: true,
+        },
+    );
 }

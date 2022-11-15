@@ -2,9 +2,9 @@ import moment from 'moment';
 import sqlite3 from 'sqlite3';
 
 import {
-    Intents,
     Message,
     Client,
+    GatewayIntentBits,
 } from 'discord.js';
 
 import { evaluate } from 'mathjs';
@@ -156,12 +156,11 @@ async function main() {
     db.on('error', console.error);
 
     const client = new Client({
-        restRequestTimeout: 5000,
-        retryLimit: 3,
         intents: [
-            Intents.FLAGS.GUILDS,
-            Intents.FLAGS.GUILD_MESSAGES,
-            Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
+            GatewayIntentBits.Guilds,
+    		GatewayIntentBits.GuildMessages,
+		    GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildMessageReactions,
         ],
     });
 
@@ -174,8 +173,8 @@ async function main() {
             await handleMessage(msg as Message, db);
         /* Usually discord permissions errors */
         } catch (err) {
-            console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${err.toString()}`);
-            console.log(`Error stack trace: ${err.stack}`);
+            console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${(err as any).toString()}`);
+            console.log(`Error stack trace: ${(err as any).stack}`);
             tryReactMessage(msg, '🔥');
         }
     });

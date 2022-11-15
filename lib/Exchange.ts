@@ -73,7 +73,7 @@ export class Exchange {
             const data = await response.json();
             this.mapping = data;
         } catch (err) {
-            console.log('Failed to fetch currency mapping: ' + err.toString());
+            console.log('Failed to fetch currency mapping: ' + (err as any).toString());
 
             /* Try again in 10 seconds */
             setTimeout(() => this.fetchCurrencyMapping(), 10 * 1000);
@@ -94,7 +94,7 @@ export class Exchange {
                 setTimeout(() => this.fetchRates(), 8 * 60 * 60 * 1000);
             }
         } catch (err) {
-            console.log('Failed to fetch exchange rates: ' + err.toString());
+            console.log('Failed to fetch exchange rates: ' + (err as any).toString());
 
             /* Try again in 10 seconds */
             setTimeout(() => this.fetchRates(), 10 * 1000);

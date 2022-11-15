@@ -1,8 +1,9 @@
-import { Message, Util } from 'discord.js';
+import { Message } from 'discord.js';
 import { Configuration, OpenAIApi } from 'openai';
 import Filter from 'bad-words';
 
 import { config } from './Config.js';
+import { escapeDiscordMarkdown } from './Utilities.js';
 import { BannedWords } from './BannedWords.js';
 
 const badWordFilter = new Filter();
@@ -58,7 +59,7 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
 
     if (result) {
         /* Ensure we don't hit discord api limits */
-        const stripped = Util.escapeMarkdown(result.substr(0, 1900));
+        const stripped = escapeDiscordMarkdown(result.substr(0, 1900));
 
         await msg.reply(stripped);
     } else {
@@ -108,7 +109,7 @@ export async function handleGPT3Request(
         } catch (err) {
             return {
                 result: undefined,
-                error: err.toString(),
+                error: (err as any).toString(),
             };
         }
     }

@@ -19,11 +19,11 @@ import {
     Client,
     TextChannel,
     User,
-    MessageEmbed,
-    MessageAttachment,
     GuildMember,
     ColorResolvable,
-    Util,
+    PermissionFlagsBits,
+    AttachmentBuilder,
+    EmbedBuilder,
 } from 'discord.js';
 
 import {
@@ -53,6 +53,7 @@ import {
     tryDeleteReaction,
     tryReactMessage,
     isValidSolAddress,
+    escapeDiscordMarkdown,
 } from './Utilities.js';
 
 import {
@@ -65,7 +66,6 @@ import {
 import {
     TimeUnits,
     Quote,
-    ScheduledWatch,
     Command,
 } from './Types.js';
 
@@ -74,13 +74,8 @@ import {
 } from './Exchange.js';
 
 import {
-    getWatchDetailsById,
-} from './Watch.js';
-
-import {
     Paginate,
     DisplayType,
-    ModifyMessage,
 } from './Paginate.js';
 
 import {
@@ -284,7 +279,14 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
 }
 
 
-export async function handleBurnt(msg: Message): Promise<void> {
+export async function handleBurnt(msg: Message, args: string): Promise<void> {
+    const address = args.trim();
+
+    if (address !== '' && !isValidSolAddress(address)) {
+        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
     const url = "https://letsalllovelain.com/slugs/";
     const res = await fetch(url);
 
@@ -292,9 +294,30 @@ export async function handleBurnt(msg: Message): Promise<void> {
         await msg.reply('Failed to fetch burnt count from API!');
         return;
     }
-
+    
     const data = await res.json();
-    await replyWithMention(msg, `${data.slugs.burnt.length} slugs have been burnt!`);
+
+    if (address === '') {
+        await replyWithMention(msg, `${data.slugs.burnt.length} slugs have been burnt!`);
+    } else {
+        let burns = 0;
+
+        for (const user of data.burnStats.users) {
+            if (user.address !== address) {
+                continue;
+            }
+
+            for (const burn of user.transactions) {
+                burns += burn.slugsBurnt.length;
+            }
+        }
+
+        if (burns === 0) {
+            await msg.reply(`${address} hasn't burnt any slugs yet. What are they playing at?`);
+        } else {
+            await msg.reply(`${address} has burnt ${burns} slug${burns === 1 ? '' : 's'}. Good job!`);
+        }
+    }
 }
 
 export async function handleFortune(msg: Message): Promise<void> {
@@ -310,7 +333,7 @@ export async function handleMath(msg: Message, args: string): Promise<void> {
     try {
         await msg.reply(evaluate(args).toString());
     } catch (err) {
-        await msg.reply('Bad mathematical expression: ' + err.toString());
+        await msg.reply('Bad mathematical expression: ' + (err as any).toString());
     }
 }
 
@@ -374,7 +397,7 @@ export async function handleDiceRoll(msg: Message, args: string): Promise<void> 
             response += mathExpression;
             result = evaluate(expression);
         } catch (err) {
-            await msg.reply('Bad mathematical expression: ' + err.toString());
+            await msg.reply('Bad mathematical expression: ' + (err as any).toString());
             return;
         }
     }
@@ -473,9 +496,13 @@ export async function handlePrice(msg: Message) {
                 return b.usd_market_cap - a.usd_market_cap;
             });
     
-            const embed = new MessageEmbed();
+            const embed = new EmbedBuilder();
             for (const price of prices) {
-                embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`, true);
+                embed.addFields({
+                    name: capitalize(price.name),
+                    value: `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`,
+                    inline: true,
+                });
             }
     
             msg.channel.send({
@@ -485,12 +512,12 @@ export async function handlePrice(msg: Message) {
             throw new Error("Fetch threw an exception")
         }
     } catch(err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${(err as any).toString()}`);
     }
 }
 
 export async function handleQuote(msg: Message, db: Database): Promise<void> {
-    const { quote, timestamp } = await selectOneQuery(
+    const { quote, timestamp } = await selectOneQuery<any>(
         `SELECT
             quote,
             timestamp
@@ -561,13 +588,13 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
             return;
         }
 
-        const attachment = new MessageAttachment(data[0].url);
+        const attachment = new AttachmentBuilder(data[0].url);
 
         await msg.channel.send({
             files: [attachment],
         });
     } catch (err) {
-        await msg.reply(`Failed to get kitty pic :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get kitty pic :( [ ${(err as any).toString()} ]`);
     }
 }
 
@@ -616,116 +643,14 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
             return;
         }
 
-        const attachment = new MessageAttachment(data.message);
+        const attachment = new AttachmentBuilder(data.message);
 
         await msg.channel.send({
             files: [attachment],
         });
     } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${(err as any).toString()}`);
     }
-}
-
-function formatChinkedData(data: any, location?: string): MessageEmbed {
-    /* Alias for conciseness */
-    const f = formatLargeNumber;
-
-    const title = location
-        ? `Coronavirus statistics, ${location}`
-        : 'Coronavirus statistics';
-
-    const embed = new MessageEmbed()
-        .setColor('#C8102E')
-        .setTitle(title)
-        .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-        .addFields(
-            {
-                name: 'Cases',
-                value: `${f(data.cases)} (+${f(data.todayCases)})`,
-                inline: true,
-            },
-            {
-                name: 'Deaths',
-                value: `${f(data.deaths)} (+${f(data.todayDeaths)})`,
-                inline: true,
-            },
-            {
-                name: 'Active',
-                value: f(data.active),
-                inline: true,
-            },
-            {
-                name: 'Recovered',
-                value: f(data.recovered),
-                inline: true,
-            },
-            {
-                name: 'Percentage Infected',
-                value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(2) + '%',
-                inline: true,
-            },
-            {
-                name: 'Last Updated',
-                value: moment.utc(data.updated).fromNow(),
-                inline: true,
-            },
-        );
-
-    return embed;
-}
-
-function formatVaccineData(data: any, population: number, embed: MessageEmbed) {
-    /* No vaccine data */
-    if (!data || data.message) {
-        embed.addFields(
-            {
-                name: 'Vaccinations',
-                value: '0',
-                inline: true,
-            },
-            {
-                name: 'Doses/100 people',
-                value: '0',
-                inline: true,
-            },
-            {
-                name: 'Approx Vaccinated',
-                value: '0%',
-                inline: true,
-            },
-        );
-
-        return;
-    }
-    
-    const [yesterday, today] = Object.values(data);
-
-    const change = today - yesterday;
-
-    const dosesPer100 = (100 * (today / population));
-
-    const percentageVaccinated = `${roundToNPlaces(dosesPer100 / 2, 2)}% - ${roundToNPlaces(Math.min(dosesPer100 * 0.95, 100), 2)}%`;
-
-    /* Alias for conciseness */
-    const f = formatLargeNumber;
-
-    embed.addFields(
-        {
-            name: 'Vaccinations',
-            value: `${f(today)} (+${f(change)})`,
-            inline: true,
-        },
-        {
-            name: 'Doses/100 people',
-            value: dosesPer100.toFixed(2),
-            inline: true,
-        },
-        {
-            name: 'Approx Vaccinated',
-            value: percentageVaccinated,
-            inline: true,
-        },
-    );
 }
 
 export async function handleStock(msg: Message, args: string[]) {
@@ -748,7 +673,7 @@ export async function handleStock(msg: Message, args: string[]) {
 
         const f = (s: string) => numberWithCommas(String(roundToNPlaces(Number(s), 2)))
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
         .setColor(Number(stockData['Global Quote']['09. change']) < 0 ? '#C8102E' : '#00853D')
         .setTitle(ticker.toUpperCase())
         .addFields(
@@ -793,145 +718,6 @@ export async function handleStock(msg: Message, args: string[]) {
     }
 }
 
-async function getChinkedWorldData(msg: Message): Promise<void> {
-    try {
-        /* Launch the two requests in parallel */
-        const worldPromise = fetch('https://disease.sh/v3/covid-19/all');
-        const vaccinePromise = fetch(`https://disease.sh/v3/covid-19/vaccine/coverage?lastdays=2`);
-
-        /* Wait for the request to complete as we need this data to proceed. */
-        const worldResponse = await worldPromise;
-        const worldData = await worldResponse.json();
-
-        const embed = formatChinkedData(worldData);
-
-        const vaccineResponse = await vaccinePromise;
-        const vaccineData = await vaccineResponse.json();
-
-        formatVaccineData(vaccineData, worldData.population, embed);
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-
-    } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
-    }
-}
-
-async function getChinkedCountryData(msg: Message, country: string): Promise<void> {
-    try {
-        /* Launch the two requests in parallel */
-        const countryPromise = fetch(`https://disease.sh/v3/covid-19/countries/${country}`);
-        const vaccinePromise = fetch(`https://disease.sh/v3/covid-19/vaccine/coverage/countries/${country}?lastdays=2`);
-
-        /* Wait for the country request to complete as we need this data to proceed. */
-        const countryResponse = await countryPromise;
-        const countryData = await countryResponse.json();
-
-        if (countryData.message) {
-            await msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
-            return;
-        }
-
-        const embed = formatChinkedData(countryData, countryData.country);
-        embed.setThumbnail(countryData.countryInfo.flag);
-
-        const vaccineResponse = await vaccinePromise;
-        const vaccineData = await vaccineResponse.json();
-
-        formatVaccineData(vaccineData.timeline, countryData.population, embed);
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-    } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
-    }
-}
-
-async function getChinkedStateData(msg: Message, state: string): Promise<void> {
-    try {
-        const response = await fetch(`https://disease.sh/v3/covid-19/states/${state}`);
-
-        const data = await response.json();
-
-        const embed = formatChinkedData(data, data.state);
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-    } catch (err) {
-        if (err.statusCode === 404) {
-            await msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
-        } else {
-            await msg.reply(`Failed to get data: ${err.toString()}`);
-        }
-    }
-}
-
-async function getChinkedCountries(msg: Message): Promise<void> {
-    try {
-        const response = await fetch('https://disease.sh/v3/covid-19/countries');
-
-        const data = await response.json();
-
-        const countries = 'Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', ');
-
-        /* Discord message limit */
-        if (countries.length > 2000) {
-            /* This splits in the middle of words, but we don't give a shit */
-            for (const message of chunk(countries, 1700)) {
-                await msg.channel.send(message);
-            }
-        } else {
-            await msg.reply(countries);
-        }
-    } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
-    }
-}
-
-async function getChinkedStates(msg: Message): Promise<void> {
-    const stateData = 'Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', ');
-
-    if (stateData.length > 2000) {
-        for (const message of chunk(stateData, 1700)) {
-            await msg.channel.send(message);
-        }
-    } else {
-        await msg.reply(stateData);
-    }
-}
-
-export async function handleChinked(msg: Message, country: string): Promise<void> {
-    country = country.trim().toLowerCase();
-
-    switch(country) {
-        case '': {
-            await getChinkedWorldData(msg);
-            break;
-        }
-        case 'countries': {
-            await getChinkedCountries(msg);
-            break;
-        }
-        case 'states': {
-            await getChinkedStates(msg);
-            break;
-        }
-        default: {
-            if (states.map((x) => x.toLowerCase()).includes(country)) {
-                await getChinkedStateData(msg, country);
-            } else {
-                await getChinkedCountryData(msg, country);
-            }
-
-            break;
-        }
-    }
-}
-
 export async function handleImgur(gallery: string, msg: Message): Promise<void> {
     try {
         // seems to loop around to page 0 if given a page > final page
@@ -954,14 +740,14 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
 
         shuffleArray(images);
 
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         const pages = new Paginate({
             sourceMessage: msg,
             embed,
             data: images,
             displayType: DisplayType.EmbedData,
-            displayFunction: (item: any, embed: MessageEmbed) => {
+            displayFunction: (item: any, embed: EmbedBuilder) => {
                 embed.setTitle(item.title);
                 embed.setImage(item.link);
             }
@@ -969,7 +755,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
 
         await pages.sendMessage();
     } catch (err) {
-        await msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get ${gallery} pic :( [ ${(err as any).toString()} ]`);
     }
 }
 
@@ -1044,10 +830,10 @@ export async function handlePurge(msg: Message) {
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Message Deletion')
         .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take several hours.')
-        .setFooter('React with 👍 to confirm the deletion');
+        .setFooter({ text: 'React with 👍 to confirm the deletion' });
 
     const sentMessage = await msg.channel.send({
         embeds: [embed],
@@ -1109,7 +895,7 @@ export async function handlePurge(msg: Message) {
 
             await msg.reply(`Message deletion complete.`);
         } catch (err) {
-            console.log('err: ' + err.toString());
+            console.log('err: ' + (err as any).toString());
         }
     });
 }
@@ -1144,7 +930,7 @@ async function handleTranslateImpl(
         const description = `${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLanguage as any]}`;
         const title = res.text;
 
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         /* Max title length of 256 */
         if (title.length < 256) {
@@ -1156,7 +942,7 @@ async function handleTranslateImpl(
         }
 
         if (res.from.text.value !== '') {
-            embed.setFooter(`Did you mean "${res.from.text.value}"?`);
+            embed.setFooter({ text: `Did you mean "${res.from.text.value}"?` });
         }
 
         await msg.channel.send({
@@ -1279,7 +1065,7 @@ async function displayQueryResults(html: HTMLElement, msg: Message) {
     }
 
     if (results.length > 0) {
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         const pages = new Paginate({
             sourceMessage: msg,
@@ -1339,7 +1125,7 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(data.Heading);
 
     if (data.Image) {
@@ -1350,17 +1136,21 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
         embed.setURL(data.AbstractURL);
     }
 
+    let haveDescription = false;
+
     if (data.Answer) {
         embed.setDescription(data.Answer);
+        haveDescription = true;
     } else if (data.AbstractText) {
         embed.setDescription(data.AbstractText);
+        haveDescription = true;
     }
 
     const results = data.Results.length > 0
         ? data.Results
         : data.RelatedTopics;
 
-    if (!embed.description) {
+    if (!haveDescription) {
         const pages = new Paginate({
             sourceMessage: msg,
             itemsPerPage: 3,
@@ -1405,11 +1195,11 @@ async function displayInstantAnswerResult(data: any, msg: Message) {
         });
 
         pages.sendMessage();
-    } else {
-        await msg.channel.send({
-            embeds: [embed],
-        });
     }
+
+    await msg.channel.send({
+        embeds: [embed],
+    });
 }
 
 export async function handleQuery(msg: Message, args: string): Promise<void> {
@@ -1428,8 +1218,7 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
 
         if (data) {
             await displayInstantAnswerResult(data, msg);
-        } else {
-            /* If not then use HTML scrape result */
+
             const html = await queryPromise;
 
             if (!html) {
@@ -1439,7 +1228,7 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
             await displayQueryResults(html, msg);
         }
     } catch (err) {
-        await msg.reply(`Error getting query results: ${err.toString()}`);
+        await msg.reply(`Error getting query results: ${(err as any).toString()}`);
     }
 }
 
@@ -1479,7 +1268,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(`${amountToConvert} ${fromCurrency} is ${roundToNPlaces(amount as number, 2)} ${toCurrency}`);
 
     await msg.channel.send({
@@ -1500,22 +1289,22 @@ export async function handleAvatar(msg: Message): Promise<void> {
         let guildUser = await msg.guild.members.fetch(user.id);
 
         if (guildUser) {
-            await msg.channel.send(user.displayAvatarURL({
-                format: 'png',
-                dynamic: true,
+            await msg.channel.send(guildUser.displayAvatarURL({
+                extension: 'png',
+                forceStatic: false,
                 size: 4096,
             }));
         } else {
             await msg.channel.send(user.displayAvatarURL({
-                format: 'png',
-                dynamic: true,
+                extension: 'png',
+                forceStatic: false,
                 size: 4096,
             }));
         }
     } else {
         await msg.channel.send(user.displayAvatarURL({
-            format: 'png',
-            dynamic: true,
+            extension: 'png',
+            forceStatic: false,
             size: 4096,
         }));
     }
@@ -1539,7 +1328,7 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed();
+    const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1565,7 +1354,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const displayImage = (duckduckgoItem: any, embed: MessageEmbed) => {
+    const displayImage = (duckduckgoItem: any, embed: EmbedBuilder) => {
         embed.setTitle(duckduckgoItem.title);
         embed.setImage(duckduckgoItem.image);
         embed.setDescription(duckduckgoItem.url);
@@ -1587,7 +1376,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         };
     };
 
-    const embed = new MessageEmbed();
+    const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1637,7 +1426,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const response = await fetch(tokenURL, tokenOptions);
         data = await response.text();
     } catch (err) {
-        await msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -1686,7 +1475,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const response = await fetch(imageURL, options);
         imageData = await response.json();
     } catch (err) {
-        await msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -1776,7 +1565,7 @@ async function handleUserStats(msg: Message, db: Database, user: string): Promis
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(`${username}'s bot usage statistics`)
         .setDescription('Number of times a command has been used');
 
@@ -1815,7 +1604,7 @@ export async function handleUsersStats(msg: Message, db: Database): Promise<void
         [ msg.channel.id ]
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Bot user usage statistics')
         .setDescription('Number of times a user has used the bot');
 
@@ -1855,7 +1644,7 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         [ msg.channel.id, command ]
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(`Bot user usage statistics`)
         .setDescription(`Number of times a user has used \`${config.prefix}${command}\``);
 
@@ -1913,7 +1702,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         [ msg.channel.id ]
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Bot usage statistics')
         .setDescription('Number of times a command has been used');
 
@@ -1953,7 +1742,7 @@ export async function handleYoutubeScrape(msg: Message, args: string): Promise<u
         const response = await fetch(url);
         data = await response.text();
     } catch (err) {
-        msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -2026,7 +1815,7 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
         const response = await fetch(url);
         data = await response.json();
     } catch (err) {
-        await msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -2049,21 +1838,6 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     const readyUsers = new Set<string>([]);
 
     let title = 'Are you ready?';
-
-    if (args.length > 0) {
-        const id = Number(args[0]);
-        const watch = await getWatchDetailsById(id, msg.channel.id, db);
-
-        if (watch) {
-            title = `Are you ready for "${watch.title}"?`;
-
-            for (const user of watch.attending) {
-                if (msg.author.id !== user) {
-                    notReadyUsers.add(user);
-                }
-            }
-        }
-    }
 
     /* They didn't mention anyone, lets make them unready so we can allow
      * sending the message */
@@ -2107,7 +1881,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
 
     const fields = await f();
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(title)
         .setDescription(description)
         .addFields(fields);
@@ -2145,7 +1919,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
             await handleCountdown("Let's jam!", msg, '7');
         } else {
             const newFields = await f();
-            embed.spliceFields(0, 2, newFields);
+            embed.spliceFields(0, 2, ...newFields);
             await sentMessage.edit({
                 embeds: [embed],
             });
@@ -2196,9 +1970,9 @@ export async function handlePoll(msg: Message, args: string) {
         title += '?';
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(title)
-        .setFooter('React with 👍 or 👎 to vote');
+        .setFooter({ text: 'React with 👍 or 👎 to vote' });
 
     const sentMessage = await msg.channel.send({
         embeds: [embed],
@@ -2228,7 +2002,7 @@ export async function handlePoll(msg: Message, args: string) {
 
         const newFields = await f();
 
-        embed.spliceFields(0, 2, newFields);
+        embed.spliceFields(0, 2, ...newFields);
 
         sentMessage.edit({
             embeds: [embed],
@@ -2325,10 +2099,10 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
     const fields = await f();
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(title)
         .addFields(fields)
-        .setFooter('React with the emoji indicated to cast your vote');
+        .setFooter({ text: 'React with the emoji indicated to cast your vote' });
 
     const sentMessage = await msg.channel.send({
         embeds: [embed]
@@ -2353,7 +2127,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
         const newFields = await f();
 
-        embed.spliceFields(0, 11, newFields);
+        embed.spliceFields(0, 11, ...newFields);
 
         sentMessage.edit({
             embeds: [embed],
@@ -2401,7 +2175,7 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed();
+    const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -2448,18 +2222,21 @@ async function handleGif(
 
     const hasPermissionInChannel = channel
         .permissionsFor(msg.member!)
-        .has('SEND_MESSAGES', false);
+        .has(PermissionFlagsBits.SendMessages, false);
 
     if (!hasPermissionInChannel) {
         await msg.reply(`You do not have permission to send messages to that channel.`);
         return;
     }
 
-    let text = Util.cleanContent(args.replace(/<#\d{16,20}>/g, ''), msg.channel).toUpperCase().trim();
+    let text = escapeDiscordMarkdown(args.replace(/<#\d{16,20}>/g, '')).toUpperCase().trim();
 
     if (text === '') {
         await channel.send({
-            files: [new MessageAttachment(`./images/${gif}`, gif)],
+            files: [
+                new AttachmentBuilder(`./images/${gif}`)
+                    .setName(gif)
+            ],
         });
 
         return;
@@ -2523,7 +2300,8 @@ async function handleGif(
         colors,
     })(newGif);
 
-    const attachment = new MessageAttachment(minified, gif);
+    const attachment = new AttachmentBuilder(minified)
+        .setName(gif);
 
     console.log(`Compressed file size: ${(minified.length / 1024 / 1024).toFixed(2)} MB`);
 
@@ -2585,7 +2363,7 @@ Burning a slug will get you access to a special role and colour, and:
 * Twitter watch - A bot that tracks influencers twitters, and posts new accounts they start following. May assist in getting whitelist on promising projects early.
 
 **Future Slug Generations**
-As part of Sol Slugs deflationary mechanism, burning slugs allows you to claim future generations, which will have new rare traits. The future generation three will take three burns for one generation three slug.
+As part of Sol Slugs deflationary mechanism, burning slugs allows you to claim future generations, which will have new rare traits. Generation 4 info is not yet finalized yet, but the previous generations took 2 and 3 slug burns respectfully to claim.
 
 **Slug Exclusive**
 For those crazy enough to burn 50 slugs, they gain access to a special channel where the Slug Devs share information about future plans and sneak peaks of upcoming functionality.`);
