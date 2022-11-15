@@ -664,6 +664,172 @@ export const Commands: Command[] = [
             'youtube',
         ],
     },
+    {
+        aliases: ['ready'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleReady,
+            description: 'Verify if users are ready to launch a countdown',
+            helpDescription: 'Lets you verify if users are ready for a movie, or other ' +
+                'event, and launches a countdown to start the event once all users are ready.' +
+                ' The ready event will expire after 5 minutes if all users do not ready up.',
+            needDb: true,
+            examples: [
+                {
+                    name: 'Check if everyone is ready for a movie',
+                    value: 'ready 1',
+                },
+                {
+                    name: 'Check if specific users are ready',
+                    value: 'ready @james @bob',
+                },
+                {
+                    name: 'Check if movie users and specific users are ready',
+                    value: 'ready 1 @james @bob',
+                },
+            ],
+        },
+        relatedCommands: [
+            'countdown',
+            'pause',
+        ],
+    },
+    {
+        aliases: ['countdown'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCountdown.bind(undefined, "Let's jam!"),
+            description: 'Perform a countdown',
+            examples: [
+                {
+                    value: 'countdown',
+                },
+                {
+                    value: 'countdown 5',
+                },
+            ],
+        },
+        relatedCommands: [
+            'ready',
+            'pause',
+        ],
+    },
+    {
+        aliases: ['pause'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCountdown.bind(undefined, 'pause'),
+            description: 'Perform a pause',
+            examples: [
+                {
+                    value: 'pause',
+                },
+                {
+                    value: 'pause 5',
+                },
+            ],
+        },
+        relatedCommands: [
+            'countdown',
+            'ready',
+        ],
+    },
+    {
+        aliases: ['timers'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleTimers,
+            description: 'View the status of running timers',
+            needDb: true,
+        },
+        relatedCommands: [
+            'timer',
+        ],
+    },
+    {
+        aliases: ['timer', 'reminder'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTimer,
+            description: 'Set a timer to remind you of something',
+            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
+            needDb: true,
+            examples: [
+                {
+                    name: 'Set a timer with a description',
+                    value: 'timer 5m coffee',
+                },
+                {
+                    name: 'Set a timer',
+                    value: 'timer 2h5m',
+                },
+                {
+                    name: 'Set a super long timer',
+                    value: 'timer 1y2w3d4h5m6s',
+                },
+            ],
+        },
+        subCommands: [
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleTimers,
+                description: 'View running timers',
+                aliases: ['list'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'View running timers',
+                        value: 'timer list',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.Split,
+                implementation: deleteTimer,
+                description: 'Delete a timer by ID',
+                aliases: ['delete'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'Delete a timer by ID',
+                        value: 'timer delete 1',
+                    },
+                ],
+            },
+        ],
+        relatedCommands: [
+            'timers',
+        ],
+    },
+    {
+        aliases: ['weather', 'forecast'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleWeather,
+            description: 'Retrieve the weather forecast for a region',
+            helpDescription: 'Retrieve the weather forecast for a region. Returns ' +
+                '5 days of forecasts, at 3 hour intervals.',
+            examples: [
+                {
+                    name: 'Get the weather in a city',
+                    value: 'weather Paris',
+                },
+                {
+                    name: 'Get the weather in a specific country',
+                    value: 'Weather Paris, US',
+                },
+                {
+                    name: 'Get the weather in a zip code',
+                    value: 'weather 10001, US',
+                },
+                {
+                    name: 'Get the weather in a post code',
+                    value: 'weather SW1, GB',
+                },
+            ],
+        },
+    },
+
 ];
 
 export function handleHelp(msg: Message, args: string): void {
