@@ -1167,7 +1167,7 @@ async function getQueryResults(query: string): Promise<false | HTMLElement> {
     return html;
 }
 
-async function displayQueryResults(html: HTMLElement, msg: Message) {
+async function displayQueryResults(html: HTMLElement, msg: Message): Promise<void> {
     const results = [];
     const errors = [];
 
@@ -1269,7 +1269,7 @@ async function getInstantAnswerResults(query: string) {
     return data;
 }
 
-async function displayInstantAnswerResult(data: any, msg: Message) {
+async function displayInstantAnswerResult(data: any, msg: Message): Promise<void> {
     if (data.Redirect) {
         await msg.reply(data.Redirect);
         return;
@@ -1355,25 +1355,8 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     }
 
     try {
-        /* Fire off both requests asynchronously */
-        const instantAnswerPromise = getInstantAnswerResults(args);
-        const queryPromise = getQueryResults(args);
-
-        /* Wait for instant answer result to complete and use that if present */
-        const data = await instantAnswerPromise;
-
-        if (data) {
-            await displayInstantAnswerResult(data, msg);
-        } else {
-            /* If not then use HTML scrape result */
-            const html = await queryPromise;
-
-            if (!html) {
-                throw new Error();
-            }
-
-            await displayQueryResults(html, msg);
-        }
+        getInstantAnswerResults(args).then((res) => res ? displayInstantAnswerResult(res!, msg) : {});
+        getQueryResults(args).then((res) => res ? displayQueryResults(res as HTMLElement, msg) : {});
     } catch (err) {
         await msg.reply(`Error getting query results: ${err.toString()}`);
     }
