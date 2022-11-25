@@ -49,6 +49,7 @@ import {
     handlePoll,
     handleMultiPoll,
     handlePrice,
+    handleItsOver,
 } from './CommandImplementations.js';
 
 import {
@@ -869,6 +870,14 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleGPT3,
             description: 'Provide a prompt to the GPT3 AI and get a completion',
+        },
+    },
+    {
+        aliases: ['over', 'itsover'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleItsOver,
+            description: 'Post it\'s over meme',
         },
     },
 ];

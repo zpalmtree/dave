@@ -2320,3 +2320,7 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
 
     pages.sendMessage();
 }
+
+export async function handleItsOver(msg: Message): Promise<void> {
+    await msg.channel.send('https://cdn.discordapp.com/attachments/483470443001413675/1045785433944105040/itsover.mp4');
+}
