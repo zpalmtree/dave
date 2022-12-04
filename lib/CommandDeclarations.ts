@@ -67,6 +67,7 @@ import {
     handleIncineratorFAQ,
     handleGen3Count,
     handleGen4Count,
+    handleItsOver,
 } from './CommandImplementations.js';
 
 import {
@@ -819,7 +820,14 @@ export const Commands: Command[] = [
             ],
         },
     },
-
+    {
+        aliases: ['over', 'itsover'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleItsOver,
+            description: 'Post it\'s over meme',
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
