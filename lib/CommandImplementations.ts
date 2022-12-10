@@ -822,9 +822,11 @@ export async function handleCountdown(
     }
 }
 
-let inProgress = true;
+let inProgress = false;
 
 export async function handlePurge(msg: Message) {
+    await tryDeleteMessage(msg);
+
     const allowed = [
         '354701063955152898',
         '901540415176597534',
@@ -834,12 +836,12 @@ export async function handlePurge(msg: Message) {
         return;
     }
 
+    inProgress = true;
+
     if (!allowed.includes(msg.author.id)) {
         await msg.reply('fuck off');
         return;
     }
-
-    await tryDeleteMessage(msg);
 
     const target = '901540415176597534';
 
