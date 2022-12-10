@@ -822,67 +822,50 @@ export async function handleCountdown(
     }
 }
 
-export async function handlePurge(msg: Message) {
-    const allowed = ['389071148421218330'];
+let inProgress = true;
 
-    if (!haveRole(msg, 'Mod') && !allowed.includes(msg.author.id)) {
+export async function handlePurge(msg: Message) {
+    const allowed = [
+        '354701063955152898',
+        '901540415176597534',
+    ];
+
+    if (inProgress) {
+        return;
+    }
+
+    if (!allowed.includes(msg.author.id)) {
         await msg.reply('fuck off');
         return;
     }
 
-    const embed = new EmbedBuilder()
-        .setTitle('Message Deletion')
-        .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take several hours.')
-        .setFooter({ text: 'React with 👍 to confirm the deletion' });
+    await tryDeleteMessage(msg);
 
-    const sentMessage = await msg.channel.send({
-        embeds: [embed],
-    });
+    const target = '901540415176597534';
 
-    await tryReactMessage(sentMessage, '👍');
+    console.log(`Deletion started by ${msg.author.id}`);
 
-    const collector = sentMessage.createReactionCollector({
-        filter: (reaction, user) => {
-            return reaction.emoji.name === '👍' && user.id === msg.author.id
-        },
-        time: 60 * 15 * 1000,
-    });
+    let messages: Message[] = [];
 
-    let inProgress = false;
+    let i = 0;
 
-    collector.on('collect', async (reaction, user) => {
-        tryDeleteReaction(reaction, user.id);
-
-        if (inProgress) {
-            return;
-        }
-
-        if (user.id !== msg.author.id) {
-            return;
-        }
-
-        inProgress = true;
-
-        embed.setDescription('Deletion started. You will be notified when it is complete.');
-        sentMessage.edit({
-            embeds: [embed],
-        });
-
-        let messages: Message[] = [];
-
-        let i = 0;
-
-        try {
-            do {
+    try {
+        do {
+            try {
                 const firstMessage = messages.length === 0 ? undefined : messages[0].id;
+
+                console.log(`Fetching messages...`);
 
                 /* Fetch messages, convert to array and sort by timestamp, oldest first */
                 messages = [...(await msg.channel.messages.fetch({ before: firstMessage })).values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
+                await sleep(2000);
+
                 for (const message of messages) {
-                    if (message.author.id === msg.author.id) {
+                    if (message.author.id === target) {
                         try {
                             await tryDeleteMessage(message);
+                            await sleep(2000);
                             console.log(`Deleted message ${i} for ${msg.author.id}`);
                         } catch (err) {
                             console.log(err);
@@ -891,13 +874,17 @@ export async function handlePurge(msg: Message) {
                         i++;
                     }
                 }
-            } while (messages.length > 0);
+            } catch (err) {
+                console.log('err: ' + (err as any).toString());
+            }
+        } while (messages.length > 0);
 
-            await msg.reply(`Message deletion complete.`);
-        } catch (err) {
-            console.log('err: ' + (err as any).toString());
-        }
-    });
+        console.log('Message deletion complete.');
+    } catch (err) {
+        console.log('err: ' + (err as any).toString());
+    }
+
+    inProgress = false;
 }
 
 function getLanguage(x: string) {

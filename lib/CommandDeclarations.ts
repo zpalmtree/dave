@@ -828,6 +828,14 @@ export const Commands: Command[] = [
             description: 'Post it\'s over meme',
         },
     },
+    {
+        aliases: ['purge'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handlePurge,
+            description: 'Delete all your messages in a channel',
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
