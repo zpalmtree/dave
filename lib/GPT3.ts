@@ -37,23 +37,11 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const tempRegex = /(^[\d.]+)?(.*)/s;
-
-    const results = tempRegex.exec(prompt);
-
-    if (!results) {
-        await msg.reply(`No prompt given. Try \`${config.prefix}ai help\``);
-        return;
-    }
-
-    /* Extract temp if present */
-    const [ , temp, query ] = results;
-
     const { result, error } = await handleGPT3Request(
-        query,
+        prompt,
         undefined,
         undefined,
-        Number(temp) || undefined,
+        undefined,
         msg.author.id,
     );
 
