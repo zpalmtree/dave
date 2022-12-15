@@ -2277,7 +2277,7 @@ export async function handleUtility(msg: Message): Promise<void> {
 * Enjoy the slug supply constantly decreasing. It's already shrunk from 10,000 to 7,500!
 * Try out the slug AI image generator and chat bots
 * Burn your slug for more benefits! Try \`${config.prefix}burn\` for more info.
-* Chill in one of the most activate chats in Solana. No more gm spam!
+* Chill in one of the most active chats in Solana. No more gm spam!
 * Help support the <https://sol-incinerator.com/>'s free operation.`);
 }
 
