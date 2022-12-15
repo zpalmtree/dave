@@ -249,7 +249,8 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
         let eligibleBurns = 0;
 
         for (const burn of user.transactions) {
-            if (new Date(burn.timestamp) > gen3Date && new Date(burn.timestamp) <= gen4Date) {
+            if (new Date(burn.timestamp) >= gen3Date && new Date(burn.timestamp) <= gen4Date) {
+                console.log(burn.signature);
                 eligibleBurns += burn.slugsBurnt.length;
             }
         }
