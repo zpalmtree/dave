@@ -2260,29 +2260,25 @@ export async function handleCock(msg: Message): Promise<void> {
     }
 }
 
-export async function handleUtility(msg: Message): Promise<void> {
-    await replyWithMention(msg, `To burn a slug, go to <https://www.sol-incinerator.com/#/>, then verify your wallet at <https://solslugs.com/#/verify> to get your discord roles. Then, you will have access to our slug gang tools and functionality.
-
+export async function handleBurn(msg: Message): Promise<void> {
+    await replyWithMention(msg, `A lot of slug utility comes from burning a slug.
 **Why burn a slug?**
-Burning a slug will get you access to a special role and colour, and:
+* Help be part of the most deflationary collection on Solana - with over 3700 slugs burnt!
+* Access to alpha, whitelist, and other burner only channels.
+* Alpha bots - Find trending magiceden collections, new twitter accounts, and just created mints.
+* Free stuff - Sometimes we will raffle 1/1s, airdrops, or other valuable items. Burners come first whenever this happens.
+* Merch - This is still in the works, but slug burners will have the first access to slug merch.
+* Future slug generations - As part of the slugs deflationary mechanism, burning enough slugs entitles you to a mint from the next slug generation. The current rate is 4:1, for generation four.`);
+}
 
-**Channels**
-* Alpha channel - Get the latest hot slug tips
-* Slug gang channel - Holder channel for fellow slug burners.
-* Slugfi - In depth analysis of the crypto and tradfi markets
-* Whitelists - Get whitelist to the hottest upcoming projects, only for slug burners
-* NSFW Zone - Only for the brave hearted. Proceed with extreme caution
-
-**Bots**
-* Trending collection bot - Shows magiceden buys and listings, ordered by volume, every 5 minute interval. This helps catch pumps and dumps as they are in progress.
-* Mint finder - A bot that tracks new candy machines that are uploaded, may assist in getting whitelist on projects early
-* Twitter watch - A bot that tracks influencers twitters, and posts new accounts they start following. May assist in getting whitelist on promising projects early.
-
-**Future Slug Generations**
-As part of Sol Slugs deflationary mechanism, burning slugs allows you to claim future generations, which will have new rare traits. Generation 4 info is not yet finalized yet, but the previous generations took 2 and 3 slug burns respectfully to claim.
-
-**Slug Exclusive**
-For those crazy enough to burn 50 slugs, they gain access to a special channel where the Slug Devs share information about future plans and sneak peaks of upcoming functionality.`);
+export async function handleUtility(msg: Message): Promise<void> {
+    await replyWithMention(msg, `**Why buy a slug?**
+* Gain benefits on our sleek portfolio tracker, slime: <https://slime.cx/>
+* Enjoy the slug supply constantly decreasing. It's already shrunk from 10,000 to 7,500!
+* Try out the slug AI image generator and chat bots
+* Burn your slug for more benefits! Try \`${config.prefix}burn\` for more info.
+* Chill in one of the most activate chats in Solana. No more gm spam!
+* Help support the <https://sol-incinerator.com/>'s free operation.`);
 }
 
 export async function handle3d(msg: Message): Promise<void> {

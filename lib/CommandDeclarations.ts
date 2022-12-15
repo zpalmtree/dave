@@ -54,7 +54,7 @@ import {
     handleMoney,
     handleViper,
     handleCock,
-    handleUtility,
+    handleBurn,
     handle3d,
     handleGen2,
     handleBuy,
@@ -68,6 +68,7 @@ import {
     handleGen3Count,
     handleGen4Count,
     handleItsOver,
+    handleUtility,
 } from './CommandImplementations.js';
 
 import {
@@ -417,11 +418,19 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['burn', 'utility'],
+        aliases: ['burn'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleBurn,
+            description: `Explain why you might burn a slug`,
+        },
+    },
+    {
+        aliases: ['utility', 'whybuy'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleUtility,
-            description: 'Explain Slugs utility and burning',
+            description: `Explain why you might buy a slug`,
         },
     },
     {
