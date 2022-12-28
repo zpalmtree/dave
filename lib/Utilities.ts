@@ -282,3 +282,35 @@ export function escapeDiscordMarkdown(text: string) {
         },
     );
 }
+
+export async function handleFloorPriceChannel(client: any)  {
+    let myChannel = client.channels.cache.get("FLOOR PRICE CHANNEL ID");
+    let data = handleGetFromME();
+
+    data.then(function(result)  {
+      myChannel.setName(`Floor Price: ◎${Number(result.floorPrice)/1000000000}`);
+    })
+};
+
+export async function handleTotalVolumeChannel(client: any)  {
+        let myChannel = client.channels.cache.get("TOTAL VOLUME CHANNEL ID");
+        let data = handleGetFromME();
+
+        data.then(function(result)  {
+        myChannel.setName(`Total Volume: ◎${prettyNumber(result.volumeAll/1000000000)}`);
+        })
+};
+
+function prettyNumber(x: number)  {
+    return x.toFixed(2).replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
+}
+
+const handleGetFromME = async () => {
+    const url = "https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats";
+    const res = await fetch(url);
+    if (!res.ok) {
+        throw new Error("failed to fetch from API");
+    }
+    const data = await res.json();
+    return data;
+}

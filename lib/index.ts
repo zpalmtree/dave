@@ -13,6 +13,8 @@ import { config } from './Config.js';
 import {
     canAccessCommand,
     tryReactMessage,
+    handleFloorPriceChannel,
+    handleTotalVolumeChannel
 } from './Utilities.js';
 
 import {
@@ -189,6 +191,18 @@ async function main() {
               console.error(err);
               main();
     });
+
+    client.on("ready", () =>  {
+        function runner() {
+            handleFloorPriceChannel(client);
+            handleTotalVolumeChannel(client);
+            setTimeout(function() {
+                runner();
+            }, 60000);
+        }
+
+        runner();
+    })
 }
 
 main();
