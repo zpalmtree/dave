@@ -172,10 +172,9 @@ async function main() {
         function runner() {
             handleFloorPriceChannel(client);
             handleTotalVolumeChannel(client);
-            setTimeout(runner, 60 * 1000);
         }
 
-        runner();
+        setTimeout(runner, 60 * 1000);
 
     });
 
