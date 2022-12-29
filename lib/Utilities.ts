@@ -284,21 +284,26 @@ export function escapeDiscordMarkdown(text: string) {
 }
 
 export async function handleFloorPriceChannel(client: any)  {
-    let myChannel = client.channels.cache.get("FLOOR PRICE CHANNEL ID");
-    let data = handleGetFromME();
+    try {
+        let myChannel = client.channels.cache.get(config.priceChannel);
+        let data = await handleGetFromME();
 
-    data.then(function(result)  {
-      myChannel.setName(`Floor Price: ◎${Number(result.floorPrice)/1000000000}`);
-    })
+        myChannel.setName(`Floor Price: ◎${Number(data.floorPrice)/1000000000}`);
+        }   catch(error) {
+                console.log(error);
+            }
+
 };
 
 export async function handleTotalVolumeChannel(client: any)  {
-        let myChannel = client.channels.cache.get("TOTAL VOLUME CHANNEL ID");
-        let data = handleGetFromME();
+    try {
+        let myChannel = client.channels.cache.get(config.volumeChannel);
+        let data = await handleGetFromME();
 
-        data.then(function(result)  {
-        myChannel.setName(`Total Volume: ◎${prettyNumber(result.volumeAll/1000000000)}`);
-        })
+        myChannel.setName(`Total Volume: ◎${prettyNumber(data.volumeAll/1000000000)}`);
+        }   catch(error) {
+                console.log(error);
+            }
 };
 
 function prettyNumber(x: number)  {

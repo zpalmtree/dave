@@ -168,6 +168,15 @@ async function main() {
 
     client.on('ready', async () => {
         console.log('Logged in');
+
+        function runner() {
+            handleFloorPriceChannel(client);
+            handleTotalVolumeChannel(client);
+            setTimeout(runner, 60 * 1000);
+        }
+
+        runner();
+
     });
 
     client.on('messageCreate', async (msg) => {
@@ -192,17 +201,7 @@ async function main() {
               main();
     });
 
-    client.on("ready", () =>  {
-        function runner() {
-            handleFloorPriceChannel(client);
-            handleTotalVolumeChannel(client);
-            setTimeout(function() {
-                runner();
-            }, 60000);
-        }
 
-        runner();
-    })
 }
 
 main();
