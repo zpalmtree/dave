@@ -157,7 +157,6 @@ const handleFloorPriceChannel = async (client: any, magicEdenData: any)  => {
     } catch(error) {
         console.log(error);
     }
-
 };
 
 const handleTotalVolumeChannel = async (client: any, magicEdenData: any)  => {
