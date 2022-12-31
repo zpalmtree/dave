@@ -69,6 +69,7 @@ import {
     handleGen4Count,
     handleItsOver,
     handleUtility,
+    handleSlime,
 } from './CommandImplementations.js';
 
 import {
@@ -843,6 +844,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handlePurge,
             description: 'Delete all your messages in a channel',
+        },
+    },
+    {
+        aliases: ['slime'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSlime,
+            description: 'Get a link to slime',
         },
     },
 ];

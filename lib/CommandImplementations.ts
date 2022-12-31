@@ -2354,3 +2354,7 @@ export async function handleItsOver(msg: Message): Promise<void> {
 
     await msg.channel.send(file);
 }
+
+export async function handleSlime(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://slime.cx/');
+}
