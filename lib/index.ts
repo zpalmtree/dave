@@ -13,8 +13,8 @@ import { config } from './Config.js';
 import {
     canAccessCommand,
     tryReactMessage,
-    handleFloorPriceChannel,
-    handleTotalVolumeChannel
+    handleGetFromME,
+    numberWithCommas
 } from './Utilities.js';
 
 import {
@@ -40,6 +40,7 @@ import {
     Commands,
     handleHelp,
 } from './CommandDeclarations.js';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
@@ -148,6 +149,35 @@ async function dispatchCommand(
         }
     }
 }
+const handleFloorPriceChannel = async (client: any, magicEdenData: any)  => {
+    try {
+        const myChannel = client.channels.cache.get(config.priceChannel);
+        const price = Number(magicEdenData.floorPrice)/LAMPORTS_PER_SOL
+        myChannel.setName(`Floor Price: ◎${price}`);
+    } catch(error) {
+        console.log(error);
+    }
+
+};
+
+const handleTotalVolumeChannel = async (client: any, magicEdenData: any)  => {
+    try {
+        const myChannel = client.channels.cache.get(config.volumeChannel);
+        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll/LAMPORTS_PER_SOL)).toString())
+        myChannel.setName(`Total Volume: ◎${volume}`);
+    } catch(error) {
+        console.log(error);
+    }
+};
+
+function channelNamesRunner(client: Client, magicEdenData: object) {
+    handleFloorPriceChannel(client, magicEdenData);
+    handleTotalVolumeChannel(client, magicEdenData);
+    setTimeout(function() {
+        channelNamesRunner(client, magicEdenData);
+    }, 60 * 1000)
+
+}
 
 async function main() {
     const db: sqlite3.Database = new sqlite3.Database(config.dbFile);
@@ -168,13 +198,11 @@ async function main() {
 
     client.on('ready', async () => {
         console.log('Logged in');
+        const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
 
-        function runner() {
-            handleFloorPriceChannel(client);
-            handleTotalVolumeChannel(client);
-        }
-
-        setTimeout(runner, 60 * 1000);
+        setTimeout(function() {
+            channelNamesRunner(client, magicEdenData);
+        }, 60 * 1000)
 
     });
 
