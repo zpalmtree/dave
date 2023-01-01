@@ -149,7 +149,7 @@ async function dispatchCommand(
         }
     }
 }
-const handleFloorPriceChannel = async (client: any, magicEdenData: any)  => {
+function handleFloorPriceChannel(client: any, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.priceChannel);
         const price = Number(magicEdenData.floorPrice)/LAMPORTS_PER_SOL
@@ -159,21 +159,22 @@ const handleFloorPriceChannel = async (client: any, magicEdenData: any)  => {
     }
 };
 
-const handleTotalVolumeChannel = async (client: any, magicEdenData: any)  => {
+function handleTotalVolumeChannel(client: any, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.volumeChannel);
-        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll/LAMPORTS_PER_SOL)).toString())
+        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString())
         myChannel.setName(`Total Volume: ◎${volume}`);
     } catch(error) {
         console.log(error);
     }
 };
 
-function channelNamesRunner(client: Client, magicEdenData: object) {
+async function channelNamesRunner(client: Client) {
+    const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
     handleFloorPriceChannel(client, magicEdenData);
     handleTotalVolumeChannel(client, magicEdenData);
     setTimeout(function() {
-        channelNamesRunner(client, magicEdenData);
+        channelNamesRunner(client);
     }, 60 * 1000)
 
 }
@@ -197,10 +198,9 @@ async function main() {
 
     client.on('ready', async () => {
         console.log('Logged in');
-        const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
 
         setTimeout(function() {
-            channelNamesRunner(client, magicEdenData);
+            channelNamesRunner(client);
         }, 60 * 1000)
 
     });
