@@ -34,6 +34,10 @@ class Config {
 
     public privilegedChannels: string[] = [];
 
+    public priceChannel: string = 'enter channel ID here';
+
+    public volumeChannel: string = 'enter channel ID here';
+
     public god: string = 'enter user here';
 
     public dbFile: string = 'example.sqlite3';

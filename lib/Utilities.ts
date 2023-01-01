@@ -282,3 +282,12 @@ export function escapeDiscordMarkdown(text: string) {
         },
     );
 }
+
+export async function handleGetFromME(url: string) {    
+    const res = await fetch(url);
+    if (!res.ok) {
+        throw new Error("failed to fetch from API");
+    }
+    const data = await res.json();
+    return data;
+}

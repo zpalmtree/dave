@@ -13,6 +13,8 @@ import { config } from './Config.js';
 import {
     canAccessCommand,
     tryReactMessage,
+    handleGetFromME,
+    numberWithCommas
 } from './Utilities.js';
 
 import {
@@ -38,6 +40,7 @@ import {
     Commands,
     handleHelp,
 } from './CommandDeclarations.js';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
@@ -146,6 +149,35 @@ async function dispatchCommand(
         }
     }
 }
+function handleFloorPriceChannel(client: any, magicEdenData: any) {
+    try {
+        const myChannel = client.channels.cache.get(config.priceChannel);
+        const price = Number(magicEdenData.floorPrice) / LAMPORTS_PER_SOL;
+        myChannel.setName(`Floor Price: ◎${price}`);
+    } catch(error) {
+        console.log(error);
+    }
+};
+
+function handleTotalVolumeChannel(client: any, magicEdenData: any) {
+    try {
+        const myChannel = client.channels.cache.get(config.volumeChannel);
+        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString());
+        myChannel.setName(`Total Volume: ◎${volume}`);
+    } catch(error) {
+        console.log(error);
+    }
+};
+
+async function channelNamesRunner(client: Client) {
+    const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
+    handleFloorPriceChannel(client, magicEdenData);
+    handleTotalVolumeChannel(client, magicEdenData);
+    setTimeout(function() {
+        channelNamesRunner(client);
+    }, 60 * 1000)
+
+}
 
 async function main() {
     const db: sqlite3.Database = new sqlite3.Database(config.dbFile);
@@ -166,6 +198,11 @@ async function main() {
 
     client.on('ready', async () => {
         console.log('Logged in');
+
+        setTimeout(function() {
+            channelNamesRunner(client);
+        }, 60 * 1000)
+
     });
 
     client.on('messageCreate', async (msg) => {
@@ -189,6 +226,8 @@ async function main() {
               console.error(err);
               main();
     });
+
+
 }
 
 main();
