@@ -152,7 +152,7 @@ async function dispatchCommand(
 function handleFloorPriceChannel(client: any, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.priceChannel);
-        const price = Number(magicEdenData.floorPrice)/LAMPORTS_PER_SOL
+        const price = Number(magicEdenData.floorPrice) / LAMPORTS_PER_SOL;
         myChannel.setName(`Floor Price: ◎${price}`);
     } catch(error) {
         console.log(error);
@@ -162,7 +162,7 @@ function handleFloorPriceChannel(client: any, magicEdenData: any) {
 function handleTotalVolumeChannel(client: any, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.volumeChannel);
-        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString())
+        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString());
         myChannel.setName(`Total Volume: ◎${volume}`);
     } catch(error) {
         console.log(error);
