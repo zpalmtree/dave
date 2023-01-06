@@ -5,6 +5,7 @@ import {
     Message,
     Client,
     GatewayIntentBits,
+    GuildChannel,
 } from 'discord.js';
 
 import { evaluate } from 'mathjs';
@@ -149,34 +150,38 @@ async function dispatchCommand(
         }
     }
 }
-function handleFloorPriceChannel(client: any, magicEdenData: any) {
+
+async function handleFloorPriceChannel(client: Client, magicEdenData: any) {
     try {
-        const myChannel = client.channels.cache.get(config.priceChannel);
+        const myChannel = client.channels.cache.get(config.priceChannel) as GuildChannel;
         const price = Number(magicEdenData.floorPrice) / LAMPORTS_PER_SOL;
-        myChannel.setName(`Floor Price: ◎${price}`);
-    } catch(error) {
+        await myChannel.setName(`Floor Price: ◎${price}`);
+    } catch (error) {
         console.log(error);
     }
 };
 
-function handleTotalVolumeChannel(client: any, magicEdenData: any) {
+async function handleTotalVolumeChannel(client: Client, magicEdenData: any) {
     try {
-        const myChannel = client.channels.cache.get(config.volumeChannel);
+        const myChannel = client.channels.cache.get(config.volumeChannel) as GuildChannel;
         const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString());
-        myChannel.setName(`Total Volume: ◎${volume}`);
-    } catch(error) {
+        await myChannel.setName(`Total Volume: ◎${volume}`);
+    } catch (error) {
         console.log(error);
     }
 };
 
-async function channelNamesRunner(client: Client) {
-    const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
-    handleFloorPriceChannel(client, magicEdenData);
-    handleTotalVolumeChannel(client, magicEdenData);
-    setTimeout(function() {
-        channelNamesRunner(client);
-    }, 60 * 1000)
+async function magicEdenStatUpdater(client: Client) {
+    try {
+        const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
 
+        handleFloorPriceChannel(client, magicEdenData);
+        handleTotalVolumeChannel(client, magicEdenData);
+    } catch (err) {
+        console.log(err);
+    }
+
+    setTimeout(() => magicEdenStatUpdater(client), 60 * 1000);
 }
 
 async function main() {
@@ -199,10 +204,7 @@ async function main() {
     client.on('ready', async () => {
         console.log('Logged in');
 
-        setTimeout(function() {
-            channelNamesRunner(client);
-        }, 60 * 1000)
-
+        magicEdenStatUpdater(client);
     });
 
     client.on('messageCreate', async (msg) => {
@@ -226,8 +228,6 @@ async function main() {
               console.error(err);
               main();
     });
-
-
 }
 
 main();
