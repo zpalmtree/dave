@@ -880,6 +880,15 @@ export const Commands: Command[] = [
             description: 'Post it\'s over meme',
         },
     },
+    {
+        aliases: ['define', 'definition'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleDefine,
+            description: 'Get a definition for a word',
+            needDb: true,
+        },
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
