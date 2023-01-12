@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "es6",
     "lib": [
-      "es2017",
+      "es2021",
       "dom",
       "scripthost"
     ],

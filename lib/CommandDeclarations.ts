@@ -19,6 +19,10 @@ import {
 } from './Utilities.js';
 
 import {
+    handleDefine,
+} from './Define.js'
+
+import {
     handleFortune,
     handleMath,
     handleRoll,
@@ -883,7 +887,7 @@ export const Commands: Command[] = [
     {
         aliases: ['define', 'definition'],
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handleDefine,
             description: 'Get a definition for a word',
             needDb: true,
