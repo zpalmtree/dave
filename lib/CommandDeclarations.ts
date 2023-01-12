@@ -890,7 +890,6 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleDefine,
             description: 'Get a definition for a word',
-            needDb: true,
         },
     },
 ];
