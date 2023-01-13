@@ -24,7 +24,8 @@ export async function handleDefine(msg: Message, args: string): Promise<void> {
         const res = await fetch(url);
         
         if (res.status === 404) {
-            throw new Error('404');
+            await msg.reply(`"${query}" not found in dictionary`);
+            return;
         }
         
         const data = await res.json();
@@ -53,10 +54,6 @@ export async function handleDefine(msg: Message, args: string): Promise<void> {
     
         await pages.sendMessage();
     } catch (err) {
-        if (err.message === '404') {
-            await msg.reply(`"${query}" not found in dictionary`);
-        } else {
-            await msg.reply(`Failed to get definition: ${err.toString()}`);
-        }
+        await msg.reply(`Failed to get definition: ${err.toString()}`);
     }
 }
