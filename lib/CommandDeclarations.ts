@@ -19,6 +19,10 @@ import {
 } from './Utilities.js';
 
 import {
+    handleDefine,
+} from './Define.js'
+
+import {
     handleFortune,
     handleMath,
     handleRoll,
@@ -878,6 +882,20 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleItsOver,
             description: 'Post it\'s over meme',
+        },
+    },
+    {
+        aliases: ['define', 'definition'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDefine,
+            description: 'Get a definition for a word',
+            examples: [
+                {
+                    name: 'define the word \"based\"',
+                    value: 'define based',
+                },
+            ],
         },
     },
 ];
