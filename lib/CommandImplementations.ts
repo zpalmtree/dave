@@ -2318,7 +2318,7 @@ It is useful to look at how these collections are trending - is the number of so
 }
 
 export async function handleSign(msg: Message): Promise<void> {
-    await replyWithMention(msg,'https://media.discordapp.net/attachments/891081495706480690/981347925248577617/unknown.png');
+    await replyWithMention(msg, 'https://media.discordapp.net/attachments/483470443001413675/1064019335955365918/sign.png');
 }
 
 export async function handleFrozen(msg: Message): Promise<void> {
