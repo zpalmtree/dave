@@ -1,6 +1,6 @@
 import {
     Message,
-    MessageEmbed,
+    EmbedBuilder,
 } from 'discord.js';
 
 import fetch from 'node-fetch';
@@ -29,7 +29,7 @@ export async function handleDefine(msg: Message, args: string): Promise<void> {
         }
         
         const data = await res.json();
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
         const meanings = data[0].meanings;
 
         let definitions = [];
@@ -54,6 +54,6 @@ export async function handleDefine(msg: Message, args: string): Promise<void> {
     
         await pages.sendMessage();
     } catch (err) {
-        await msg.reply(`Failed to get definition: ${err.toString()}`);
+        await msg.reply(`Failed to get definition: ${(err as any).toString()}`);
     }
 }
