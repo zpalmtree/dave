@@ -203,6 +203,23 @@ export const Commands: Command[] = [
         ],
     },
     {
+        aliases: ['exchange'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleExchange,
+            description: 'Convert between REAL currencies',
+            helpDescriptionFunc: () => `Convert between currencies. Known currencies: \`${exchangeService.getCurrencies().join(',')}\``,
+            examples: [
+                {
+                    value: 'exchange 100 USD to GBP',
+                },
+                {
+                    value: 'exchange 666.66 MXN to EUR',
+                },
+            ],
+        },
+    },
+    {
         aliases: ['avatar'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
