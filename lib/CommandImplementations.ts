@@ -2330,6 +2330,7 @@ export async function handleItsOver(msg: Message): Promise<void> {
         'https://cdn.discordapp.com/attachments/483470443001413675/1047016078468972554/5.mp4',
         'https://cdn.discordapp.com/attachments/483470443001413675/1047016078741622804/6.mp4',
         'https://cdn.discordapp.com/attachments/483470443001413675/1047016079077159003/7.mp4',
+        'https://cdn.discordapp.com/attachments/483470443001413675/1066569981787119747/8.mp4',
     ];
 
     const file = pickRandomItem(files);
