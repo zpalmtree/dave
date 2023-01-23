@@ -62,9 +62,15 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
 ) {
+    /*
     if (badWordFilter.isProfane(prompt)) {
         prompt = badWordFilter.clean(prompt);
     }
+    */
+
+    const prefix = `You are a helpful AI bot who always provides answers to peoples questions. Don't give any indefinitive answers, if you're not sure, then make a guess. Question: `;
+
+    let modifiedPrompt = `${prefix}${prompt}`;
 
     let maxAttempts = 3;
     let attempt = 0;
@@ -75,7 +81,7 @@ export async function handleGPT3Request(
         try {
             const completion = await openai.createCompletion({
                 model,
-                prompt,
+                prompt: modifiedPrompt,
                 max_tokens: maxTokens,
                 temperature,
                 echo: true,
@@ -85,12 +91,18 @@ export async function handleGPT3Request(
             });
 
             if (completion.data.choices && completion.data.choices.length > 0) {
-                if (completion.data.choices[0].text === prompt) {
+                let generation = completion.data.choices[0].text!;
+
+                if (generation === modifiedPrompt) {
                     continue;
                 }
 
+                if (generation.startsWith(prefix)) {
+                    generation = generation.slice(prefix.length);
+                }
+
                 return {
-                    result: completion.data.choices[0].text!,
+                    result: generation,
                     error: undefined,
                 };
             }
