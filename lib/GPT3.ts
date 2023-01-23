@@ -67,7 +67,7 @@ export async function handleGPT3Request(
     }
     */
 
-    const prefix = `You are a helpful AI bot who always provides answers to peoples questions. Don't give any indefinitive answers, if you're not sure, then make a guess. Question: `;
+    const prefix = `You are a helpful AI bot who always provides answers to peoples questions or completions to their statements. Don't give any indefinitive answers, if you're not sure, then make a guess. Question/statement: `;
 
     let modifiedPrompt = `${prefix}${prompt}`;
 
