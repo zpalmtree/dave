@@ -74,6 +74,7 @@ import {
     handleItsOver,
     handleUtility,
     handleSlime,
+    handleGitbook,
 } from './CommandImplementations.js';
 
 import {
@@ -887,6 +888,14 @@ export const Commands: Command[] = [
                     value: 'define based',
                 },
             ],
+        },
+    },
+    {
+        aliases: ['info', 'gitbook'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGitbook,
+            description: 'Get a link to the slugs gitbook',
         },
     },
 ];

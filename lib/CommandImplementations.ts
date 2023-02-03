@@ -2359,3 +2359,7 @@ export async function handleItsOver(msg: Message): Promise<void> {
 export async function handleSlime(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://slime.cx/');
 }
+
+export async function handleGitbook(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://solana-slugs.gitbook.io/solana-slugs/');
+}
