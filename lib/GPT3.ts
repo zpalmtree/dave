@@ -17,7 +17,7 @@ const openai = new OpenAIApi(configuration);
 
 const DEFAULT_TEMPERATURE = 0.9;
 const DEFAULT_MAX_TOKENS = 250;
-const DEFAULT_AI_MODEL = 'text-davinci-002';
+const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 30;
 
 export async function handleGPT3(msg: Message, args: string): Promise<void> {
@@ -62,15 +62,9 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
 ) {
-    /*
-    if (badWordFilter.isProfane(prompt)) {
-        prompt = badWordFilter.clean(prompt);
-    }
-    */
-
     const prefix = `You are a helpful AI bot who always provides answers to peoples questions or completions to their statements. Don't give any indefinitive answers, if you're not sure, then make a guess. Question/statement: `;
 
-    let modifiedPrompt = `${prefix}${prompt}`;
+    let modifiedPrompt = `${prompt}`;
 
     let maxAttempts = 3;
     let attempt = 0;
