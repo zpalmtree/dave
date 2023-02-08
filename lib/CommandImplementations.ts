@@ -989,6 +989,13 @@ async function displayQueryResults(html: HTMLElement, msg: Message): Promise<voi
             continue;
         }
 
+        try {
+            new URL(link);
+        } catch (err) {
+            console.log(`Skipping invalid url ${link}`);
+            continue;
+        }
+
         results.push({
             linkTitle,
             linkURL,
@@ -1439,6 +1446,12 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         /* Verify it has a valid extension, discord will not display a preview without one */
         if (!isValidExtension(img)) {
             return false;
+        }
+
+        try {
+            new URL(img.image);
+        } catch (err) {
+            console.log(`Skipping invalid image url ${img.image}`);
         }
 
         /* Add to url cache */
