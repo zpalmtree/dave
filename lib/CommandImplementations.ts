@@ -972,6 +972,10 @@ async function displayQueryResults(html: HTMLElement, msg: Message): Promise<voi
         const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
         const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
 
+        if (protocol === 'http') {
+            continue;
+        }
+
         const linkTitle = he.decode(linkNode.childNodes[0].text.trim());
         const link = he.decode(resultNode.querySelector('.result__url').childNodes[0].text.trim());
         const snippetNode = resultNode.querySelector('.result__snippet');
@@ -990,9 +994,9 @@ async function displayQueryResults(html: HTMLElement, msg: Message): Promise<voi
         }
 
         try {
-            new URL(link);
+            new URL(linkURL);
         } catch (err) {
-            console.log(`Skipping invalid url ${link}`);
+            console.log(`Skipping invalid url ${linkURL}`);
             continue;
         }
 
