@@ -2382,5 +2382,5 @@ export async function handleGitbook(msg: Message): Promise<void> {
 }
 
 export async function handleAIInfo(msg: Message): Promise<void> {
-    await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/891081746186113024/1074481930017452062/image.png');
+    await replyWithMention(msg, 'https://media.discordapp.net/attachments/891081746186113024/1074482623512059925/image.png');
 }
