@@ -2380,3 +2380,7 @@ export async function handleSlime(msg: Message): Promise<void> {
 export async function handleGitbook(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://solana-slugs.gitbook.io/solana-slugs/');
 }
+
+export async function handleAIInfo(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/891081746186113024/1074481930017452062/image.png');
+}

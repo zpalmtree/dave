@@ -75,6 +75,7 @@ import {
     handleUtility,
     handleSlime,
     handleGitbook,
+    handleAIInfo,
 } from './CommandImplementations.js';
 
 import {
@@ -893,9 +894,17 @@ export const Commands: Command[] = [
     {
         aliases: ['info', 'gitbook'],
         primaryCommand: {
-            argsFormat: Args.Combined,
+            argsFormat: Args.DontNeed,
             implementation: handleGitbook,
             description: 'Get a link to the slugs gitbook',
+        },
+    },
+    {
+        aliases: ['howtoai', 'aiinfo', 'aitut'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleAIInfo,
+            description: 'Get info on using the AI image bot',
         },
     },
 ];
