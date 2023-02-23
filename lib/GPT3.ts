@@ -2,14 +2,6 @@ import { Message } from 'discord.js';
 import { Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
-<<<<<<< HEAD
-import { escapeDiscordMarkdown } from './Utilities.js';
-import { BannedWords } from './BannedWords.js';
-
-const badWordFilter = new Filter();
-badWordFilter.addWords(...BannedWords);
-=======
->>>>>>> db73879 (Gpt3 improvements)
 
 const configuration = new Configuration({
     apiKey: config.openaiApiKey,
