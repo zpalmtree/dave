@@ -55,7 +55,7 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
 ) {
-    const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for headers, code, bolding, and so on. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
+    const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for italics, bolding, underline, code blocks, and so on. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
 
     let modifiedPrompt = `${prefix}${prompt}`;
 
