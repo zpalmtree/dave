@@ -55,7 +55,7 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
 ) {
-    const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for italics, bolding, underline, quotations, code blocks, and so on. You should specify the language filetype when displaying code blocks, so syntax highlighting works as expected. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
+    const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for bolding, italics, and quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
 
     let modifiedPrompt = `${prefix}${prompt}`;
 
