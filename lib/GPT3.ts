@@ -1,12 +1,7 @@
 import { Message, Util } from 'discord.js';
 import { Configuration, OpenAIApi } from 'openai';
-import Filter from 'bad-words';
 
 import { config } from './Config.js';
-import { BannedWords } from './BannedWords.js';
-
-const badWordFilter = new Filter();
-badWordFilter.addWords(...BannedWords);
 
 const configuration = new Configuration({
     apiKey: config.openaiApiKey,
@@ -46,8 +41,7 @@ export async function handleGPT3(msg: Message, args: string): Promise<void> {
 
     if (result) {
         /* Ensure we don't hit discord api limits */
-        const stripped = Util.escapeMarkdown(result.substr(0, 1900));
-
+        const stripped = result.substr(0, 1900);
         await msg.reply(stripped);
     } else {
         await msg.reply(error);
@@ -61,9 +55,9 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
 ) {
-    const prefix = `You are a helpful AI bot who always provides answers to peoples questions or completions to their statements. Don't give any indefinitive answers, if you're not sure, then make a guess. Question/statement: `;
+    const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for headers, code, bolding, and so on. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
 
-    let modifiedPrompt = `${prompt}`;
+    let modifiedPrompt = `${prefix}${prompt}`;
 
     let maxAttempts = 3;
     let attempt = 0;
@@ -109,6 +103,6 @@ export async function handleGPT3Request(
     
     return {
         result: undefined,
-        error: 'Failed to get response from API',
+        error: 'Got same completion as input. Try with a modified prompt.',
     };
 }
