@@ -23,6 +23,7 @@ import {
 import {
     capitalize,
     getUsername,
+    getDefaultTimeZone,
 } from './Utilities.js';
 
 import { config } from './Config.js';
@@ -124,11 +125,13 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         description
     );
 
+    const { offset, label } = getDefaultTimeZone();
+
     const embed = new MessageEmbed()
         .addFields(
             {
                 name: `Timer #${timerID}`,
-                value: `${capitalize(moment.utc(time).fromNow())}, ${moment.utc(time).utcOffset(-6).format('HH:mm')} CST`,
+                value: `${capitalize(moment.utc(time).fromNow())}, ${moment.utc(time).utcOffset(offset).format('HH:mm')} ${label}`,
             }
         );
 
@@ -170,6 +173,8 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
     const embed = new MessageEmbed()
         .setTitle('Running Timers');
 
+    const { offset, label } = getDefaultTimeZone();
+
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 7,
@@ -185,7 +190,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
             fields.push(
                 {
                     name: 'Time',
-                    value: `${capitalize(moment.utc(timer.expire_time).fromNow())}, ${moment.utc(timer.expire_time).utcOffset(-6).format('HH:mm')} CST`,
+                    value: `${capitalize(moment.utc(timer.expire_time).fromNow())}, ${moment.utc(timer.expire_time).utcOffset(offset).format('HH:mm')} ${label}`,
 
                     inline: true,
                 },
