@@ -250,13 +250,13 @@ export async function uploadToImgur(image: any, filename?: string): Promise<stri
 export function getDefaultTimeZone() {
     if (moment().isDST()) {
         return {
-            offset: -5,
-            label: 'CDT',
+            offset: -4,
+            label: 'EDT',
         };
     } else {
         return {
-            offset: -6,
-            label: 'CST',
+            offset: -5,
+            label: 'EST',
         };
     }
 }
