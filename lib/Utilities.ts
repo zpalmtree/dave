@@ -250,34 +250,3 @@ export function getDefaultTimeZone() {
         };
     }
 }
-
-export function escapeDiscordMarkdown(text: string) {
-    return escapeMarkdown(
-        text,
-        {
-            codeBlock: true,
-            inlineCode: true,
-            bold: true,
-            italic: true,
-            underline: true,
-            strikethrough: true,
-            spoiler: true,
-            codeBlockContent: true,
-            inlineCodeContent: true,
-            escape: true,
-            heading: true,
-            bulletedList: true,
-            numberedList: true,
-            maskedLink: true,
-        },
-    );
-}
-
-export async function handleGetFromME(url: string) {    
-    const res = await fetch(url);
-    if (!res.ok) {
-        throw new Error("failed to fetch from API");
-    }
-    const data = await res.json();
-    return data;
-}
