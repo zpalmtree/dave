@@ -907,6 +907,50 @@ export const Commands: Command[] = [
             description: 'Get info on using the AI image bot',
         },
     },
+    {
+        aliases: ['time'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTime,
+            description: 'Get the current time in a specific UTC offset',
+            examples: [
+                {
+                    value: 'time',
+                },
+                {
+                    value: 'time +01:00',
+                },
+                {
+                    value: 'time -06:00',
+                },
+            ],
+        },
+        relatedCommands: [
+            'date',
+        ],
+    },
+    {
+        aliases: ['date'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDate,
+            description: 'Get the current date in a specific UTC offset',
+            examples: [
+                {
+                    value: 'date',
+                },
+                {
+                    value: 'date +01:00',
+                },
+                {
+                    value: 'date -06:00',
+                },
+            ],
+        },
+        relatedCommands: [
+            'time',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
