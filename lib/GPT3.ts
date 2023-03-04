@@ -67,19 +67,21 @@ export async function handleGPT3Request(
         attempt++;
 
         try {
-            const completion = await openai.createCompletion({
+            const completion = await openai.createChatCompletion({
                 model,
-                prompt: modifiedPrompt,
+                messages: [{
+                    role: 'user',
+                    content: modifiedPrompt,
+                }],
                 max_tokens: maxTokens,
                 temperature,
-                echo: true,
                 user,
             }, {
                 timeout: DEFAULT_TIMEOUT,
             });
 
-            if (completion.data.choices && completion.data.choices.length > 0) {
-                let generation = completion.data.choices[0].text!;
+            if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
+                let generation = completion.data.choices[0].message.content!;
 
                 if (generation === modifiedPrompt) {
                     continue;
