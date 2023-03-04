@@ -11,7 +11,7 @@ const openai = new OpenAIApi(configuration);
 
 const DEFAULT_TEMPERATURE = 1;
 const DEFAULT_MAX_TOKENS = 500;
-const DEFAULT_AI_MODEL = 'text-davinci-003';
+const DEFAULT_AI_MODEL = 'gpt-3.5-turbo';
 const DEFAULT_TIMEOUT = 1000 * 30;
 
 export async function handleGPT3(msg: Message, args: string): Promise<void> {
@@ -55,7 +55,8 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
 ) {
-    const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for bolding, italics, and quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
+    //const prefix = `If the following query is factual, answer it honestly. You can use discord style markdown formatting for bolding, italics, and quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style.\n\n`;
+    const prefix = '';
 
     let modifiedPrompt = `${prefix}${prompt}`;
 
