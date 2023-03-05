@@ -58,6 +58,7 @@ import {
 
 import {
     handleGPT3,
+    handleChatGPT,
 } from './GPT3.js';
 
 import {
@@ -710,6 +711,157 @@ export const Commands: Command[] = [
         ],
     },
     {
+        aliases: ['poll', 'vote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handlePoll,
+            description: 'Propose a yes/no query and let users vote',
+            examples: [
+                {
+                    value: 'poll Do you like peanut butter?',
+                },
+            ],
+        },
+        relatedCommands: [
+            'multipoll',
+        ],
+    },
+    {
+        aliases: ['multipoll', 'multivote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMultiPoll,
+            description: 'Create a query with multiple options and let users vote',
+            helpDescription: 'Create a query with multiple options and let users vote. ' +
+                'Multipoll should start with the query, then be followed by a forward slash (`/`). ' +
+                'Then, enter the poll options, each one again separated by a forward slash.',
+            examples: [
+                {
+                    value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
+                },
+            ],
+        },
+        relatedCommands: [
+            'poll',
+        ],
+    },
+    {
+        aliases: ['math'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMath,
+            description: 'Perform math or conversions',
+            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
+            examples: [
+                {
+                    value: 'math 123 * 456',
+                },
+                {
+                    value: 'math 100 fahrenheit to celsius',
+                }
+            ],
+        },
+    },
+    {
+        aliases: ['doggo', 'dog', 'doggy'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleDoggo,
+            description: 'Get a random dog picture',
+            examples: [
+                {
+                    value: 'doggo',
+                },
+                {
+                    value: 'doggo corgi',
+                },
+                {
+                    value: 'doggo golden retriever',
+                },
+            ],
+        },
+        relatedCommands: [
+            'kitty',
+        ],
+    },
+    {
+        aliases: ['kitty', 'cat'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKitty,
+            description: 'Get a random cat picture',
+            examples: [
+                {
+                    value: 'kitty',
+                },
+                {
+                    value: 'kitty persian',
+                },
+                {
+                    value: 'kitty european burmese',
+                },
+            ],
+        },
+        relatedCommands: [
+            'doggo',
+        ],
+    },
+    {
+        aliases: ['translate'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTranslate,
+            description: 'Translate text from one language to another',
+            helpDescription: `Translate text from one language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
+            examples: [
+                {
+                    name: 'Translate to english',
+                    value: 'translate C\'est la vie',
+                },
+                {
+                    name: 'Translate to another language',
+                    value: 'translate french Such is life',
+                }
+            ],
+        },
+        relatedCommands: [
+            'translatefrom',
+        ],
+    },
+    {
+        aliases: ['translatefrom'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTranslateFrom,
+            description: 'Translate text from a specific language to another',
+            helpDescription: `Translate text from a specific language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
+            examples: [
+                {
+                    name: 'Translate to english',
+                    value: 'translatefrom french C\'est la vie',
+                },
+                {
+                    name: 'Translate to another language',
+                    value: 'translatefrom french spanish C\'est la vie',
+                }
+            ],
+        },
+        relatedCommands: [
+            'translate',
+        ],
+    },
+    {
+        aliases: ['ai', 'gpt3', 'prompt'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGPT3,
+            description: 'Provide a prompt to the GPT3 AI and get a completion',
+        },
+        relatedCommands: [
+            'chatgpt',
+        ],
+    },
+    {
         aliases: ['stats'],
         primaryCommand: {
             argsFormat: Args.Split,
@@ -897,6 +1049,61 @@ export const Commands: Command[] = [
                 },
             ],
         },
+    },
+    {
+        aliases: ['time'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTime,
+            description: 'Get the current time in a specific UTC offset',
+            examples: [
+                {
+                    value: 'time',
+                },
+                {
+                    value: 'time +01:00',
+                },
+                {
+                    value: 'time -06:00',
+                },
+            ],
+        },
+        relatedCommands: [
+            'date',
+        ],
+    },
+    {
+        aliases: ['date'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDate,
+            description: 'Get the current date in a specific UTC offset',
+            examples: [
+                {
+                    value: 'date',
+                },
+                {
+                    value: 'date +01:00',
+                },
+                {
+                    value: 'date -06:00',
+                },
+            ],
+        },
+        relatedCommands: [
+            'time',
+        ],
+    },
+    {
+        aliases: ['chatgpt'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleChatGPT,
+            description: 'Ask ChatGPT something',
+        },
+        relatedCommands: [
+            'ai',
+        ],
     },
 ];
 
