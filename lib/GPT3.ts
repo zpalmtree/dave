@@ -32,7 +32,7 @@ export async function handleChatGPT(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const { result, error } = await handleGPT3Request(
+    const { result, error } = await handleChatGPTRequest(
         prompt,
         undefined,
         undefined,
