@@ -107,6 +107,7 @@ export async function handleGPT3Request(
                 max_tokens: maxTokens,
                 temperature,
                 user,
+                echo: true,
             }, {
                 timeout: DEFAULT_TIMEOUT,
             });
