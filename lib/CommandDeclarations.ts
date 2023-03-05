@@ -80,6 +80,7 @@ import {
 
 import {
     handleGPT3,
+    handleChatGPT,
 } from './GPT3.js';
 
 import {
@@ -608,6 +609,9 @@ export const Commands: Command[] = [
             implementation: handleGPT3,
             description: 'Provide a prompt to the GPT3 AI and get a completion',
         },
+        relatedCommands: [
+            'chatgpt',
+        ],
     },
     {
         aliases: ['clowns', 'sendintheclowns'],
@@ -949,6 +953,17 @@ export const Commands: Command[] = [
         },
         relatedCommands: [
             'time',
+        ],
+    },
+    {
+        aliases: ['chatgpt'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleChatGPT,
+            description: 'Ask ChatGPT something',
+        },
+        relatedCommands: [
+            'ai',
         ],
     },
 ];
