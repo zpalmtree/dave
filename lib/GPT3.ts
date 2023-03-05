@@ -143,7 +143,7 @@ export async function handleGPT3Request(
 
 export async function handleChatGPTRequest(
     prompt: string,
-    model: string = DEFAULT_AI_MODEL,
+    model: string = DEFAULT_CHATGPT_MODEL,
     maxTokens: number = DEFAULT_MAX_TOKENS,
     temperature: number = DEFAULT_TEMPERATURE,
     user: string = '',
