@@ -10,10 +10,10 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 const DEFAULT_TEMPERATURE = 1;
-const DEFAULT_MAX_TOKENS = 500;
+const DEFAULT_MAX_TOKENS = 420;
 const DEFAULT_CHATGPT_MODEL = 'gpt-3.5-turbo';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
-const DEFAULT_TIMEOUT = 1000 * 30;
+const DEFAULT_TIMEOUT = 1000 * 60;
 
 export async function handleChatGPT(msg: Message, args: string): Promise<void> {
     const bannedUsers = [
