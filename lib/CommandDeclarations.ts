@@ -860,7 +860,7 @@ export const Commands: Command[] = [
     {
         aliases: ['over', 'itsover'],
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handleItsOver,
             description: 'Post it\'s over meme',
         },
