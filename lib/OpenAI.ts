@@ -35,15 +35,35 @@ type OpenAIHandler = (
     previousConvo?: ChatCompletionRequestMessage[]
 ) => Promise<OpenAIResponse>;
 
-function createStringFromMessages(messages: ChatCompletionRequestMessage[], includeSystemPrompt = true) {
+function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true) {
+    let messages = [...msgs];
 
     if (!includeSystemPrompt) {
         if (messages.length && messages[0].role === 'system') {
-            return messages.slice(1).map((m) => m.content).join('\n\n');
+            messages = messages.slice(1);
         }
     }
 
-    return messages.map((m) => m.content).join('\n\n');
+    messages.reverse();
+
+    let length = 0;
+    let usableMessages = [];
+
+    for (const message of messages) {
+        const len = message.content.length;
+
+        if (length + len >= 1900) {
+            break;
+        }
+
+        length += len;
+
+        usableMessages.push(message.content);
+    }
+
+    usableMessages.reverse();
+
+    return usableMessages.join('\n\n');
 }
 
 function cacheMessage(messageId: string, messages: ChatCompletionRequestMessage[]) {
