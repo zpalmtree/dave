@@ -1,4 +1,4 @@
-import { Message, Util } from 'discord.js';
+import { Message } from 'discord.js';
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
@@ -273,7 +273,7 @@ export async function handleChatGPTRequest(
     } catch (err) {
         return {
             result: undefined,
-            error: err.toString(),
+            error: (err as any).toString(),
         };
     }
 }
