@@ -81,7 +81,8 @@ import {
 import {
     handleGPT3,
     handleChatGPT,
-} from './GPT3.js';
+    handleGLADOS,
+} from './OpenAI.js';
 
 import {
     handleTimers,
@@ -611,6 +612,7 @@ export const Commands: Command[] = [
         },
         relatedCommands: [
             'chatgpt',
+            'glados',
         ],
     },
     {
@@ -964,6 +966,19 @@ export const Commands: Command[] = [
         },
         relatedCommands: [
             'ai',
+            'glados',
+        ],
+    },
+    {
+        aliases: ['glados'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGLADOS,
+            description: 'Ask GLaDOS something',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
         ],
     },
 ];
