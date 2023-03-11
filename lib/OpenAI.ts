@@ -210,7 +210,7 @@ export async function handleGPT3Request(
             let generation = completion.data.choices[0].text!.trim();
 
             messages.push({
-                role: 'system',
+                role: 'assistant',
                 content: generation,
             });
 
@@ -275,7 +275,7 @@ export async function handleChatGPTRequest(
             let generation = completion.data.choices[0].message.content!.trim();
 
             messages.push({
-                role: 'system',
+                role: 'assistant',
                 content: generation,
             });
 
