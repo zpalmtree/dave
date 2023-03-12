@@ -60,6 +60,7 @@ import {
     handleGPT3,
     handleChatGPT,
     handleGLADOS,
+    handleDrunk,
 } from './OpenAI.js';
 
 import {
@@ -861,6 +862,7 @@ export const Commands: Command[] = [
         relatedCommands: [
             'chatgpt',
             'glados',
+            'drunk',
         ],
     },
     {
@@ -1106,6 +1108,7 @@ export const Commands: Command[] = [
         relatedCommands: [
             'ai',
             'glados',
+            'drunk',
         ],
     },
     {
@@ -1118,6 +1121,20 @@ export const Commands: Command[] = [
         relatedCommands: [
             'ai',
             'chatgpt',
+            'drunk',
+        ],
+    },
+    {
+        aliases: ['drunk'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDrunk,
+            description: 'Ask a drunk person something',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'glados',
         ],
     },
 ];

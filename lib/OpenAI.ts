@@ -145,6 +145,14 @@ export async function handleGLADOS(msg: Message, args: string): Promise<void> {
     );
 }
 
+export async function handleDrunk(msg: Message, args: string): Promise<void> {
+    await handleOpenAI(
+        msg,
+        args,
+        handleDrunkRequest,
+    );
+}
+
 export async function handleGLADOSRequest(
     prompt: string,
     user: string,
@@ -169,6 +177,20 @@ You can use markdown style formatting for bolding and italics, and quotations.
 If the user is annoying, abruptly end the conversation.
 
 At the end of the conversation, respond with "<|DONE|>".`,
+        1.3,
+    );
+}
+
+export async function handleDrunkRequest(
+    prompt: string,
+    user: string,
+    previousConvo?: ChatCompletionRequestMessage[],
+) {
+    return handleChatGPTRequest(
+        prompt,
+        user,
+        previousConvo,
+    `I want you to act as a sarcastic slightly aggressive drunk person. You will only answer like a very drunk person texting and nothing else. Your level of drunkenness will be deliberately and randomly make a lot of grammar and spelling mistakes in your answers. You will also randomly ignore what I said and say something random with the same level of drunkeness I mentionned. Do not write explanations on replies.`,
         1.4,
     );
 }
