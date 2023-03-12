@@ -1129,7 +1129,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['drunk'],
+        aliases: ['drunk', 'homelander', 'homestead', 'homesteader'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleDrunk,
