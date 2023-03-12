@@ -62,6 +62,7 @@ import {
     handleGLADOS,
     handleDrunk,
     handleBuddha,
+    handleTsong,
 } from './OpenAI.js';
 
 import {
@@ -1112,6 +1113,7 @@ export const Commands: Command[] = [
             'glados',
             'drunk',
             'buddha',
+            'tsong',
         ],
     },
     {
@@ -1126,6 +1128,7 @@ export const Commands: Command[] = [
             'chatgpt',
             'drunk',
             'buddha',
+            'tsong',
         ],
     },
     {
@@ -1140,6 +1143,7 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'buddha',
+            'tsong',
         ],
     },
     {
@@ -1154,6 +1158,7 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'drunk',
+            'tsong',
         ],
     },
     {
