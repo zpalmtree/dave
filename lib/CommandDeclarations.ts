@@ -1023,7 +1023,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['tsong', 'tsong kapa', 'kapa'],
+        aliases: ['tsong', 'tsongkhapa', 'tsong kapa', 'kapa', 'khapa'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleTsong,
@@ -1037,7 +1037,6 @@ export const Commands: Command[] = [
             'buddha',
         ],
     },
-
 ];
 
 export function handleHelp(msg: Message, args: string): void {
