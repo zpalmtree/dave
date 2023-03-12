@@ -1156,6 +1156,21 @@ export const Commands: Command[] = [
             'drunk',
         ],
     },
+    {
+        aliases: ['tsong', 'tsongkhapa', 'tsong kapa', 'kapa', 'khapa'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTsong,
+            description: 'Ask Tsong Kapa something',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'glados',
+            'drunk',
+            'buddha',
+        ],
+    },
 ];
 
 export function handleHelp(msg: Message, args: string): void {
