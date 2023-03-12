@@ -231,6 +231,10 @@ export async function handleGPT3Request(
         if (completion.data.choices && completion.data.choices.length > 0) {
             let generation = completion.data.choices[0].text!.trim();
 
+            if (generation.startsWith('?')) {
+                generation = generation.slice(1).trim();
+            }
+
             messages.push({
                 role: 'system',
                 content: generation,
@@ -295,6 +299,10 @@ export async function handleChatGPTRequest(
 
         if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
             let generation = completion.data.choices[0].message.content!.trim();
+
+            if (generation.startsWith('?')) {
+                generation = generation.slice(1).trim();
+            }
 
             messages.push({
                 role: 'system',
