@@ -84,6 +84,7 @@ import {
     handleGLADOS,
     handleDrunk,
     handleBuddha,
+    handleTsong,
 } from './OpenAI.js';
 
 import {
@@ -973,6 +974,7 @@ export const Commands: Command[] = [
             'glados',
             'drunk',
             'buddha',
+            'tsong',
         ],
     },
     {
@@ -987,6 +989,7 @@ export const Commands: Command[] = [
             'chatgpt',
             'drunk',
             'buddha',
+            'tsong',
         ],
     },
     {
@@ -1001,6 +1004,7 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'buddha',
+            'tsong',
         ],
     },
     {
@@ -1015,8 +1019,25 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'drunk',
+            'tsong',
         ],
     },
+    {
+        aliases: ['tsong', 'tsong kapa', 'kapa'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTsong,
+            description: 'Ask Tsong Kapa something',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'glados',
+            'drunk',
+            'buddha',
+        ],
+    },
+
 ];
 
 export function handleHelp(msg: Message, args: string): void {
