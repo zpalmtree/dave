@@ -55,6 +55,10 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeS
         const len = message.content.length;
 
         if (length + len >= 1900) {
+            if (length === 0) {
+                usableMessages.push(message.content.substr(0, 1900));
+            }
+
             break;
         }
 
@@ -106,9 +110,7 @@ export async function handleOpenAI(
     );
 
     if (result) {
-        /* Ensure we don't hit discord api limits */
-        const stripped = result.substr(0, 1900);
-        const message = await msg.reply(stripped);
+        const message = await msg.reply(result);
 
         if (messages) {
             cacheMessage(message.id, messages);
@@ -245,6 +247,13 @@ export async function handleGPT3Request(
                 generation = generation.slice(1).trim();
             }
 
+            if (generation === '') {
+                return {
+                    result: undefined,
+                    error: 'Got same completion as input. Try with an altered prompt.',
+                };
+            }
+
             messages.push({
                 role: 'system',
                 content: generation,
@@ -312,6 +321,13 @@ export async function handleChatGPTRequest(
 
             if (generation.startsWith('?')) {
                 generation = generation.slice(1).trim();
+            }
+
+            if (generation === '') {
+                return {
+                    result: undefined,
+                    error: 'Got same completion as input. Try with an altered prompt.',
+                };
             }
 
             messages.push({
