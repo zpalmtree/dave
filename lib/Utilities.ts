@@ -250,3 +250,8 @@ export function getDefaultTimeZone() {
         };
     }
 }
+
+export function isCapital(char: string) {
+    const charCode = char.charCodeAt(0);
+    return (charCode >= 65 && charCode <= 90);
+}

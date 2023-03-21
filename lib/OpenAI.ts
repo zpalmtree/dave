@@ -2,6 +2,7 @@ import { Message, Util } from 'discord.js';
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
+import { isCapital } from './Utilities.js';
 
 const configuration = new Configuration({
     apiKey: config.openaiApiKey,
@@ -69,7 +70,9 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeS
 
     usableMessages.reverse();
 
-    return usableMessages.join('\n\n');
+    let result = '';
+
+    return usableMessages[0] += usableMessages.slice(1).join('\n\n');
 }
 
 function cacheMessage(messageId: string, messages: ChatCompletionRequestMessage[]) {
@@ -241,10 +244,19 @@ export async function handleGPT3Request(
         });
 
         if (completion.data.choices && completion.data.choices.length > 0) {
-            let generation = completion.data.choices[0].text!.trim();
+            let generation = completion.data.choices[0].text!;
 
             if (generation.startsWith('?')) {
-                generation = generation.slice(1).trim();
+                generation = generation.slice(1);
+            }
+
+            /* First gpt3 response, don't remove auto completed prompt or
+             * newlines if present since it could be mid word completion.
+             * But if it starts with a capital, add newlines. */
+            if (messages.length !== 2) {
+                generation = generation.trim();
+            } else if (isCapital(generation)) {
+                generation = '\n\n' + generation;
             }
 
             if (generation === '') {
@@ -317,10 +329,19 @@ export async function handleChatGPTRequest(
         });
 
         if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
-            let generation = completion.data.choices[0].message.content!.trim();
+            let generation = completion.data.choices[0].message.content!;
+
+            /* First gpt3 response, don't remove auto completed prompt or
+             * newlines if present since it could be mid word completion.
+             * But if it starts with a capital, add newlines. */
+            if (messages.length !== 2) {
+                generation = generation.trim();
+            } else if (isCapital(generation)) {
+                generation = '\n\n' + generation;
+            }
 
             if (generation.startsWith('?')) {
-                generation = generation.slice(1).trim();
+                generation = generation.slice(1);
             }
 
             if (generation === '') {
