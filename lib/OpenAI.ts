@@ -36,9 +36,10 @@ type OpenAIHandler = (
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature?: number,
+    permitPromptCompletion?: boolean,
 ) => Promise<OpenAIResponse>;
 
-function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true) {
+function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true, permitPromptCompletion = true) {
     let messages = [...msgs];
 
     if (!includeSystemPrompt) {
@@ -52,12 +53,42 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeS
     let length = 0;
     let usableMessages = [];
 
+    let index = 0;
+
     for (const message of messages) {
-        const len = message.content.length;
+        let content = message.content;
+
+        /* Note the array is reversed for proper message truncation on too long
+         * inputs. So we need to find first reply backwards */
+        const isFirstReply = (index === messages.length - 2 && !includeSystemPrompt) || (index === messages.length - 3 && includeSystemPrompt);
+
+        if (message.role === 'assistant') {
+            if (isFirstReply) {
+                /* Prompt completion not allowed. Always add newlines after user prompt. */
+                if (!permitPromptCompletion) {
+                    content = '\n\n' + content;
+                } else {
+                    /* AI probably started a new thought. Add spacing instead
+                     * of completing user prompt */
+                    if (isCapital(content)) {
+                        content = '\n\n' + content;
+                    }
+                }
+
+                /* Probably auto completing a question. Not needed. */
+                if (content.startsWith('?')) {
+                    content = content.slice(1);
+                }
+            } else {
+                content = content.trim();
+            }
+        }
+
+        const len = content.length;
 
         if (length + len >= 1900) {
             if (length === 0) {
-                usableMessages.push(message.content.substr(0, 1900));
+                usableMessages.push(content.substr(0, 1900));
             }
 
             break;
@@ -65,14 +96,22 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeS
 
         length += len;
 
-        usableMessages.push(message.content);
+        usableMessages.push(content);
+
+        index++;
     }
 
     usableMessages.reverse();
 
-    let result = '';
+    let result;
 
-    return usableMessages[0] += usableMessages.slice(1).join('\n\n');
+    if (includeSystemPrompt) {
+        result = usableMessages[0] + '\n\n' + usableMessages[1] + usableMessages.slice(2).join('\n\n');
+    } else {
+        result = usableMessages[0] + usableMessages.slice(1).join('\n\n');
+    }
+
+    return result;
 }
 
 function cacheMessage(messageId: string, messages: ChatCompletionRequestMessage[]) {
@@ -84,7 +123,9 @@ export async function handleOpenAI(
     args: string,
     handler: OpenAIHandler,
     systemPrompt?: string,
-    temperature?: number): Promise<void> {
+    temperature?: number,
+    permitPromptCompletion: boolean = true,
+): Promise<void> {
 
     if (bannedUsers.includes(msg.author.id)) {
         await msg.reply(`Sorry, this function has been disabled for your user.`);
@@ -110,6 +151,7 @@ export async function handleOpenAI(
         previousConvo,
         systemPrompt,
         temperature,
+        permitPromptCompletion,
     );
 
     if (result) {
@@ -176,6 +218,7 @@ export async function handleDrunk(msg: Message, args: string): Promise<void> {
         handleChatGPTRequest,
     `I want you to act as a sarcastic slightly aggressive drunk person. You will only answer like a very drunk person texting and nothing else. Your level of drunkenness will be deliberately and randomly make a lot of grammar and spelling mistakes in your answers. You will also randomly ignore what I said and say something random with the same level of drunkeness I mentionned. Do not write explanations on replies.`,
         1.2,
+        false,
     );
 }
 
@@ -205,8 +248,9 @@ export async function handleGPT3Request(
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature: number = DEFAULT_TEMPERATURE,
+    permitPromptCompletion: boolean = true,
 ) {
-    systemPrompt = systemPrompt || `If the following query is factual, answer it honestly. You can use markdown style formatting for bolding and italics and quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. Do NOT use link markdown. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
+    systemPrompt = systemPrompt || `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. Display links in their raw forms, do not use [brackets] to format them. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
 
     const model = DEFAULT_AI_MODEL;
     const maxTokens = DEFAULT_MAX_TOKENS;
@@ -230,7 +274,7 @@ export async function handleGPT3Request(
         content: prompt,
     });
 
-    const completionInput = createStringFromMessages(messages);
+    const completionInput = createStringFromMessages(messages, undefined, permitPromptCompletion);
 
     try {
         const completion = await openai.createCompletion({
@@ -246,19 +290,6 @@ export async function handleGPT3Request(
         if (completion.data.choices && completion.data.choices.length > 0) {
             let generation = completion.data.choices[0].text!;
 
-            if (generation.startsWith('?')) {
-                generation = generation.slice(1);
-            }
-
-            /* First gpt3 response, don't remove auto completed prompt or
-             * newlines if present since it could be mid word completion.
-             * But if it starts with a capital, add newlines. */
-            if (messages.length !== 2) {
-                generation = generation.trim();
-            } else if (isCapital(generation)) {
-                generation = '\n\n' + generation;
-            }
-
             if (generation === '') {
                 return {
                     result: undefined,
@@ -272,7 +303,7 @@ export async function handleGPT3Request(
             });
 
             return {
-                result: createStringFromMessages(messages, false),
+                result: createStringFromMessages(messages, false, permitPromptCompletion),
                 error: undefined,
                 messages,
             };
@@ -296,6 +327,7 @@ export async function handleChatGPTRequest(
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature: number = DEFAULT_CHATGPT_TEMPERATURE,
+    permitPromptCompletion: boolean = true,
 ) {
     const model = DEFAULT_CHATGPT_MODEL;
     const maxTokens = DEFAULT_MAX_TOKENS;
@@ -331,19 +363,6 @@ export async function handleChatGPTRequest(
         if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
             let generation = completion.data.choices[0].message.content!;
 
-            /* First gpt3 response, don't remove auto completed prompt or
-             * newlines if present since it could be mid word completion.
-             * But if it starts with a capital, add newlines. */
-            if (messages.length !== 2) {
-                generation = generation.trim();
-            } else if (isCapital(generation)) {
-                generation = '\n\n' + generation;
-            }
-
-            if (generation.startsWith('?')) {
-                generation = generation.slice(1);
-            }
-
             if (generation === '') {
                 return {
                     result: undefined,
@@ -357,7 +376,7 @@ export async function handleChatGPTRequest(
             });
 
             return {
-                result: createStringFromMessages(messages, false),
+                result: createStringFromMessages(messages, false, permitPromptCompletion),
                 error: undefined,
                 messages,
             };
