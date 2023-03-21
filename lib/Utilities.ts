@@ -291,3 +291,8 @@ export async function handleGetFromME(url: string) {
     const data = await res.json();
     return data;
 }
+
+export function isCapital(char: string) {
+    const charCode = char.charCodeAt(0);
+    return (charCode >= 65 && charCode <= 90);
+}
