@@ -298,7 +298,7 @@ export async function handleGPT3Request(
             }
 
             messages.push({
-                role: 'system',
+                role: 'assistant',
                 content: generation,
             });
 
@@ -371,7 +371,7 @@ export async function handleChatGPTRequest(
             }
 
             messages.push({
-                role: 'system',
+                role: 'assistant',
                 content: generation,
             });
 
