@@ -2280,7 +2280,7 @@ export async function handleCock(msg: Message): Promise<void> {
 export async function handleBurn(msg: Message): Promise<void> {
     await replyWithMention(msg, `A lot of slug utility comes from burning a slug.
 **Why burn a slug?**
-* Help be part of the most deflationary collection on Solana - with over 3700 slugs burnt!
+* Help be part of the most deflationary collection on Solana - with over 4100 slugs burnt!
 * Access to alpha, whitelist, and other burner only channels.
 * Alpha bots - Find trending magiceden collections, new twitter accounts, and just created mints.
 * Free stuff - Sometimes we will raffle 1/1s, airdrops, or other valuable items. Burners come first whenever this happens.
@@ -2291,7 +2291,7 @@ export async function handleBurn(msg: Message): Promise<void> {
 export async function handleUtility(msg: Message): Promise<void> {
     await replyWithMention(msg, `**Why buy a slug?**
 * Gain benefits on our sleek portfolio tracker, slime: <https://slime.cx/>
-* Enjoy the slug supply constantly decreasing. It's already shrunk from 10,000 to 7,500!
+* Enjoy the slug supply constantly decreasing. It's already shrunk from 10,000 to 7,200!
 * Try out the slug AI image generator and chat bots
 * Burn your slug for more benefits! Try \`${config.prefix}burn\` for more info.
 * Chill in one of the most active chats in Solana. No more gm spam!
