@@ -2395,3 +2395,7 @@ export async function handleGitbook(msg: Message): Promise<void> {
 export async function handleAIInfo(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://media.discordapp.net/attachments/891081746186113024/1074511672401731724/image.png');
 }
+
+export async function handleChickenFried(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/483470443001413675/1088687349497597982/repost.mov');
+}

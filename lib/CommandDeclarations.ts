@@ -76,6 +76,7 @@ import {
     handleSlime,
     handleGitbook,
     handleAIInfo,
+    handleChickenFried,
 } from './CommandImplementations.js';
 
 import {
@@ -1036,6 +1037,14 @@ export const Commands: Command[] = [
             'drunk',
             'buddha',
         ],
+    },
+    {
+        aliases: ['chickenfried', 'fried', 'friday', 'fridaynight', 'coldbeer', 'radio', 'sunrise', 'womanseyes', 'preciouschild', 'motherslove', 'jeans', 'repost'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleChickenFried,
+            description: 'Get the chicken fried vid',
+        },
     },
 ];
 
