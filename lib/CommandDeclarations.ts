@@ -965,7 +965,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['chatgpt'],
+        aliases: ['chatgpt', 'chatgtp'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleChatGPT,
