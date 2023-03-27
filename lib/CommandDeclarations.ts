@@ -1151,7 +1151,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['buddha'],
+        aliases: ['buddha', 'budda'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleBuddha,
