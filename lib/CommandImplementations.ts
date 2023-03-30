@@ -452,7 +452,12 @@ export async function handlePrice(msg: Message) {
                 embeds: [embed],
             });
         } else {
-            throw new Error("Fetch threw an exception")
+            try {
+                const err = await data.text();
+                await msg.reply(`Failed to fetch data from coingecko: ${data.status}, ${err}`);
+            } catch (err) {
+                await msg.reply(`Failed to fetch data from coingecko: ${data.status}`);
+            }
         }
     } catch(err) {
         await msg.reply(`Failed to get data: ${(err as any).toString()}`);
