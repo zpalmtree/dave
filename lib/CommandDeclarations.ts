@@ -601,7 +601,7 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['sign', 'tapthesign', 'chill'],
+        aliases: ['sign', 'tapthesign', 'tapsign', 'chill'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleSign,
