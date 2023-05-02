@@ -52,7 +52,13 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         return;
     }
 
+    /*
     if (msg.author.bot) {
+        return;
+    }
+    */
+
+    if (msg.author.id === msg.client.user.id) {
         return;
     }
 
