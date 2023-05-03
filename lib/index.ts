@@ -58,7 +58,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
     }
     */
 
-    if (msg.author.id === msg.client.user.id) {
+    if (msg.author.id === msg.client?.user?.id) {
         return;
     }
 
