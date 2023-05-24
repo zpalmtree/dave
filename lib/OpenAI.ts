@@ -264,7 +264,7 @@ function getCurrentDatePrompt() {
 }
 
 function createSystemPrompt(prompt: string): string {
-    return `${prompt} ${getCurrentDatePrompt()}`;
+    return `${getCurrentDatePrompt()} ${prompt}`;
 }
 
 export async function handleGPT3Request(
