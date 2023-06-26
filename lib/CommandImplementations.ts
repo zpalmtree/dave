@@ -1363,7 +1363,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     }
 
     // gimme that token...
-    const regex = /vqd='([\d-]+)'/gm;
+    const regex = /vqd=([\d-]+)\&/;
 
     const [, token ] = regex.exec(data) || [ undefined, undefined ];
 
