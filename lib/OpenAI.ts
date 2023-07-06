@@ -13,7 +13,7 @@ const openai = new OpenAIApi(configuration);
 const DEFAULT_TEMPERATURE = 1.2;
 const DEFAULT_CHATGPT_TEMPERATURE = 1.2;
 const DEFAULT_MAX_TOKENS = 420;
-const DEFAULT_CHATGPT_MODEL = 'gpt-3.5-turbo';
+const DEFAULT_CHATGPT_MODEL = 'gpt-4';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
 
