@@ -67,7 +67,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
     }
 
     /* Get the command with prefix, and any args */
-    const [ tmp, ...args ] = msg.content.trim().split(' ');
+    const [ tmp, ...args ] = msg.content.trim().split(/ |\n/);
 
     /* Get the actual command after the prefix is removed */
     const command: string = tmp.substring(tmp.indexOf(config.prefix) + 1, tmp.length).toLowerCase();
