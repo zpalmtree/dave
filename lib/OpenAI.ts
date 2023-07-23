@@ -4,7 +4,6 @@ import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
 import { isCapital } from './Utilities.js';
-import { DisplayType, Paginate } from './Paginate.js';
 
 const configuration = new Configuration({
     apiKey: config.openaiApiKey,
@@ -18,6 +17,9 @@ const DEFAULT_MAX_TOKENS = 420;
 const DEFAULT_CHATGPT_MODEL = 'gpt-3.5-turbo';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
+const BEFORE_FIRST_POST = 10; //number of passes (usually single words, symbols) before initial post
+const BEFORE_EDIT = 50; //number of passes before each subsequent edit
+const legacyGPTModels = ['text-davinci-003', 'text-davinci-002', 'text-davinci-001', 'text-curie-001', 'text-babbage-001', 'text-ada-001', 'davinci', 'curie', 'babbage', 'ada'];
 
 const bannedUsers = [
     '663270358161293343',
@@ -160,7 +162,7 @@ export async function handleOpenAI(
         permitPromptCompletion,
     );
 
-        if (messages) {
+        if (messages && msgRef) {
             cacheMessage(msgRef.id, messages);
         }
     } 
@@ -323,52 +325,7 @@ export async function handleGPT3Request(
         content: prompt,
     });
 
-    // const completionInput = createStringFromMessages(messages, undefined, permitPromptCompletion);
-
-    return handleGPTStream(messages, user, msg, model, temperature, permitPromptCompletion);
-    // try {
-    //     const completion = await openai.createCompletion({
-    //         model,
-    //         prompt: completionInput,
-    //         max_tokens: maxTokens,
-    //         temperature,
-    //         user,
-    //     }, {
-    //         timeout: DEFAULT_TIMEOUT,
-    //     });
-
-    //     if (completion.data.choices && completion.data.choices.length > 0) {
-    //         let generation = completion.data.choices[0].text!;
-
-    //         if (generation === '') {
-    //             return {
-    //                 result: undefined,
-    //                 error: 'Got same completion as input. Try with an altered prompt.',
-    //             };
-    //         }
-
-    //         messages.push({
-    //             role: 'assistant',
-    //             content: generation,
-    //         });
-
-    //         return {
-    //             result: createStringFromMessages(messages, false, permitPromptCompletion),
-    //             error: undefined,
-    //             messages,
-    //         };
-    //     }
-
-    //     return {
-    //         result: undefined,
-    //         error: 'Unexpected response from api',
-    //     };
-    // } catch (err) {
-    //     return {
-    //         result: undefined,
-    //         error: (err as any).toString(),
-    //     };
-    // }
+    return handleGPTCompletion(messages, user, msg, model, temperature, permitPromptCompletion, maxTokens);
 }
 
 export async function handleChatGPTRequest(
@@ -407,125 +364,182 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
         content: prompt,
     });
 
-    return handleGPTStream(messages, user, msg, model, temperature, permitPromptCompletion);
+    return handleGPTCompletion(messages, user, msg, model, temperature, permitPromptCompletion, maxTokens);
 }
 
-export async function handleGPTStream(
+export async function handleGPTCompletion(
     messages: ChatCompletionRequestMessage[],
     user: string = '',
     msg: Message,
     model: string = DEFAULT_AI_MODEL,
     temperature: number = DEFAULT_TEMPERATURE,
     permitPromptCompletion: boolean = true,
+    maxTokens: number = DEFAULT_MAX_TOKENS,
 ) {
-    try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${config.openaiApiKey}`,
-            },
-            body: JSON.stringify({
-                model: model,
-                messages: messages,
-                // max_tokens: maxTokens,
-                temperature: temperature,
-                user: user,
-                stream: true,
-            }),
-        });
-        console.log(response);
+    let msgRef: Message | undefined = undefined;
+    if (legacyGPTModels.includes(model)) {
 
+        const completionInput = createStringFromMessages(messages, undefined, permitPromptCompletion);
+        try {
+            const completion = await openai.createCompletion(
+                {
+                    model,
+                    prompt: completionInput,
+                    max_tokens: maxTokens,
+                    temperature,
+                    user,
+                },
+                {
+                    timeout: DEFAULT_TIMEOUT,
+                }
+            );
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder("utf-8");
+            if (completion.data.choices && completion.data.choices.length > 0) {
+                let generation = completion.data.choices[0].text!;
 
-        let output = '';
-        let totalOutput = '';
-        let begin = true;
-        let msgRef: Message | undefined = undefined;
-        let cycleCount = 0;
-        while (true) {
-            const { done, value } = await reader?.read() ?? { done: true, value: undefined };
-            if (done) {
-                if (msgRef) {
-                    msgRef?.edit(output);
-                    messages.push({
-                        role: 'assistant',
-                        content: totalOutput,
-                    })
+                if (generation === "") {
                     return {
-                        result: createStringFromMessages(messages, false, permitPromptCompletion),
-                        error: undefined,
-                        messages,
-                        msgRef: msgRef,
-                    };
-                } else {
-                    msgRef = await msg.reply(output);
-                    messages.push({
-                        role: 'assistant',
-                        content: totalOutput,
-                    })
-                    return {
-                        result: createStringFromMessages(messages, false, permitPromptCompletion),
-                        error: undefined,
-                        messages,
-                        msgRef: msgRef,
+                        result: undefined,
+                        error: "Got same completion as input. Try with an altered prompt.",
                     };
                 }
 
+                messages.push({
+                    role: "assistant",
+                    content: generation,
+                });
+
+                msgRef = await msg.reply(generation);
+
+                return {
+                    result: createStringFromMessages(
+                        messages,
+                        false,
+                        permitPromptCompletion
+                    ),
+                    error: undefined,
+                    messages,
+                    msgRef
+                };
             }
 
-            // Massage and parse the chunk of data
-            const chunk = decoder.decode(value)
-            const lines = chunk.split(/\n+/);
-
-
-            for (let line of lines) {
-                const parsedLines = line.split(/\n+/)
-                    .map((line) => line.replace(/^data: /, "").trim()) // Remove the "data: " prefix
-                    .filter((line) => line !== "" && line !== "[DONE]") // Remove empty lines and "[DONE]"
-                    .map((line) => JSON.parse(line)); // Parse the JSON string
-
-
-                for (const parsedLine of parsedLines) {
-                    const { choices } = parsedLine;
-                    const { delta, finish_reason } = choices[0];
-                    const { content } = delta;
-                    totalOutput += content;
-                    if (!finish_reason && content !== "") {
-                        if (output.length >= 1850) {
-                            totalOutput += content;
-                            await msgRef?.edit(output);
-                            msgRef = await msg.reply(content);
-                            messages.push({
-                                role: 'assistant',
-                                content: totalOutput,
-                            })
-                            output = content;
-                            cycleCount = 0;
-                        } else {
-                            output += content;
-                        }
-                        /* number of passes (words, spaces, symbols) before initial post */
-                        if (begin) {
-                            msgRef = await msg.reply(output);
-                            begin = false;
-                            cycleCount = 0;
-                        }
-                        /* passes per subsequent edit */
-                        if (cycleCount >= 50) {
-                            msgRef?.edit(output);
-                            cycleCount = 0;
-                        }
-                    }
-                    cycleCount++;
-                }
-            }
+            return {
+                result: undefined,
+                error: "Unexpected response from api",
+            };
+        } catch (err) {
+            return {
+                result: undefined,
+                error: (err as any).toString(),
+            };
         }
+    
+    } else { //not a legacy model
 
-    } catch (err) {
-        return messages;
+        try {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${config.openaiApiKey}`,
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: messages,
+                    max_tokens: maxTokens,
+                    temperature: temperature,
+                    user: user,
+                    stream: true,
+                }),
+            });
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder("utf-8");
+
+            let output = '';
+            let totalOutput = '';
+            let begin = true;
+            let cycleCount = 0;
+            while (true) {
+                const { done, value } = await reader?.read() ?? { done: true, value: undefined };
+                if (done) {
+                    if (msgRef) {
+                        msgRef?.edit(output);
+                        messages.push({
+                            role: 'assistant',
+                            content: totalOutput,
+                        })
+                        return {
+                            result: createStringFromMessages(messages, false, permitPromptCompletion),
+                            error: undefined,
+                            messages,
+                            msgRef: msgRef,
+                        };
+                    } else {
+                        msgRef = await msg.reply(output);
+                        messages.push({
+                            role: 'assistant',
+                            content: totalOutput,
+                        })
+                        return {
+                            result: createStringFromMessages(messages, false, permitPromptCompletion),
+                            error: undefined,
+                            messages,
+                            msgRef: msgRef,
+                        };
+                    }
+
+                }
+
+                // Massage and parse the chunk of data
+                const chunk = decoder.decode(value)
+                const lines = chunk.split(/\n+/);
+
+
+                for (let line of lines) {
+                    const parsedLines = line.split(/\n+/)
+                        .map((line) => line.replace(/^data: /, "").trim()) // Remove the "data: " prefix
+                        .filter((line) => line !== "" && line !== "[DONE]") // Remove empty lines and "[DONE]"
+                        .map((line) => JSON.parse(line)); // Parse the JSON string
+
+
+                    for (const parsedLine of parsedLines) {
+                        const { choices } = parsedLine;
+                        const { delta, finish_reason } = choices[0];
+                        const { content } = delta;
+                        totalOutput += content;
+                        if (!finish_reason && content !== "") {
+                            if (output.length >= 1850) {
+                                totalOutput += content;
+                                await msgRef?.edit(output);
+                                msgRef = await msg.reply(content);
+                                messages.push({
+                                    role: 'assistant',
+                                    content: totalOutput,
+                                })
+                                output = content;
+                                cycleCount = 0;
+                            } else {
+                                output += content;
+                            }
+                            if (begin && cycleCount >= BEFORE_FIRST_POST) {
+                                msgRef = await msg.reply(output);
+                                begin = false;
+                                cycleCount = 0;
+                            }
+                            if (!begin && cycleCount >= BEFORE_EDIT) {
+                                msgRef?.edit(output);
+                                cycleCount = 0;
+                            }
+                        }
+                        cycleCount++;
+                    }
+                }
+            }
+
+        } catch (err) {
+            return messages;
+        }
     }
 }
 
