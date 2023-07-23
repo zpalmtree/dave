@@ -1,4 +1,3 @@
-
 import { Message, Util } from 'discord.js';
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
@@ -162,11 +161,10 @@ export async function handleOpenAI(
         permitPromptCompletion,
     );
 
-        if (messages && msgRef) {
-            cacheMessage(msgRef.id, messages);
-        }
-    } 
-
+    if (messages && msgRef) {
+        cacheMessage(msgRef.id, messages);
+    }
+} 
 
 export async function handleChatGPT(msg: Message, args: string): Promise<void> {
     await handleOpenAI(
@@ -279,7 +277,7 @@ export async function handleGPT3Request(
     temperature: number = DEFAULT_TEMPERATURE,
     permitPromptCompletion: boolean = true,
 ) {
-    const defaultPrompt =
+    const defaultPrompt = 
     `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
 
     systemPrompt = createSystemPrompt(systemPrompt || defaultPrompt);
@@ -301,7 +299,7 @@ export async function handleGPT3Request(
 
     messages.push({
         role: 'user',
-        content: prompt,
+        content: prompt + '\n\n',
     });
 
     return handleGPTCompletion(messages, user, msg, model, temperature, permitPromptCompletion, maxTokens);
@@ -474,13 +472,11 @@ export async function handleGPTCompletion(
                 const chunk = decoder.decode(value)
                 const lines = chunk.split(/\n+/);
 
-
                 for (let line of lines) {
                     const parsedLines = line.split(/\n+/)
                         .map((line) => line.replace(/^data: /, "").trim()) // Remove the "data: " prefix
                         .filter((line) => line !== "" && line !== "[DONE]") // Remove empty lines and "[DONE]"
                         .map((line) => JSON.parse(line)); // Parse the JSON string
-
 
                     for (const parsedLine of parsedLines) {
                         const { choices } = parsedLine;
@@ -515,7 +511,6 @@ export async function handleGPTCompletion(
                     }
                 }
             }
-
         } catch (err) {
             return {
                 result: undefined,
