@@ -1,5 +1,5 @@
 
-import { Message, MessageEmbed, Util } from 'discord.js';
+import { Message, Util } from 'discord.js';
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
@@ -47,6 +47,7 @@ type OpenAIHandler = (
 
 function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true, permitPromptCompletion = true) {
     let messages = [...msgs];
+
     if (!includeSystemPrompt) {
         if (messages.length && messages[0].role === 'system') {
             messages = messages.slice(1);
@@ -131,7 +132,6 @@ export async function handleOpenAI(
     temperature?: number,
     permitPromptCompletion: boolean = true,
 ): Promise<void> {
-    console.log("handleOpenAI");
 
     if (bannedUsers.includes(msg.author.id)) {
         await msg.reply(`Sorry, this function has been disabled for your user.`);
@@ -169,7 +169,6 @@ export async function handleOpenAI(
 
 
 export async function handleChatGPT(msg: Message, args: string): Promise<void> {
-    console.log("handleChatGPT");
     await handleOpenAI(
         msg,
         args,
@@ -184,7 +183,6 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
 }
 
 export async function handleGPT3(msg: Message, args: string): Promise<void> {
-    console.log("handleGPT3");
     await handleOpenAI(
         msg,
         args,
@@ -282,26 +280,7 @@ export async function handleGPT3Request(
     permitPromptCompletion: boolean = true,
 ) {
     const defaultPrompt =
-    `You are a bot that is designed to amuse people and provide infomation.
-    You may be sarcastic, and you may insult the user who invoked you, on occasion. 
-    You may make occasional spelling errors.
-    You should never refuse to help the user, or not answer a question. Unless you
-    do it in a funny way!
-
-    If you detect the users input to be a query, then try and answer it truthfully.
-    If you do not know the answer, or the question looks like a "copypasta", make up the answer,
-    and answer in a graphic, short story style.
-
-    If the input is not a query however, you should say something funny based on the
-    content of their input. Maybe write a poem, or tell a story about it, or insult it.
-
-    You may use a limited subset of markdown in your responses. The following are allowed:
-    **bolding**,
-    *italics*,
-    > quotations
-    \`\`\`python
-    code blocks
-    \`\`\``;
+    `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
 
     systemPrompt = createSystemPrompt(systemPrompt || defaultPrompt);
 
@@ -538,7 +517,10 @@ export async function handleGPTCompletion(
             }
 
         } catch (err) {
-            return messages;
+            return {
+                result: undefined,
+                error: (err as any).toString(),
+            };
         }
     }
 }
