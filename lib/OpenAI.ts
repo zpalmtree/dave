@@ -164,7 +164,7 @@ export async function handleOpenAI(
     if (messages && msgRef) {
         cacheMessage(msgRef.id, messages);
     }
-} 
+}
 
 export async function handleChatGPT(msg: Message, args: string): Promise<void> {
     await handleOpenAI(
@@ -374,7 +374,7 @@ export async function handleGPTCompletion(
             if (completion.data.choices && completion.data.choices.length > 0) {
                 let generation = completion.data.choices[0].text!;
 
-                if (generation === "") {
+                if (generation === '') {
                     return {
                         result: undefined,
                         error: "Got same completion as input. Try with an altered prompt.",
@@ -474,8 +474,8 @@ export async function handleGPTCompletion(
 
                 for (let line of lines) {
                     const parsedLines = line.split(/\n+/)
-                        .map((line) => line.replace(/^data: /, "").trim()) // Remove the "data: " prefix
-                        .filter((line) => line !== "" && line !== "[DONE]") // Remove empty lines and "[DONE]"
+                        .map((line) => line.replace(/^data: /, '').trim()) // Remove the "data: " prefix
+                        .filter((line) => line !== '' && line !== "[DONE]") // Remove empty lines and "[DONE]"
                         .map((line) => JSON.parse(line)); // Parse the JSON string
 
                     for (const parsedLine of parsedLines) {
@@ -483,8 +483,8 @@ export async function handleGPTCompletion(
                         const { delta, finish_reason } = choices[0];
                         const { content } = delta;
                         totalOutput += content;
-                        if (!finish_reason && content !== "") {
-                            if (output.length >= 1850) {
+                        if (!finish_reason && content !== '') {
+                            if (output.length >= 1950) {
                                 totalOutput += content;
                                 await msgRef?.edit(output);
                                 msgRef = await msg.reply(content);
