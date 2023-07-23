@@ -1,8 +1,10 @@
-import { Message, Util } from 'discord.js';
+
+import { Message, MessageEmbed, Util } from 'discord.js';
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
 import { isCapital } from './Utilities.js';
+import { DisplayType, Paginate } from './Paginate.js';
 
 const configuration = new Configuration({
     apiKey: config.openaiApiKey,
@@ -13,7 +15,7 @@ const openai = new OpenAIApi(configuration);
 const DEFAULT_TEMPERATURE = 1.2;
 const DEFAULT_CHATGPT_TEMPERATURE = 1.2;
 const DEFAULT_MAX_TOKENS = 420;
-const DEFAULT_CHATGPT_MODEL = 'gpt-4';
+const DEFAULT_CHATGPT_MODEL = 'gpt-3.5-turbo';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
 
@@ -25,6 +27,7 @@ interface OpenAIResponse {
     error?: string;
     result?: string;
     messages?: ChatCompletionRequestMessage[];
+    msgRef?: Message;
 }
 
 /* Map of message ID and the current conversation at that point */
@@ -33,15 +36,15 @@ const chatHistoryCache = new Map<string, ChatCompletionRequestMessage[]>();
 type OpenAIHandler = (
     prompt: string,
     userId: string,
+    msg: Message,
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature?: number,
     permitPromptCompletion?: boolean,
-) => Promise<OpenAIResponse>;
+) => Promise<any>;
 
 function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true, permitPromptCompletion = true) {
     let messages = [...msgs];
-
     if (!includeSystemPrompt) {
         if (messages.length && messages[0].role === 'system') {
             messages = messages.slice(1);
@@ -126,6 +129,7 @@ export async function handleOpenAI(
     temperature?: number,
     permitPromptCompletion: boolean = true,
 ): Promise<void> {
+    console.log("handleOpenAI");
 
     if (bannedUsers.includes(msg.author.id)) {
         await msg.reply(`Sorry, this function has been disabled for your user.`);
@@ -145,27 +149,25 @@ export async function handleOpenAI(
         result,
         error,
         messages,
+        msgRef,
     } = await handler(
         prompt,
         msg.author.id,
+        msg,
         previousConvo,
         systemPrompt,
         temperature,
         permitPromptCompletion,
     );
 
-    if (result) {
-        const message = await msg.reply(result);
-
         if (messages) {
-            cacheMessage(message.id, messages);
+            cacheMessage(msgRef.id, messages);
         }
-    } else {
-        await msg.reply(error!);
-    }
-}
+    } 
+
 
 export async function handleChatGPT(msg: Message, args: string): Promise<void> {
+    console.log("handleChatGPT");
     await handleOpenAI(
         msg,
         args,
@@ -180,6 +182,7 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
 }
 
 export async function handleGPT3(msg: Message, args: string): Promise<void> {
+    console.log("handleGPT3");
     await handleOpenAI(
         msg,
         args,
@@ -270,13 +273,33 @@ function createSystemPrompt(prompt: string): string {
 export async function handleGPT3Request(
     prompt: string,
     user: string = '',
+    msg: Message,
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature: number = DEFAULT_TEMPERATURE,
     permitPromptCompletion: boolean = true,
 ) {
-    const defaultPrompt = 
-    `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
+    const defaultPrompt =
+    `You are a bot that is designed to amuse people and provide infomation.
+    You may be sarcastic, and you may insult the user who invoked you, on occasion. 
+    You may make occasional spelling errors.
+    You should never refuse to help the user, or not answer a question. Unless you
+    do it in a funny way!
+
+    If you detect the users input to be a query, then try and answer it truthfully.
+    If you do not know the answer, or the question looks like a "copypasta", make up the answer,
+    and answer in a graphic, short story style.
+
+    If the input is not a query however, you should say something funny based on the
+    content of their input. Maybe write a poem, or tell a story about it, or insult it.
+
+    You may use a limited subset of markdown in your responses. The following are allowed:
+    **bolding**,
+    *italics*,
+    > quotations
+    \`\`\`python
+    code blocks
+    \`\`\``;
 
     systemPrompt = createSystemPrompt(systemPrompt || defaultPrompt);
 
@@ -297,59 +320,61 @@ export async function handleGPT3Request(
 
     messages.push({
         role: 'user',
-        content: prompt + '\n\n',
+        content: prompt,
     });
 
-    const completionInput = createStringFromMessages(messages, undefined, permitPromptCompletion);
+    // const completionInput = createStringFromMessages(messages, undefined, permitPromptCompletion);
 
-    try {
-        const completion = await openai.createCompletion({
-            model,
-            prompt: completionInput,
-            max_tokens: maxTokens,
-            temperature,
-            user,
-        }, {
-            timeout: DEFAULT_TIMEOUT,
-        });
+    return handleGPTStream(messages, user, msg, model, temperature, permitPromptCompletion);
+    // try {
+    //     const completion = await openai.createCompletion({
+    //         model,
+    //         prompt: completionInput,
+    //         max_tokens: maxTokens,
+    //         temperature,
+    //         user,
+    //     }, {
+    //         timeout: DEFAULT_TIMEOUT,
+    //     });
 
-        if (completion.data.choices && completion.data.choices.length > 0) {
-            let generation = completion.data.choices[0].text!;
+    //     if (completion.data.choices && completion.data.choices.length > 0) {
+    //         let generation = completion.data.choices[0].text!;
 
-            if (generation === '') {
-                return {
-                    result: undefined,
-                    error: 'Got same completion as input. Try with an altered prompt.',
-                };
-            }
+    //         if (generation === '') {
+    //             return {
+    //                 result: undefined,
+    //                 error: 'Got same completion as input. Try with an altered prompt.',
+    //             };
+    //         }
 
-            messages.push({
-                role: 'assistant',
-                content: generation,
-            });
+    //         messages.push({
+    //             role: 'assistant',
+    //             content: generation,
+    //         });
 
-            return {
-                result: createStringFromMessages(messages, false, permitPromptCompletion),
-                error: undefined,
-                messages,
-            };
-        }
+    //         return {
+    //             result: createStringFromMessages(messages, false, permitPromptCompletion),
+    //             error: undefined,
+    //             messages,
+    //         };
+    //     }
 
-        return {
-            result: undefined,
-            error: 'Unexpected response from api',
-        };
-    } catch (err) {
-        return {
-            result: undefined,
-            error: (err as any).toString(),
-        };
-    }
+    //     return {
+    //         result: undefined,
+    //         error: 'Unexpected response from api',
+    //     };
+    // } catch (err) {
+    //     return {
+    //         result: undefined,
+    //         error: (err as any).toString(),
+    //     };
+    // }
 }
 
 export async function handleChatGPTRequest(
     prompt: string,
     user: string = '',
+    msg: Message,
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature: number = DEFAULT_CHATGPT_TEMPERATURE,
@@ -382,47 +407,126 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
         content: prompt,
     });
 
+    return handleGPTStream(messages, user, msg, model, temperature, permitPromptCompletion);
+}
+
+export async function handleGPTStream(
+    messages: ChatCompletionRequestMessage[],
+    user: string = '',
+    msg: Message,
+    model: string = DEFAULT_AI_MODEL,
+    temperature: number = DEFAULT_TEMPERATURE,
+    permitPromptCompletion: boolean = true,
+) {
     try {
-        const completion = await openai.createChatCompletion({
-            model,
-            messages,
-            max_tokens: maxTokens,
-            temperature,
-            user,
-        }, {
-            timeout: DEFAULT_TIMEOUT,
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${config.openaiApiKey}`,
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: messages,
+                // max_tokens: maxTokens,
+                temperature: temperature,
+                user: user,
+                stream: true,
+            }),
         });
+        console.log(response);
 
-        if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
-            let generation = completion.data.choices[0].message.content!;
 
-            if (generation === '') {
-                return {
-                    result: undefined,
-                    error: 'Got same completion as input. Try with an altered prompt.',
-                };
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder("utf-8");
+
+        let output = '';
+        let totalOutput = '';
+        let begin = true;
+        let msgRef: Message | undefined = undefined;
+        let cycleCount = 0;
+        while (true) {
+            const { done, value } = await reader?.read() ?? { done: true, value: undefined };
+            if (done) {
+                if (msgRef) {
+                    msgRef?.edit(output);
+                    messages.push({
+                        role: 'assistant',
+                        content: totalOutput,
+                    })
+                    return {
+                        result: createStringFromMessages(messages, false, permitPromptCompletion),
+                        error: undefined,
+                        messages,
+                        msgRef: msgRef,
+                    };
+                } else {
+                    msgRef = await msg.reply(output);
+                    messages.push({
+                        role: 'assistant',
+                        content: totalOutput,
+                    })
+                    return {
+                        result: createStringFromMessages(messages, false, permitPromptCompletion),
+                        error: undefined,
+                        messages,
+                        msgRef: msgRef,
+                    };
+                }
+
             }
 
-            messages.push({
-                role: 'assistant',
-                content: generation,
-            });
+            // Massage and parse the chunk of data
+            const chunk = decoder.decode(value)
+            const lines = chunk.split(/\n+/);
 
-            return {
-                result: createStringFromMessages(messages, false, permitPromptCompletion),
-                error: undefined,
-                messages,
-            };
+
+            for (let line of lines) {
+                const parsedLines = line.split(/\n+/)
+                    .map((line) => line.replace(/^data: /, "").trim()) // Remove the "data: " prefix
+                    .filter((line) => line !== "" && line !== "[DONE]") // Remove empty lines and "[DONE]"
+                    .map((line) => JSON.parse(line)); // Parse the JSON string
+
+
+                for (const parsedLine of parsedLines) {
+                    const { choices } = parsedLine;
+                    const { delta, finish_reason } = choices[0];
+                    const { content } = delta;
+                    totalOutput += content;
+                    if (!finish_reason && content !== "") {
+                        if (output.length >= 1850) {
+                            totalOutput += content;
+                            await msgRef?.edit(output);
+                            msgRef = await msg.reply(content);
+                            messages.push({
+                                role: 'assistant',
+                                content: totalOutput,
+                            })
+                            output = content;
+                            cycleCount = 0;
+                        } else {
+                            output += content;
+                        }
+                        /* number of passes (words, spaces, symbols) before initial post */
+                        if (begin) {
+                            msgRef = await msg.reply(output);
+                            begin = false;
+                            cycleCount = 0;
+                        }
+                        /* passes per subsequent edit */
+                        if (cycleCount >= 50) {
+                            msgRef?.edit(output);
+                            cycleCount = 0;
+                        }
+                    }
+                    cycleCount++;
+                }
+            }
         }
 
-        return {
-            result: undefined,
-            error: 'Unexpected response from api',
-        };
     } catch (err) {
-        return {
-            result: undefined,
-            error: err.toString(),
-        };
+        return messages;
     }
 }
+
+
