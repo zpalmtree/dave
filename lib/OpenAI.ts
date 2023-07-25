@@ -16,8 +16,8 @@ const DEFAULT_MAX_TOKENS = 420;
 const DEFAULT_CHATGPT_MODEL = 'gpt-4';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
-const BEFORE_FIRST_POST = 10; //number of passes (usually single words, symbols) before initial post
-const BEFORE_EDIT = 50; //number of passes before each subsequent edit
+const BEFORE_FIRST_POST = 10; //number of "deltas" (usually single words, symbols) before initial post
+const BEFORE_EDIT = 50; //number of "deltas" before each subsequent edit
 const legacyGPTModels = ['text-davinci-003', 'text-davinci-002', 'text-davinci-001', 'text-curie-001', 'text-babbage-001', 'text-ada-001', 'davinci', 'curie', 'babbage', 'ada'];
 
 const bannedUsers = [
@@ -42,7 +42,7 @@ type OpenAIHandler = (
     systemPrompt?: string,
     temperature?: number,
     permitPromptCompletion?: boolean,
-) => Promise<any>;
+) => Promise<OpenAIResponse>;
 
 function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true, permitPromptCompletion = true) {
     let messages = [...msgs];
