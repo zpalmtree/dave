@@ -1,5 +1,6 @@
 import moment from 'moment';
 import sqlite3 from 'sqlite3';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 import {
     Message,
@@ -41,28 +42,27 @@ import {
     Commands,
     handleHelp,
 } from './CommandDeclarations.js';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+
+import { cacheMessageForSummarization } from './Summarize.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
-    if (!msg.content.startsWith(config.prefix)) {
+    if (config.devEnv && !config.devChannels.includes(msg.channel.id)) {
         return;
     }
-
-    /*
-    if (msg.author.bot) {
-        return;
-    }
-    */
 
     if (msg.author.id === msg.client.user.id) {
         return;
     }
 
-    if (config.devEnv && !config.devChannels.includes(msg.channel.id)) {
+    if (!msg.content.startsWith(config.prefix)) {
+        if (!msg.author.bot) {
+            cacheMessageForSummarization(msg);
+        }
+
         return;
     }
-
+        
     /* Get the command with prefix, and any args */
     const [ tmp, ...args ] = msg.content.trim().split(/\s+/);
 

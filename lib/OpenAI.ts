@@ -11,7 +11,7 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 const DEFAULT_TEMPERATURE = 1.2;
-const DEFAULT_CHATGPT_TEMPERATURE = 1.2;
+const DEFAULT_CHATGPT_TEMPERATURE = 1.1;
 const DEFAULT_MAX_TOKENS = 420;
 const DEFAULT_CHATGPT_MODEL = 'gpt-4';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
@@ -281,9 +281,6 @@ export async function handleGPT3Request(
     const model = DEFAULT_AI_MODEL;
     const maxTokens = DEFAULT_MAX_TOKENS;
 
-    let maxAttempts = 3;
-    let attempt = 0;
-
     const messages = previousConvo || [];
 
     if (messages.length === 0 && systemPrompt) {
@@ -363,9 +360,6 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
     const model = DEFAULT_CHATGPT_MODEL;
     const maxTokens = DEFAULT_MAX_TOKENS;
 
-    let maxAttempts = 3;
-    let attempt = 0;
-
     const messages = previousConvo || [];
 
     if (messages.length === 0 && systemPrompt) {
@@ -410,6 +404,60 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
                 result: createStringFromMessages(messages, false, permitPromptCompletion),
                 error: undefined,
                 messages,
+            };
+        }
+
+        return {
+            result: undefined,
+            error: 'Unexpected response from api',
+        };
+    } catch (err) {
+        return {
+            result: undefined,
+            error: (err as any).toString(),
+        };
+    }
+}
+
+export async function aiSummarize(contentToSummarize: string, requestingUser: string) {
+    const systemPrompt = createSystemPrompt(`You are ChatGPT, a helpful, funny, artificial intelligence. You are not an AI language model.
+
+    Your task is to provide a summary of a discord chat history log, which will follow. Jump directly into the summary, don't provide any meta commentary. E.g. "John mentioned he is hungry, Sally said she wants to eat Pizza"
+
+    ==END OF INSTRUCTIONS==`);
+
+    const model = DEFAULT_CHATGPT_MODEL;
+    const maxTokens = DEFAULT_MAX_TOKENS;
+
+    const messages: ChatCompletionRequestMessage[] = [];
+
+    messages.push({
+        role: 'system',
+        content: systemPrompt,
+    });
+
+    messages.push({
+        role: 'user',
+        content: contentToSummarize,
+    });
+
+    try {
+        const completion = await openai.createChatCompletion({
+            model,
+            messages,
+            max_tokens: maxTokens,
+            temperature: DEFAULT_CHATGPT_TEMPERATURE,
+            user: requestingUser,
+        }, {
+            timeout: DEFAULT_TIMEOUT,
+        });
+
+        if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
+            let generation = completion.data.choices[0].message.content!;
+
+            return {
+                result: generation,
+                error: undefined,
             };
         }
 

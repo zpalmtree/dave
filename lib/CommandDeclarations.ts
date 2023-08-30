@@ -95,6 +95,8 @@ import {
     deleteTimer,
 } from './Timer.js';
 
+import { handleSummarize } from './Summarize.js';
+
 import { exchangeService } from './Exchange.js';
 
 import { handleWeather } from './Weather.js';
@@ -1066,6 +1068,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleChickenFried,
             description: 'Get the chicken fried vid',
+        },
+    },
+    {
+        aliases: ['summarize', 'summary'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSummarize,
+            description: 'Get a summary of recent conversation in this channel',
         },
     },
 ];
