@@ -6,6 +6,8 @@ import { getUsername } from './Utilities.js';
 export interface CachedMessage {
     content: string;
     author: string;
+    id: string;
+    reply?: string;
 }
 
 const MAX_SUMMARIZE_MESSAGE_COUNT = 50;
@@ -27,7 +29,14 @@ export async function handleSummarize(msg: Message): Promise<void> {
 
     for (const storedMessage of previousMessages) {
         const username = await getUsername(storedMessage.author, msg.guild);
-        contentToSummarize += `${username}: ${storedMessage.content}\n`;
+
+        const id = `[ID# ${storedMessage.id}]`;
+
+        const reply = storedMessage.reply
+            ? `[Reply to ID# ${storedMessage.reply}]`
+            : '';
+
+        contentToSummarize += `${id} ${reply} ${username}: ${storedMessage.content}\n`;
     }
 
     console.log(`Input length: ${contentToSummarize.length}`);
@@ -61,6 +70,8 @@ export async function cacheMessageForSummarization(msg: Message): Promise<void> 
     existingMessages.push({
         content: msg.content.trim(),
         author: msg.author.id,
+        id: msg.id,
+        reply: msg?.reference?.messageId || undefined,
     });
 
     console.log(`Existing messages: ${JSON.stringify(existingMessages, null, 4)}`);
