@@ -20,6 +20,9 @@ export async function handleSummarize(msg: Message): Promise<void> {
      * like 1000, 1001, 3, etc. This saves tokens in the GPT prompt. */
     const idMap = new Map<string, number>();
 
+    /* Save us making constant lookups to find usernames */
+    const usernameMap = new Map<string, string>();
+
     const channel = msg.channel.id;
 
     let contentToSummarize = '';
@@ -36,7 +39,14 @@ export async function handleSummarize(msg: Message): Promise<void> {
     for (const storedMessage of previousMessages) {
         idMap.set(storedMessage.id, currentId);
 
-        const username = await getUsername(storedMessage.author, msg.guild);
+        let username;
+
+        if (usernameMap.has(storedMessage.author)) {
+            username = usernameMap.get(storedMessage.author);
+        } else {
+            username = await getUsername(storedMessage.author, msg.guild);
+            usernameMap.set(storedMessage.author, username);
+        }
 
         const id = `[ID#${currentId}]`;
 
