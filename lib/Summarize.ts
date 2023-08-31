@@ -61,10 +61,10 @@ export async function handleSummarize(msg: Message): Promise<void> {
                 replyId = Number(storedMessage.reply.slice(-3));
             }
 
-            reply = `[Reply to ID#${replyId}]`;
+            reply = ` [Reply to ID#${replyId}]`;
         }
 
-        contentToSummarize += `${id} ${reply} ${username}: ${storedMessage.content}\n`;
+        contentToSummarize += `${id}${reply} ${username}: ${storedMessage.content}\n`;
 
         currentId++;
     }
