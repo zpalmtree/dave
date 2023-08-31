@@ -87,14 +87,22 @@ export async function cacheMessageForSummarization(msg: Message): Promise<void> 
         existingMessages.shift();
     }
 
+    let content = msg.content.trim();
+
+    if (msg.attachments.size) {
+        content += '\n' + [...msg.attachments.values()].map((a) => a.url).join(' ');
+    }
+
+    if (content === '') {
+        return;
+    }
+
     existingMessages.push({
-        content: msg.content.trim(),
+        content,
         author: msg.author.id,
         id: msg.id,
         reply: msg?.reference?.messageId || undefined,
     });
-
-    console.log(`Existing messages: ${JSON.stringify(existingMessages, null, 4)}`);
 
     cachedMessages.set(channel, existingMessages);
 }
