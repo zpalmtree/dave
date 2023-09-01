@@ -122,17 +122,12 @@ export async function handleSummarize(msg: Message): Promise<void> {
 export async function handleLongSummarize(msg: Message): Promise<void> {
     await msg.reply(`Generating long summary, please wait, this will take some time...`);
 
-    const systemPrompt = `Your task is to provide a brief summary of a discord chat history snippet, which will follow. Jump directly into the summary, don't provide any meta commentary. Use frequent paragraphs, and don't mention ID numbers of the replies. You may provide an amusing conclusion summing up all activity if you like.
-
-    ==END OF INSTRUCTIONS==`;
-
     const { error, result } = await summarizeMessages(
         msg.channel.id,
         msg.guild,
         msg.author.id,
         LONG_SUMMARY_MESSAGE_COUNT,
         LONG_SUMMARY_MAX_INPUT_LENGTH,
-        systemPrompt,
     );
 
     if (error || !result) {
