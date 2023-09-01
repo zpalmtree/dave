@@ -18,8 +18,9 @@ const SHORT_SUMMARY_MESSAGE_COUNT = 50;
 const SHORT_SUMMARY_MAX_INPUT_LENGTH = MAX_AVERAGE_MESSAGE_LENGTH * SHORT_SUMMARY_MESSAGE_COUNT;
 
 const LONG_SUMMARY_MESSAGE_COUNT = 1500;
-/* 32k context length */
-const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(32768 * 0.75);
+
+/* 8k context length */
+const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(8192 * 0.75);
 
 const cachedMessages = new Map<string, CachedMessage[]>;
 
