@@ -95,7 +95,10 @@ import {
     deleteTimer,
 } from './Timer.js';
 
-import { handleSummarize } from './Summarize.js';
+import {
+    handleSummarize,
+    handleLongSummarize,
+} from './Summarize.js';
 
 import { exchangeService } from './Exchange.js';
 
@@ -1071,11 +1074,19 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['summarize', 'summary'],
+        aliases: ['summary', 'summarize'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleSummarize,
             description: 'Get a summary of recent conversation in this channel',
+        },
+    },
+    {
+        aliases: ['longsummary', 'longsummarize'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleLongSummarize,
+            description: 'Get a longer summary of conversation in this channel',
         },
     },
 ];

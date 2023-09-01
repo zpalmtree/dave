@@ -1,4 +1,4 @@
-import { Message } from 'discord.js';
+import { Message, Guild } from 'discord.js';
 
 import { aiSummarize } from './OpenAI.js';
 import { getUsername } from './Utilities.js';
@@ -10,12 +10,41 @@ export interface CachedMessage {
     reply?: string;
 }
 
-const MAX_SUMMARIZE_MESSAGE_COUNT = 50;
-const MAX_SUMMARIZE_INPUT_LENGTH = 3000;
+const MAX_SUMMARIZE_MESSAGE_COUNT = 1500;
+
+const MAX_AVERAGE_MESSAGE_LENGTH = 60;
+
+const SHORT_SUMMARY_MESSAGE_COUNT = 50;
+const SHORT_SUMMARY_MAX_INPUT_LENGTH = MAX_AVERAGE_MESSAGE_LENGTH * SHORT_SUMMARY_MESSAGE_COUNT;
+
+const LONG_SUMMARY_MESSAGE_COUNT = 1500;
+/* 32k context length */
+const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(32768 * 0.75);
 
 const cachedMessages = new Map<string, CachedMessage[]>;
 
-export async function handleSummarize(msg: Message): Promise<void> {
+export async function summarizeMessages(
+    channel: string,
+    guild: Guild | null,
+    authorId: string,
+    messageCount: number,
+    maxLength: number,
+    systemPrompt?: string) {
+
+    const previousMessages = cachedMessages.get(channel) || [];
+
+    if (previousMessages.length === 0) {
+        return {
+            error: `No messages cached for this channel. Bot may have recently restarted.`,
+            result: undefined,
+        }
+    }
+
+    /* Get the messageCount newest messages */
+    const newestMessages = previousMessages.slice(Math.max(previousMessages.length - messageCount, 0));
+
+    let currentId = 1000;
+
     /* This maps a discord message id, e.g. 1146565736538587278 to a shortened id
      * like 1000, 1001, 3, etc. This saves tokens in the GPT prompt. */
     const idMap = new Map<string, number>();
@@ -23,20 +52,9 @@ export async function handleSummarize(msg: Message): Promise<void> {
     /* Save us making constant lookups to find usernames */
     const usernameMap = new Map<string, string>();
 
-    const channel = msg.channel.id;
-
     let contentToSummarize = '';
 
-    const previousMessages = cachedMessages.get(channel) || [];
-
-    if (previousMessages.length === 0) {
-        await msg.reply(`No messages cached for this channel. Bot may have recently restarted.`);
-        return;
-    }
-
-    let currentId = 1000;
-
-    for (const storedMessage of previousMessages) {
+    for (const storedMessage of newestMessages) {
         idMap.set(storedMessage.id, currentId);
 
         let username;
@@ -44,7 +62,7 @@ export async function handleSummarize(msg: Message): Promise<void> {
         if (usernameMap.has(storedMessage.author)) {
             username = usernameMap.get(storedMessage.author);
         } else {
-            username = await getUsername(storedMessage.author, msg.guild);
+            username = await getUsername(storedMessage.author, guild);
             usernameMap.set(storedMessage.author, username);
         }
 
@@ -69,19 +87,55 @@ export async function handleSummarize(msg: Message): Promise<void> {
         currentId++;
     }
 
-    console.log(`Input length: ${contentToSummarize.length}`);
-
-    if (contentToSummarize.length > MAX_SUMMARIZE_INPUT_LENGTH) {
-        const startIndex = contentToSummarize.length - MAX_SUMMARIZE_INPUT_LENGTH;
+    if (contentToSummarize.length > maxLength) {
+        const startIndex = contentToSummarize.length - maxLength;
         contentToSummarize = contentToSummarize.slice(startIndex);
     }
 
-    console.log(`Summarizing: ${contentToSummarize}`);
+    return aiSummarize(
+        contentToSummarize,
+        authorId,
+        systemPrompt,
+    );
+}
 
-    const { result, error } = await aiSummarize(contentToSummarize, msg.author.id);
+export async function handleSummarize(msg: Message): Promise<void> {
+    await msg.reply(`Generating summary, please wait, this will take some time...`);
+
+    const { error, result } = await summarizeMessages(
+        msg.channel.id,
+        msg.guild,
+        msg.author.id,
+        SHORT_SUMMARY_MESSAGE_COUNT,
+        SHORT_SUMMARY_MAX_INPUT_LENGTH,
+    );
 
     if (error || !result) {
-        await msg.reply(`Error trying to summarize content: ${error}`);
+        await msg.reply(`Error trying to summarize content: ${error || 'Unknown Error'}`);
+        return;
+    }
+
+    await msg.reply(result);
+}
+
+export async function handleLongSummarize(msg: Message): Promise<void> {
+    await msg.reply(`Generating long summary, please wait, this will take some time...`);
+
+    const systemPrompt = `Your task is to provide a brief summary of a discord chat history snippet, which will follow. Jump directly into the summary, don't provide any meta commentary. Use frequent paragraphs, and don't mention ID numbers of the replies. You may provide an amusing conclusion summing up all activity if you like.
+
+    ==END OF INSTRUCTIONS==`;
+
+    const { error, result } = await summarizeMessages(
+        msg.channel.id,
+        msg.guild,
+        msg.author.id,
+        LONG_SUMMARY_MESSAGE_COUNT,
+        LONG_SUMMARY_MAX_INPUT_LENGTH,
+        systemPrompt,
+    );
+
+    if (error || !result) {
+        await msg.reply(`Error trying to summarize content: ${error || 'Unknown Error'}`);
         return;
     }
 

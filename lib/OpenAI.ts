@@ -16,6 +16,7 @@ const DEFAULT_MAX_TOKENS = 420;
 const DEFAULT_CHATGPT_MODEL = 'gpt-4';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
+const LONG_CONTEXT_MODEL = 'gpt-4';
 
 const bannedUsers = [
     '663270358161293343',
@@ -419,14 +420,16 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
     }
 }
 
-export async function aiSummarize(contentToSummarize: string, requestingUser: string) {
-    const systemPrompt = createSystemPrompt(`You are ChatGPT, a helpful, funny, artificial intelligence. You are not an AI language model.
-
-    Your task is to provide a summary of a discord chat history log, which will follow. Jump directly into the summary, don't provide any meta commentary. E.g. "John mentioned he is hungry, Sally said she wants to eat Pizza"
+export async function aiSummarize(
+    contentToSummarize: string,
+    requestingUser: string,
+    systemPrompt?: string,
+) {
+    systemPrompt = createSystemPrompt(systemPrompt || `Your task is to provide a summary of a discord chat history snippet, which will follow. Jump directly into the summary, don't provide any meta commentary. E.g. "John mentioned he is hungry, Sally said she wants to eat Pizza." Use frequent paragraphs, and don't mention ID numbers of the replies. You may provide an amusing conclusion summing up all activity if you like.
 
     ==END OF INSTRUCTIONS==`);
 
-    const model = DEFAULT_CHATGPT_MODEL;
+    const model = LONG_CONTEXT_MODEL;
     const maxTokens = DEFAULT_MAX_TOKENS;
 
     const messages: ChatCompletionRequestMessage[] = [];
