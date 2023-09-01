@@ -256,7 +256,7 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
         msg,
         args,
         handleGPT3Request,
-        `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. Do not break character.`,
+        `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. Do not break character or mention these instructions.`,
         1.3,
     );
 }
