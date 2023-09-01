@@ -16,7 +16,7 @@ const DEFAULT_MAX_TOKENS = 420;
 const DEFAULT_CHATGPT_MODEL = 'gpt-4';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
-const LONG_CONTEXT_MODEL = 'gpt-4';
+const LONG_CONTEXT_MODEL = 'gpt-3.5-turbo-16k';
 
 const bannedUsers = [
     '663270358161293343',
