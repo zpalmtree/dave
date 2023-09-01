@@ -251,6 +251,16 @@ export async function handleDoctor(msg: Message, args: string): Promise<void> {
     );
 }
 
+export async function handleGf(msg: Message, args: string): Promise<void> {
+    await handleOpenAI(
+        msg,
+        args,
+        handleGPT3Request,
+        `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. Do not break character.`,
+        1.3,
+    );
+}
+
 function getCurrentDatePrompt() {
     const now = new Date().toLocaleDateString('en-US', {
         weekday: 'long',

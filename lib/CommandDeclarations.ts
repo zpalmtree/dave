@@ -87,6 +87,7 @@ import {
     handleBuddha,
     handleTsong,
     handleDoctor,
+    handleGf,
 } from './OpenAI.js';
 
 import {
@@ -1080,6 +1081,9 @@ export const Commands: Command[] = [
             implementation: handleSummarize,
             description: 'Get a summary of recent conversation in this channel',
         },
+        relatedCommands: [
+            'longsummary',
+        ],
     },
     {
         aliases: ['longsummary', 'longsummarize'],
@@ -1087,6 +1091,17 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleLongSummarize,
             description: 'Get a longer summary of conversation in this channel',
+        },
+        relatedCommands: [
+            'summary',
+        ],
+    },
+    {
+        aliases: ['gf'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGf,
+            description: 'Talk to your virtual gf',
         },
     },
 ];
