@@ -67,12 +67,15 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeS
             if (isFirstReply) {
                 /* Prompt completion not allowed. Always add newlines after user prompt. */
                 if (!permitPromptCompletion) {
-                    content = '\n\n' + content;
+                    content = '\n' + content;
                 } else {
-                    /* AI probably started a new thought. Add spacing instead
-                     * of completing user prompt */
-                    if (isCapital(content)) {
-                        content = '\n\n' + content;
+                    const firstChar = content[0];
+
+                    const isLowerAZ = firstChar >= 'a' && firstChar <= 'z';
+
+                    /* If lower az, assume continuing previous convo */
+                    if (!isLowerAZ) {
+                        content = '\n' + content;
                     }
                 }
 
@@ -107,9 +110,9 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeS
     let result;
 
     if (includeSystemPrompt) {
-        result = usableMessages[0] + '\n\n' + usableMessages[1] + usableMessages.slice(2).join('\n\n');
+        result = usableMessages[0] + '\n' + usableMessages[1] + usableMessages.slice(2).join('\n');
     } else {
-        result = usableMessages[0] + usableMessages.slice(1).join('\n\n');
+        result = usableMessages[0] + usableMessages.slice(1).join('\n');
     }
 
     return result;
