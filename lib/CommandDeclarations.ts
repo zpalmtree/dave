@@ -88,6 +88,7 @@ import {
     handleTsong,
     handleDoctor,
     handleGf,
+    handleTradGf,
 } from './OpenAI.js';
 
 import {
@@ -1102,6 +1103,14 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleGf,
             description: 'Talk to your virtual gf',
+        },
+    },
+    {
+        aliases: ['tradgf'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTradGf,
+            description: 'Talk to your trad virtual gf',
         },
     },
 ];
