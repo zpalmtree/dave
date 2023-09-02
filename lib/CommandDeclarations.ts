@@ -64,6 +64,8 @@ import {
     handleBuddha,
     handleTsong,
     handleDoctor,
+    handleGf,
+    handleTradGf,
 } from './OpenAI.js';
 
 import {
@@ -1197,6 +1199,52 @@ export const Commands: Command[] = [
             'buddha',
             'tsong',
         ],
+    },
+    {
+        aliases: ['chickenfried', 'fried', 'friday', 'fridaynight', 'coldbeer', 'radio', 'sunrise', 'womanseyes', 'preciouschild', 'motherslove', 'jeans', 'repost'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleChickenFried,
+            description: 'Get the chicken fried vid',
+        },
+    },
+    {
+        aliases: ['summary', 'summarize'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSummarize,
+            description: 'Get a summary of recent conversation in this channel',
+        },
+        relatedCommands: [
+            'longsummary',
+        ],
+    },
+    {
+        aliases: ['longsummary', 'longsummarize'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleLongSummarize,
+            description: 'Get a longer summary of conversation in this channel',
+        },
+        relatedCommands: [
+            'summary',
+        ],
+    },
+    {
+        aliases: ['gf'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGf,
+            description: 'Talk to your virtual gf',
+        },
+    },
+    {
+        aliases: ['tradgf'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTradGf,
+            description: 'Talk to your trad virtual gf',
+        },
     },
 ];
 
