@@ -46,7 +46,21 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[]) {
         messages = messages.slice(1);
     }
 
-    return messages.map((m) => m.content).join('\n\n');
+    const includedMessages = []; 
+
+    // the looping variable begins from the end of the array
+    for (let i = messages.length - 1; i >= 0; i--) { 
+        // append the i-th message's content if its length with the existing strings is less than or equals to 1900
+        if (includedMessages.join('').length + messages[i].content.length <= 1900) {
+            includedMessages.unshift(messages[i].content);
+        } 
+        // break the loop if adding another message's content would lead to the overall length exceeding 1900
+        else {
+            break;
+        }
+    }
+
+    return includedMessages.join('\n\n');
 }
 
 function cacheMessage(messageId: string, messages: ChatCompletionRequestMessage[]) {
