@@ -193,6 +193,7 @@ async function main() {
             console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${err.toString()}`);
             console.log(`Error stack trace: ${err.stack}`);
             tryReactMessage(msg, '🔥');
+            await msg.reply(`Error: ${(err as any).toString()}`);
         }
     });
 
