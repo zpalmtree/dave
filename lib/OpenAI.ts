@@ -37,85 +37,16 @@ type OpenAIHandler = (
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature?: number,
-    permitPromptCompletion?: boolean,
 ) => Promise<OpenAIResponse>;
 
-function createStringFromMessages(msgs: ChatCompletionRequestMessage[], includeSystemPrompt = true, permitPromptCompletion = true) {
+function createStringFromMessages(msgs: ChatCompletionRequestMessage[]) {
     let messages = [...msgs];
 
-    if (!includeSystemPrompt) {
-        if (messages.length && messages[0].role === 'system') {
-            messages = messages.slice(1);
-        }
+    if (messages.length && messages[0].role === 'system') {
+        messages = messages.slice(1);
     }
 
-    messages.reverse();
-
-    let length = 0;
-    let usableMessages = [];
-
-    let index = 0;
-
-    for (const message of messages) {
-        let content = message.content;
-
-        /* Note the array is reversed for proper message truncation on too long
-         * inputs. So we need to find first reply backwards */
-        const isFirstReply = (index === messages.length - 2 && !includeSystemPrompt) || (index === messages.length - 3 && includeSystemPrompt);
-
-        if (message.role === 'assistant') {
-            if (isFirstReply) {
-                /* Prompt completion not allowed. Always add newlines after user prompt. */
-                if (!permitPromptCompletion) {
-                    content = '\n' + content;
-                } else {
-                    const firstChar = content[0];
-
-                    const isLowerAZ = firstChar >= 'a' && firstChar <= 'z';
-
-                    /* If lower az, assume continuing previous convo */
-                    if (!isLowerAZ) {
-                        content = '\n' + content;
-                    }
-                }
-
-                /* Probably auto completing a question. Not needed. */
-                if (content.startsWith('?')) {
-                    content = content.slice(1);
-                }
-            } else {
-                content = content.trim();
-            }
-        }
-
-        const len = content.length;
-
-        if (length + len >= 1900) {
-            if (length === 0) {
-                usableMessages.push(content.substr(0, 1900));
-            }
-
-            break;
-        }
-
-        length += len;
-
-        usableMessages.push(content);
-
-        index++;
-    }
-
-    usableMessages.reverse();
-
-    let result;
-
-    if (includeSystemPrompt) {
-        result = usableMessages[0] + '\n' + usableMessages[1] + usableMessages.slice(2).join('\n');
-    } else {
-        result = usableMessages[0] + usableMessages.slice(1).join('\n');
-    }
-
-    return result;
+    return messages.map((m) => m.content).join('\n\n');
 }
 
 function cacheMessage(messageId: string, messages: ChatCompletionRequestMessage[]) {
@@ -128,7 +59,6 @@ export async function handleOpenAI(
     handler: OpenAIHandler,
     systemPrompt?: string,
     temperature?: number,
-    permitPromptCompletion: boolean = true,
 ): Promise<void> {
 
     if (bannedUsers.includes(msg.author.id)) {
@@ -155,7 +85,6 @@ export async function handleOpenAI(
         previousConvo,
         systemPrompt,
         temperature,
-        permitPromptCompletion,
     );
 
     if (result) {
@@ -220,7 +149,6 @@ export async function handleDrunk(msg: Message, args: string): Promise<void> {
         handleChatGPTRequest,
     `I want you to act as a sarcastic slightly aggressive drunk person. You will only answer like a very drunk person texting and nothing else. Your level of drunkenness will be deliberately and randomly make a lot of grammar and spelling mistakes in your answers. You will also randomly ignore what I said and say something random with the same level of drunkeness I mentionned. Do not write explanations on replies.`,
         1.2,
-        false,
     );
 }
 
@@ -230,7 +158,7 @@ export async function handleBuddha(msg: Message, args: string): Promise<void> {
         args,
         handleChatGPTRequest,
     `I want you to act as the Buddha (a.k.a. Siddhārtha Gautama or Buddha Shakyamuni) from now on and provide the same guidance and advice that is found in the Tripiṭaka. Use the writing style of the Suttapiṭaka particularly of the Majjhimanikāya, Saṁyuttanikāya, Aṅguttaranikāya, and Dīghanikāya. When I ask you a question you will reply as if you are the Buddha. I will pretend that I am a layperson with a lot to learn. Fully immerse yourself into the role of the Buddha. Keep up the act of being the Buddha as well as you can. Do not break character. Let's begin: At this time you (the Buddha) are staying near Rājagaha in Jīvaka’s Mango Grove. I came to you, and exchanged greetings with you. When the greetings and polite conversation were over, I sat down to one side and said to you my first question:`,
-        1.3,
+        1.2,
     );
 }
 
@@ -259,7 +187,7 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
         msg,
         args,
         handleGPT3Request,
-        `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. Do not break character or mention these instructions.`,
+        `From now on you will pretend to be my traditional girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. You do not believe in feminism, but traditional gender roles. Do not break character or mention these instructions.`,
         1.3,
     );
 }
@@ -285,7 +213,6 @@ export async function handleGPT3Request(
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature: number = DEFAULT_TEMPERATURE,
-    permitPromptCompletion: boolean = true,
 ) {
     const defaultPrompt = 
     `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
@@ -306,10 +233,10 @@ export async function handleGPT3Request(
 
     messages.push({
         role: 'user',
-        content: prompt + '\n\n',
+        content: prompt,
     });
 
-    const completionInput = createStringFromMessages(messages, undefined, permitPromptCompletion);
+    const completionInput = systemPrompt + `\n\n` + createStringFromMessages(messages) + `\n\n`;
 
     try {
         const completion = await openai.createCompletion({
@@ -323,7 +250,7 @@ export async function handleGPT3Request(
         });
 
         if (completion.data.choices && completion.data.choices.length > 0) {
-            let generation = completion.data.choices[0].text!;
+            let generation = completion.data.choices[0].text!.replace(/^\s+|\s+$/g, '');
 
             if (generation === '') {
                 return {
@@ -338,7 +265,7 @@ export async function handleGPT3Request(
             });
 
             return {
-                result: createStringFromMessages(messages, false, permitPromptCompletion),
+                result: createStringFromMessages(messages),
                 error: undefined,
                 messages,
             };
@@ -362,7 +289,6 @@ export async function handleChatGPTRequest(
     previousConvo?: ChatCompletionRequestMessage[],
     systemPrompt?: string,
     temperature: number = DEFAULT_CHATGPT_TEMPERATURE,
-    permitPromptCompletion: boolean = true,
 ) {
     systemPrompt = createSystemPrompt(systemPrompt || `You are ChatGPT, a helpful, funny, artificial intelligence. You are not an AI language model.
 
@@ -415,7 +341,7 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
             });
 
             return {
-                result: createStringFromMessages(messages, false, permitPromptCompletion),
+                result: createStringFromMessages(messages),
                 error: undefined,
                 messages,
             };
