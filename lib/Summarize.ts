@@ -1,7 +1,7 @@
 import { Message, Guild } from 'discord.js';
 
 import { aiSummarize } from './OpenAI.js';
-import { getUsername } from './Utilities.js';
+import { getUsername, truncateResponse } from './Utilities.js';
 
 export interface CachedMessage {
     content: string;
@@ -116,7 +116,7 @@ export async function handleSummarize(msg: Message): Promise<void> {
         return;
     }
 
-    await msg.reply(result);
+    await msg.reply(truncateResponse(result));
 }
 
 export async function handleLongSummarize(msg: Message): Promise<void> {
@@ -135,7 +135,7 @@ export async function handleLongSummarize(msg: Message): Promise<void> {
         return;
     }
 
-    await msg.reply(result);
+    await msg.reply(truncateResponse(result));
 }
 
 export async function cacheMessageForSummarization(msg: Message): Promise<void> {
