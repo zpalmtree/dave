@@ -390,7 +390,7 @@ export async function aiSummarize(
     requestingUser: string,
     systemPrompt?: string,
 ) {
-    systemPrompt = createSystemPrompt(systemPrompt || `Your task is to provide a summary of a discord chat history snippet, which will follow. Jump directly into the summary, don't provide any meta commentary. E.g. "John mentioned he is hungry, Sally said she wants to eat Pizza." Use frequent paragraphs, and don't mention ID numbers of the replies. You may provide an amusing conclusion summing up all activity if you like.
+    systemPrompt = createSystemPrompt(systemPrompt || `Your task is to provide a summary of a discord chat history snippet, which will follow. Jump directly into the summary, don't provide any meta commentary. E.g. "John mentioned he is hungry, Sally said she wants to eat Pizza." Use frequent paragraphs, and don't mention ID numbers of the replies. You may provide an amusing conclusion summing up all activity if you like. Your summary should not exceed 1900 characters.
 
     ==END OF INSTRUCTIONS==`);
 
