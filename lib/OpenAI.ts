@@ -2,7 +2,7 @@ import { Message } from 'discord.js';
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai';
 
 import { config } from './Config.js';
-import { isCapital } from './Utilities.js';
+import { truncateResponse } from './Utilities.js';
 
 const configuration = new Configuration({
     apiKey: config.openaiApiKey,
@@ -54,8 +54,11 @@ function createStringFromMessages(msgs: ChatCompletionRequestMessage[]) {
         if (includedMessages.join('').length + messages[i].content.length <= 1900) {
             includedMessages.unshift(messages[i].content);
         } 
+        // append truncated message if no messages included yet
+        else if (includedMessages.length === 0) {
+            includedMessages.unshift(truncateResponse(messages[i].content, 1900));
+        } else {
         // break the loop if adding another message's content would lead to the overall length exceeding 1900
-        else {
             break;
         }
     }
@@ -102,7 +105,7 @@ export async function handleOpenAI(
     );
 
     if (result) {
-        const message = await msg.reply(result);
+        const message = await msg.reply(truncateResponse(result));
 
         if (messages) {
             cacheMessage(message.id, messages);
@@ -352,7 +355,7 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
         });
 
         if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
-            let generation = completion.data.choices[0].message.content!;
+            let generation = completion.data.choices[0].message.content!.replace(/^\s+|\s+$/g, '');
 
             if (generation === '') {
                 return {
@@ -421,7 +424,7 @@ export async function aiSummarize(
         });
 
         if (completion.data.choices && completion.data.choices.length > 0 && completion.data.choices[0].message) {
-            let generation = completion.data.choices[0].message.content!;
+            let generation = completion.data.choices[0].message.content!.replace(/^\s+|\s+$/g, '');
 
             return {
                 result: generation,

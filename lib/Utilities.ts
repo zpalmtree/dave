@@ -256,6 +256,6 @@ export function isCapital(char: string) {
     return (charCode >= 65 && charCode <= 90);
 }
 
-export function truncateResponse(msg: string, limit: number = 1900): string {
+export function truncateResponse(msg: string, limit: number = 1999): string {
     return msg.slice(Math.max(msg.length - limit, 0));
 }
