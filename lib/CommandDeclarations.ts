@@ -54,6 +54,7 @@ import {
     handleMultiPoll,
     handlePrice,
     handleItsOver,
+    handleChickenFried,
 } from './CommandImplementations.js';
 
 import {
@@ -73,6 +74,11 @@ import {
     handleTimer,
     deleteTimer,
 } from './Timer.js';
+
+import {
+    handleSummarize,
+    handleLongSummarize,
+} from './Summarize.js';
 
 import {
     handleWatch,

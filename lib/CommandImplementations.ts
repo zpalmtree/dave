@@ -152,6 +152,15 @@ const states = [
     "West Virginia",
 ];
 
+export async function replyWithMention(msg: Message, reply: string): Promise<void> {
+    if (msg.mentions.users.size > 0)   {
+        const usersMentioned = [...msg.mentions.users.keys()].map((id) => `<@${id}>`).join(' ');
+        await msg.reply(`${usersMentioned} ${reply}`);
+    } else {
+        await msg.channel.send(reply);
+    }
+}
+
 export async function handleFortune(msg: Message): Promise<void> {
     await msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
 }
@@ -2348,4 +2357,8 @@ export async function handleItsOver(msg: Message, args: string): Promise<void> {
     }
 
     await msg.channel.send(file);
+}
+
+export async function handleChickenFried(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/483470443001413675/1088687349497597982/repost.mov');
 }
