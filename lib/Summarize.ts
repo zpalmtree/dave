@@ -22,7 +22,7 @@ const LONG_SUMMARY_MESSAGE_COUNT = 1500;
 /* 16k context length */
 const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(16385 * 0.75);
 
-const cachedMessages = new Map<string, CachedMessage[]>;
+const cachedMessages = new Map<string, CachedMessage[]>();
 
 export async function summarizeMessages(
     channel: string,
