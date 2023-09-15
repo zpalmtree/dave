@@ -45,24 +45,27 @@ import {
 } from './CommandDeclarations.js';
 
 import { restoreTimers } from './Timer.js';
+import { cacheMessageForSummarization } from './Summarize.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
-    if (!msg.content.startsWith(config.prefix)) {
+    if (config.devEnv && !config.devChannels.includes(msg.channel.id)) {
         return;
     }
 
-    /*
-    if (msg.author.bot) {
+    if (!msg.content.startsWith(config.prefix)) {
         return;
     }
-    */
 
     if (msg.author.id === msg.client?.user?.id) {
         return;
     }
 
-    if (config.devEnv && !config.devChannels.includes(msg.channel.id)) {
+    if (!msg.content.startsWith(config.prefix)) {
+        if (msg.author.id !== '446154284514541579') {
+            cacheMessageForSummarization(msg);
+        }
+
         return;
     }
 
