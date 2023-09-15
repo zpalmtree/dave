@@ -1,10 +1,9 @@
 import {
     Message,
-    MessageAttachment,
-    MessageEmbed,
+    AttachmentBuilder,
+    EmbedBuilder,
     User,
     MessageReaction,
-    EmbedFieldData,
     ReactionCollector,
     GuildMember,
 } from 'discord.js';
@@ -24,56 +23,6 @@ export enum DisplayType {
     MessageData = 3,
 }
 
-type Asyncable<T> = T | Promise<T>
-
-export type EditableResponse = string | MessageEmbed | MessageAttachment;
-
-export type DisplayItem<T> = (
-    this: Paginate<T>,
-    item: T,
-    embed: MessageEmbed,
-) => Asyncable<EmbedFieldData | Array<EmbedFieldData>>;
-
-export type ModifyEmbed<T> = (
-    this: Paginate<T>,
-    item: T,
-    embed: MessageEmbed,
-) => Asyncable<any>;
-
-export type ModifyMessage<T> = (
-    this: Paginate<T>,
-    items: T[],
-    message: Message,
-) => Asyncable<string>;
-
-export type CustomReactionEmbedCallback<T> = (
-    this: Paginate<T>,
-    pageItems: T[],
-    embed: MessageEmbed,
-    reaction: MessageReaction,
-    user: User,
-) => Asyncable<MessageEmbed | undefined>;
-
-export type CustomReactionCallback<T> = (
-    this: Paginate<T>,
-    pageItems: T[],
-    message: Message,
-    reaction: MessageReaction,
-    user: User,
-) => Asyncable<EditableResponse>;
-
-export type PaginateFunction<T> = DisplayItem<T>
-                                | ModifyEmbed<T>
-                                | ModifyMessage<T>;
-
-export type CustomReactionFunction<T> = CustomReactionEmbedCallback<T>
-                                      | CustomReactionCallback<T>;
-
-export type DetermineDisplayType<T> = (items: T[]) => {
-    displayType: DisplayType,
-    displayFunction: PaginateFunction<T>,
-};
-
 export interface PaginateOptions<T> {
     sourceMessage: Message;
 
@@ -81,19 +30,19 @@ export interface PaginateOptions<T> {
 
     displayType: DisplayType;
 
-    displayFunction: PaginateFunction<T>;
+    displayFunction: any;
 
-    determineDisplayTypeFunction?: DetermineDisplayType<T>;
+    determineDisplayTypeFunction?: any;
 
     data: T[];
 
-    embed?: MessageEmbed;
+    embed?: EmbedBuilder;
 
     hideFooter?: boolean;
 
     customReactions?: string[];
 
-    customReactionFunction?: CustomReactionFunction<T>;
+    customReactionFunction?: any;
 
     permittedUsers?: string[];
 }
@@ -117,7 +66,7 @@ export class Paginate<T> {
 
     private data: T[];
 
-    private embed: MessageEmbed | undefined;
+    private embed: EmbedBuilder | undefined;
 
     private sourceMessage: Message;
 
@@ -125,9 +74,9 @@ export class Paginate<T> {
 
     private displayFooter: boolean = true;
 
-    private displayFunction: PaginateFunction<T>;
+    private displayFunction: any;
 
-    private determineDisplayTypeFunction?: DetermineDisplayType<T>;
+    private determineDisplayTypeFunction?: any;
 
     private displayType: DisplayType;
 
@@ -135,11 +84,11 @@ export class Paginate<T> {
 
     private customReactions: string[] | undefined;
 
-    private customReactionFunction: CustomReactionFunction<T> | undefined;
+    private customReactionFunction: any | undefined;
 
     private permittedUsers: string[] | undefined;
 
-    public constructor(options: PaginateOptions<T>) {
+    public constructor(options: any) {
         const {
             sourceMessage,
             itemsPerPage = 1,
@@ -173,9 +122,9 @@ export class Paginate<T> {
         }
     }
 
-    private editMessage(data: any) {
+    private async editMessage(data: any) {
         try {
-            this.sentMessage!.edit(data);
+            await this.sentMessage!.edit(data);
         } catch (err) {
             console.log(err);
         }
@@ -189,7 +138,7 @@ export class Paginate<T> {
         if (this.displayType !== DisplayType.MessageData) {
             if (this.embed) {
                 const footer = await this.getPageFooter();
-                this.embed.setFooter(footer);
+                this.embed.setFooter({ text: footer });
 
                 if (editMessage) {
                     this.editMessage({ embeds: [this.embed] });
@@ -217,7 +166,7 @@ export class Paginate<T> {
         return `Page ${this.currentPage + 1} of ${this.totalPages}${lockMessage}`;
     }
 
-    private async getPageContent(): Promise<({ embeds: MessageEmbed[] } | { content: string })> {
+    private async getPageContent(): Promise<({ embeds: EmbedBuilder[] } | { content: string })> {
         const startIndex = this.currentPage * this.itemsPerPage;
         const endIndex = (this.currentPage + 1) * this.itemsPerPage;
 
@@ -237,9 +186,9 @@ export class Paginate<T> {
 
         switch (this.displayType) {
             case DisplayType.EmbedFieldData: {
-                this.embed!.fields = [];
+                this.embed!.setFields([]);
 
-                const f = (this.displayFunction as DisplayItem<T>).bind(this);
+                const f = this.displayFunction.bind(this);
 
                 for (const item of items) {
                     const newFields = await f(item, this.embed!);
@@ -257,7 +206,7 @@ export class Paginate<T> {
             }
             case DisplayType.EmbedData: {
                 for (const item of items) {
-                    const f = (this.displayFunction as ModifyEmbed<T>).bind(this);
+                    const f = this.displayFunction.bind(this);
                     await f(item, this.embed!);
                 }
 
@@ -266,7 +215,7 @@ export class Paginate<T> {
                 };
             }
             case DisplayType.MessageData: {
-                const f = (this.displayFunction as ModifyMessage<T>).bind(this);
+                const f = this.displayFunction.bind(this);
                 return {
                     content: await f(items, this.sentMessage!),
                 };
@@ -452,12 +401,12 @@ export class Paginate<T> {
         switch (this.displayType) {
             case DisplayType.EmbedFieldData:
             case DisplayType.EmbedData: {
-                const f = (this.customReactionFunction as CustomReactionEmbedCallback<T>).bind(this);
+                const f = this.customReactionFunction.bind(this);
 
                 return f(items, this.embed!, reaction, user);
             }
             case DisplayType.MessageData: {
-                const f = (this.customReactionFunction as CustomReactionCallback<T>).bind(this);
+                const f = this.customReactionFunction.bind(this);
 
                 return f(items, this.sentMessage!, reaction, user);
             }
@@ -473,22 +422,26 @@ export class Paginate<T> {
     }
 
     private havePermission(guildUser: GuildMember | undefined, user: User) {
-        if (user.id === config.god) {
-            return true;
-        }
+        try {
+            if (user.id === config.god) {
+                return true;
+            }
 
-        if (this.sourceMessage.author.id === user.id) {
-            return true;
-        }
+            if (this.sourceMessage.author.id === user.id) {
+                return true;
+            }
 
-        if (guildUser) {
-            for (const role of this.allowedRoles) {
-                if (guildUser.roles.cache.some((r) => r.name === role)) {
-                    return true;
+            if (guildUser) {
+                for (const role of this.allowedRoles) {
+                    if (guildUser.roles.cache.some((r) => r.name === role)) {
+                        return true;
+                    }
                 }
             }
-        }
 
-        return false;
+            return false;
+        } catch (err) {
+            return false;
+        }
     }
 }
