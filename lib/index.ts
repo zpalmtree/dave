@@ -43,6 +43,7 @@ import {
     handleHelp,
 } from './CommandDeclarations.js';
 
+import { restoreTimers } from './Timer.js';
 import { cacheMessageForSummarization } from './Summarize.js';
 
 /* This is the main entry point to handling messages. */
@@ -211,6 +212,7 @@ async function main() {
         console.log('Logged in');
 
         magicEdenStatUpdater(client);
+        restoreTimers(db, client);
     });
 
     client.on('messageCreate', async (msg) => {
