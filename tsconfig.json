@@ -15,7 +15,10 @@
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
     "paths": {
-        "@vitalets/google-translate-api": ["typings/google-translate-api"]
-    }
+        "@vitalets/google-translate-api": ["typings/google-translate-api"],
+        "imagemin-gifsicle": ["typings/imagemin-gifsicle"],
+        "text-on-gif": ["typings/text-on-gif"]
+    },
+    "skipLibCheck": true
   }
 }

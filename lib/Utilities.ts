@@ -1,22 +1,32 @@
 import {
     Guild,
     Message,
-    MessageEmbed,
     MessageReaction,
     User,
     TextChannel,
+    escapeMarkdown,
 } from 'discord.js';
 
 import moment from 'moment';
 import fetch from 'node-fetch';
-import * as FormData from 'form-data';
+import FormData from 'form-data';
 import translate from '@vitalets/google-translate-api';
+import { PublicKey } from '@solana/web3.js'
 
 import { RGB } from './Types.js';
 import { config } from './Config.js';
 
 export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function isValidSolAddress(address: string) {
+    try {
+        const pubkey = new PublicKey(address);
+        return PublicKey.isOnCurve(pubkey.toBuffer());
+    } catch (error) {
+        return false;
+    }
 }
 
 export function chunk(arr: string, len: number) {
@@ -193,7 +203,7 @@ export async function tryDeleteMessage(msg: Message) {
     try {
         await msg.delete();
     } catch (err) {
-        console.log(`Failed to delete message ${msg.id}, ${err.toString()}, ${err.stack}`);
+        console.log(`Failed to delete message ${msg.id}, ${(err as any).toString()}, ${(err as any).stack}`);
     }
 }
 
@@ -201,7 +211,7 @@ export async function tryReactMessage(msg: Message, reaction: string) {
     try {
         await msg.react(reaction);
     } catch (err) {
-        console.log(`Failed to react with ${reaction} to message ${msg.id}, ${err.toString()}, ${err.stack}`);
+        console.log(`Failed to react with ${reaction} to message ${msg.id}, ${(err as any).toString()}, ${(err as any).stack}`);
     }
 }
 
@@ -209,7 +219,7 @@ export async function tryDeleteReaction(reaction: MessageReaction, id: string) {
     try {
         await reaction.users.remove(id);
     } catch (err) {
-        console.log(`Failed to remove reaction ${reaction.emoji.name} for ${id}, ${err.toString()}, ${err.stack}`);
+        console.log(`Failed to remove reaction ${reaction.emoji.name} for ${id}, ${(err as any).toString()}, ${(err as any).stack}`);
     }
 }
 
@@ -249,6 +259,37 @@ export function getDefaultTimeZone() {
             label: 'EST',
         };
     }
+}
+
+export function escapeDiscordMarkdown(text: string) {
+    return escapeMarkdown(
+        text,
+        {
+            codeBlock: true,
+            inlineCode: true,
+            bold: true,
+            italic: true,
+            underline: true,
+            strikethrough: true,
+            spoiler: true,
+            codeBlockContent: true,
+            inlineCodeContent: true,
+            escape: true,
+            heading: true,
+            bulletedList: true,
+            numberedList: true,
+            maskedLink: true,
+        },
+    );
+}
+
+export async function handleGetFromME(url: string) {    
+    const res = await fetch(url);
+    if (!res.ok) {
+        throw new Error("failed to fetch from API");
+    }
+    const data = await res.json();
+    return data;
 }
 
 export function isCapital(char: string) {

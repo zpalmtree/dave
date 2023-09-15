@@ -19,32 +19,6 @@ export interface Quote {
     timestamp: number;
 }
 
-export interface ScheduledWatch {
-    /* Id of the watch event */
-    watchID: number;
-
-    /* ID of the movie */
-    movieID: number;
-
-    /* Title of the watch */
-    title: string;
-
-    /* IMDB / myanimelist links */
-    infoLinks: string[];
-
-    /* Magnet / youtube links */
-    downloadLinks: string[];
-
-    /* Date of the watch */
-    time: Date;
-
-    /* Discord IDs attending */
-    attending: string[];
-
-    /* Channel the movie is being watched in */
-    channelID: string;
-}
-
 export type DontNeedArgsCommandDb = (msg: Message, db: Database) => void;
 export type DontNeedArgsCommand = (msg: Message) => void;
 

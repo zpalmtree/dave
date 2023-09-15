@@ -1,6 +1,6 @@
 import {
     Message,
-    MessageEmbed,
+    EmbedBuilder,
 } from 'discord.js';
 
 import {
@@ -31,7 +31,6 @@ import {
     handleSuggest,
     handleKitty,
     handleDoggo,
-    handleChinked,
     handleDot,
     handleImgur,
     handleTime,
@@ -79,15 +78,6 @@ import {
     handleSummarize,
     handleLongSummarize,
 } from './Summarize.js';
-
-import {
-    handleWatch,
-    deleteWatch,
-    displayAllWatches,
-    updateTime,
-    addLink,
-    handleWatchStats,
-} from './Watch.js';
 
 import { exchangeService } from './Exchange.js';
 
@@ -256,25 +246,6 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['chinked', 'corona', 'coronavirus', 'chinavirus'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleChinked,
-            description: 'Display coronavirus statistics',
-            examples: [
-                {
-                    value: 'chinked',
-                },
-                {
-                    value: 'chinked usa',
-                },
-                {
-                    value: 'chinked new york',
-                },
-            ],
-        },
-    },
-    {
         aliases: ['dot'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -309,117 +280,6 @@ export const Commands: Command[] = [
             implementation: handleImgur.bind(undefined, 'r/turtle'),
             description: 'Get a random r/turtle picture',
         },
-    },
-    {
-        aliases: ['watch', 'movie'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleWatch,
-            description: 'Display or schedule a movie/series to watch',
-            needDb: true,
-            examples: [
-                {
-                    name: 'List all movies/series scheduled to watch',
-                    value: 'watch',
-                },
-                {
-                    name: 'Schedule a new movie/series to be watched',
-                    value: 'watch <Title> <Optional IMDB or MyAnimeList Link> <YYYY/MM/DD HH:MM UTC TIMEZONE OFFSET> <Optional Magnet or Youtube Link>',
-                },
-                {
-                    name: 'Schedule a new movie/series to be watched',
-                    value: 'watch Jagten https://www.imdb.com/title/tt2106476/?ref_=fn_al_tt_1 2020/07/29 19:00 -08:00',
-                },
-                {
-                    name: 'Schedule a new movie/series to be watched',
-                    value: 'watch Tseagure! Bukatsumono https://myanimelist.net/anime/19919/Tesagure_Bukatsumono 5h30m',
-                },
-                {
-                    name: 'Find more info about a specific movie',
-                    value: 'watch 1',
-                },
-            ],
-        },
-        subCommands: [
-            {
-                argsFormat: Args.DontNeed,
-                implementation: displayAllWatches,
-                description: 'View previously seen movies/series',
-                aliases: ['history'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'View previously seen movies',
-                        value: 'watch history',
-                    },
-                ]
-            },
-            {
-                argsFormat: Args.Combined,
-                implementation: deleteWatch,
-                description: 'Delete a scheduled movie (You must be the only attendee)',
-                aliases: ['delete'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Delete a scheduled movie (You must be the only attendee)',
-                        value: 'watch delete 1',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.Split,
-                implementation: addLink,
-                description: 'Add a youtube or magnet link for a movie',
-                aliases: ['addlink', 'addmagnet', 'addyoutube'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Add a youtube or magnet link for a movie',
-                        value: 'watch addlink 1 magnet:?xt=urn:btih:e5f8d9251b8ca1f285b8474da1aa72844d830...',
-                    },
-                    {
-                        name: 'Add a youtube or magnet link for a movie',
-                        value: 'watch addlink 1 https://www.youtube.com/watch?v=vJykw3H4PDw',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.Combined,
-                implementation: updateTime,
-                description: 'Update the date/time of a scheduled watch',
-                aliases: ['updatetime'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Update the date/time of a scheduled watch',
-                        value: 'watch updatetime 1 2020/07/29 03:00 +01:00',
-                    },
-                    {
-                        name: 'Update the date/time of a scheduled watch',
-                        value: 'watch updatetime 1 10m',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.DontNeed,
-                implementation: handleWatchStats,
-                description: 'View stats on previously watched movies',
-                aliases: ['stats'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'View stats on previously watched movies',
-                        value: 'watch stats',
-                    },
-                ],
-            },
-        ],
-        relatedCommands: [
-            'countdown',
-            'ready',
-            'pause',
-        ],
     },
     {
         aliases: ['time'],
@@ -536,7 +396,6 @@ export const Commands: Command[] = [
             ],
         },
         relatedCommands: [
-            'watch',
             'ready',
             'pause',
         ],
@@ -610,7 +469,6 @@ export const Commands: Command[] = [
             ],
         },
         relatedCommands: [
-            'watch',
             'countdown',
             'ready',
         ],
@@ -968,7 +826,6 @@ export const Commands: Command[] = [
             ],
         },
         relatedCommands: [
-            'watch',
             'countdown',
             'pause',
         ],
@@ -1296,7 +1153,7 @@ export function handleHelp(msg: Message, args: string): void {
                     description = c.primaryCommand.helpDescriptionFunc();
                 }
 
-                const embed = new MessageEmbed()
+                const embed = new EmbedBuilder()
                     .setTitle(callString)
                     .setDescription(description);
 
@@ -1330,7 +1187,7 @@ export function handleHelp(msg: Message, args: string): void {
         }
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Available commands')
         .setDescription(`Enter \`${config.prefix}command help\` for more info and examples on a specific command`);
 

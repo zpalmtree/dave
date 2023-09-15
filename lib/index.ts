@@ -1,10 +1,12 @@
 import moment from 'moment';
 import sqlite3 from 'sqlite3';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 import {
-    Intents,
     Message,
     Client,
+    GatewayIntentBits,
+    GuildChannel,
 } from 'discord.js';
 
 import { evaluate } from 'mathjs';
@@ -13,6 +15,7 @@ import { config } from './Config.js';
 import {
     canAccessCommand,
     tryReactMessage,
+    numberWithCommas
 } from './Utilities.js';
 
 import {
@@ -24,7 +27,6 @@ import {
 import {
     Command,
     CommandFunc,
-    ScheduledWatch,
     Args,
     DontNeedArgsCommandDb,
     DontNeedArgsCommand,
@@ -34,10 +36,6 @@ import {
     CombinedArgsCommand,
     Quote,
 } from './Types.js';
-
-import {
-    handleWatchNotifications,
-} from './Watch.js';
 
 import {
     Commands,
@@ -53,7 +51,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         return;
     }
 
-    if (msg.author.id === msg.client?.user?.id) {
+    if (msg.author.id === msg.client.user.id) {
         return;
     }
 
@@ -64,7 +62,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
 
         return;
     }
-
+        
     /* Get the command with prefix, and any args */
     const [ tmp, ...args ] = msg.content.trim().split(/\s+/);
 
@@ -168,19 +166,17 @@ async function main() {
     db.on('error', console.error);
 
     const client = new Client({
-        restRequestTimeout: 5000,
-        retryLimit: 3,
         intents: [
-            Intents.FLAGS.GUILDS,
-            Intents.FLAGS.GUILD_MESSAGES,
-            Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildMessageReactions,
         ],
     });
 
     client.on('ready', async () => {
         console.log('Logged in');
 
-        handleWatchNotifications(client, db);
         restoreTimers(db, client);
     });
 
@@ -189,8 +185,8 @@ async function main() {
             await handleMessage(msg as Message, db);
         /* Usually discord permissions errors */
         } catch (err) {
-            console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${err.toString()}`);
-            console.log(`Error stack trace: ${err.stack}`);
+            console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${(err as any).toString()}`);
+            console.log(`Error stack trace: ${(err as any).stack}`);
             tryReactMessage(msg, '🔥');
             await msg.reply(`Error: ${(err as any).toString()}`);
         }

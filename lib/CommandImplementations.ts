@@ -6,6 +6,9 @@ import translate from '@vitalets/google-translate-api';
 
 import fetch from 'node-fetch';
 
+import imageminGifsicle from 'imagemin-gifsicle';
+import TextOnGif from 'text-on-gif';
+
 import { stringify, unescape } from 'querystring';
 import { evaluate } from 'mathjs';
 import he from 'he';
@@ -16,10 +19,11 @@ import {
     Client,
     TextChannel,
     User,
-    MessageEmbed,
-    MessageAttachment,
     GuildMember,
     ColorResolvable,
+    PermissionFlagsBits,
+    AttachmentBuilder,
+    EmbedBuilder,
 } from 'discord.js';
 
 import {
@@ -54,6 +58,8 @@ import {
     tryDeleteMessage,
     tryDeleteReaction,
     tryReactMessage,
+    isValidSolAddress,
+    escapeDiscordMarkdown,
 } from './Utilities.js';
 
 import {
@@ -66,7 +72,6 @@ import {
 import {
     TimeUnits,
     Quote,
-    ScheduledWatch,
     Command,
 } from './Types.js';
 
@@ -75,13 +80,8 @@ import {
 } from './Exchange.js';
 
 import {
-    getWatchDetailsById,
-} from './Watch.js';
-
-import {
     Paginate,
     DisplayType,
-    ModifyMessage,
 } from './Paginate.js';
 
 import {
@@ -152,12 +152,120 @@ const states = [
     "West Virginia",
 ];
 
+
 export async function replyWithMention(msg: Message, reply: string): Promise<void> {
     if (msg.mentions.users.size > 0)   {
         const usersMentioned = [...msg.mentions.users.keys()].map((id) => `<@${id}>`).join(' ');
         await msg.reply(`${usersMentioned} ${reply}`);
     } else {
         await msg.channel.send(reply);
+    }
+}
+
+export async function handleGen3Count(msg: Message): Promise<void> {
+    await replyWithMention(msg, `Generation 3 slugs can be found by filtering for Shipwreck, Submarine, Fish Tank, Underwater Cult, and Night Shift backgrounds. They are part of the same slugs collection, with new, rarer, underwater themed traits. They were awarded to users who burnt three slugs.`);
+}
+
+export async function handleGen4Count(msg: Message, args: string): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    const address = args.trim();
+
+    if (address !== '' && !isValidSolAddress(address)) {
+        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch Gen3 count from API!');
+        return;
+    }
+
+    const data = await res.json();
+
+    const gen3Date = new Date('2022-11-14');
+    const gen4Date = new Date('2030-11-14');
+
+    let gen3Count = 0;
+    let burns = 0;
+
+    for (const user of data.burnStats.users) {
+        if (address !== '' && user.address !== address) {
+            continue;
+        }
+
+        let eligibleBurns = 0;
+
+        for (const burn of user.transactions) {
+            if (new Date(burn.timestamp) >= gen3Date && new Date(burn.timestamp) <= gen4Date) {
+                eligibleBurns += burn.slugsBurnt.length;
+            }
+        }
+
+        gen3Count += Math.floor(eligibleBurns / 4);
+        burns += eligibleBurns;
+    }
+
+    if (address !== '') {
+        const burnsForNextSlug = 4 - (burns % 4);
+        const slugStr = burnsForNextSlug === 1 ? 'slug' : 'slugs';
+
+        if (gen3Count === 0) {
+            await replyWithMention(
+                msg,
+                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every four slugs burnt will get you one generation 4 slug. Burn ${burnsForNextSlug} ${burns > 0 ? 'more ' : ''}${slugStr} to be eligible for your first generation 4 slug.`
+            );
+        } else {
+            await replyWithMention(
+                msg,
+                `You are currently set to receive ${gen3Count} generation 4 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${burnsForNextSlug} more ${slugStr} to be eligible for another generation 4 slug.`,
+            );
+        }
+    } else {
+        await replyWithMention(msg, `The current projected Generation 4 slug supply is ${gen3Count}`);
+    }
+}
+
+
+export async function handleBurnt(msg: Message, args: string): Promise<void> {
+    const address = args.trim();
+
+    if (address !== '' && !isValidSolAddress(address)) {
+        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch burnt count from API!');
+        return;
+    }
+    
+    const data = await res.json();
+
+    if (address === '') {
+        await replyWithMention(msg, `${data.slugs.burnt.length} slugs have been burnt!`);
+    } else {
+        let burns = 0;
+
+        for (const user of data.burnStats.users) {
+            if (user.address !== address) {
+                continue;
+            }
+
+            for (const burn of user.transactions) {
+                burns += burn.slugsBurnt.length;
+            }
+        }
+
+        if (burns === 0) {
+            await msg.reply(`${address} hasn't burnt any slugs yet. What are they playing at?`);
+        } else {
+            await msg.reply(`${address} has burnt ${burns} slug${burns === 1 ? '' : 's'}. Good job!`);
+        }
     }
 }
 
@@ -174,7 +282,7 @@ export async function handleMath(msg: Message, args: string): Promise<void> {
     try {
         await msg.reply(evaluate(args).toString());
     } catch (err) {
-        await msg.reply('Bad mathematical expression: ' + err.toString());
+        await msg.reply('Bad mathematical expression: ' + (err as any).toString());
     }
 }
 
@@ -238,7 +346,7 @@ export async function handleDiceRoll(msg: Message, args: string): Promise<void> 
             response += mathExpression;
             result = evaluate(expression);
         } catch (err) {
-            await msg.reply('Bad mathematical expression: ' + err.toString());
+            await msg.reply('Bad mathematical expression: ' + (err as any).toString());
             return;
         }
     }
@@ -337,24 +445,33 @@ export async function handlePrice(msg: Message) {
                 return b.usd_market_cap - a.usd_market_cap;
             });
     
-            const embed = new MessageEmbed();
+            const embed = new EmbedBuilder();
             for (const price of prices) {
-                embed.addField(capitalize(price.name), `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`, true);
+                embed.addFields({
+                    name: capitalize(price.name),
+                    value: `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`,
+                    inline: true,
+                });
             }
     
             msg.channel.send({
                 embeds: [embed],
             });
         } else {
-            throw new Error("Fetch threw an exception")
+            try {
+                const err = await data.text();
+                await msg.reply(`Failed to fetch data from coingecko: ${data.status}, ${err}`);
+            } catch (err) {
+                await msg.reply(`Failed to fetch data from coingecko: ${data.status}`);
+            }
         }
     } catch(err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${(err as any).toString()}`);
     }
 }
 
 export async function handleQuote(msg: Message, db: Database): Promise<void> {
-    const { quote, timestamp } = await selectOneQuery(
+    const { quote, timestamp } = await selectOneQuery<any>(
         `SELECT
             quote,
             timestamp
@@ -425,13 +542,13 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
             return;
         }
 
-        const attachment = new MessageAttachment(data[0].url);
+        const attachment = new AttachmentBuilder(data[0].url);
 
         await msg.channel.send({
             files: [attachment],
         });
     } catch (err) {
-        await msg.reply(`Failed to get kitty pic :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get kitty pic :( [ ${(err as any).toString()} ]`);
     }
 }
 
@@ -480,116 +597,14 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
             return;
         }
 
-        const attachment = new MessageAttachment(data.message);
+        const attachment = new AttachmentBuilder(data.message);
 
         await msg.channel.send({
             files: [attachment],
         });
     } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
+        await msg.reply(`Failed to get data: ${(err as any).toString()}`);
     }
-}
-
-function formatChinkedData(data: any, location?: string): MessageEmbed {
-    /* Alias for conciseness */
-    const f = formatLargeNumber;
-
-    const title = location
-        ? `Coronavirus statistics, ${location}`
-        : 'Coronavirus statistics';
-
-    const embed = new MessageEmbed()
-        .setColor('#C8102E')
-        .setTitle(title)
-        .setThumbnail('https://i.imgur.com/FnbQwqQ.png')
-        .addFields(
-            {
-                name: 'Cases',
-                value: `${f(data.cases)} (+${f(data.todayCases)})`,
-                inline: true,
-            },
-            {
-                name: 'Deaths',
-                value: `${f(data.deaths)} (+${f(data.todayDeaths)})`,
-                inline: true,
-            },
-            {
-                name: 'Active',
-                value: f(data.active),
-                inline: true,
-            },
-            {
-                name: 'Recovered',
-                value: f(data.recovered),
-                inline: true,
-            },
-            {
-                name: 'Percentage Infected',
-                value: (100 * (data.casesPerOneMillion / 1_000_000)).toFixed(2) + '%',
-                inline: true,
-            },
-            {
-                name: 'Last Updated',
-                value: moment.utc(data.updated).fromNow(),
-                inline: true,
-            },
-        );
-
-    return embed;
-}
-
-function formatVaccineData(data: any, population: number, embed: MessageEmbed) {
-    /* No vaccine data */
-    if (!data || data.message) {
-        embed.addFields(
-            {
-                name: 'Vaccinations',
-                value: '0',
-                inline: true,
-            },
-            {
-                name: 'Doses/100 people',
-                value: '0',
-                inline: true,
-            },
-            {
-                name: 'Approx Vaccinated',
-                value: '0%',
-                inline: true,
-            },
-        );
-
-        return;
-    }
-    
-    const [yesterday, today] = Object.values(data);
-
-    const change = today - yesterday;
-
-    const dosesPer100 = (100 * (today / population));
-
-    const percentageVaccinated = `${roundToNPlaces(dosesPer100 / 2, 2)}% - ${roundToNPlaces(Math.min(dosesPer100 * 0.95, 100), 2)}%`;
-
-    /* Alias for conciseness */
-    const f = formatLargeNumber;
-
-    embed.addFields(
-        {
-            name: 'Vaccinations',
-            value: `${f(today)} (+${f(change)})`,
-            inline: true,
-        },
-        {
-            name: 'Doses/100 people',
-            value: dosesPer100.toFixed(2),
-            inline: true,
-        },
-        {
-            name: 'Approx Vaccinated',
-            value: percentageVaccinated,
-            inline: true,
-        },
-    );
 }
 
 export async function handleStock(msg: Message, args: string[]) {
@@ -612,7 +627,7 @@ export async function handleStock(msg: Message, args: string[]) {
 
         const f = (s: string) => numberWithCommas(String(roundToNPlaces(Number(s), 2)))
 
-        const embed = new MessageEmbed()
+        const embed = new EmbedBuilder()
         .setColor(Number(stockData['Global Quote']['09. change']) < 0 ? '#C8102E' : '#00853D')
         .setTitle(ticker.toUpperCase())
         .addFields(
@@ -657,219 +672,6 @@ export async function handleStock(msg: Message, args: string[]) {
     }
 }
 
-async function getChinkedWorldData(msg: Message): Promise<void> {
-    try {
-        /* Launch the two requests in parallel */
-        const worldPromise = fetch('https://disease.sh/v3/covid-19/all');
-        const vaccinePromise = fetch(`https://disease.sh/v3/covid-19/vaccine/coverage?lastdays=2`);
-
-        /* Wait for the request to complete as we need this data to proceed. */
-        const worldResponse = await worldPromise;
-        const worldData = await worldResponse.json();
-
-        const embed = formatChinkedData(worldData);
-
-        const vaccineResponse = await vaccinePromise;
-        const vaccineData = await vaccineResponse.json();
-
-        formatVaccineData(vaccineData, worldData.population, embed);
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-
-    } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
-    }
-}
-
-async function getChinkedCountryData(msg: Message, country: string): Promise<void> {
-    try {
-        /* Launch the two requests in parallel */
-        const countryPromise = fetch(`https://disease.sh/v3/covid-19/countries/${country}`);
-        const vaccinePromise = fetch(`https://disease.sh/v3/covid-19/vaccine/coverage/countries/${country}?lastdays=2`);
-
-        /* Wait for the country request to complete as we need this data to proceed. */
-        const countryResponse = await countryPromise;
-        const countryData = await countryResponse.json();
-
-        if (countryData.message) {
-            await msg.reply(`Unknown country "${country}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
-            return;
-        }
-
-        const embed = formatChinkedData(countryData, countryData.country);
-        embed.setThumbnail(countryData.countryInfo.flag);
-
-        const vaccineResponse = await vaccinePromise;
-        const vaccineData = await vaccineResponse.json();
-
-        formatVaccineData(vaccineData.timeline, countryData.population, embed);
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-    } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
-    }
-}
-
-async function getChinkedStateData(msg: Message, state: string): Promise<void> {
-    try {
-        const response = await fetch(`https://disease.sh/v3/covid-19/states/${state}`);
-
-        const data = await response.json();
-
-        const embed = formatChinkedData(data, data.state);
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-    } catch (err) {
-        if (err.statusCode === 404) {
-            await msg.reply(`Unknown state "${state}", run \`${config.prefix}chinked countries\` to list all countries and \`${config.prefix}chinked states\` to list all states.`);
-        } else {
-            await msg.reply(`Failed to get data: ${err.toString()}`);
-        }
-    }
-}
-
-async function getChinkedCountries(msg: Message): Promise<void> {
-    try {
-        const response = await fetch('https://disease.sh/v3/covid-19/countries');
-
-        const data = await response.json();
-
-        const countries = 'Known countries/areas: ' + data.map((x: any) => x.country).sort((a: string, b: string) => a.localeCompare(b)).join(', ');
-
-        /* Discord message limit */
-        if (countries.length > 2000) {
-            /* This splits in the middle of words, but we don't give a shit */
-            for (const message of chunk(countries, 1700)) {
-                await msg.channel.send(message);
-            }
-        } else {
-            await msg.reply(countries);
-        }
-    } catch (err) {
-        await msg.reply(`Failed to get data: ${err.toString()}`);
-    }
-}
-
-async function getChinkedStates(msg: Message): Promise<void> {
-    const stateData = 'Known states: ' + states.sort((a: string, b: string) => a.localeCompare(b)).join(', ');
-
-    if (stateData.length > 2000) {
-        for (const message of chunk(stateData, 1700)) {
-            await msg.channel.send(message);
-        }
-    } else {
-        await msg.reply(stateData);
-    }
-}
-
-export async function handleChinked(msg: Message, country: string): Promise<void> {
-    country = country.trim().toLowerCase();
-
-    switch(country) {
-        case '': {
-            await getChinkedWorldData(msg);
-            break;
-        }
-        case 'countries': {
-            await getChinkedCountries(msg);
-            break;
-        }
-        case 'states': {
-            await getChinkedStates(msg);
-            break;
-        }
-        default: {
-            if (states.map((x) => x.toLowerCase()).includes(country)) {
-                await getChinkedStateData(msg, country);
-            } else {
-                await getChinkedCountryData(msg, country);
-            }
-
-            break;
-        }
-    }
-}
-
-export async function handleDot(msg: Message, arg: string): Promise<void> {
-    await initDot();
-
-    /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
-    const timeRegex = /^([0-9]+)([YMWdhms])/;
-
-    let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
-    let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
-
-    /* Timespan cannot be larger than 498 days */
-    /* Default timespan is 24h */
-    if (timeSpan > 86400 * 498) {
-        timeSpan = 86400 * 498;
-        timeString = '1w';
-    } else if (timeSpan <= 0) {
-        timeSpan = 86400;
-        timeString = '24h';
-    }
-
-    let dotGraph;
-    let currentDotColor = '#000000';
-    let currentDotValue = 0;
-    let dot;
-
-    try {
-        [ [ , dotGraph ], [ currentDotColor, currentDotValue, dot ] ] = await Promise.all([
-            renderDotGraph(timeSpan * -1),
-            renderDot(),
-        ]);
-    } catch (err) {
-        await msg.reply(`Failed to get dot data :( [ ${err.toString()} ]`);
-        return;
-    }
-
-    let description: string = '';
-
-    if (currentDotValue < 0.05) {
-        description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
-    }
-    else if (currentDotValue < 0.1) {
-        description = 'Strongly increased network variance. May be chance fluctuation.';
-    }
-    else if (currentDotValue < 0.4) {
-        description = 'Slightly increased network variance. Probably chance fluctuation.';
-    }
-    else if (currentDotValue < 0.9) {
-        description = 'Normally random network variance. This is average or expected behavior.';
-    }
-    else if (currentDotValue < 0.95) {
-        description = 'Small network variance. Probably chance fluctuation.';
-    }
-    else if (currentDotValue <= 1.0) {
-        description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
-    }
-
-    const dotGraphAttachment = new MessageAttachment(dotGraph.toBuffer(), 'dot-graph.png');
-    const dotAttachment = new MessageAttachment(dot.toBuffer(), 'dot.png');
-
-    const percentage = Math.floor(currentDotValue * 100);
-
-    const embed = new MessageEmbed()
-        .setColor(currentDotColor as ColorResolvable)
-        .setTitle(`${percentage}% Network Variance`)
-        .setThumbnail('attachment://dot.png')
-        .setImage('attachment://dot-graph.png')
-        .setDescription(description);
-
-    await msg.channel.send({
-        embeds: [embed],
-        files: [dotAttachment, dotGraphAttachment],
-    });
-}
-
-
 export async function handleImgur(gallery: string, msg: Message): Promise<void> {
     try {
         // seems to loop around to page 0 if given a page > final page
@@ -892,14 +694,14 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
 
         shuffleArray(images);
 
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         const pages = new Paginate({
             sourceMessage: msg,
             embed,
             data: images,
             displayType: DisplayType.EmbedData,
-            displayFunction: (item: any, embed: MessageEmbed) => {
+            displayFunction: (item: any, embed: EmbedBuilder) => {
                 embed.setTitle(item.title);
                 embed.setImage(item.link);
             }
@@ -907,7 +709,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
 
         await pages.sendMessage();
     } catch (err) {
-        await msg.reply(`Failed to get ${gallery} pic :( [ ${err.toString()} ]`);
+        await msg.reply(`Failed to get ${gallery} pic :( [ ${(err as any).toString()} ]`);
     }
 }
 
@@ -974,67 +776,52 @@ export async function handleCountdown(
     }
 }
 
-export async function handlePurge(msg: Message) {
-    const allowed = ['389071148421218330'];
+let inProgress = false;
 
-    if (!haveRole(msg, 'Mod') && !allowed.includes(msg.author.id)) {
+export async function handlePurge(msg: Message) {
+    await tryDeleteMessage(msg);
+
+    const allowed = [
+        '354701063955152898',
+        '901540415176597534',
+    ];
+
+    if (inProgress) {
+        return;
+    }
+
+    inProgress = true;
+
+    if (!allowed.includes(msg.author.id)) {
         await msg.reply('fuck off');
         return;
     }
 
-    const embed = new MessageEmbed()
-        .setTitle('Message Deletion')
-        .setDescription('This will delete every single message you have made in this channel. Are you sure? The process will take several hours.')
-        .setFooter('React with 👍 to confirm the deletion');
+    const target = '901540415176597534';
 
-    const sentMessage = await msg.channel.send({
-        embeds: [embed],
-    });
+    console.log(`Deletion started by ${msg.author.id}`);
 
-    await tryReactMessage(sentMessage, '👍');
+    let messages: Message[] = [];
 
-    const collector = sentMessage.createReactionCollector({
-        filter: (reaction, user) => {
-            return reaction.emoji.name === '👍' && user.id === msg.author.id
-        },
-        time: 60 * 15 * 1000,
-    });
+    let i = 0;
 
-    let inProgress = false;
-
-    collector.on('collect', async (reaction, user) => {
-        tryDeleteReaction(reaction, user.id);
-
-        if (inProgress) {
-            return;
-        }
-
-        if (user.id !== msg.author.id) {
-            return;
-        }
-
-        inProgress = true;
-
-        embed.setDescription('Deletion started. You will be notified when it is complete.');
-        sentMessage.edit({
-            embeds: [embed],
-        });
-
-        let messages: Message[] = [];
-
-        let i = 0;
-
-        try {
-            do {
+    try {
+        do {
+            try {
                 const firstMessage = messages.length === 0 ? undefined : messages[0].id;
+
+                console.log(`Fetching messages...`);
 
                 /* Fetch messages, convert to array and sort by timestamp, oldest first */
                 messages = [...(await msg.channel.messages.fetch({ before: firstMessage })).values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
+                await sleep(2000);
+
                 for (const message of messages) {
-                    if (message.author.id === msg.author.id) {
+                    if (message.author.id === target) {
                         try {
                             await tryDeleteMessage(message);
+                            await sleep(2000);
                             console.log(`Deleted message ${i} for ${msg.author.id}`);
                         } catch (err) {
                             console.log(err);
@@ -1043,13 +830,17 @@ export async function handlePurge(msg: Message) {
                         i++;
                     }
                 }
-            } while (messages.length > 0);
+            } catch (err) {
+                console.log('err: ' + (err as any).toString());
+            }
+        } while (messages.length > 0);
 
-            await msg.reply(`Message deletion complete.`);
-        } catch (err) {
-            console.log('err: ' + err.toString());
-        }
-    });
+        console.log('Message deletion complete.');
+    } catch (err) {
+        console.log('err: ' + (err as any).toString());
+    }
+
+    inProgress = false;
 }
 
 function getLanguage(x: string) {
@@ -1082,7 +873,7 @@ async function handleTranslateImpl(
         const description = `${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLanguage as any]}`;
         const title = res.text;
 
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         /* Max title length of 256 */
         if (title.length < 256) {
@@ -1094,7 +885,7 @@ async function handleTranslateImpl(
         }
 
         if (res.from.text.value !== '') {
-            embed.setFooter(`Did you mean "${res.from.text.value}"?`);
+            embed.setFooter({ text: `Did you mean "${res.from.text.value}"?` });
         }
 
         await msg.channel.send({
@@ -1154,7 +945,7 @@ async function getQueryResults(query: string): Promise<false | HTMLElement> {
     const params = {
         q: query,
         kl: 'us-en', // US location
-        kp: -2, // safe search off
+        kp: 1, // safe search on
         kac: -1, // auto suggest off
         kav: 1, // load all results
     };
@@ -1228,7 +1019,7 @@ async function displayQueryResults(html: HTMLElement, msg: Message): Promise<voi
     }
 
     if (results.length > 0) {
-        const embed = new MessageEmbed();
+        const embed = new EmbedBuilder();
 
         const pages = new Paginate({
             sourceMessage: msg,
@@ -1288,7 +1079,7 @@ async function displayInstantAnswerResult(data: any, msg: Message): Promise<void
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(data.Heading);
 
     if (data.Image) {
@@ -1299,17 +1090,21 @@ async function displayInstantAnswerResult(data: any, msg: Message): Promise<void
         embed.setURL(data.AbstractURL);
     }
 
+    let haveDescription = false;
+
     if (data.Answer) {
         embed.setDescription(data.Answer);
+        haveDescription = true;
     } else if (data.AbstractText) {
         embed.setDescription(data.AbstractText);
+        haveDescription = true;
     }
 
     const results = data.Results.length > 0
         ? data.Results
         : data.RelatedTopics;
 
-    if (!embed.description) {
+    if (!haveDescription) {
         const pages = new Paginate({
             sourceMessage: msg,
             itemsPerPage: 3,
@@ -1354,11 +1149,11 @@ async function displayInstantAnswerResult(data: any, msg: Message): Promise<void
         });
 
         pages.sendMessage();
-    } else {
-        await msg.channel.send({
-            embeds: [embed],
-        });
     }
+
+    await msg.channel.send({
+        embeds: [embed],
+    });
 }
 
 export async function handleQuery(msg: Message, args: string): Promise<void> {
@@ -1371,7 +1166,7 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
         getInstantAnswerResults(args).then((res) => res ? displayInstantAnswerResult(res!, msg) : {});
         getQueryResults(args).then((res) => res ? displayQueryResults(res as HTMLElement, msg) : {});
     } catch (err) {
-        await msg.reply(`Error getting query results: ${err.toString()}`);
+        await msg.reply(`Error getting query results: ${(err as any).toString()}`);
     }
 }
 
@@ -1411,7 +1206,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(`${amountToConvert} ${fromCurrency} is ${roundToNPlaces(amount as number, 2)} ${toCurrency}`);
 
     await msg.channel.send({
@@ -1423,16 +1218,34 @@ export async function handleAvatar(msg: Message): Promise<void> {
     const mentionedUsers = [...msg.mentions.users.values()];
 
     let user = msg.author;
-
+    
     if (mentionedUsers.length > 0) {
         user = mentionedUsers[0];
     }
 
-    await msg.channel.send(user.displayAvatarURL({
-        format: 'png',
-        dynamic: true,
-        size: 4096,
-    }));
+    if (msg.guild) {
+        let guildUser = await msg.guild.members.fetch(user.id);
+
+        if (guildUser) {
+            await msg.channel.send(guildUser.displayAvatarURL({
+                extension: 'png',
+                forceStatic: false,
+                size: 4096,
+            }));
+        } else {
+            await msg.channel.send(user.displayAvatarURL({
+                extension: 'png',
+                forceStatic: false,
+                size: 4096,
+            }));
+        }
+    } else {
+        await msg.channel.send(user.displayAvatarURL({
+            extension: 'png',
+            forceStatic: false,
+            size: 4096,
+        }));
+    }
 }
 
 export async function handleNikocado(msg: Message): Promise<void> {
@@ -1453,7 +1266,7 @@ export async function handleYoutube(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed();
+    const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1479,7 +1292,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const displayImage = (duckduckgoItem: any, embed: MessageEmbed) => {
+    const displayImage = (duckduckgoItem: any, embed: EmbedBuilder) => {
         embed.setTitle(duckduckgoItem.title);
         embed.setImage(duckduckgoItem.image);
         embed.setDescription(duckduckgoItem.url);
@@ -1501,7 +1314,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         };
     };
 
-    const embed = new MessageEmbed();
+    const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1531,7 +1344,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     const tokenParams = {
         q: query,
         kl: 'us-en', // US location
-        kp: -2, // safe search off
+        kp: 1, // safe search off
         kac: -1, // auto suggest off
         kav: 1, // load all results
     };
@@ -1543,7 +1356,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
     };
 
     // gotta get our magic token to perform an image search
-    const tokenURL = `https://duckduckgo.com/?${stringify(tokenParams)}`;
+    const tokenURL = `https://safe.duckduckgo.com/?${stringify(tokenParams)}`;
 
     let data: any;
 
@@ -1551,7 +1364,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const response = await fetch(tokenURL, tokenOptions);
         data = await response.text();
     } catch (err) {
-        await msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -1570,7 +1383,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         l: 'us-en', // US location
         ac: -1, // auto suggest off
         av: 1, // load all results
-        p: -1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
+        p: 1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
         vqd: token, // magic token!
         f: ',,,',
         v7exp: 'a',
@@ -1592,7 +1405,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         },
     };
 
-    const imageURL = `https://duckduckgo.com/i.js?${stringify(imageParams)}`;
+    const imageURL = `https://safe.duckduckgo.com/i.js?${stringify(imageParams)}`;
 
     let imageData: any;
 
@@ -1600,7 +1413,7 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         const response = await fetch(imageURL, options);
         imageData = await response.json();
     } catch (err) {
-        await msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -1696,7 +1509,7 @@ async function handleUserStats(msg: Message, db: Database, user: string): Promis
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(`${username}'s bot usage statistics`)
         .setDescription('Number of times a command has been used');
 
@@ -1735,7 +1548,7 @@ export async function handleUsersStats(msg: Message, db: Database): Promise<void
         [ msg.channel.id ]
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Bot user usage statistics')
         .setDescription('Number of times a user has used the bot');
 
@@ -1775,7 +1588,7 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         [ msg.channel.id, command ]
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(`Bot user usage statistics`)
         .setDescription(`Number of times a user has used \`${config.prefix}${command}\``);
 
@@ -1785,7 +1598,7 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         displayFunction: async (user: any) => {
             return {
                 name: await getUsername(user.user, msg.guild),
-                value: user.usage.toString(),
+                value: user.usage,
                 inline: true,
             };
         },
@@ -1833,7 +1646,7 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         [ msg.channel.id ]
     );
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Bot usage statistics')
         .setDescription('Number of times a command has been used');
 
@@ -1873,7 +1686,7 @@ export async function handleYoutubeScrape(msg: Message, args: string): Promise<u
         const response = await fetch(url);
         data = await response.text();
     } catch (err) {
-        msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -1946,7 +1759,7 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
         const response = await fetch(url);
         data = await response.json();
     } catch (err) {
-        await msg.reply(err);
+        await msg.reply((err as any));
         return;
     }
 
@@ -1969,21 +1782,6 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     const readyUsers = new Set<string>([]);
 
     let title = 'Are you ready?';
-
-    if (args.length > 0) {
-        const id = Number(args[0]);
-        const watch = await getWatchDetailsById(id, msg.channel.id, db);
-
-        if (watch) {
-            title = `Are you ready for "${watch.title}"?`;
-
-            for (const user of watch.attending) {
-                if (msg.author.id !== user) {
-                    notReadyUsers.add(user);
-                }
-            }
-        }
-    }
 
     /* They didn't mention anyone, lets make them unready so we can allow
      * sending the message */
@@ -2027,7 +1825,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
 
     const fields = await f();
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(title)
         .setDescription(description)
         .addFields(fields);
@@ -2065,7 +1863,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
             await handleCountdown("Let's jam!", msg, '7');
         } else {
             const newFields = await f();
-            embed.spliceFields(0, 2, newFields);
+            embed.spliceFields(0, 2, ...newFields);
             await sentMessage.edit({
                 embeds: [embed],
             });
@@ -2116,9 +1914,9 @@ export async function handlePoll(msg: Message, args: string) {
         title += '?';
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(title)
-        .setFooter('React with 👍 or 👎 to vote');
+        .setFooter({ text: 'React with 👍 or 👎 to vote' });
 
     const sentMessage = await msg.channel.send({
         embeds: [embed],
@@ -2148,7 +1946,7 @@ export async function handlePoll(msg: Message, args: string) {
 
         const newFields = await f();
 
-        embed.spliceFields(0, 2, newFields);
+        embed.spliceFields(0, 2, ...newFields);
 
         sentMessage.edit({
             embeds: [embed],
@@ -2168,7 +1966,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
         args = args.slice(0, -1);
     }
 
-    const responseMapping = new Map<string, Set<string>>();
+    const responseMapping = new Map<number, Set<string>>();
 
     const emojiToIndexMap = new Map([
         ['0️⃣', 0],
@@ -2186,26 +1984,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
     const emojis = [...emojiToIndexMap.keys()];
 
-    const f = async () => {
-        const fields = [];
-
-        let i = 0;
-
-        for (const [response, users] of responseMapping) {
-            const names = await Promise.all([...users].map((user) => getUsername(user, msg.guild)));
-
-            fields.push({
-                name: `${emojis[i]} ${response}: ${users.size}`,
-                value: names.join(', ') || 'None',
-            })
-
-            i++;
-        }
-
-        return fields;
-    }
-
-    const questionEndIndex = args.indexOf('/');
+        const questionEndIndex = args.indexOf('/');
 
     if (questionEndIndex === -1) {
         await msg.reply(`Multipoll query is malformed. Try \`${config.prefix}multipoll help\``);
@@ -2224,8 +2003,10 @@ export async function handleMultiPoll(msg: Message, args: string) {
         return;
     }
 
-    for (const option of options) {
-        responseMapping.set(option, new Set());
+    let i = 0;
+
+    for (let i = 0; i < options.length; i++) {
+        responseMapping.set(i, new Set());
     }
 
     let title = capitalize(args.slice(0, questionEndIndex)).trim();
@@ -2234,18 +2015,68 @@ export async function handleMultiPoll(msg: Message, args: string) {
         title += '?';
     }
 
+    const f = async () => {
+        const fields = [];
+
+        let i = 0;
+
+        for (const option of options) {
+            const users = responseMapping.get(i);
+
+            if (!users) {
+                i++;
+                continue;
+            }
+
+            const names = await Promise.all([...users].map((user) => getUsername(user, msg.guild)));
+
+            fields.push({
+                name: `${emojis[i]} ${option}: ${users.size}`,
+                value: names.join(', ') || 'None',
+            })
+
+            i++;
+        }
+
+        return fields;
+    }
+
     const fields = await f();
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle(title)
         .addFields(fields)
-        .setFooter('React with the emoji indicated to cast your vote');
+        .setFooter({ text: 'React with the emoji indicated to cast your vote' });
 
     const sentMessage = await msg.channel.send({
         embeds: [embed]
     });
     
     const usedEmojis = emojis.slice(0, options.length);
+
+    async function toggleSelect(reaction: any, user: any) {
+        const index = emojiToIndexMap.get(reaction.emoji.name as string) || 0;
+
+        const users = responseMapping.get(index);
+
+        if (!users) {
+            return;
+        }
+
+        if (users.has(user.id)) {
+            users.delete(user.id);
+        } else {
+            users.add(user.id);
+        }
+
+        const newFields = await f();
+
+        embed.spliceFields(0, 11, ...newFields);
+
+        sentMessage.edit({
+            embeds: [embed],
+        });
+    }
     
     const collector = sentMessage.createReactionCollector({
         filter: (reaction, user) => {
@@ -2255,33 +2086,13 @@ export async function handleMultiPoll(msg: Message, args: string) {
 
             return usedEmojis.includes(reaction.emoji.name) && !user.bot;
         },
-        time: 60 * 15 * 1000,
+        time: 60 * 60 * 8 * 1000,
+        dispose: true,
     });
 
     collector.on('collect', async (reaction, user) => {
         tryDeleteReaction(reaction, user.id);
-
-        const index = emojiToIndexMap.get(reaction.emoji.name as string) || 0;
-
-        let i = 0;
-
-        for (let [response, users] of responseMapping) {
-            if (i === index) {
-                users.add(user.id);
-            } else {
-                users.delete(user.id);
-            }
-
-            i++;
-        }
-
-        const newFields = await f();
-
-        embed.spliceFields(0, 11, newFields);
-
-        sentMessage.edit({
-            embeds: [embed],
-        });
+        toggleSelect(reaction, user);
     });
 
     for (const emoji of usedEmojis) {
@@ -2308,7 +2119,7 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed();
+    const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -2328,6 +2139,232 @@ export async function handleQuotes(msg: Message, db: Database): Promise<void> {
     });
 
     pages.sendMessage();
+}
+
+async function handleGif(
+    msg: Message,
+    args: string,
+    gif: string,
+    colors: number = 128,
+    fontMultiplier: number = 1,
+    flipPalette: boolean = false): Promise<void> {
+
+    const mentionedChannels = [...msg.mentions.channels.values()];
+
+    let channel: TextChannel = mentionedChannels.length > 0
+        ? mentionedChannels[0] as TextChannel
+        : msg.channel as TextChannel;
+
+    const bannedChannels = [
+        '891080925163704352',
+    ];
+
+    if (bannedChannels.includes(channel.id)) {
+        await msg.reply(`Cannot send messages to that channel.`);
+        return;
+    }
+
+    const hasPermissionInChannel = channel
+        .permissionsFor(msg.member!)
+        .has(PermissionFlagsBits.SendMessages, false);
+
+    if (!hasPermissionInChannel) {
+        await msg.reply(`You do not have permission to send messages to that channel.`);
+        return;
+    }
+
+    let text = escapeDiscordMarkdown(args.replace(/<#\d{16,20}>/g, '')).toUpperCase().trim();
+
+    if (text === '') {
+        await channel.send({
+            files: [
+                new AttachmentBuilder(`./images/${gif}`)
+                    .setName(gif)
+            ],
+        });
+
+        return;
+    }
+
+    if (!text.endsWith('!')) {
+        text += '!';
+    }
+
+    const words = text.split(' ');
+
+    let fixedWords: string[] = [];
+
+    for (const word of words) {
+        if (word.length >= 16) {
+            fixedWords = fixedWords.concat(chunk(word, 16));
+        } else {
+            fixedWords.push(word);
+        }
+    }
+    let finalText = fixedWords.join(' ');
+
+    let fontPixels = 48;
+
+    if (text.length >= 1000) {
+        fontPixels = 6;
+    } else if (text.length >= 500) {
+        fontPixels = 8;
+    } else if (text.length >= 250) {
+        fontPixels = 12;
+    } else if (text.length >= 100) {
+        fontPixels = 18;
+    } else if (text.length >= 50) {
+        fontPixels = 24;
+    } else if (text.length >= 20) {
+        fontPixels = 40;
+    }
+
+    let primaryColour = flipPalette ? 'black' : 'white';
+    let secondaryColour = flipPalette ? 'white' : 'black';
+
+    const fontSize = `${fontPixels * fontMultiplier}px`;
+
+    const gifObject = new TextOnGif({
+        file_path: `./images/${gif}`,
+        font_size: fontSize,
+        font_color: primaryColour,
+        stroke_color: secondaryColour,
+        stroke_width: 3,
+    });
+
+    const newGif = await gifObject.textOnGif({
+        text: finalText,
+        get_as_buffer: true,
+    });
+
+    console.log(`Original file size: ${(newGif.length / 1024 / 1024).toFixed(2)} MB`);
+
+    const minified = await imageminGifsicle({
+        optimizationLevel: 1,
+        colors,
+    })(newGif);
+
+    const attachment = new AttachmentBuilder(minified)
+        .setName(gif);
+
+    console.log(`Compressed file size: ${(minified.length / 1024 / 1024).toFixed(2)} MB`);
+
+    await channel.send({
+        files: [attachment],
+    });
+}
+
+export async function handleGroundhog(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'hog.gif');
+}
+
+export async function handleGroove(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'dance.gif', 200);
+}
+
+export async function handleKek(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'kek.gif', 16, 2);
+}
+
+export async function handleNut(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'nut.gif', 16, 2);
+}
+
+export async function handleMoney(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'money.gif', 256);
+}
+
+export async function handleViper(msg: Message, args: string): Promise<void> {
+    await handleGif(msg, args, 'viper.gif', 256, 0.8);
+}
+
+export async function handleCock(msg: Message): Promise<void> {
+    const guwap = '238350296093294592';
+
+    if (msg.author.id === guwap) {
+        msg.reply(`Nice balls!`);
+    } else {
+        msg.reply(`Nice cock!`);
+    }
+}
+
+export async function handleBurn(msg: Message): Promise<void> {
+    await replyWithMention(msg, `A lot of slug utility comes from burning a slug.
+**Why burn a slug?**
+* Help be part of the most deflationary collection on Solana - with over 4100 slugs burnt!
+* Access to alpha, whitelist, and other burner only channels.
+* Alpha bots - Find trending magiceden collections, new twitter accounts, and just created mints.
+* Free stuff - Sometimes we will raffle 1/1s, airdrops, or other valuable items. Burners come first whenever this happens.
+* Merch - This is still in the works, but slug burners will have the first access to slug merch.
+* Future slug generations - As part of the slugs deflationary mechanism, burning enough slugs entitles you to a mint from the next slug generation. The current rate is 4:1, for generation four.`);
+}
+
+export async function handleUtility(msg: Message): Promise<void> {
+    await replyWithMention(msg, `**Why buy a slug?**
+* Gain benefits on our sleek portfolio tracker, slime: <https://slime.cx/>
+* Enjoy the slug supply constantly decreasing. It's already shrunk from 10,000 to 7,200!
+* Try out the slug AI image generator and chat bots
+* Burn your slug for more benefits! Try \`${config.prefix}burn\` for more info.
+* Chill in one of the most active chats in Solana. No more gm spam!
+* Help support the <https://sol-incinerator.com/>'s free operation.`);
+}
+
+export async function handle3d(msg: Message): Promise<void> {
+    await replyWithMention(msg, `3D slugs or Slugs Regenesis are a separate collection by the same team but the supply is much lower. As a free mint for rug victims, they don't have any defined utility yet, but they've got rocket launchers and katanas, they're cool as fuck. <https://magiceden.io/marketplace/slugs_regenesis>`);
+}
+
+export async function handleGen2(msg: Message): Promise<void> {
+    await replyWithMention(msg, `Generation 2 slugs can be found by filtering for Arena, Temple, and Pyramid backgrounds. They are part of the same slugs collection, with new, rarer, god of death themed traits. They were awarded to users who burnt two slugs.`);
+}
+
+export async function handleBuy(msg: Message): Promise<void> {
+    await replyWithMention(msg, `<https://magiceden.io/marketplace/sol_slugs>`);
+}
+
+export async function handleVerify(msg: Message): Promise<void> {
+    await replyWithMention(msg, `Get your holder and burner roles here: <https://solslugs.com/#/verify>`);
+}
+
+export async function handleIncinerator(msg: Message): Promise<void> {
+    await replyWithMention(msg, `Burn your slugs, rugs, or scams here: <https://sol-incinerator.com/>`);
+}
+
+export async function handleTrending(msg: Message): Promise<void> {
+    await replyWithMention(msg, `The trending bot is separated into 6 different channels, by window of time. The 1m channel, for example, will show the hottest collections within a 1 minute interval. A hot collection is defined as having the greatest NUMBER of sales within that interval.
+
+So a collection that sells 100 units in 1 minute would be hotter than one that sold 50 units in 1 minute.
+
+The colors indicate the sold to listed balance.
+
+Green: Sold > Listed
+Yellow: Sold = Listed
+Red: Sold < Listed
+
+Volume is the total amount of Solana transacted within the interval. Low is the lowest sale price, High is the highest sale price, and Average is the average sale price.
+
+It is useful to look at how these collections are trending - is the number of sold going up each interval, for example? Is there a high average, indicating people are sniping rares? There's a strategy to develop using the trending bot, but if use effectively, can lead to great trading success.`);
+}
+
+export async function handleSign(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://media.discordapp.net/attachments/483470443001413675/1064019335955365918/sign.png');
+}
+
+export async function handleFrozen(msg: Message): Promise<void> {
+    await replyWithMention(msg, `Some scam tokens are freezing the token accounts so you can’t get burn or transfer them. Our dev has posted about the issue on Solana’s GitHub in hopes they fix it, but we will be pushing an update soon with our redesign that makes it more obvious the token is frozen and cannot be burnt.\n\nIf you have a GitHub account, you could let the Solana devs know you would like to see this fixed - <https://github.com/solana-labs/solana-program-library/issues/3295>`);
+}
+
+export async function handleIncineratorFAQ(msg: Message): Promise<void> {
+    await replyWithMention(msg, `Q. Where is the money coming from?
+A. Its liberating a small storage fee 
+
+Q. I only got 0.002 for an NFT. What gives!?
+A. The MAJORITY of NFTs give 0.01. Non-master editions(non unique) tokens, like scams, still give 0.002
+
+Q. Theres an NFT in my wallet that wont burn. Why?
+A. Some nfts, scams in particular, abuse the freeze instruction - you cant send them out or burn them.
+
+Q. I burned and it doesnt seem like I got anything. What happened?
+A. The amount you get is very small, unless youre burning a lot of NFTs. You need to burn at least 100 to get 1 sol!`);
 }
 
 export async function handleItsOver(msg: Message, args: string): Promise<void> {
@@ -2359,6 +2396,94 @@ export async function handleItsOver(msg: Message, args: string): Promise<void> {
     await msg.channel.send(file);
 }
 
+export async function handleSlime(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://slime.cx/');
+}
+
+export async function handleGitbook(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://solana-slugs.gitbook.io/solana-slugs/');
+}
+
+export async function handleAIInfo(msg: Message): Promise<void> {
+    await replyWithMention(msg, 'https://media.discordapp.net/attachments/891081746186113024/1074511672401731724/image.png');
+}
+
 export async function handleChickenFried(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/483470443001413675/1088687349497597982/repost.mov');
+}
+
+export async function handleDot(msg: Message, arg: string): Promise<void> {
+    await initDot();
+
+    /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
+    const timeRegex = /^([0-9]+)([YMWdhms])/;
+
+    let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
+    let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
+
+    /* Timespan cannot be larger than 498 days */
+    /* Default timespan is 24h */
+    if (timeSpan > 86400 * 498) {
+        timeSpan = 86400 * 498;
+        timeString = '1w';
+    } else if (timeSpan <= 0) {
+        timeSpan = 86400;
+        timeString = '24h';
+    }
+
+    let dotGraph;
+    let currentDotColor = '#000000';
+    let currentDotValue = 0;
+    let dot;
+
+    try {
+        [ [ , dotGraph ], [ currentDotColor, currentDotValue, dot ] ] = await Promise.all([
+            renderDotGraph(timeSpan * -1),
+            renderDot(),
+        ]);
+    } catch (err) {
+        await msg.reply(`Failed to get dot data :( [ ${(err as any).toString()} ]`);
+        return;
+    }
+
+    let description: string = '';
+
+    if (currentDotValue < 0.05) {
+        description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
+    }
+    else if (currentDotValue < 0.1) {
+        description = 'Strongly increased network variance. May be chance fluctuation.';
+    }
+    else if (currentDotValue < 0.4) {
+        description = 'Slightly increased network variance. Probably chance fluctuation.';
+    }
+    else if (currentDotValue < 0.9) {
+        description = 'Normally random network variance. This is average or expected behavior.';
+    }
+    else if (currentDotValue < 0.95) {
+        description = 'Small network variance. Probably chance fluctuation.';
+    }
+    else if (currentDotValue <= 1.0) {
+        description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
+    }
+
+    const dotGraphAttachment = new AttachmentBuilder(dotGraph.toBuffer())
+        .setName('dot-graph.png');
+
+    const dotAttachment = new AttachmentBuilder(dot.toBuffer())
+        .setName('dot.png');
+
+    const percentage = Math.floor(currentDotValue * 100);
+
+    const embed = new EmbedBuilder()
+        .setColor(currentDotColor as ColorResolvable)
+        .setTitle(`${percentage}% Network Variance`)
+        .setThumbnail('attachment://dot.png')
+        .setImage('attachment://dot-graph.png')
+        .setDescription(description);
+
+    await msg.channel.send({
+        embeds: [embed],
+        files: [dotAttachment, dotGraphAttachment],
+    });
 }

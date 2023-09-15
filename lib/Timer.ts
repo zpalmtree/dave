@@ -1,8 +1,8 @@
 import {
     Client,
     Message,
-    MessageEmbed,
     TextChannel,
+    EmbedBuilder,
 } from 'discord.js';
 
 import moment from 'moment';
@@ -127,10 +127,13 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
 
     const { offset, label } = getDefaultTimeZone();
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
+        .setTitle('Success')
+        .setDescription(`Timer #${timerID} has been scheduled.`)
+        .setFooter({ text: `Type ${config.prefix}timer delete ${timerID} to cancel this timer` })
         .addFields(
             {
-                name: `Timer #${timerID}`,
+                name: 'Time',
                 value: `${capitalize(moment.utc(time).fromNow())}, ${moment.utc(time).utcOffset(offset).format('HH:mm')} ${label}`,
             }
         );
@@ -170,7 +173,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
         return;
     }
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
         .setTitle('Running Timers');
 
     const { offset, label } = getDefaultTimeZone();
