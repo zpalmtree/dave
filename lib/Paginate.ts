@@ -23,58 +23,6 @@ export enum DisplayType {
     MessageData = 3,
 }
 
-/*
-type Asyncable<T> = T | Promise<T>
-
-export type EditableResponse = string | EmbedBuilder | MessageAttachment;
-
-export type DisplayItem<T> = (
-    this: Paginate<T>,
-    item: T,
-    embed: EmbedBuilder,
-) => Asyncable<EmbedFieldData | Array<EmbedFieldData>>;
-
-export type ModifyEmbed<T> = (
-    this: Paginate<T>,
-    item: T,
-    embed: EmbedBuilder,
-) => Asyncable<any>;
-
-export type ModifyMessage<T> = (
-    this: Paginate<T>,
-    items: T[],
-    message: Message,
-) => Asyncable<string>;
-
-export type CustomReactionEmbedCallback<T> = (
-    this: Paginate<T>,
-    pageItems: T[],
-    embed: EmbedBuilder,
-    reaction: MessageReaction,
-    user: User,
-) => Asyncable<EmbedBuilder | undefined>;
-
-export type CustomReactionCallback<T> = (
-    this: Paginate<T>,
-    pageItems: T[],
-    message: Message,
-    reaction: MessageReaction,
-    user: User,
-) => Asyncable<EditableResponse>;
-
-export type PaginateFunction<T> = DisplayItem<T>
-                                | ModifyEmbed<T>
-                                | ModifyMessage<T>;
-
-export type CustomReactionFunction<T> = CustomReactionEmbedCallback<T>
-                                      | CustomReactionCallback<T>;
-
-export type DetermineDisplayType<T> = (items: T[]) => {
-    displayType: DisplayType,
-    displayFunction: PaginateFunction<T>,
-};
-*/
-
 export interface PaginateOptions<T> {
     sourceMessage: Message;
 
@@ -174,9 +122,9 @@ export class Paginate<T> {
         }
     }
 
-    private editMessage(data: any) {
+    private async editMessage(data: any) {
         try {
-            this.sentMessage!.edit(data);
+            await this.sentMessage!.edit(data);
         } catch (err) {
             console.log(err);
         }
