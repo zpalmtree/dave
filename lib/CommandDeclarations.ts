@@ -236,7 +236,7 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['avatar'],
+        aliases: ['avatar', 'av', 'pfp'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleAvatar,
