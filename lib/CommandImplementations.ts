@@ -1292,28 +1292,11 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         embed.setDescription(duckduckgoItem.url);
     };
 
-    const determineDisplayType = (duckduckgoItems: any[]) => {
-        const item = duckduckgoItems[0];
-
-        if (/https:\/\/.*(?:youtube\.com|youtu\.be)\/\S+/.test(item.url)) {
-            return {
-                displayType: DisplayType.MessageData,
-                displayFunction: displayYoutube,
-            }
-        }
-
-        return {
-            displayType: DisplayType.EmbedData,
-            displayFunction: displayImage,
-        };
-    };
-
     const embed = new EmbedBuilder();
 
     const pages = new Paginate({
         sourceMessage: msg,
         displayFunction: displayImage,
-        determineDisplayTypeFunction: determineDisplayType,
         displayType: DisplayType.EmbedData,
         data,
         embed,
@@ -1660,72 +1643,6 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
     });
 
     await pages.sendMessage();
-}
-
-export async function handleYoutubeScrape(msg: Message, args: string): Promise<undefined | any[]> {
-    if (args.trim() === '') {
-        msg.reply('No query given');
-        return;
-    }
-
-    const params = {
-        search_query: args,
-    };
-
-    const url = `https://youtube.com/results?${stringify(params)}`;
-
-    let data: any;
-
-    try {
-        const response = await fetch(url);
-        data = await response.text();
-    } catch (err) {
-        await msg.reply((err as any));
-        return;
-    }
-
-    /* Pull out the response json */
-    const regex = /<script nonce=".*">var ytInitialData = ({.*});<\/script>/;
-
-    const [, jsonStr ] = regex.exec(data) || [];
-
-    if (!jsonStr) {
-        console.error(data);
-        msg.reply('Failed to extract youtube results from HTML!');
-        return;
-    }
-
-    let json = {} as any;
-
-    try {
-        json = JSON.parse(jsonStr);
-    } catch (err) {
-        console.error(err);
-        msg.reply('Failed to extract youtube results from HTML!');
-        return;
-    }
-
-    const videoData = json
-        .contents
-        .twoColumnSearchResultsRenderer
-        .primaryContents
-        .sectionListRenderer
-        .contents[0]
-        .itemSectionRenderer
-        .contents;
-
-    const videos = videoData.filter((x: any) => x.videoRenderer).map((x: any) => {
-        return {
-            url: `https://www.youtube.com/watch?v=${x.videoRenderer.videoId}`,
-        }
-    });
-
-    if (videos.length === 0) {
-        msg.reply('No results found!');
-        return;
-    }
-
-    return videos;
 }
 
 export async function handleYoutubeApi(msg: Message, args: string): Promise<undefined | any[]> {
