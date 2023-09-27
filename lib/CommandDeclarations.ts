@@ -120,6 +120,9 @@ export const Commands: Command[] = [
             'addquote',
             'quotes',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['addquote', 'suggest', 'suggestquote'],
@@ -502,6 +505,9 @@ export const Commands: Command[] = [
             'image',
             'youtube',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['exchange'],
@@ -562,6 +568,9 @@ export const Commands: Command[] = [
         relatedCommands: [
             'query',
             'youtube',
+        ],
+        commandGates: [
+            slugUserGate,
         ],
     },
     {
@@ -733,6 +742,9 @@ export const Commands: Command[] = [
             'glados',
             'drunk',
             'buddha',
+        ],
+        commandGates: [
+            slugUserGate,
         ],
     },
     {
@@ -982,6 +994,9 @@ export const Commands: Command[] = [
             'tsong',
             'doctor',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['glados'],
@@ -997,6 +1012,9 @@ export const Commands: Command[] = [
             'buddha',
             'tsong',
             'doctor',
+        ],
+        commandGates: [
+            slugUserGate,
         ],
     },
     {
@@ -1014,6 +1032,9 @@ export const Commands: Command[] = [
             'tsong',
             'doctor',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['buddha', 'budda'],
@@ -1029,6 +1050,9 @@ export const Commands: Command[] = [
             'drunk',
             'tsong',
             'doctor',
+        ],
+        commandGates: [
+            slugUserGate,
         ],
     },
     {
@@ -1046,6 +1070,9 @@ export const Commands: Command[] = [
             'buddha',
             'doctor',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['doctor'],
@@ -1061,6 +1088,9 @@ export const Commands: Command[] = [
             'drunk',
             'buddha',
             'tsong',
+        ],
+        commandGates: [
+            slugUserGate,
         ],
     },
     {
@@ -1081,6 +1111,9 @@ export const Commands: Command[] = [
         relatedCommands: [
             'longsummary',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['longsummary', 'longsummarize'],
@@ -1092,6 +1125,9 @@ export const Commands: Command[] = [
         relatedCommands: [
             'summary',
         ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['gf'],
@@ -1100,6 +1136,9 @@ export const Commands: Command[] = [
             implementation: handleGf,
             description: 'Talk to your virtual gf',
         },
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['tradgf'],
@@ -1108,6 +1147,9 @@ export const Commands: Command[] = [
             implementation: handleTradGf,
             description: 'Talk to your trad virtual gf',
         },
+        commandGates: [
+            slugUserGate,
+        ],
     },
 ];
 

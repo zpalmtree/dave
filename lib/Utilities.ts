@@ -16,6 +16,51 @@ import { PublicKey } from '@solana/web3.js'
 import { RGB } from './Types.js';
 import { config } from './Config.js';
 
+const SLUGS_GUILD = '891069801173237800';
+
+const SlugRoles = {
+    SLUG_HOLDER: "957503404404527144",
+    SLUG_GANG: "961026739704844308"
+}
+
+/* If we're running in the slugs server, this user must be a burner or holder */
+export function slugUserGate(message: Message): { canAccess: boolean, error?: string } {
+    if (!message.guild) {
+        return {
+            canAccess: true,
+            error: undefined,
+        };
+    }
+
+    if (message.guild.id !== SLUGS_GUILD) {
+        return {
+            canAccess: true,
+            error: undefined,
+        };
+    }
+
+    if (!message.member) {
+        return {
+            canAccess: true,
+            error: undefined,
+        };
+    }
+
+    const canAccess = Object.values(SlugRoles).some((id) => message.member!.roles.cache.has(id));
+
+    if (!canAccess) {
+        return {
+            canAccess: false,
+            error: `Sorry, this bot is usable for slug holders or burners only. Buy Sol Slugs! <https://magiceden.io/marketplace/sol_slugs>`,
+        };
+    }
+
+    return {
+        canAccess: true,
+        error: undefined,
+    };
+}
+
 export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
 }

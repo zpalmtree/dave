@@ -91,6 +91,10 @@ export interface Command {
 
     /* Commands that are related to this one */
     relatedCommands?: string[];
+
+    /* Ways to gate the command to a certain user, channel, etc. Gate must return
+     * true to let the user run this command */
+    commandGates?: [(m: Message) => { canAccess: boolean, error?: string }];
 }
 
 export enum Args {
