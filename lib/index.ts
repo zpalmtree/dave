@@ -98,6 +98,17 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
                 return;
             }
 
+            if (c.commandGates) {
+                for (const gate of c.commandGates) {
+                    const { canAccess, error } = gate(msg);
+
+                    if (!canAccess) {
+                        await msg.reply(error!);
+                        return;
+                    }
+                }
+            }
+
             /* Check if the user is calling a sub command instead of the main
              * function. */
             if (args.length > 0 && c.subCommands && c.subCommands.length > 0) {
