@@ -16,6 +16,7 @@ import {
 import {
     canAccessCommand,
     getLanguageNames,
+    slugUserGate,
 } from './Utilities.js';
 
 import {
