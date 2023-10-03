@@ -62,7 +62,7 @@ export function slugUserGate(message: Message): { canAccess: boolean, error?: st
     if (!canAccess) {
         return {
             canAccess: false,
-            error: `Sorry, this bot is usable for slug holders or burners only. Buy Sol Slugs! <https://magiceden.io/marketplace/sol_slugs>`,
+            error: `Sorry, this command is usable for slug holders or burners only. [Buy Sol Slugs!](https://www.tensor.trade/trade/sol_slugs)`,
         };
     }
 
