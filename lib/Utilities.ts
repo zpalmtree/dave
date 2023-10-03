@@ -46,6 +46,17 @@ export function slugUserGate(message: Message): { canAccess: boolean, error?: st
         };
     }
 
+    const specialUsers = [
+        '523335703913037837',
+    ];
+
+    if (specialUsers.includes(message.author.id)) {
+        return {
+            canAccess: true,
+            error: undefined,
+        };
+    }
+
     const canAccess = Object.values(SlugRoles).some((id) => message.member!.roles.cache.has(id));
 
     if (!canAccess) {
