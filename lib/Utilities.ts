@@ -354,5 +354,5 @@ export function isCapital(char: string) {
 }
 
 export function truncateResponse(msg: string, limit: number = 1999): string {
-    return msg.slice(Math.max(msg.length - limit, 0));
+    return msg.slice(0, limit);
 }
