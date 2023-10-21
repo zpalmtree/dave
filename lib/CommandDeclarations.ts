@@ -702,7 +702,7 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['image'],
+        aliases: ['image', 'img'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleImage,
