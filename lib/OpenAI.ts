@@ -77,6 +77,9 @@ export async function handleOpenAI(
     systemPrompt?: string,
     temperature?: number,
 ): Promise<void> {
+    if (config.devEnv) {
+        return;
+    }
 
     if (bannedUsers.includes(msg.author.id)) {
         await msg.reply(`Sorry, this function has been disabled for your user.`);
