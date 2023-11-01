@@ -77,7 +77,7 @@ export async function handleOpenAI(
     systemPrompt?: string,
     temperature?: number,
 ): Promise<void> {
-    if (config.devEnv) {
+    if (config.devChannels.includes(msg.channel.id)) {
         return;
     }
 
