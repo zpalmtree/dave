@@ -2290,6 +2290,9 @@ export async function handleItsOver(msg: Message, args: string): Promise<void> {
         'https://cdn.discordapp.com/attachments/483470443001413675/1066569981787119747/8.mp4',
         'https://cdn.discordapp.com/attachments/483470443001413675/1076309851786989718/9.mp4',
         'https://cdn.discordapp.com/attachments/483470443001413675/1096251152405893130/10.mp4',
+        'https://media.discordapp.net/attachments/483470443001413675/1171312724970590299/11.mp4',
+        'https://media.discordapp.net/attachments/483470443001413675/1171312725419368478/12.mp4',
+        'https://media.discordapp.net/attachments/483470443001413675/1171312725973012481/13.mp4',
     ];
 
     const index = Number(args.trim());
