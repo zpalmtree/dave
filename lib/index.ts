@@ -172,8 +172,11 @@ async function dispatchCommand(
 async function handleFloorPriceChannel(client: Client, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.priceChannel) as GuildChannel;
-        const price = Number(magicEdenData.floorPrice) / LAMPORTS_PER_SOL;
-        await myChannel.setName(`Floor Price: ◎${price}`);
+
+        if (myChannel) {
+            const price = Number(magicEdenData.floorPrice) / LAMPORTS_PER_SOL;
+            await myChannel.setName(`Floor Price: ◎${price}`);
+        }
     } catch (error) {
         console.log(error);
     }
@@ -182,8 +185,10 @@ async function handleFloorPriceChannel(client: Client, magicEdenData: any) {
 async function handleTotalVolumeChannel(client: Client, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.volumeChannel) as GuildChannel;
-        const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString());
-        await myChannel.setName(`Total Volume: ◎${volume}`);
+        if (myChannel) {
+            const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString());
+            await myChannel.setName(`Total Volume: ◎${volume}`);
+        }
     } catch (error) {
         console.log(error);
     }

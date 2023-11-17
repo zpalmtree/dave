@@ -77,7 +77,6 @@ export async function handleOpenAI(
     systemPrompt?: string,
     temperature?: number,
 ): Promise<void> {
-
     if (bannedUsers.includes(msg.author.id)) {
         await msg.reply(`Sorry, this function has been disabled for your user.`);
         return;
@@ -90,7 +89,22 @@ export async function handleOpenAI(
         return;
     }
 
-    const previousConvo = chatHistoryCache.get(msg?.reference?.messageId || '');
+    const reply = msg?.reference?.messageId;
+
+    let previousConvo: ChatCompletionRequestMessage[] = [];
+
+    if (reply) {
+        previousConvo = chatHistoryCache.get(msg?.reference?.messageId || '') || [];
+
+        if (previousConvo.length === 0) {
+            const message = await msg.channel?.messages.fetch(reply);
+
+            previousConvo.push({
+                role: 'user',
+                content: message.content,
+            });
+        }
+    }
 
     const {
         result,
@@ -253,8 +267,8 @@ export async function handleGPT3Request(
 
     const messages = previousConvo || [];
 
-    if (messages.length === 0 && systemPrompt) {
-        messages.push({
+    if (messages.length === 0 || messages.find((m) => m.role === 'system') === undefined) {
+        messages.unshift({
             role: 'system',
             content: systemPrompt,
         });
