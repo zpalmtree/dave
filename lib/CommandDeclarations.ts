@@ -67,6 +67,7 @@ import {
     handleDoctor,
     handleGf,
     handleTradGf,
+    handleAIQuote,
 } from './OpenAI.js';
 
 import {
@@ -1081,6 +1082,25 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleDoctor,
             description: 'Ask the doctor something',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'glados',
+            'drunk',
+            'buddha',
+            'tsong',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['aiquote'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleAIQuote,
+            description: 'Generate AI quote',
         },
         relatedCommands: [
             'ai',

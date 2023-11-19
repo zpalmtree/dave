@@ -410,6 +410,7 @@ export async function handleChatGPTRequest(
     systemPrompt?: string,
     temperature: number = DEFAULT_CHATGPT_TEMPERATURE,
     files?: string[],
+    userProvidedModel?: string,
 ) {
     systemPrompt = createSystemPrompt(systemPrompt || `You are ChatGPT, a helpful, funny, artificial intelligence. You are not an AI language model.
 
@@ -429,7 +430,7 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
         });
     }
 
-    if (files && files.length > 0) {
+    if (files && files.length > 0 && !userProvidedModel) {
         let content: OpenAI.Chat.ChatCompletionContentPart[] = [
             {
                 type: 'text',
@@ -469,7 +470,11 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
         }
     }
 
-    const model = haveImage ? DEFAULT_VISION_MODEL : DEFAULT_CHATGPT_MODEL;
+    let model = haveImage ? DEFAULT_VISION_MODEL : DEFAULT_CHATGPT_MODEL;
+
+    if (userProvidedModel !== undefined) {
+        model = userProvidedModel;
+    }
 
     try {
         const completion = await openai.chat.completions.create({
@@ -571,5 +576,27 @@ export async function aiSummarize(
             result: undefined,
             error: (err as any).toString(),
         };
+    }
+}
+
+export async function handleAIQuote(msg: Message): Promise<void> {
+    const { result, error, messages } = await handleChatGPTRequest(
+        'aiquote: ',
+        msg.author.id,
+        undefined,
+        'Your job is to randomly generate quotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members.',
+        undefined,
+        undefined,
+        'ft:gpt-3.5-turbo-1106:personal:ai-quote-bot:8MifmdD8',
+    );
+
+    if (result) {
+        const response = messages.find((m) => m.role === 'assistant');
+
+        if (response) {
+            await msg.reply(truncateResponse(response.content as string));
+        }
+    } else {
+        await msg.reply(error!);
     }
 }
