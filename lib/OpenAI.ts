@@ -580,6 +580,10 @@ export async function aiSummarize(
 }
 
 export async function handleAIQuote(msg: Message): Promise<void> {
+    if (msg.channel.id !== '746507379310461010') {
+        return;
+    }
+
     const { result, error, messages } = await handleChatGPTRequest(
         'aiquote: ',
         msg.author.id,
