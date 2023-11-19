@@ -584,10 +584,10 @@ export async function handleAIQuote(msg: Message): Promise<void> {
         'aiquote: ',
         msg.author.id,
         undefined,
-        'Your job is to randomly generate quotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members.',
+        'Your job is to randomly generate quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members.',
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:ai-quote-bot:8MifmdD8',
+        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot:8MkBNVs6',
     );
 
     if (result) {
