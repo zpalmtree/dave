@@ -356,3 +356,54 @@ export function isCapital(char: string) {
 export function truncateResponse(msg: string, limit: number = 1999): string {
     return msg.slice(0, limit);
 }
+
+export function extractURLs(messageContent: string): string[] {
+    // This regular expression is designed to match most common URLs.
+    const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%_+.~#?&//=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)/gi;
+
+    // Use the match method to find all the matches in the given message content.
+    const urls = messageContent.match(urlRegex);
+
+    // If there are URLs found, return them; otherwise, return an empty array.
+    return urls ? urls : [];
+}
+
+export function extractURLsAndValidateExtensions(
+    messageContent: string, 
+    extensions: string[]
+): { validURLs: string[], invalidURLs: string[] } {
+    // Join the extensions into a string to insert into the regex pattern
+    const extensionsPattern = extensions.join('|');
+
+    // URL regex with a group for possible filenames at the end
+    const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
+
+    // Iterate over all matches and separate valid from invalid URLs
+    const validURLs: string[] = [];
+    const invalidURLs: string[] = [];
+    let match;
+
+    while ((match = urlRegex.exec(messageContent)) !== null) {
+        const url = match[0];
+
+        const extensionRegex = /\/(\w+)\.(\w{3,4})($|\?)/i;
+
+        const extensionMatch = url.match(extensionRegex);
+
+        if (extensionMatch && extensionMatch.length >= 3) {
+            const fileExtension = extensionMatch[2].toLowerCase();
+            if (extensions.includes(fileExtension)) {
+                validURLs.push(url);
+            } else {
+                invalidURLs.push(url);
+            }
+        } else { // If there's no filename, then the URL is valid
+            validURLs.push(url);
+        }
+    }
+
+    return {
+        validURLs,
+        invalidURLs,
+    }
+};

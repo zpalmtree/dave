@@ -4,7 +4,11 @@ import {
 } from 'openai';
 
 import { config } from './Config.js';
-import { truncateResponse } from './Utilities.js';
+import {
+    truncateResponse,
+    extractURLs,
+    extractURLsAndValidateExtensions,
+} from './Utilities.js';
 
 const openai = new OpenAI({
     apiKey: config.openaiApiKey,
@@ -84,6 +88,51 @@ function cacheMessage(messageId: string, messages: OpenAI.Chat.ChatCompletionMes
     chatHistoryCache.set(messageId, messages);
 }
 
+export function getImageURLsFromMessage(
+    msg: Message,
+    repliedMessage?: Message,
+): string[] {
+    let contentToExtractFrom = '';
+
+    if (msg.attachments.size) {
+        contentToExtractFrom += [...msg.attachments.values()].map((f) => f.url).join(' ');
+    }
+
+    if (repliedMessage) {
+        contentToExtractFrom += [...repliedMessage.attachments.values()].map((f) => f.url).join(' ');
+    }
+
+    const supportedExtensions = [
+        'png',
+        'gif',
+        'jpg',
+        'webp',
+    ];
+
+    for (const currentMessage of [repliedMessage, msg]) {
+        if (!currentMessage) {
+            continue;
+        }
+
+        contentToExtractFrom += ` ${currentMessage.content} `;
+    }
+
+    if (contentToExtractFrom === '') {
+        return [];
+    }
+
+    const { validURLs, invalidURLs } = extractURLsAndValidateExtensions(
+        contentToExtractFrom,
+        supportedExtensions,
+    );
+
+    if (invalidURLs.length > 0) {
+        throw new Error(`Invalid URLs or attachments provided: ${invalidURLs.join(', ')}, extension must be one of ${supportedExtensions.join(', ')}`);
+    }
+
+    return validURLs;
+}
+
 export async function handleOpenAI(
     msg: Message,
     args: string,
@@ -106,22 +155,15 @@ export async function handleOpenAI(
     const reply = msg?.reference?.messageId;
 
     let previousConvo: OpenAI.Chat.ChatCompletionMessageParam[] = [];
-
-    let files: string[] = [];
-
-    if (msg.attachments.size) {
-        files = [...msg.attachments.values()].map((f) => f.url);
-    }
+    let repliedMessage = undefined;
 
     if (reply) {
         previousConvo = chatHistoryCache.get(msg?.reference?.messageId || '') || [];
 
         if (previousConvo.length === 0) {
-            const repliedMessage = await msg.channel?.messages.fetch(reply);
+            repliedMessage = await msg.channel?.messages.fetch(reply);
 
             if (repliedMessage) {
-                files = files.concat([...repliedMessage.attachments.values()].map((f) => f.url));
-
                 previousConvo.push({
                     role: 'user',
                     content: repliedMessage.content,
@@ -129,6 +171,11 @@ export async function handleOpenAI(
             }
         }
     }
+
+    const files = getImageURLsFromMessage(
+        msg,
+        repliedMessage,
+    );
 
     const {
         result,
