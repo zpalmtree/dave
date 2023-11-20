@@ -579,19 +579,27 @@ export async function aiSummarize(
     }
 }
 
-export async function handleAIQuote(msg: Message): Promise<void> {
-    if (msg.channel.id !== '746507379310461010') {
+export async function handleAIQuote(msg: Message, args: string): Promise<void> {
+    if (msg.channel.id !== '746507379310461010' && !config.devEnv) {
         return;
+    }
+
+    let systemPrompt = 'Your job is to randomly generate quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members.';
+
+    const prompt = args.trim();
+
+    if (prompt !== '') {
+        systemPrompt += ` The quote should be about or authored by "${prompt}" as applicable.`;
     }
 
     const { result, error, messages } = await handleChatGPTRequest(
         'aiquote: ',
         msg.author.id,
         undefined,
-        'Your job is to randomly generate quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members.',
+        systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot:8MkBNVs6',
+        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v2:8Mq7Aob3',
     );
 
     if (result) {
