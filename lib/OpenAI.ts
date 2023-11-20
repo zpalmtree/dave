@@ -575,12 +575,20 @@ export async function aiSummarize(
     }
 }
 
-export async function handleAIQuote(msg: Message): Promise<void> {
+export async function handleAIQuote(msg: Message, args: string): Promise<void> {
+    let systemPrompt = 'Your job is to randomly generate quotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
+
+    const prompt = args.trim();
+
+    if (prompt !== '') {
+        systemPrompt += ` Topic/author: "${prompt}"`;
+    }
+
     const { result, error, messages } = await handleChatGPTRequest(
         'aiquote: ',
         msg.author.id,
         undefined,
-        'Your job is to randomly generate quotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members.',
+        systemPrompt,
         undefined,
         undefined,
         'ft:gpt-3.5-turbo-1106:personal:ai-quote-bot:8MifmdD8',

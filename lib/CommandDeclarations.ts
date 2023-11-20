@@ -1102,7 +1102,7 @@ export const Commands: Command[] = [
     {
         aliases: ['aiquote'],
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handleAIQuote,
             description: 'Generate AI quote',
         },
