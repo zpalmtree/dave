@@ -580,7 +580,12 @@ export async function aiSummarize(
 }
 
 export async function handleAIQuote(msg: Message, args: string): Promise<void> {
-    if (msg.channel.id !== '746507379310461010' && !config.devEnv) {
+    const permittedChans = [
+        '746507379310461010',
+        '1076313241078202471',
+    ];
+
+    if (!permittedChans.includes(msg.channel.id) && !config.devEnv) {
         return;
     }
 
