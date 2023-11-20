@@ -599,7 +599,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v3:8Ms0r161',
+        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v5:8N0lz647',
     );
 
     if (result) {
