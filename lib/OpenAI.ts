@@ -576,7 +576,7 @@ export async function aiSummarize(
 }
 
 export async function handleAIQuote(msg: Message, args: string): Promise<void> {
-    let systemPrompt = 'Your job is to randomly generate quotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
+    let systemPrompt = 'Your job is to randomly generate or completequotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
 
     const prompt = args.trim();
 
@@ -591,7 +591,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:ai-quote-bot:8MifmdD8',
+        'ft:gpt-3.5-turbo-1106:personal:slug-quote-bot-v2:8NC8XipH',
     );
 
     if (result) {
