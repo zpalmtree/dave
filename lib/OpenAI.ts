@@ -583,9 +583,10 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
     const permittedChans = [
         '746507379310461010',
         '1076313241078202471',
+        '483470443001413675',
     ];
 
-    if (!permittedChans.includes(msg.channel.id) && !config.devEnv) {
+    if (!permittedChans.includes(msg.channel.id)) {
         return;
     }
 
