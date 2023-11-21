@@ -589,7 +589,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    let systemPrompt = 'Your job is to randomly generate quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
+    let systemPrompt = 'Your job is to randomly generate or complete quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
 
     const prompt = args.trim();
 
@@ -604,7 +604,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v3:8Ms0r161',
+        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v8:8N9NhtHp',
     );
 
     if (result) {
