@@ -591,7 +591,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
 
     let systemPrompt = 'Your job is to randomly generate or complete quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
 
-    const prompt = args.trim();
+    const prompt = args.trim().toLowerCase();
 
     if (prompt !== '') {
         systemPrompt += ` Topic/author: "${prompt}"`;
