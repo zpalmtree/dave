@@ -605,13 +605,14 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v8:8N9NhtHp',
+        'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v17:8NSpO14A',
     );
 
     if (result) {
         const response = messages.find((m) => m.role === 'assistant');
 
         if (response) {
+            console.log(response.content);
             await msg.reply(truncateResponse(response.content as string));
         }
     } else {
