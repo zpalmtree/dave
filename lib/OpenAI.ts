@@ -607,7 +607,6 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         const response = messages.find((m) => m.role === 'assistant');
 
         if (response) {
-            console.log(response.content);
             await msg.reply(truncateResponse(response.content as string));
         }
     } else {
