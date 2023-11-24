@@ -210,7 +210,7 @@ export async function handleChatGPT(msg: Message, args: string): Promise<void> {
         msg,
         args,
         handleChatGPTRequest,
-        `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point.`
+        `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible.`
     );
 }
 
