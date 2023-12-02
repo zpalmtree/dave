@@ -21,6 +21,7 @@ const SLUGS_GUILD = '891069801173237800';
 const SlugRoles = {
     SLUG_HOLDER: "957503404404527144",
     SLUG_GANG: "961026739704844308"
+    SLUG_BOSS: "891077439277645884",
 }
 
 /* If we're running in the slugs server, this user must be a burner or holder */
