@@ -44,6 +44,7 @@ import {
 
 import { restoreTimers } from './Timer.js';
 import { cacheMessageForSummarization } from './Summarize.js';
+import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
@@ -59,6 +60,8 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         if (msg.author.id !== '446154284514541579') {
             cacheMessageForSummarization(msg);
         }
+
+        convertTwitterLinks(msg);
 
         return;
     }
