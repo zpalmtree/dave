@@ -3,6 +3,10 @@ import { Message, Guild } from 'discord.js';
 import { getUsername, truncateResponse } from './Utilities.js';
 
 export async function convertTwitterLinks(msg: Message): Promise<void> {
+    if (!msg.guild.me.hasPermission('SEND_MESSAGES')) {
+        return;
+    }
+
     try {
         const content = msg.content.trim();
 
