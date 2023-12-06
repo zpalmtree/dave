@@ -1,9 +1,9 @@
-import { Message, Guild, PermissionsBitField } from 'discord.js';
+import { Message, Guild, PermissionsBitField, TextChannel } from 'discord.js';
 
 import { getUsername, truncateResponse } from './Utilities.js';
 
 export async function convertTwitterLinks(msg: Message): Promise<void> {
-    if (!msg.guild!.members.me!.permissions.has(PermissionsBitField.Flags.SendMessages)) {
+    if (!msg.guild!.members.me!.permissionsIn(msg.channel as TextChannel).has(PermissionsBitField.Flags.SendMessages)) {
         return;
     }
 
