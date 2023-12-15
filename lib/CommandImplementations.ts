@@ -2229,7 +2229,7 @@ export async function handleGen2(msg: Message): Promise<void> {
 }
 
 export async function handleBuy(msg: Message): Promise<void> {
-    await replyWithMention(msg, `<https://magiceden.io/marketplace/sol_slugs>`);
+    await replyWithMention(msg, `<https://www.tensor.trade/trade/sol_slugs>`);
 }
 
 export async function handleVerify(msg: Message): Promise<void> {
