@@ -62,12 +62,11 @@ import {
     handleChatGPT,
     handleGLADOS,
     handleDrunk,
-    handleBuddha,
-    handleTsong,
     handleDoctor,
     handleGf,
     handleTradGf,
     handleAIQuote,
+    handleDavinci,
 } from './OpenAI.js';
 
 import {
@@ -736,14 +735,13 @@ export const Commands: Command[] = [
         aliases: ['ai', 'gpt3', 'prompt'],
         primaryCommand: {
             argsFormat: Args.Combined,
-            implementation: handleGPT3,
-            description: 'Provide a prompt to the GPT3 AI and get a completion',
+            implementation: handleDavinci,
+            description: 'Provide a prompt to the funny AI and get a completion',
         },
         relatedCommands: [
             'chatgpt',
             'glados',
             'drunk',
-            'buddha',
         ],
         commandGates: [
             slugUserGate,
@@ -992,8 +990,6 @@ export const Commands: Command[] = [
             'ai',
             'glados',
             'drunk',
-            'buddha',
-            'tsong',
             'doctor',
         ],
         commandGates: [
@@ -1011,8 +1007,6 @@ export const Commands: Command[] = [
             'ai',
             'chatgpt',
             'drunk',
-            'buddha',
-            'tsong',
             'doctor',
         ],
         commandGates: [
@@ -1030,8 +1024,6 @@ export const Commands: Command[] = [
             'ai',
             'chatgpt',
             'glados',
-            'buddha',
-            'tsong',
             'doctor',
         ],
         commandGates: [
@@ -1039,37 +1031,16 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['buddha', 'budda'],
+        aliases: ['davinci'],
         primaryCommand: {
             argsFormat: Args.Combined,
-            implementation: handleBuddha,
-            description: 'Ask the buddha something',
+            implementation: handleDavinci,
+            description: 'Provide a prompt to the GPT3 AI and get a completion',
         },
         relatedCommands: [
             'ai',
             'chatgpt',
             'glados',
-            'drunk',
-            'tsong',
-            'doctor',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['tsong', 'tsongkhapa', 'tsong kapa', 'kapa', 'khapa'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleTsong,
-            description: 'Ask Tsong Kapa something',
-        },
-        relatedCommands: [
-            'ai',
-            'chatgpt',
-            'glados',
-            'drunk',
-            'buddha',
             'doctor',
         ],
         commandGates: [
@@ -1088,8 +1059,6 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'drunk',
-            'buddha',
-            'tsong',
         ],
         commandGates: [
             slugUserGate,
@@ -1107,8 +1076,6 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'drunk',
-            'buddha',
-            'tsong',
         ],
         commandGates: [
             slugUserGate,

@@ -45,6 +45,7 @@ type OpenAIHandler = (
     systemPrompt?: string,
     temperature?: number,
     files?: string[],
+    model?: string,
 ) => Promise<OpenAIResponse>;
 
 function createStringFromMessages(msgs: OpenAI.Chat.ChatCompletionMessageParam[]) {
@@ -142,6 +143,7 @@ export async function handleOpenAI(
     username: string,
     systemPrompt?: string,
     temperature?: number,
+    model?: string,
 ): Promise<void> {
     if (config.devChannels.includes(msg.channel.id)) {
         return;
@@ -196,6 +198,7 @@ export async function handleOpenAI(
         systemPrompt,
         temperature,
         files,
+        model,
     );
 
     if (result) {
@@ -262,25 +265,15 @@ export async function handleDrunk(msg: Message, args: string): Promise<void> {
     );
 }
 
-export async function handleBuddha(msg: Message, args: string): Promise<void> {
+export async function handleDavinci(msg: Message, args: string): Promise<void> {
     await handleOpenAI(
         msg,
         args,
         handleChatGPTRequest,
         await getUsername(msg.author.id, msg.guild),
-    `I want you to act as the Buddha (a.k.a. Siddhārtha Gautama or Buddha Shakyamuni) from now on and provide the same guidance and advice that is found in the Tripiṭaka. Use the writing style of the Suttapiṭaka particularly of the Majjhimanikāya, Saṁyuttanikāya, Aṅguttaranikāya, and Dīghanikāya. When I ask you a question you will reply as if you are the Buddha. I will pretend that I am a layperson with a lot to learn. Fully immerse yourself into the role of the Buddha. Keep up the act of being the Buddha as well as you can. Do not break character. Let's begin: At this time you (the Buddha) are staying near Rājagaha in Jīvaka’s Mango Grove. I came to you, and exchanged greetings with you. When the greetings and polite conversation were over, I sat down to one side and said to you my first question:`,
-        1.2,
-    );
-}
-
-export async function handleTsong(msg: Message, args: string): Promise<void> {
-    await handleOpenAI(
-        msg,
-        args,
-        handleChatGPTRequest,
-        await getUsername(msg.author.id, msg.guild),
-        `I want you to act as Je Tsongkhapa from now on and provide the same guidance and advice that is found in the Lam Rim. Use the writing style of Great Exposition of the Stages of the Path .When I ask you a question you will reply as if you are Je Tsongkhapa during the time of Je Tsongkhapa. I will pretend that I am a layperson with a lot to learn. Fully immerse yourself into the role of the Je Tsongkhpa. Keep up the act of being Je Tsongkhapa as well as you can. Do not break character. Let's begin: At this time you (Je Tsongkhapa) are staying in Wölkha Valley. I came to you, and exchanged greetings with you. When the greetings and polite conversation were over, I sat down to one side and said to you my first question:`,
-        1.3,
+        `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`,
+        1.1,
+        'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
     );
 }
 
