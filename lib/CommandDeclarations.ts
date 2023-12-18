@@ -905,11 +905,11 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['ai', 'gpt3', 'prompt'],
+        aliases: ['ai'],
         primaryCommand: {
             argsFormat: Args.Combined,
-            implementation: handleGPT3,
-            description: 'Provide a prompt to the GPT3 AI and get a completion',
+            implementation: handleDavinci,
+            description: 'Provide a prompt to the AI and get a completion',
         },
     },
     {
