@@ -58,7 +58,6 @@ import {
 } from './CommandImplementations.js';
 
 import {
-    handleGPT3,
     handleChatGPT,
     handleGLADOS,
     handleDrunk,
