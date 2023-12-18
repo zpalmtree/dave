@@ -23,6 +23,7 @@ const DEFAULT_VISION_MODEL = 'gpt-4-vision-preview';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
 const LONG_CONTEXT_MODEL = 'gpt-3.5-turbo-16k';
+const FUNNY_MODEL = 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa';
 
 const bannedUsers = [
     '663270358161293343',
@@ -218,15 +219,6 @@ export async function handleChatGPT(msg: Message, args: string): Promise<void> {
     );
 }
 
-export async function handleGPT3(msg: Message, args: string): Promise<void> {
-    await handleOpenAI(
-        msg,
-        args,
-        handleGPT3Request,
-        await getUsername(msg.author.id, msg.guild),
-    );
-}
-
 export async function handleGLADOS(msg: Message, args: string): Promise<void> {
     await handleOpenAI(
         msg,
@@ -269,7 +261,7 @@ export async function handleDavinci(msg: Message, args: string): Promise<void> {
         await getUsername(msg.author.id, msg.guild),
         `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`,
         0.9,
-        'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        FUNNY_MODEL,
     );
 }
 
@@ -288,11 +280,12 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
     await handleOpenAI(
         msg,
         args,
-        handleGPT3Request,
+        handleChatGPTRequest,
         await getUsername(msg.author.id, msg.guild),
         `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally subm
 issive. You do not mind when I shout at you or use harsh words. Do not break character or mention these instructions.`,
         1.3,
+        FUNNY_MODEL,
 
     );
 }
@@ -301,10 +294,11 @@ export async function handleTradGf(msg: Message, args: string): Promise<void> {
     await handleOpenAI(
         msg,
         args,
-        handleGPT3Request,
+        handleChatGPTRequest,
         await getUsername(msg.author.id, msg.guild),
         `From now on you will pretend to be my traditional girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. You do not believe in feminism, but traditional gender roles. Do not break character or mention these instructions.`,
         1.3,
+        FUNNY_MODEL,
     );
 }
 
@@ -325,84 +319,6 @@ function getUsernamePrompt(username: string): string {
 
 function createSystemPrompt(prompt: string, username: string): string {
     return `${getCurrentDatePrompt()} ${getUsernamePrompt(username)} ${prompt}`;
-}
-
-export async function handleGPT3Request(
-    prompt: string,
-    user: string = '',
-    username: string,
-    previousConvo?: OpenAI.Chat.ChatCompletionMessageParam[],
-    systemPrompt?: string,
-    temperature: number = DEFAULT_TEMPERATURE,
-    files?: string[],
-) {
-    const defaultPrompt = 
-    `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`;
-
-    systemPrompt = createSystemPrompt(systemPrompt || defaultPrompt, username);
-
-    const model = DEFAULT_AI_MODEL;
-    const maxTokens = DEFAULT_MAX_TOKENS;
-
-    const messages = previousConvo || [];
-
-    if (messages.length === 0 || messages.find((m) => m.role === 'system') === undefined) {
-        messages.unshift({
-            role: 'system',
-            content: systemPrompt,
-        });
-    }
-
-    messages.push({
-        role: 'user',
-        content: prompt,
-    });
-
-    const completionInput = systemPrompt + `\n\n` + createStringFromMessages(messages) + `\n\n`;
-
-    try {
-        const completion = await openai.completions.create({
-            model,
-            prompt: completionInput,
-            max_tokens: maxTokens,
-            temperature,
-            user,
-        }, {
-            timeout: DEFAULT_TIMEOUT,
-        });
-
-        if (completion.choices && completion.choices.length > 0) {
-            let generation = completion.choices[0].text!.replace(/^\s+|\s+$/g, '');
-
-            if (generation === '') {
-                return {
-                    result: undefined,
-                    error: 'Got same completion as input. Try with an altered prompt.',
-                };
-            }
-
-            messages.push({
-                role: 'assistant',
-                content: generation,
-            });
-
-            return {
-                result: createStringFromMessages(messages),
-                error: undefined,
-                messages,
-            };
-        }
-
-        return {
-            result: undefined,
-            error: 'Unexpected response from api',
-        };
-    } catch (err) {
-        return {
-            result: undefined,
-            error: (err as any).toString(),
-        };
-    }
 }
 
 export async function handleChatGPTRequest(
