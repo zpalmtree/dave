@@ -128,29 +128,9 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         description
     );
 
-    const { offset, label } = getDefaultTimeZone();
+    const message = `Success. Timer #${timerID} will go off ${moment.utc(time).fromNow()}.`;
 
-    const embed = new EmbedBuilder()
-        .setTitle('Success')
-        .setDescription(`Timer #${timerID} has been scheduled.`)
-        .setFooter({ text: `Type ${config.prefix}timer delete ${timerID} to cancel this timer` })
-        .addFields(
-            {
-                name: 'Time',
-                value: `${capitalize(moment.utc(time).fromNow())}, ${moment.utc(time).utcOffset(offset).format('HH:mm')} ${label}`,
-            }
-        );
-
-    if (description) {
-        embed.addFields({
-            name: 'Message',
-            value: description,
-        });
-    }
-
-    msg.channel.send({
-        embeds: [embed],
-    });
+    await msg.reply(message);
 }
 
 export async function handleTimers(msg: Message, db: Database): Promise<void> {
