@@ -407,3 +407,9 @@ export function extractURLsAndValidateExtensions(
         invalidURLs,
     }
 };
+
+export function monthDurationToSeconds(months: string): number {
+    const now = moment();
+    const futureDate = moment().add(months, 'months');
+    return futureDate.unix() - now.unix();
+}
