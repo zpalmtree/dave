@@ -807,7 +807,7 @@ export const Commands: Command[] = [
             argsFormat: Args.Split,
             implementation: handleTimer,
             description: 'Set a timer to remind you of something',
-            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
+            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `mm` (month), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
             needDb: true,
             examples: [
                 {
@@ -1241,3 +1241,4 @@ export function handleHelp(msg: Message, args: string): void {
 
     pages.sendMessage();
 }
+
