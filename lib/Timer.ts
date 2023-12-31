@@ -82,7 +82,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
     const [
         ,
         years=0,
-        months,
+        months='0',
         weeks=0,
         days=0,
         hours=0,
