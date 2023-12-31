@@ -24,6 +24,7 @@ import {
     capitalize,
     getUsername,
     getDefaultTimeZone,
+    monthDurationToSeconds
 } from './Utilities.js';
 
 import { config } from './Config.js';
@@ -69,7 +70,7 @@ export async function deleteTimer(msg: Message, args: string[], db: Database) {
 }
 
 export async function handleTimer(msg: Message, args: string[], db: Database) {
-    const regex = /^(?:([0-9\.]+)y)?(?:([0-9\.]+)w)?(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
+    const regex = /^(?:([0-9\.]+)y)?(?:([0-9\.]+)mm)?(?:([0-9\.]+)w)?(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
 
     const results = regex.exec(args.join(' '));
 
@@ -81,6 +82,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
     const [
         ,
         years=0,
+        months='0',
         weeks=0,
         days=0,
         hours=0,
@@ -94,6 +96,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
                            + Number(hours) * 60 * 60
                            + Number(days) * 60 * 60 * 24
                            + Number(weeks) * 60 * 60 * 24 * 7
+                           + monthDurationToSeconds(months)
                            + Number(years) * 60 * 60 * 24 * 365;
 
     if (totalTimeSeconds > 60 * 60 * 24 * 365 * 100) {
