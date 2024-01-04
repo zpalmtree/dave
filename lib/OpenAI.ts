@@ -264,7 +264,7 @@ export async function handleDavinci(msg: Message, args: string): Promise<void> {
         handleChatGPTRequest,
         await getUsername(msg.author.id, msg.guild),
         `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`,
-        1.05,
+        1.15,
         FUNNY_MODEL,
     );
 }
