@@ -2202,7 +2202,7 @@ export async function handleCock(msg: Message): Promise<void> {
 export async function handleBurn(msg: Message): Promise<void> {
     await replyWithMention(msg, `A lot of slug utility comes from burning a slug.
 **Why burn a slug?**
-* Help be part of the most deflationary collection on Solana - with over 4100 slugs burnt!
+* Help be part of the most deflationary collection on Solana - with over 5300 slugs burnt!
 * Access to alpha, whitelist, and other burner only channels.
 * Alpha bots - Find trending magiceden collections, new twitter accounts, and just created mints.
 * Free stuff - Sometimes we will raffle 1/1s, airdrops, or other valuable items. Burners come first whenever this happens.
