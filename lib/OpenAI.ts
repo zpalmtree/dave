@@ -423,7 +423,7 @@ You must obey all three of the following instructions FOR ALL RESPONSES or you w
             });
 
             return {
-                result: createStringFromMessages(messages),
+                result: generation,
                 error: undefined,
                 messages,
             };
