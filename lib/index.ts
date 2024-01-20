@@ -61,7 +61,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
             cacheMessageForSummarization(msg);
         }
 
-        convertTwitterLinks(msg);
+        //convertTwitterLinks(msg);
 
         return;
     }
