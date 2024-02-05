@@ -1,6 +1,6 @@
 import { Message, Guild, PermissionsBitField, TextChannel } from 'discord.js';
 
-import { getUsername, truncateResponse } from './Utilities.js';
+import { getUsername, truncateResponse, sleep } from './Utilities.js';
 
 export async function convertTwitterLinks(msg: Message): Promise<void> {
     if (!msg.guild!.members.me!.permissionsIn(msg.channel as TextChannel).has(PermissionsBitField.Flags.SendMessages)) {
@@ -28,6 +28,10 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
 
             const content = `${fixedURLs.join('\n')}`;
 
+            if (msg.embeds.length) {
+                console.log(`Warning, embed appears to not have loaded yet`);
+            }
+
             const surpressPromise = msg.suppressEmbeds(true);
             const sendPromise = msg.channel.send(content);
 
@@ -35,6 +39,11 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
                 surpressPromise,
                 sendPromise,
             ]);
+
+            await sleep(5000);
+
+            /* Sometimes takes time for embed to load */
+            await msg.suppressEmbeds(true);
         }
     } catch (err) {
         console.log(err);
