@@ -24,7 +24,17 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
         }
 
         if (fixedURLs.length > 0) {
-            await msg.channel.send(fixedURLs.join('\n'));
+            const username = await getUsername(msg.author.id, msg.guild);
+
+            const content = `Fixed twitter embed posted by ${username}: ${fixedURLs.join('\n')}`;
+
+            const deletePromise = msg.delete();
+            const sendPromise = msg.channel.send(content);
+
+            await Promise.all([
+                deletePromise,
+                sendPromise,
+            ]);
         }
     } catch (err) {
         console.log(err);
