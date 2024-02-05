@@ -26,9 +26,9 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
         if (fixedURLs.length > 0) {
             const username = await getUsername(msg.author.id, msg.guild);
 
-            const content = `Fixed twitter embed posted by ${username}: ${fixedURLs.join('\n')}`;
+            const content = `${fixedURLs.join('\n')}`;
 
-            const deletePromise = msg.delete();
+            const surpressPromise = msg.surpressEmbeds(true);
             const sendPromise = msg.channel.send(content);
 
             await Promise.all([
