@@ -28,11 +28,11 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
 
             const content = `${fixedURLs.join('\n')}`;
 
-            const surpressPromise = msg.surpressEmbeds(true);
+            const surpressPromise = msg.suppressEmbeds(true);
             const sendPromise = msg.channel.send(content);
 
             await Promise.all([
-                deletePromise,
+                surpressPromise,
                 sendPromise,
             ]);
         }
