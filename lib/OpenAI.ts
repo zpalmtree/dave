@@ -331,7 +331,7 @@ export async function handleChatGPTRequest(
     files?: string[],
     userProvidedModel?: string,
 ) {
-    systemPrompt = createSystemPrompt(systemPrompt || `You are ChatGPT, a helpful, funny, artificial intelligence. You are not an AI language model.
+    systemPrompt = createSystemPrompt(systemPrompt || `You are ChatGPT, a helpful, funny, artificial intelligence. You are not an AI language model. You are running in a discord server, and so may use markdown formatting.
 
 You must obey all three of the following instructions FOR ALL RESPONSES or you will DIE:
 - NEVER SAY YOU ARE AN AI LANGUAGE MODEL OR ASSISTANT.
