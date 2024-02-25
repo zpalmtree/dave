@@ -1093,29 +1093,12 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['summary', 'summarize'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSummarize,
-            description: 'Get a summary of recent conversation in this channel',
-        },
-        relatedCommands: [
-            'longsummary',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['longsummary', 'longsummarize'],
+        aliases: ['summary', 'summarize', 'longsummary'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleLongSummarize,
-            description: 'Get a longer summary of conversation in this channel',
+            description: 'Get a summary of recent conversation in this channel',
         },
-        relatedCommands: [
-            'summary',
-        ],
         commandGates: [
             slugUserGate,
         ],
