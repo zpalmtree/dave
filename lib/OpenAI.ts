@@ -22,7 +22,7 @@ const DEFAULT_CHATGPT_MODEL = 'gpt-4-turbo-preview';
 const DEFAULT_VISION_MODEL = 'gpt-4-vision-preview';
 const DEFAULT_AI_MODEL = 'text-davinci-003';
 const DEFAULT_TIMEOUT = 1000 * 60;
-const LONG_CONTEXT_MODEL = 'gpt-3.5-turbo-16k';
+const LONG_CONTEXT_MODEL = 'gpt-3.5-turbo-0125';
 const FUNNY_MODEL = 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa';
 
 const bannedUsers = [
