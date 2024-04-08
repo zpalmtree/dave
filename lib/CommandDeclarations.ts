@@ -71,6 +71,7 @@ import {
     handleFrozen,
     handleIncineratorFAQ,
     handleGen3Count,
+    handleGen3CountLegacy,
     handleGen4Count,
     handleItsOver,
     handleUtility,
@@ -117,6 +118,15 @@ export const Commands: Command[] = [
             description: 'Displays the current Generation 3 slug supply',
         }
     },
+    {
+        aliases: ['gen3legacy'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen3CountLegacy,
+            description: 'Displays the historical Generation 3 eligiblity',
+        }
+    },
+
     {
         aliases: ['gen4', 'gen4count', 'gen4supply'],
         primaryCommand: {

@@ -160,6 +160,67 @@ export async function handleGen3Count(msg: Message): Promise<void> {
     await replyWithMention(msg, `Generation 3 slugs can be found by filtering for Shipwreck, Submarine, Fish Tank, Underwater Cult, and Night Shift backgrounds. They are part of the same slugs collection, with new, rarer, underwater themed traits. They were awarded to users who burnt three slugs.`);
 }
 
+export async function handleGen3CountLegacy(msg: Message, args: string): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    const address = args.trim();
+
+    if (address !== '' && !isValidSolAddress(address)) {
+        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch Gen3 count from API!');
+        return;
+    }
+
+    const data = await res.json();
+
+    const gen2Date = new Date('2022-01-01');
+    const gen3Date = new Date('2022-11-14');
+
+    let gen3Count = 0;
+    let burns = 0;
+
+    for (const user of data.burnStats.users) {
+        if (address !== '' && user.address !== address) {
+            continue;
+        }
+
+        let eligibleBurns = 0;
+
+        for (const burn of user.transactions) {
+            if (new Date(burn.timestamp) >= gen2Date && new Date(burn.timestamp) <= gen3Date) {
+                eligibleBurns += burn.slugsBurnt.length;
+            }
+        }
+
+        gen3Count += Math.floor(eligibleBurns / 3);
+        burns += eligibleBurns;
+    }
+
+    if (address !== '') {
+        const burnsForNextSlug = 3 - (burns % 3);
+        const slugStr = burnsForNextSlug === 1 ? 'slug' : 'slugs';
+
+        if (gen3Count === 0) {
+            await replyWithMention(
+                msg,
+                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Unfortunately, you missed out on the gen 3 burn period!`,
+            );
+        } else {
+            await replyWithMention(
+                msg,
+                `You are currently set to receive ${gen3Count} generation 3 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns.`,
+            );
+        }
+    } else {
+        await replyWithMention(msg, `The Generation 3 slug supply will be 800.`);
+    }
+}
+
 export async function handleGen4Count(msg: Message, args: string): Promise<void> {
     const url = "https://letsalllovelain.com/slugs/";
     const res = await fetch(url);
