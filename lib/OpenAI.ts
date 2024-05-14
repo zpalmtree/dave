@@ -1,4 +1,7 @@
-import { Message } from 'discord.js';
+import {
+    Message,
+    EmbedBuilder,
+} from 'discord.js';
 import {
     OpenAI,
 } from 'openai';
@@ -525,5 +528,61 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         }
     } else {
         await msg.reply(error!);
+    }
+}
+
+export async function handleTranscribe(msg: Message) {
+    /* 100 MB */
+    const MAX_FILE_SIZE = 1024 * 1024 * 1;
+
+    const validContentTypes = [
+        "audio/flac",
+        "audio/mpeg",
+        "video/mp4",
+        "video/mpeg",
+        "audio/mpeg",
+        "audio/x-m4a",
+        "audio/mp4",
+        "audio/ogg",
+        "video/ogg",
+        "audio/wav",
+        "audio/x-wav",
+        "video/webm",
+        "audio/webm"
+    ];
+
+    const audioAttachments = [];
+
+    for (const attachment of msg.attachments.values()) {
+        if (attachment.contentType && validContentTypes.includes(attachment.contentType)) {
+            audioAttachments.push(attachment);
+        }
+    }
+
+    if (audioAttachments.length === 0) {
+        return;
+    }
+
+    for (const attachment of audioAttachments) {
+        try {
+            console.log(`Transcribing ${attachment.name} - ${attachment.url}...`);
+
+            const transcription = await openai.audio.transcriptions.create({
+                file: await fetch(attachment.url),
+                model: 'whisper-1',
+            });
+
+            const embed = new EmbedBuilder()
+                .setTitle('Transcribed Audio')
+                .setDescription(transcription.text.slice(0, 4096))
+
+            await msg.reply({
+                embeds: [embed],
+            });
+
+            console.log(transcription.text);
+        } catch (err) {
+            console.log(`Error transcribing ${attachment} ${attachment.name}, ${attachment.url}: ${err}`);
+        }
     }
 }
