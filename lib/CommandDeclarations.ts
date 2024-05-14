@@ -66,6 +66,7 @@ import {
     handleTradGf,
     handleAIQuote,
     handleDavinci,
+    handleTranscribe,
 } from './OpenAI.js';
 
 import {
@@ -1116,6 +1117,17 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleTradGf,
             description: 'Talk to your trad virtual gf',
+        },
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['transcribe'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTranscribe,
+            description: 'Transcribe audio from an audio or video file or URL',
         },
         commandGates: [
             slugUserGate,

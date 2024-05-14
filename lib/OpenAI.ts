@@ -132,10 +132,6 @@ export function getImageURLsFromMessage(
         supportedExtensions,
     );
 
-    if (invalidURLs.length > 0) {
-        throw new Error(`Invalid URLs or attachments provided: ${invalidURLs.join(', ')}, extension must be one of ${supportedExtensions.join(', ')}`);
-    }
-
     return validURLs;
 }
 
@@ -545,65 +541,97 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
     }
 }
 
+const VALID_CONTENT_TYPES = [
+    "audio/flac",
+    "audio/mpeg",
+    "video/mp4",
+    "video/mpeg",
+    "audio/mpeg",
+    "audio/x-m4a",
+    "audio/mp4",
+    "audio/ogg",
+    "video/ogg",
+    "audio/wav",
+    "audio/x-wav",
+    "video/webm",
+    "audio/webm"
+];
+
+const MAX_FILE_SIZE = 1024 * 1024 * 25;
+
+/* Audio and video */
 export async function handleTranscribe(msg: Message) {
-    /* 10 MB */
-    const MAX_FILE_SIZE = 1024 * 1024 * 10;
+    const urls = extractURLs(msg.content);
+
+    for (const attachment of msg.attachments.values()) {
+        if (attachment.size > MAX_FILE_SIZE) {
+            await msg.reply(`Error: ${attachment.name} exceeds max file size of 50MB.`);
+            continue;
+        }
+
+        if (attachment.contentType && VALID_CONTENT_TYPES.includes(attachment.contentType)) {
+            urls.push(attachment.url);
+        }
+    }
+
+    if (urls.length === 0) {
+        return;
+    }
+
+    return handleTranscribeInternal(msg, urls);
+}
+
+/* Audio only */
+export async function handleAutoTranscribe(msg: Message) {
+    const urls = [];
 
     const validContentTypes = [
         "audio/flac",
         "audio/mpeg",
-        "video/mp4",
-        "video/mpeg",
         "audio/mpeg",
         "audio/x-m4a",
         "audio/mp4",
         "audio/ogg",
-        "video/ogg",
         "audio/wav",
         "audio/x-wav",
-        "video/webm",
         "audio/webm"
     ];
 
-    const audioAttachments = [];
-
     for (const attachment of msg.attachments.values()) {
-        console.log(attachment);
-
         if (attachment.size > MAX_FILE_SIZE) {
             console.log(`Not transcribing ${attachment.name}, exceeds max file size.`);
             continue;
         }
 
         if (attachment.contentType && validContentTypes.includes(attachment.contentType)) {
-            audioAttachments.push(attachment);
+            urls.push(attachment.url);
         }
     }
 
-    if (audioAttachments.length === 0) {
+    if (urls.length === 0) {
         return;
     }
 
-    for (const attachment of audioAttachments) {
-        try {
-            console.log(`Transcribing ${attachment.name} - ${attachment.url}...`);
+    return handleTranscribeInternal(msg, urls);
+}
 
+export async function handleTranscribeInternal(msg: Message, urls: string[]) {
+    for (const url of urls) {
+        try {
             const transcription = await openai.audio.transcriptions.create({
-                file: await fetch(attachment.url),
+                file: await fetch(url),
                 model: 'whisper-1',
             });
 
             const embed = new EmbedBuilder()
                 .setTitle('Transcribed Audio')
-                .setDescription(transcription.text.slice(0, 4096))
+                .setDescription(transcription.text.slice(0, 4096));
 
             await msg.reply({
                 embeds: [embed],
             });
-
-            console.log(transcription.text);
         } catch (err) {
-            console.log(`Error transcribing ${attachment} ${attachment.name}, ${attachment.url}: ${err}`);
+            console.log(`Error transcribing ${url}: ${err}`);
         }
     }
 }

@@ -45,7 +45,7 @@ import {
 import { restoreTimers } from './Timer.js';
 import { cacheMessageForSummarization } from './Summarize.js';
 import { convertTwitterLinks } from './ConvertTwitterLinks.js';
-import { handleTranscribe } from './OpenAI.js';
+import { handleAutoTranscribe } from './OpenAI.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
@@ -63,7 +63,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         }
 
         convertTwitterLinks(msg);
-        handleTranscribe(msg);
+        handleAutoTranscribe(msg);
 
         return;
     }
