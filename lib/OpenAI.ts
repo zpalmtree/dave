@@ -546,8 +546,8 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
 }
 
 export async function handleTranscribe(msg: Message) {
-    /* 100 MB */
-    const MAX_FILE_SIZE = 1024 * 1024 * 1;
+    /* 10 MB */
+    const MAX_FILE_SIZE = 1024 * 1024 * 10;
 
     const validContentTypes = [
         "audio/flac",
