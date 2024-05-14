@@ -554,6 +554,8 @@ export async function handleTranscribe(msg: Message) {
     const audioAttachments = [];
 
     for (const attachment of msg.attachments.values()) {
+        console.log(attachment);
+
         if (attachment.contentType && validContentTypes.includes(attachment.contentType)) {
             audioAttachments.push(attachment);
         }
