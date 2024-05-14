@@ -569,6 +569,8 @@ export async function handleTranscribe(msg: Message) {
             continue;
         }
 
+        console.log(attachment.contentType);
+
         if (attachment.contentType && VALID_CONTENT_TYPES.includes(attachment.contentType)) {
             urls.push(attachment.url);
         }
@@ -578,7 +580,11 @@ export async function handleTranscribe(msg: Message) {
         return;
     }
 
-    return handleTranscribeInternal(msg, urls);
+    const errors = await handleTranscribeInternal(msg, urls);
+
+    if (errors) {
+        await msg.reply(errors.join('\n'));
+    }
 }
 
 /* Audio only */
@@ -616,6 +622,8 @@ export async function handleAutoTranscribe(msg: Message) {
 }
 
 export async function handleTranscribeInternal(msg: Message, urls: string[]) {
+    const errors = [];
+
     for (const url of urls) {
         try {
             const transcription = await openai.audio.transcriptions.create({
@@ -632,6 +640,9 @@ export async function handleTranscribeInternal(msg: Message, urls: string[]) {
             });
         } catch (err) {
             console.log(`Error transcribing ${url}: ${err}`);
+            errors.push(err);
         }
     }
+
+    return errors;
 }
