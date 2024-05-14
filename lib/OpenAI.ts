@@ -556,6 +556,11 @@ export async function handleTranscribe(msg: Message) {
     for (const attachment of msg.attachments.values()) {
         console.log(attachment);
 
+        if (attachment.size > MAX_FILE_SIZE) {
+            console.log(`Not transcribing ${attachment.name}, exceeds max file size.`);
+            continue;
+        }
+
         if (attachment.contentType && validContentTypes.includes(attachment.contentType)) {
             audioAttachments.push(attachment);
         }
