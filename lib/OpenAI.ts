@@ -18,11 +18,10 @@ const openai = new OpenAI({
 const DEFAULT_TEMPERATURE = 1.2;
 const DEFAULT_CHATGPT_TEMPERATURE = 1.1;
 const DEFAULT_MAX_TOKENS = 420;
-const DEFAULT_CHATGPT_MODEL = 'gpt-4-turbo-preview';
-const DEFAULT_VISION_MODEL = 'gpt-4-vision-preview';
-const DEFAULT_AI_MODEL = 'text-davinci-003';
+const DEFAULT_CHATGPT_MODEL = 'gpt-4o';
+const DEFAULT_VISION_MODEL = 'gpt-4o';
 const DEFAULT_TIMEOUT = 1000 * 60;
-const LONG_CONTEXT_MODEL = 'gpt-3.5-turbo-0125';
+const LONG_CONTEXT_MODEL = 'gpt-4o';
 const FUNNY_MODEL = 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa';
 
 const bannedUsers = [
