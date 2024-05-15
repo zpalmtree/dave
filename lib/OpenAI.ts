@@ -568,7 +568,7 @@ export async function handleTranscribe(msg: Message) {
 
     const errors = await handleTranscribeInternal(msg, urls);
 
-    if (errors) {
+    if (errors.length) {
         await msg.reply(errors.join('\n'));
     }
 }
