@@ -561,6 +561,8 @@ const MAX_FILE_SIZE = 1024 * 1024 * 25;
 
 /* Audio and video */
 export async function handleTranscribe(msg: Message) {
+    await msg.reply(`Transcribing urls/attachments in this message, please wait...`);
+
     const reply = msg?.reference?.messageId;
 
     const urls = extractURLs(msg.content);
@@ -659,7 +661,7 @@ export async function handleTranscribeInternal(msg: Message, urls: string[]) {
                 msg.author.id,
                 await getUsername(msg.author.id, msg.guild),
                 undefined,
-                'Format this transcribed audio nicely, with discord markdown where applicable. Return just the formatted transcript, no additional info',
+                'Format this transcribed audio nicely, with discord markdown where applicable. Return just the formatted transcript, no additional info. Do not include the leading ```, I will handle those. Example output: **Chipotle Employee:** Good morning sir!',
             );
 
             if (error) {
