@@ -561,7 +561,29 @@ const MAX_FILE_SIZE = 1024 * 1024 * 25;
 
 /* Audio and video */
 export async function handleTranscribe(msg: Message) {
+    const reply = msg?.reference?.messageId;
+
     const urls = extractURLs(msg.content);
+
+    if (reply) {
+        const replyMessage = await msg.channel?.messages.fetch(reply);
+        const replyURLs = extractURLs(replyMessage.content);
+
+        for (const url of replyURLs) {
+            urls.push(url);
+        }
+
+        for (const attachment of replyMessage.attachments.values()) {
+            if (attachment.size > MAX_FILE_SIZE) {
+                await msg.reply(`Error: ${attachment.name} exceeds max file size of 50MB.`);
+                continue;
+            }
+
+            if (attachment.contentType && VALID_CONTENT_TYPES.includes(attachment.contentType)) {
+                urls.push(attachment.url);
+            }
+        }
+    }
 
     for (const attachment of msg.attachments.values()) {
         if (attachment.size > MAX_FILE_SIZE) {
@@ -577,6 +599,7 @@ export async function handleTranscribe(msg: Message) {
     }
 
     if (urls.length === 0) {
+        await msg.reply(`Oops, didn't find any URLs or attachments with valid content types to transcribe!`);
         return;
     }
 
@@ -631,13 +654,28 @@ export async function handleTranscribeInternal(msg: Message, urls: string[]) {
                 model: 'whisper-1',
             });
 
-            const embed = new EmbedBuilder()
-                .setTitle('Transcribed Audio')
-                .setDescription(transcription.text.slice(0, 4096));
+            const { result, error } = await handleChatGPTRequest(
+                transcription.text,
+                msg.author.id,
+                await getUsername(msg.author.id, msg.guild),
+                undefined,
+                'Format this transcribed audio nicely, with discord markdown where applicable. Return just the formatted transcript, no additional info',
+            );
 
-            await msg.reply({
-                embeds: [embed],
-            });
+            if (error) {
+                await msg.reply(error);
+                continue;
+            }
+
+            if (result) {
+                const embed = new EmbedBuilder()
+                    .setTitle('Transcribed Audio')
+                    .setDescription(result.slice(0, 4096));
+
+                await msg.reply({
+                    embeds: [embed],
+                });
+            }
         } catch (err) {
             console.log(`Error transcribing ${url}: ${err}`);
             errors.push(err);
