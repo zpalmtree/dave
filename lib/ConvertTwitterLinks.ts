@@ -19,7 +19,7 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
         while ((match = twitterRegex.exec(content)) !== null) {
             const user = match[2];
             const statusId = match[3];
-            const fixedURL = `https://vxtwitter.com/${user}/status/${statusId}`;
+            const fixedURL = `https://fxtwitter.com/${user}/status/${statusId}`;
             fixedURLs.push(fixedURL);
         }
 
