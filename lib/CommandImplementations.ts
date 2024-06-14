@@ -1711,11 +1711,8 @@ export async function handleReady(msg: Message, args: string, db: Database) {
         notReadyUsers = previousReady.notReadyUsers;
         readyUsers = previousReady.readyUsers;
     } else {
-        /* They didn't mention anyone, lets make them unready so we can allow
-         * sending the message */
         if (notReadyUsers.size === 0) {
             notReadyUsers.add(msg.author.id);
-        /* If the user doesn't mention themselves and there are other attendents, make them ready automatically. */
         } else if (!notReadyUsers.has(msg.author.id)) {
             readyUsers.add(msg.author.id);
         }
@@ -1733,7 +1730,7 @@ export async function handleReady(msg: Message, args: string, db: Database) {
 
     const mention = Array.from(notReadyUsers).map((x) => `<@${x}>`).join(' ');
 
-    const description = 'React with 👍 when you are ready. Once everyone is ready, ' + 
+    const description = 'React with 👍 when you are ready and 👎 if you want to unready. Once everyone is ready, ' + 
         'a countdown will automatically start! The countdown will be cancelled after 15 ' +
         'minutes if not all users are ready.';
 
@@ -1769,10 +1766,11 @@ export async function handleReady(msg: Message, args: string, db: Database) {
     });
 
     await tryReactMessage(sentMessage, '👍');
+    await tryReactMessage(sentMessage, '👎');
 
     const collector = sentMessage.createReactionCollector({
         filter: (reaction, user) => {
-            return reaction.emoji.name === '👍' && !user.bot;
+            return reaction.emoji.name !== null && ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
         },
         time: 60 * 15 * 1000,
     });
@@ -1780,19 +1778,28 @@ export async function handleReady(msg: Message, args: string, db: Database) {
     collector.on('collect', async (reaction, user) => {
         tryDeleteReaction(reaction, user.id);
 
-        if (!notReadyUsers.has(user.id)) {
-            return;
-        }
+        if (reaction.emoji.name === '👍') {
+            if (!notReadyUsers.has(user.id)) {
+                return;
+            }
 
-        notReadyUsers.delete(user.id);
-        readyUsers.add(user.id);
+            notReadyUsers.delete(user.id);
+            readyUsers.add(user.id);
+        } else if (reaction.emoji.name === '👎') {
+            if (!readyUsers.has(user.id)) {
+                return;
+            }
+
+            readyUsers.delete(user.id);
+            notReadyUsers.add(user.id);
+        }
 
         if (notReadyUsers.size === 0) {
             collector.stop('messageDelete');
             tryDeleteMessage(sentMessage);
             const ping = [...readyUsers].map((x) => `<@${x}>`).join(' ');
             await msg.channel.send({
-                content: `${ping} Everyone is ready, lets go!`,
+                content: `${ping} Everyone is ready, let's go!`,
             });
             await handleCountdown("Let's jam!", msg, '7');
         } else {
