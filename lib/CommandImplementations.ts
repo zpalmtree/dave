@@ -1734,7 +1734,7 @@ export async function handleReady(msg: Message, args: string, db: Database) {
     const mention = Array.from(notReadyUsers).map((x) => `<@${x}>`).join(' ');
 
     const description = 'React with 👍 when you are ready. Once everyone is ready, ' + 
-        'a countdown will automatically start! The countdown will be cancelled after 5 ' +
+        'a countdown will automatically start! The countdown will be cancelled after 15 ' +
         'minutes if not all users are ready.';
 
     const f = async () => {
