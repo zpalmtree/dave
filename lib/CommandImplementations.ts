@@ -1711,7 +1711,11 @@ export async function handleReady(msg: Message, args: string, db: Database) {
         // Make the invoking user ready and all other users not ready
         notReadyUsers = new Set<string>(previousReady.readyUsers);
         readyUsers = new Set<string>([msg.author.id]);
-        notReadyUsers.add(...previousReady.notReadyUsers);
+
+        for (const user of previousReady.notReadyUsers) {
+            notReadyUsers.add(user);
+        }
+
         notReadyUsers.delete(msg.author.id);
 
     } else {
