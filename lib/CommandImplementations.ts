@@ -1694,25 +1694,42 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
     return videos;
 }
 
-export async function handleReady(msg: Message, args: string[], db: Database) {
-    const notReadyUsers = new Set<string>([...msg.mentions.users.keys()]);
-    const readyUsers = new Set<string>([]);
+let previousReady: undefined | any = undefined;
+
+export async function handleReady(msg: Message, args: string, db: Database) {
+    let notReadyUsers = new Set<string>([...msg.mentions.users.keys()]);
+    let readyUsers = new Set<string>([]);
 
     let title = 'Are you ready?';
 
-    /* They didn't mention anyone, lets make them unready so we can allow
-     * sending the message */
-    if (notReadyUsers.size === 0) {
-        notReadyUsers.add(msg.author.id);
-    /* If the user doesn't mention themselves and there are other attendents, make them ready automatically. */
-    } else if (!notReadyUsers.has(msg.author.id)) {
-        readyUsers.add(msg.author.id);
+    if (args === 'last') {
+        if (!previousReady) {
+            await msg.reply(`No previous ready, bot may have recently restarted.`);
+            return;
+        }
+
+        notReadyUsers = previousReady.notReadyUsers;
+        readyUsers = previousReady.readyUsers;
+    } else {
+        /* They didn't mention anyone, lets make them unready so we can allow
+         * sending the message */
+        if (notReadyUsers.size === 0) {
+            notReadyUsers.add(msg.author.id);
+        /* If the user doesn't mention themselves and there are other attendents, make them ready automatically. */
+        } else if (!notReadyUsers.has(msg.author.id)) {
+            readyUsers.add(msg.author.id);
+        }
     }
 
-    if (notReadyUsers.size === 0) {
+    if (notReadyUsers.size === 0 && readyUsers.size <= 1) {
         await msg.reply(`At least one user other than yourself must be mentioned or attending the movie ID. See \`${config.prefix}help ready\``);
         return;
     }
+
+    previousReady = {
+        notReadyUsers,
+        readyUsers,
+    };
 
     const mention = Array.from(notReadyUsers).map((x) => `<@${x}>`).join(' ');
 
