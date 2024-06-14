@@ -1708,8 +1708,12 @@ export async function handleReady(msg: Message, args: string, db: Database) {
             return;
         }
 
-        notReadyUsers = previousReady.notReadyUsers;
-        readyUsers = previousReady.readyUsers;
+        // Make the invoking user ready and all other users not ready
+        notReadyUsers = new Set<string>(previousReady.readyUsers);
+        readyUsers = new Set<string>([msg.author.id]);
+        notReadyUsers.add(...previousReady.notReadyUsers);
+        notReadyUsers.delete(msg.author.id);
+
     } else {
         if (notReadyUsers.size === 0) {
             notReadyUsers.add(msg.author.id);
