@@ -686,3 +686,38 @@ export async function handleTranscribeInternal(msg: Message, urls: string[]) {
 
     return errors;
 }
+
+export async function handleBuggles(msg: Message, args: string): Promise<void> {
+    const permittedChans = [
+        '746507379310461010',
+        '1076313241078202471',
+        '483470443001413675',
+    ];
+
+    if (!permittedChans.includes(msg.channel.id)) {
+        return;
+    }
+
+    let systemPrompt = 'Your job is to randomly generate or complete phrases when the user inputs "buggles". These are usually a few lines sometimes in all caps.';
+
+    const { result, error, messages } = await handleChatGPTRequest(
+        'buggles: ',
+        msg.author.id,
+        await getUsername(msg.author.id, msg.guild),
+        undefined,
+        systemPrompt,
+        undefined,
+        undefined,
+        'ft:gpt-3.5-turbo-1106:personal:buggles-v1:9c4icR5v',
+    );
+
+    if (result) {
+        const response = messages.find((m) => m.role === 'assistant');
+
+        if (response) {
+            await msg.reply(truncateResponse(response.content as string));
+        }
+    } else {
+        await msg.reply(error!);
+    }
+}

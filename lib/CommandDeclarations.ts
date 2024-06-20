@@ -67,6 +67,7 @@ import {
     handleAIQuote,
     handleDavinci,
     handleTranscribe,
+    handleBuggles,
 } from './OpenAI.js';
 
 import {
@@ -1129,6 +1130,23 @@ export const Commands: Command[] = [
             implementation: handleTranscribe,
             description: 'Transcribe audio from an audio or video file or URL',
         },
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['buggles'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleBuggles,
+            description: 'Generate autism quote',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'glados',
+            'drunk',
+        ],
         commandGates: [
             slugUserGate,
         ],
