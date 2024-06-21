@@ -708,7 +708,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:buggles-v2:9c56YbLB',
+        'ft:gpt-3.5-turbo-1106:personal:buggles-v4:9cP9XAdA',
     );
 
     if (result) {
