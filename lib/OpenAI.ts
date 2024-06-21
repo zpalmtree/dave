@@ -708,14 +708,14 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:buggles-v4:9cP9XAdA',
+        'ft:gpt-3.5-turbo-1106:personal:buggles-v6:9cPY2Xy8',
     );
 
     if (result) {
         const response = messages.find((m) => m.role === 'assistant');
 
         if (response) {
-            await msg.reply(truncateResponse(response.content as string));
+            await msg.reply(`New: ${truncateResponse(response.content as string)}`);
         }
     } else {
         await msg.reply(error!);
