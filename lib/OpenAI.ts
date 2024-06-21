@@ -715,7 +715,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         const response = messages.find((m) => m.role === 'assistant');
 
         if (response) {
-            await msg.reply(`New: ${truncateResponse(response.content as string)}`);
+            await msg.reply(truncateResponse(response.content as string));
         }
     } else {
         await msg.reply(error!);
