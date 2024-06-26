@@ -698,7 +698,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    let systemPrompt = 'Your job is to randomly generate phrases when the user inputs "buggles". These are usually a rant of a few lines often in all caps, usually somewhat schizophrenic or related to politics or cryptocurrency.';
+    let systemPrompt = 'Your job is to randomly generate or complete phrases when the user inputs "buggles". These are usually a rant of a few lines often in all caps, usually somewhat schizophrenic and possibly related to politics or cryptocurrency. If give a topic, the generated quote must include these topics.';
 
     const { result, error, messages } = await handleChatGPTRequest(
         'buggles: ',
@@ -708,7 +708,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:buggles-v12:9eA1zyYR',
+        'ft:gpt-3.5-turbo-1106:personal:buggles-v21:9eG8oeKM',
     );
 
     const prompt = args.trim().toLowerCase();
@@ -721,7 +721,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         const response = messages.find((m) => m.role === 'assistant');
 
         if (response) {
-            await msg.reply(`New: ${truncateResponse(response.content as string)}`);
+            await msg.reply(truncateResponse(response.content as string));
         }
     } else {
         await msg.reply(error!);
