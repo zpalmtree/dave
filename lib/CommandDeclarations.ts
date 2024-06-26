@@ -71,6 +71,10 @@ import {
 } from './OpenAI.js';
 
 import {
+    handleClaude,
+} from './Claude.js';
+
+import {
     handleTimers,
     handleTimer,
     deleteTimer,
@@ -1146,6 +1150,23 @@ export const Commands: Command[] = [
             'chatgpt',
             'glados',
             'drunk',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['claude', 'sonnet'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleClaude,
+            description: 'Ask Claude something',
+        },
+        relatedCommands: [
+            'ai',
+            'glados',
+            'drunk',
+            'doctor',
         ],
         commandGates: [
             slugUserGate,

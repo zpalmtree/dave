@@ -28,6 +28,8 @@ class Config {
 
     public openaiApiKey: string = 'enter open ai api key here';
 
+    public claudeApiKey: string = 'enter claude api key here';
+
     public watchPollInterval: number = 10000;
 
     public devEnv: boolean = false;

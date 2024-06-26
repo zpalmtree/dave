@@ -20,7 +20,7 @@ const openai = new OpenAI({
 
 const DEFAULT_TEMPERATURE = 1.2;
 const DEFAULT_CHATGPT_TEMPERATURE = 1.1;
-const DEFAULT_MAX_TOKENS = 420;
+const DEFAULT_MAX_TOKENS = 1024;
 const DEFAULT_CHATGPT_MODEL = 'gpt-4o';
 const DEFAULT_VISION_MODEL = 'gpt-4o';
 const DEFAULT_TIMEOUT = 1000 * 60;
@@ -698,7 +698,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    let systemPrompt = 'Your job is to randomly generate or complete phrases when the user inputs "buggles". These are usually a few lines sometimes in all caps.';
+    let systemPrompt = 'Your job is to randomly generate phrases when the user inputs "buggles". These are usually a rant of a few lines often in all caps, usually somewhat schizophrenic or related to politics or cryptocurrency.';
 
     const { result, error, messages } = await handleChatGPTRequest(
         'buggles: ',
@@ -708,14 +708,20 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         systemPrompt,
         undefined,
         undefined,
-        'ft:gpt-3.5-turbo-1106:personal:buggles-v6:9cPY2Xy8',
+        'ft:gpt-3.5-turbo-1106:personal:buggles-v12:9eA1zyYR',
     );
+
+    const prompt = args.trim().toLowerCase();
+
+    if (prompt !== '') {
+        systemPrompt += ` Topic: "${prompt}"`;
+    }
 
     if (result) {
         const response = messages.find((m) => m.role === 'assistant');
 
         if (response) {
-            await msg.reply(truncateResponse(response.content as string));
+            await msg.reply(`New: ${truncateResponse(response.content as string)}`);
         }
     } else {
         await msg.reply(error!);
