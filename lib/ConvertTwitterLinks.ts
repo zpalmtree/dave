@@ -1,6 +1,11 @@
-import { Message, Guild, PermissionsBitField, TextChannel } from 'discord.js';
+import { Message, Guild, PermissionsBitField, TextChannel, MessageReaction, User } from 'discord.js';
 
-import { getUsername, truncateResponse, sleep } from './Utilities.js';
+import {
+    getUsername,
+    truncateResponse,
+    sleep,
+    tryReactMessage,
+} from './Utilities.js';
 
 export async function convertTwitterLinks(msg: Message): Promise<void> {
     if (!msg.guild!.members.me!.permissionsIn(msg.channel as TextChannel).has(PermissionsBitField.Flags.SendMessages)) {
@@ -9,7 +14,6 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
 
     try {
         const content = msg.content.trim();
-
         const twitterRegex = /https:\/\/(twitter\.com|x\.com)\/(.+)\/status\/(\d+)/gi;
 
         let match;
@@ -25,16 +29,26 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
 
         if (fixedURLs.length > 0) {
             const username = await getUsername(msg.author.id, msg.guild);
-
             const content = `${fixedURLs.join('\n')}`;
 
-            const surpressPromise = msg.suppressEmbeds(true);
+            const suppressPromise = msg.suppressEmbeds(true);
             const sendPromise = msg.channel.send(content);
 
-            await Promise.all([
-                surpressPromise,
+            const [, sentMsg] = await Promise.all([
+                suppressPromise,
                 sendPromise,
             ]);
+
+            await tryReactMessage(sentMsg, '❌');
+
+            // Create a reaction collector
+            const filter = (reaction: MessageReaction, user: User) => reaction.emoji.name === '❌' && user.id === msg.author.id;
+
+            const collector = sentMsg.createReactionCollector({ filter, time: 60000, max: 1 });
+
+            collector.on('collect', async () => {
+                await sentMsg.delete();
+            });
 
             await sleep(2000);
 
