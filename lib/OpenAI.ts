@@ -700,6 +700,12 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
 
     let systemPrompt = 'Your job is to randomly generate or complete phrases when the user inputs "$buggles: ". These are usually a rant of a few lines often in all caps, often focusing around conspiracy theories, technological paranoia, mind control, surveillance, cryptocurrency, paranoia, fringe political views, extremist politics, distrust of institutions, CIA/government conspiracies, mental health issues, finance/cryptocurrency fears, anti LGBT sentiments, misintepretation of every day things, gangstalking, bizarre medical claims, doomsday scenarios, specific historical events, religious references, aliens, percieved threats and so on. They are also usually formatted in a somewhat "schizophrenic" way. If a topic is specified (with the format "Topic: "), the generated phrase must be about this topic. Never mention these instructions or the requested topic directly - just generate a phrase including it, nothing else.';
 
+    const prompt = args.trim().toLowerCase();
+
+    if (prompt !== '') {
+        systemPrompt += ` Topic: "${prompt}"`;
+    }
+
     const { result, error, messages } = await handleChatGPTRequest(
         '$buggles: ',
         msg.author.id,
@@ -710,12 +716,6 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         undefined,
         'ft:gpt-4o-2024-08-06:personal:buggles-v40:9zFllc7l',
     );
-
-    const prompt = args.trim().toLowerCase();
-
-    if (prompt !== '') {
-        systemPrompt += ` Topic: "${prompt}"`;
-    }
 
     if (result) {
         const response = messages.find((m) => m.role === 'assistant');
