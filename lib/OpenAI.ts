@@ -632,9 +632,8 @@ export async function handleAutoTranscribe(msg: Message) {
     return handleTranscribeInternal(msg, urls);
 }
 
-export async function handleTranscribeInternal(msg: Message, urls: string[]) {
-    const errors = [];
-
+export async function handleTranscribeInternal(msg: Message, urls: string[]): Promise<Error[]> {
+    const errors: Error[] = [];
     for (const url of urls) {
         try {
             const transcription = await openai.audio.transcriptions.create({
@@ -642,16 +641,22 @@ export async function handleTranscribeInternal(msg: Message, urls: string[]) {
                 model: 'whisper-1',
             });
 
+            // Check if the transcription is empty or too short
+            if (!transcription.text.trim() || transcription.text.length < 8) {
+                errors.push(new Error("The audio couldn't be transcribed or contained very little content."));
+                continue;
+            }
+
             const { result, error } = await handleChatGPTRequest(
                 transcription.text,
                 msg.author.id,
                 await getUsername(msg.author.id, msg.guild),
                 undefined,
-                'Format this transcribed audio nicely, with discord markdown where applicable. Return just the formatted transcript, no additional info. Do not include the leading ```, I will handle those. Example output: **Chipotle Employee:** Good morning sir!',
+                'Format this transcribed audio nicely, with discord markdown where applicable. If the transcription does not appear to be a conversation or meaningful content, simply return the original transcription without formatting. Do not invent or add any content that is not present in the original transcription. Return just the formatted transcript or original text, no additional info. Do not include the leading ```, I will handle those.'
             );
 
             if (error) {
-                await msg.reply(error);
+                errors.push(error);
                 continue;
             }
 
@@ -666,7 +671,7 @@ export async function handleTranscribeInternal(msg: Message, urls: string[]) {
             }
         } catch (err) {
             console.log(`Error transcribing ${url}: ${err}`);
-            errors.push(err);
+            errors.push(err instanceof Error ? err : new Error(String(err)));
         }
     }
 
