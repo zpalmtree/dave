@@ -2389,3 +2389,51 @@ export async function handleAIInfo(msg: Message): Promise<void> {
 export async function handleChickenFried(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/483470443001413675/1088687349497597982/repost.mov');
 }
+
+export async function handleGen4Leaderboard(msg: Message): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch burn stats from API!');
+        return;
+    }
+
+    const data = await res.json();
+    const gen3Date = new Date('2022-11-14');
+    const gen4Date = new Date('2030-11-14');
+
+    // Create a map to store Gen4 eligibility for each user
+    const userGen4Eligibility = new Map<string, number>();
+
+    for (const user of data.burnStats.users) {
+        let eligibleBurns = 0;
+        for (const burn of user.transactions) {
+            const burnDate = new Date(burn.timestamp);
+            if (burnDate >= gen3Date && burnDate <= gen4Date) {
+                eligibleBurns += burn.slugsBurnt.length;
+            }
+        }
+        userGen4Eligibility.set(user.address, Math.floor(eligibleBurns / 4));
+    }
+
+    // Sort users by Gen4 eligibility and get top 10
+    const topUsers = Array.from(userGen4Eligibility.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+
+    // Create embed
+    const embed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('Top 10 Gen4 Eligibility');
+
+    const leaderboardFields = topUsers.map((user, index) => {
+        const address = user[0];
+        const gen4Eligibility = user[1];
+        return `${index + 1}. ${address}\n   Eligible: ${gen4Eligibility}`;
+    });
+
+    embed.setDescription(leaderboardFields.join('\n\n'));
+
+    await msg.channel.send({ embeds: [embed] });
+}

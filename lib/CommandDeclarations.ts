@@ -73,6 +73,7 @@ import {
     handleGen3Count,
     handleGen3CountLegacy,
     handleGen4Count,
+    handleGen4Leaderboard,
     handleItsOver,
     handleUtility,
     handleSlime,
@@ -136,7 +137,14 @@ export const Commands: Command[] = [
             description: 'Displays the current Generation 4 slug supply',
         }
     },
-
+    {
+        aliases: ['gen4leaderboard', 'leaderboard'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen4Leaderboard,
+            description: 'Display users getting the most gen4 slugs',
+        },
+    },
     {
         aliases: ['burnt', 'burned'],
         primaryCommand: {
