@@ -138,13 +138,6 @@ export async function handleClaudeRequest(
 
     const messages = previousConvo || [];
 
-    if (messages.length === 0 || !messages.some(m => 'role' in m && m.role === 'assistant')) {
-        messages.unshift({
-            role: 'assistant',
-            content: systemPrompt,
-        });
-    }
-
     messages.push({
         role: 'user',
         content: prompt,
@@ -155,6 +148,7 @@ export async function handleClaudeRequest(
             model: CLAUDE_MODEL,
             max_tokens: DEFAULT_MAX_TOKENS,
             messages,
+            system: systemPrompt,
             metadata: {
                 user_id: user,
             },
