@@ -134,10 +134,18 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
             maxRetries: 0,
         });
 
-        if (completion.choices && completion.choices.length > 0 && completion.choices[0].message) {
-            const generation = completion.choices[0].message.content!.trim();
-            messages.push({ role: 'assistant', content: generation });
-            return { result: generation, messages };
+        if (completion.choices && completion.choices.length > 0) {
+            const choice = completion.choices[0];
+
+            if (choice.message.content) {
+                const generation = choice.message.content!.trim();
+                messages.push({ role: 'assistant', content: generation });
+                return { result: generation, messages };
+            } else if (choice.finish_reason === 'length') {
+                return { error: 'Error: Not enough reasoning tokens to generate an output.' };
+            } else {
+                return { error: 'Unexpected response from API' };
+            }
         } else {
             return { error: 'Unexpected response from API' };
         }
