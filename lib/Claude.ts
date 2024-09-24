@@ -51,12 +51,6 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         maxTokens = DEFAULT_SETTINGS.maxTokens,
     } = options;
 
-    /*
-    if (config.devChannels.includes(msg.channel.id)) {
-        return {};
-    }
-    */
-
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
         return { error: 'Sorry, this function has been disabled for your user.' };
     }
