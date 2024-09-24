@@ -18,6 +18,7 @@ const openai = new OpenAI({
 const DEFAULT_SETTINGS = {
     temperature: 1.1,
     maxTokens: 1024,
+    maxCompletionTokens: 25000,
     model: 'gpt-4o',
     visionModel: 'gpt-4o',
     timeout: 60000,
@@ -368,7 +369,7 @@ export async function handleO1(msg: Message, args: string): Promise<void> {
         systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible.`,
         model: 'o1-preview',
         includeSystemPrompt: false,
-        maxCompletionTokens: DEFAULT_SETTINGS.maxTokens,
+        maxCompletionTokens: DEFAULT_SETTINGS.maxCompletionTokens,
         temperature: 1,
     });
 
