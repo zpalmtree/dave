@@ -65,11 +65,9 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
         maxCompletionTokens,
     } = options;
 
-    /*
     if (config.devChannels.includes(msg.channel.id)) {
         return {};
     }
-    */
 
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
         return { error: `Sorry, this function has been disabled for your user.` };
