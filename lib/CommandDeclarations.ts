@@ -68,6 +68,7 @@ import {
     handleDavinci,
     handleTranscribe,
     handleBuggles,
+    handleO1,
 } from './OpenAI.js';
 
 import {
@@ -1170,6 +1171,21 @@ export const Commands: Command[] = [
         ],
         commandGates: [
             slugUserGate,
+        ],
+    },
+    {
+        aliases: ['o1'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleO1,
+            description: 'Ask GPT o1-preview something',
+        },
+        relatedCommands: [
+            'ai',
+            'glados',
+            'drunk',
+            'claude',
+            'chatgpt',
         ],
     },
 ];
