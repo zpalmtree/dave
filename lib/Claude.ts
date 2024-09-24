@@ -89,8 +89,6 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
     // Combine consecutive user messages
     messages = combineConsecutiveUserMessages(messages);
 
-    console.log(messages);
-
     try {
         const completion = await anthropic.messages.create({
             model: DEFAULT_SETTINGS.model,

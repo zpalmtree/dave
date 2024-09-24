@@ -96,6 +96,10 @@ import {
 } from './OpenAI.js';
 
 import {
+    handleClaude,
+} from './Claude.js';
+
+import {
     handleTimers,
     handleTimer,
     deleteTimer,
