@@ -153,12 +153,15 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
         } else {
             return { error: 'Unexpected response from API' };
         }
-    } catch (err) {
-        if ((err as Error).message.includes("unsupported image")) {
+    } catch (err: any) {
+        const isInvalidImage = err.message.includes('unsupported image') || err.message.includes('Invalid image');
+
+        if (isInvalidImage) {
             console.log("Retrying without images due to unsupported image error");
             return masterOpenAIHandler(options, true);
         }
-        return { error: (err as Error).toString() };
+
+        return { error: err.toString() };
     }
 }
 
