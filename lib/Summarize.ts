@@ -25,6 +25,7 @@ const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(16385 * 0.75);
 const cachedMessages = new Map<string, CachedMessage[]>();
 
 export async function summarizeMessages(
+    msg: Message,
     channel: string,
     guild: Guild | null,
     authorId: string,
@@ -94,6 +95,7 @@ export async function summarizeMessages(
     }
 
     return aiSummarize(
+        msg,
         contentToSummarize,
         authorId,
         systemPrompt,
@@ -104,6 +106,7 @@ export async function handleSummarize(msg: Message): Promise<void> {
     await msg.reply(`Generating summary, please wait, this will take some time...`);
 
     const { error, result } = await summarizeMessages(
+        msg,
         msg.channel.id,
         msg.guild,
         msg.author.id,
@@ -120,9 +123,10 @@ export async function handleSummarize(msg: Message): Promise<void> {
 }
 
 export async function handleLongSummarize(msg: Message): Promise<void> {
-    await msg.reply(`Generating long summary, please wait, this will take some time...`);
+    await msg.reply(`Generating summary, please wait, this will take some time...`);
 
     const { error, result } = await summarizeMessages(
+        msg,
         msg.channel.id,
         msg.guild,
         msg.author.id,

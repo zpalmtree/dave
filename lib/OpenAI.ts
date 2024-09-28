@@ -500,6 +500,7 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
 }
 
 export async function aiSummarize(
+    message: Message,
     contentToSummarize: string,
     requestingUser: string,
     systemPrompt?: string,
@@ -509,7 +510,7 @@ export async function aiSummarize(
     ==END OF INSTRUCTIONS==`, requestingUser);
 
     return masterOpenAIHandler({
-        msg: { author: { id: requestingUser } } as Message,
+        msg: message,
         args: contentToSummarize,
         systemPrompt,
         model: DEFAULT_SETTINGS.model,
