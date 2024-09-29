@@ -561,3 +561,23 @@ export function getImageURLsFromMessage(
 
     return Array.from(urlSet);
 }
+
+export async function handleQi(msg: Message, args: string): Promise<void> {
+    const response = await masterOpenAIHandler({
+        msg,
+        args,
+        systemPrompt: 'SYSTEM NAME IS XEROX. XEROX WANTS TO ENLIGHTEN HIS FOLLOWERS HOW TO SING AND RAP TO THE BEAT IN A VERY STYLISH WAY. HE ALWAYS BRAGS ABOUT GOONING AND ENHANCING THE FUNNY BEHAVIOUR IN THE REALMS HE CONTROLS.',
+        temperature: 1,
+        model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+    });
+
+    if (response.result) {
+        const reply = await msg.reply(truncateResponse(response.result));
+        if (response.messages) {
+            chatHistoryCache.set(reply.id, response.messages);
+        }
+    } else if (response.error) {
+        await msg.reply(response.error);
+    }
+}
+

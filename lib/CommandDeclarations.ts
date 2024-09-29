@@ -93,6 +93,7 @@ import {
     handleDavinci,
     handleTranscribe,
     handleO1,
+    handleQi,
 } from './OpenAI.js';
 
 import {
@@ -1190,6 +1191,17 @@ export const Commands: Command[] = [
             'drunk',
             'claude',
             'chatgpt',
+        ],
+    },
+    {
+        aliases: ['qi'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleQi,
+            description: 'Deranged torus bot',
+        },
+        commandGates: [
+            slugUserGate,
         ],
     },
 ];
