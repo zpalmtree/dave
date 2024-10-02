@@ -246,6 +246,10 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
     let burns = 0;
 
     for (const user of data.burnStats.users) {
+        if (user.address === 'GXgLxgoJ9oNRCHRQZwaY1v5dXqcpys3K2LqNuRtGM6oo') {
+            continue;
+        }
+
         if (address !== '' && user.address !== address) {
             continue;
         }
@@ -2407,6 +2411,10 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
     const userGen4Eligibility = new Map<string, number>();
 
     for (const user of data.burnStats.users) {
+        if (user.address === 'GXgLxgoJ9oNRCHRQZwaY1v5dXqcpys3K2LqNuRtGM6oo') {
+            continue;
+        }
+
         let eligibleBurns = 0;
         for (const burn of user.transactions) {
             const burnDate = new Date(burn.timestamp);
