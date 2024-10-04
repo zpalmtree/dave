@@ -567,9 +567,18 @@ export function getImageURLsFromMessage(
 }
 
 export async function handleTranslate(msg: Message, args: string): Promise<void> {
+    const reply = msg?.reference?.messageId;
+
+    let input = args;
+
+    if (reply) {
+        const repliedMessage = await msg.channel?.messages.fetch(reply);
+        input = repliedMessage.content += '\n\n' + input;
+    }
+
     const response = await masterOpenAIHandler({
         msg,
-        args,
+        args: input,
         systemPrompt: `You are a master translator. If no language is specified, translate the input to english. Provide context as appropriate.`,
     });
 
