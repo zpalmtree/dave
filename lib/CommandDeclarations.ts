@@ -379,7 +379,7 @@ export const Commands: Command[] = [
     {
         aliases: ['translate'],
         primaryCommand: {
-            argsFormat: Args.Split,
+            argsFormat: Args.Combined,
             implementation: handleTranslate,
             description: 'Translate text from one language to another',
             examples: [
