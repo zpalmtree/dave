@@ -28,7 +28,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
     "@solana/web3.js": "^1.91.3",
-    "@vitalets/google-translate-api": "^4.0.0",
     "discord.js": "^14.13.0",
     "fabric": "^4.3.1",
     "form-data": "^4.0.0",

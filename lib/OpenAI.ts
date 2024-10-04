@@ -565,3 +565,20 @@ export function getImageURLsFromMessage(
 
     return Array.from(urlSet);
 }
+
+export async function handleTranslate(msg: Message, args: string): Promise<void> {
+    const response = await masterOpenAIHandler({
+        msg,
+        args,
+        systemPrompt: `You are a master translator. If no language is specified, translate the input to english. Provide context as appropriate.`,
+    });
+
+    if (response.result) {
+        const reply = await msg.reply(truncateResponse(response.result));
+        if (response.messages) {
+            chatHistoryCache.set(reply.id, response.messages);
+        }
+    } else if (response.error) {
+        await msg.reply(response.error);
+    }
+}

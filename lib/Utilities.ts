@@ -10,7 +10,6 @@ import {
 import moment from 'moment';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
-import translate from '@vitalets/google-translate-api';
 import { PublicKey } from '@solana/web3.js'
 
 import { RGB } from './Types.js';
@@ -182,14 +181,6 @@ export async function getUsername(id: string, guild: Guild | null | undefined): 
     } catch (err) {
         return ping;
     }
-}
-
-export function getLanguageNames() {
-    const languages = Object.values(translate.languages)
-        .filter((x) => typeof x === 'string');
-
-    /* First language is 'Automatic' */
-    return languages.slice(1);
 }
 
 export function roundToNPlaces(num: number, places: number) {

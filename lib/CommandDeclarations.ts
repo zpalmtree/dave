@@ -15,7 +15,6 @@ import {
 
 import {
     canAccessCommand,
-    getLanguageNames,
     slugUserGate,
 } from './Utilities.js';
 
@@ -39,8 +38,6 @@ import {
     handleStock,
     handleCountdown,
     handlePurge,
-    handleTranslate,
-    handleTranslateFrom,
     handleQuery,
     handleExchange,
     handleAvatar,
@@ -69,6 +66,7 @@ import {
     handleTranscribe,
     handleBuggles,
     handleO1,
+    handleTranslate,
 } from './OpenAI.js';
 
 import {
@@ -425,7 +423,6 @@ export const Commands: Command[] = [
             argsFormat: Args.Split,
             implementation: handleTranslate,
             description: 'Translate text from one language to another',
-            helpDescription: `Translate text from one language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
             examples: [
                 {
                     name: 'Translate to english',
@@ -433,35 +430,10 @@ export const Commands: Command[] = [
                 },
                 {
                     name: 'Translate to another language',
-                    value: 'translate french Such is life',
+                    value: 'translate to french: Such is life',
                 }
             ],
         },
-        relatedCommands: [
-            'translatefrom',
-        ],
-    },
-    {
-        aliases: ['translatefrom'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTranslateFrom,
-            description: 'Translate text from a specific language to another',
-            helpDescription: `Translate text from a specific language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
-            examples: [
-                {
-                    name: 'Translate to english',
-                    value: 'translatefrom french C\'est la vie',
-                },
-                {
-                    name: 'Translate to another language',
-                    value: 'translatefrom french spanish C\'est la vie',
-                }
-            ],
-        },
-        relatedCommands: [
-            'translate',
-        ],
     },
     {
         aliases: ['pause'],
@@ -691,66 +663,6 @@ export const Commands: Command[] = [
         },
         relatedCommands: [
             'doggo',
-        ],
-    },
-    {
-        aliases: ['translate'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTranslate,
-            description: 'Translate text from one language to another',
-            helpDescription: `Translate text from one language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
-            examples: [
-                {
-                    name: 'Translate to english',
-                    value: 'translate C\'est la vie',
-                },
-                {
-                    name: 'Translate to another language',
-                    value: 'translate french Such is life',
-                }
-            ],
-        },
-        relatedCommands: [
-            'translatefrom',
-        ],
-    },
-    {
-        aliases: ['translatefrom'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTranslateFrom,
-            description: 'Translate text from a specific language to another',
-            helpDescription: `Translate text from a specific language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
-            examples: [
-                {
-                    name: 'Translate to english',
-                    value: 'translatefrom french C\'est la vie',
-                },
-                {
-                    name: 'Translate to another language',
-                    value: 'translatefrom french spanish C\'est la vie',
-                }
-            ],
-        },
-        relatedCommands: [
-            'translate',
-        ],
-    },
-    {
-        aliases: ['ai', 'gpt3', 'prompt'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDavinci,
-            description: 'Provide a prompt to the funny AI and get a completion',
-        },
-        relatedCommands: [
-            'chatgpt',
-            'glados',
-            'drunk',
-        ],
-        commandGates: [
-            slugUserGate,
         ],
     },
     {
@@ -1025,23 +937,6 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleDrunk,
             description: 'Ask a drunk person something',
-        },
-        relatedCommands: [
-            'ai',
-            'chatgpt',
-            'glados',
-            'doctor',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['davinci'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDavinci,
-            description: 'Provide a prompt to the GPT3 AI and get a completion',
         },
         relatedCommands: [
             'ai',
