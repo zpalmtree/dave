@@ -71,9 +71,6 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
     }
 
     const prompt = args.trim();
-    if (prompt.length === 0) {
-        return { error: `No prompt given. Try \`${config.prefix}ai help\`` };
-    }
 
     const username = await getUsername(msg.author.id, msg.guild);
     const fullSystemPrompt = createSystemPrompt(systemPrompt || getDefaultSystemPrompt(), username);
@@ -583,19 +580,10 @@ export async function handleQi(msg: Message, args: string): Promise<void> {
 
 
 export async function handleTranslate(msg: Message, args: string): Promise<void> {
-    const reply = msg?.reference?.messageId;
-
-    let input = args;
-
-    if (reply) {
-        const repliedMessage = await msg.channel?.messages.fetch(reply);
-        input = repliedMessage.content += '\n\n' + input;
-    }
-
     const response = await masterOpenAIHandler({
         msg,
-        args: input,
-        systemPrompt: `You are a master translator. If no language is specified, translate the input to english. Provide context as appropriate.`,
+        args,
+        systemPrompt: `You are a master translator. If no language is specified, translate the input to english. Provide context as appropriate. Your replies should be in english unless specified otherwise "e.g. translate this to french".`,
     });
 
     if (response.result) {
