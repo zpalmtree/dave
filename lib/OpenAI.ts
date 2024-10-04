@@ -18,7 +18,7 @@ const openai = new OpenAI({
 const DEFAULT_SETTINGS = {
     temperature: 1.1,
     maxTokens: 1024,
-    maxCompletionTokens: 25000,
+    maxCompletionTokens: 16384,
     model: 'gpt-4o',
     visionModel: 'gpt-4o',
     timeout: 60000,
