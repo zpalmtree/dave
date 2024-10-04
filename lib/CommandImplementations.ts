@@ -2,8 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import moment from 'moment';
 
-import translate from '@vitalets/google-translate-api';
-
 import fetch from 'node-fetch';
 
 import imageminGifsicle from 'imagemin-gifsicle';
@@ -36,6 +34,11 @@ import { catBreeds } from './Cats.js';
 import { dogBreeds } from './Dogs.js';
 import { fortunes } from './Fortunes.js';
 import { dubTypes } from './Dubs.js';
+import {
+    renderDotGraph,
+    renderDot,
+    initDot,
+} from './Dot.js';
 
 import {
     chunk,
@@ -900,104 +903,6 @@ export async function handlePurge(msg: Message) {
     }
 
     inProgress = false;
-}
-
-function getLanguage(x: string) {
-    for (const key of Object.keys(translate.languages)) {
-        if (typeof translate.languages[key] !== 'string') {
-            continue;
-        }
-
-        if (translate.languages[key].toLowerCase() === x.toLowerCase()) {
-            return key;
-        }
-    }
-
-    return undefined;
-}
-
-async function handleTranslateImpl(
-    msg: Message,
-    toLanguage: string,
-    fromLanguage: string | undefined,
-    translateString: string) {
-
-    try {
-        const res = await translate(translateString, {
-            to: toLanguage,
-            from: fromLanguage,
-            client: 'gtx',
-        });
-
-        const description = `${translate.languages[res.from.language.iso as any]} to ${translate.languages[toLanguage as any]}`;
-        const title = res.text;
-
-        const embed = new EmbedBuilder();
-
-        /* Max title length of 256 */
-        if (title.length < 256) {
-            embed.setDescription(description)
-            embed.setTitle(title);
-        } else {
-            embed.setDescription(title);
-            embed.setTitle(description);
-        }
-
-        if (res.from.text.value !== '') {
-            embed.setFooter({ text: `Did you mean "${res.from.text.value}"?` });
-        }
-
-        await msg.channel.send({
-            embeds: [embed],
-        });
-
-    } catch (err) {
-        await msg.reply(`Failed to translate: ${err}`);
-    }
-}
-
-export async function handleTranslateFrom(msg: Message, args: string[]): Promise<void> {
-    if (args.length < 2) {
-        await msg.reply(`No language or translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
-        return;
-    }
-
-    const fromLanguage = getLanguage(args[0]);
-    let toLanguage = getLanguage(args[1]);
-
-    if (fromLanguage === undefined) {
-        await msg.reply(`Unknown language "${args[0]}". Try \`${config.prefix}help translatefrom\` to see available languages.`);
-        return;
-    }
-
-    let translateString = args.slice(1).join(' ');
-
-    if (toLanguage !== undefined) {
-        translateString = args.slice(2).join(' ');
-    } else {
-        toLanguage = 'en';
-    }
-
-    await handleTranslateImpl(msg, toLanguage, fromLanguage, translateString);
-}
-
-export async function handleTranslate(msg: Message, args: string[]): Promise<void> {
-    if (args.length === 0) {
-        await msg.reply(`No translate string given. Try \`${config.prefix}help translatefrom\` to see available languages.`);
-        return;
-    }
-
-    let toLanguage = getLanguage(args[0]);
-
-    let translateString = args.join(' ');
-
-    if (toLanguage !== undefined) {
-        translateString = args.slice(1).join(' ');
-    } else {
-        toLanguage = 'en';
-    }
-
-    await handleTranslateImpl(msg, toLanguage, undefined, translateString);
 }
 
 async function getQueryResults(query: string): Promise<false | HTMLElement> {
@@ -2392,6 +2297,82 @@ export async function handleAIInfo(msg: Message): Promise<void> {
 
 export async function handleChickenFried(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/483470443001413675/1088687349497597982/repost.mov');
+}
+
+export async function handleDot(msg: Message, arg: string): Promise<void> {
+    await initDot();
+
+    /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
+    const timeRegex = /^([0-9]+)([YMWdhms])/;
+
+    let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
+    let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
+
+    /* Timespan cannot be larger than 498 days */
+    /* Default timespan is 24h */
+    if (timeSpan > 86400 * 498) {
+        timeSpan = 86400 * 498;
+        timeString = '1w';
+    } else if (timeSpan <= 0) {
+        timeSpan = 86400;
+        timeString = '24h';
+    }
+
+    let dotGraph;
+    let currentDotColor = '#000000';
+    let currentDotValue = 0;
+    let dot;
+
+    try {
+        [ [ , dotGraph ], [ currentDotColor, currentDotValue, dot ] ] = await Promise.all([
+            renderDotGraph(timeSpan * -1),
+            renderDot(),
+        ]);
+    } catch (err) {
+        await msg.reply(`Failed to get dot data :( [ ${(err as any).toString()} ]`);
+        return;
+    }
+
+    let description: string = '';
+
+    if (currentDotValue < 0.05) {
+        description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
+    }
+    else if (currentDotValue < 0.1) {
+        description = 'Strongly increased network variance. May be chance fluctuation.';
+    }
+    else if (currentDotValue < 0.4) {
+        description = 'Slightly increased network variance. Probably chance fluctuation.';
+    }
+    else if (currentDotValue < 0.9) {
+        description = 'Normally random network variance. This is average or expected behavior.';
+    }
+    else if (currentDotValue < 0.95) {
+        description = 'Small network variance. Probably chance fluctuation.';
+    }
+    else if (currentDotValue <= 1.0) {
+        description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
+    }
+
+    const dotGraphAttachment = new AttachmentBuilder(dotGraph.toBuffer())
+        .setName('dot-graph.png');
+
+    const dotAttachment = new AttachmentBuilder(dot.toBuffer())
+        .setName('dot.png');
+
+    const percentage = Math.floor(currentDotValue * 100);
+
+    const embed = new EmbedBuilder()
+        .setColor(currentDotColor as ColorResolvable)
+        .setTitle(`${percentage}% Network Variance`)
+        .setThumbnail('attachment://dot.png')
+        .setImage('attachment://dot-graph.png')
+        .setDescription(description);
+
+    await msg.channel.send({
+        embeds: [embed],
+        files: [dotAttachment, dotGraphAttachment],
+    });
 }
 
 export async function handleGen4Leaderboard(msg: Message): Promise<void> {

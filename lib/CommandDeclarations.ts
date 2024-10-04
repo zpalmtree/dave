@@ -15,7 +15,6 @@ import {
 
 import {
     canAccessCommand,
-    getLanguageNames,
     slugUserGate,
 } from './Utilities.js';
 
@@ -38,8 +37,6 @@ import {
     handleStock,
     handleCountdown,
     handlePurge,
-    handleTranslate,
-    handleTranslateFrom,
     handleQuery,
     handleExchange,
     handleAvatar,
@@ -80,6 +77,7 @@ import {
     handleGitbook,
     handleAIInfo,
     handleChickenFried,
+    handleDot,
 } from './CommandImplementations.js';
 
 import {
@@ -94,6 +92,7 @@ import {
     handleTranscribe,
     handleO1,
     handleQi,
+    handleTranslate,
 } from './OpenAI.js';
 
 import {
@@ -212,6 +211,208 @@ export const Commands: Command[] = [
             implementation: handleHelp,
             description: 'Displays this help',
         },
+    },
+    {
+        aliases: ['dot'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDot,
+            description: 'Get the Global Consciousness Project Dot Graph',
+            helpDescription: 'The Global Consciousness Project collects random numbers from ' +
+                'around the world. These numbers are available on the GCP website. ' +
+                'This website downloads those numbers once a minute and performs ' +
+                'sophisticated analysis on these random numbers to see how coherent ' +
+                'they are. That is, we compute how random the random numbers coming ' +
+                'from the eggs really are. The theory is that the Global Consciousness ' +
+                'of all Beings of the Planet affect these random numbers... Maybe ' +
+                'they aren\'t quite as random as we thought.\n\nThe probability time ' +
+                'window is one and two hours; with the display showing the more ' +
+                'coherent of the two. For more information on the algorithm you can ' +
+                'read about it on the GCP Basic Science page ' +
+                '(<http://global-mind.org/science2.html#hypothesis>)',
+        },
+    },
+    {
+        aliases: ['pizza'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleImgur.bind(undefined, 'r/pizza'),
+            description: 'Get a random r/pizza picture',
+        },
+    },
+    {
+        aliases: ['tortle'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleImgur.bind(undefined, 'r/turtle'),
+            description: 'Get a random r/turtle picture',
+        },
+    },
+    {
+        aliases: ['time'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTime,
+            description: 'Get the current time in a specific UTC offset',
+            examples: [
+                {
+                    value: 'time',
+                },
+                {
+                    value: 'time +01:00',
+                },
+                {
+                    value: 'time -06:00',
+                },
+            ],
+        },
+        relatedCommands: [
+            'date',
+        ],
+    },
+    {
+        aliases: ['date'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDate,
+            description: 'Get the current date in a specific UTC offset',
+            examples: [
+                {
+                    value: 'date',
+                },
+                {
+                    value: 'date +01:00',
+                },
+                {
+                    value: 'date -06:00',
+                },
+            ],
+        },
+        relatedCommands: [
+            'time',
+        ],
+    },
+    {
+        aliases: ['timer', 'reminder'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTimer,
+            description: 'Set a timer to remind you of something',
+            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `mm` (month), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
+            needDb: true,
+            examples: [
+                {
+                    name: 'Set a timer with a description',
+                    value: 'timer 5m coffee',
+                },
+                {
+                    name: 'Set a timer',
+                    value: 'timer 2h5m',
+                },
+                {
+                    name: 'Set a super long timer',
+                    value: 'timer 1y2w3d4h5m6s',
+                },
+            ],
+        },
+        subCommands: [
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleTimers,
+                description: 'View running timers',
+                aliases: ['list'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'View running timers',
+                        value: 'timer list',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.Split,
+                implementation: deleteTimer,
+                description: 'Delete a timer by ID',
+                aliases: ['delete'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'Delete a timer by ID',
+                        value: 'timer delete 1',
+                    },
+                ],
+            },
+        ],
+        relatedCommands: [
+            'timers',
+        ],
+    },
+    {
+        aliases: ['countdown'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCountdown.bind(undefined, "Let's jam!"),
+            description: 'Perform a countdown',
+            examples: [
+                {
+                    value: 'countdown',
+                },
+                {
+                    value: 'countdown 5',
+                },
+            ],
+        },
+        relatedCommands: [
+            'ready',
+            'pause',
+        ],
+    },
+    {
+        aliases: ['purge'],
+        hidden: true,
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handlePurge,
+            description: 'Delete all your messages in a channel',
+        },
+    },
+    {
+        aliases: ['translate'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTranslate,
+            description: 'Translate text from one language to another',
+            examples: [
+                {
+                    name: 'Translate to english',
+                    value: 'translate C\'est la vie',
+                },
+                {
+                    name: 'Translate to another language',
+                    value: 'translate to french: Such is life',
+                }
+            ],
+        },
+    },
+    {
+        aliases: ['pause'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCountdown.bind(undefined, 'pause'),
+            description: 'Perform a pause',
+            examples: [
+                {
+                    value: 'pause',
+                },
+                {
+                    value: 'pause 5',
+                },
+            ],
+        },
+        relatedCommands: [
+            'countdown',
+            'ready',
+        ],
     },
     {
         aliases: ['query', 'search'],
@@ -585,50 +786,6 @@ export const Commands: Command[] = [
             implementation: handleIncinerator,
             description: 'Get incinerator link',
         },
-    },
-    {
-        aliases: ['translate'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTranslate,
-            description: 'Translate text from one language to another',
-            helpDescription: `Translate text from one language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
-            examples: [
-                {
-                    name: 'Translate to english',
-                    value: 'translate C\'est la vie',
-                },
-                {
-                    name: 'Translate to another language',
-                    value: 'translate french Such is life',
-                }
-            ],
-        },
-        relatedCommands: [
-            'translatefrom',
-        ],
-    },
-    {
-        aliases: ['translatefrom'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTranslateFrom,
-            description: 'Translate text from a specific language to another',
-            helpDescription: `Translate text from a specific language to another. Known languages: ${getLanguageNames().map((x) => `\`${x}\``).join(', ')}`,
-            examples: [
-                {
-                    name: 'Translate to english',
-                    value: 'translatefrom french C\'est la vie',
-                },
-                {
-                    name: 'Translate to another language',
-                    value: 'translatefrom french spanish C\'est la vie',
-                }
-            ],
-        },
-        relatedCommands: [
-            'translate',
-        ],
     },
     {
         aliases: ['trending'],
@@ -1047,23 +1204,6 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleDrunk,
             description: 'Ask a drunk person something',
-        },
-        relatedCommands: [
-            'ai',
-            'chatgpt',
-            'glados',
-            'doctor',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['davinci'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDavinci,
-            description: 'Provide a prompt to the GPT3 AI and get a completion',
         },
         relatedCommands: [
             'ai',
