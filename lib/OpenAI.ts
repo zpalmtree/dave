@@ -20,7 +20,6 @@ const DEFAULT_SETTINGS = {
     maxTokens: 1024,
     maxCompletionTokens: 25000,
     model: 'gpt-4o',
-    visionModel: 'gpt-4o',
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
 };
@@ -45,6 +44,7 @@ interface OpenAIHandlerOptions {
     files?: string[];
     maxTokens?: number;
     maxCompletionTokens?: number;
+    includeFiles?: boolean;
 }
 
 export interface OpenAIResponse {
@@ -64,6 +64,7 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
         files = [],
         maxTokens = DEFAULT_SETTINGS.maxTokens,
         maxCompletionTokens,
+        includeFiles = true,
     } = options;
 
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
@@ -100,7 +101,7 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
 
     let imageURLs: string[] = [];
 
-    if (!isRetry) {
+    if (!isRetry && includeFiles) {
         let repliedMessage: Message | undefined;
         if (msg.reference?.messageId) {
             try {
@@ -117,11 +118,9 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
     content.push(...imageURLs.map(url => ({ type: 'image_url', image_url: { url } } as OpenAI.Chat.ChatCompletionContentPart)));
     messages.push({ role: 'user', content });
 
-    const selectedModel = imageURLs.length > 0 ? DEFAULT_SETTINGS.visionModel : model;
-
     try {
         const completion = await openai.chat.completions.create({
-            model: selectedModel,
+            model,
             messages,
             ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
             temperature,
@@ -379,6 +378,7 @@ export async function handleO1(msg: Message, args: string): Promise<void> {
         includeSystemPrompt: false,
         maxCompletionTokens: DEFAULT_SETTINGS.maxCompletionTokens,
         temperature: 1,
+        includeFiles: false,
     });
 
     if (response.result) {
