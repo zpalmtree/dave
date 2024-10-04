@@ -18,7 +18,7 @@ const openai = new OpenAI({
 const DEFAULT_SETTINGS = {
     temperature: 1.1,
     maxTokens: 1024,
-    maxCompletionTokens: 16384,
+    maxCompletionTokens: 25000,
     model: 'gpt-4o',
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
