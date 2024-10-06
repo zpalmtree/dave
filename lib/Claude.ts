@@ -60,9 +60,6 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
     }
 
     const prompt = args.trim();
-    if (prompt.length === 0) {
-        return { error: `No prompt given. Try \`${config.prefix}claude help\`` };
-    }
 
     const username = await getUsername(msg.author.id, msg.guild);
     const fullSystemPrompt = createSystemPrompt(systemPrompt || getDefaultSystemPrompt(), username);
