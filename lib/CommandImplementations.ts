@@ -149,6 +149,10 @@ const states = [
     "West Virginia",
 ];
 
+const excludedGen4 = [
+    'BnZNCQz3Zqb1o4nrjW3zNGbWdKubSTw7mAU5NGYouJMF',
+    'GXgLxgoJ9oNRCHRQZwaY1v5dXqcpys3K2LqNuRtGM6oo',
+];
 
 export async function replyWithMention(msg: Message, reply: string): Promise<void> {
     if (msg.mentions.users.size > 0)   {
@@ -249,7 +253,7 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
     let burns = 0;
 
     for (const user of data.burnStats.users) {
-        if (user.address === 'GXgLxgoJ9oNRCHRQZwaY1v5dXqcpys3K2LqNuRtGM6oo') {
+        if (excludedGen4.includes(user.address)) {
             continue;
         }
 
@@ -2392,7 +2396,7 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
     const userGen4Eligibility = new Map<string, number>();
 
     for (const user of data.burnStats.users) {
-        if (user.address === 'GXgLxgoJ9oNRCHRQZwaY1v5dXqcpys3K2LqNuRtGM6oo') {
+        if (excludedGen4.includes(user.address)) {
             continue;
         }
 
