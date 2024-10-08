@@ -2432,11 +2432,15 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
 }
 
 export async function handleMilton(msg: Message) {
+    console.log('fetching');
+
     try {
         const response = await fetch('https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/latest.jpg');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
+
+        console.log('sending');
         
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
@@ -2447,6 +2451,8 @@ export async function handleMilton(msg: Message) {
             files: [attachment],
         });
     } catch (err) {
+        console.log('error: ' + err);
+
         const errorMessage = err instanceof Error ? err.message : String(err);
         await msg.reply(`Failed to get data: ${errorMessage}`);
     }
