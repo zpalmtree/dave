@@ -52,7 +52,6 @@ import {
     handlePrice,
     handleItsOver,
     handleChickenFried,
-    handleDot,
     handleMilton,
 } from './CommandImplementations.js';
 
@@ -1083,17 +1082,6 @@ export const Commands: Command[] = [
             'drunk',
             'claude',
             'chatgpt',
-        ],
-    },
-    {
-        aliases: ['qi'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleQi,
-            description: 'Deranged torus bot',
-        },
-        commandGates: [
-            slugUserGate,
         ],
     },
     {
