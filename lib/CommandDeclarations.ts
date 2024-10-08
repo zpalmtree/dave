@@ -52,6 +52,8 @@ import {
     handlePrice,
     handleItsOver,
     handleChickenFried,
+    handleDot,
+    handleMilton,
 } from './CommandImplementations.js';
 
 import {
@@ -1082,6 +1084,25 @@ export const Commands: Command[] = [
             'claude',
             'chatgpt',
         ],
+    },
+    {
+        aliases: ['qi'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleQi,
+            description: 'Deranged torus bot',
+        },
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['milton'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleMilton,
+            description: 'Track milton',
+        },
     },
 ];
 
