@@ -2431,6 +2431,11 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
     await msg.channel.send({ embeds: [embed] });
 }
 
+function getRandomInt(min: number, max: number) {
+    return Math.floor(Math.random() * (max - min) + min); // The maximum is exclusive and the minimum is inclusive
+}
+
 export async function handleMilton(msg: Message) {
-    await msg.channel.send('https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/500x500.jpg');
+    const bust = getRandomInt(0, Number.MAX_SAFE_INTEGER);
+    await msg.channel.send(`https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/500x500.jpg?cachebuster=${bust}`);
 }
