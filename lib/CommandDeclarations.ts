@@ -78,6 +78,7 @@ import {
     handleAIInfo,
     handleChickenFried,
     handleDot,
+    handleMilton,
 } from './CommandImplementations.js';
 
 import {
@@ -1343,6 +1344,14 @@ export const Commands: Command[] = [
         commandGates: [
             slugUserGate,
         ],
+    },
+    {
+        aliases: ['milton'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleMilton,
+            description: 'Track milton',
+        },
     },
 ];
 
