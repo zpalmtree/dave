@@ -512,17 +512,23 @@ export async function handlePrice(msg: Message) {
             });
     
             const embed = new EmbedBuilder();
-            for (const price of prices) {
-                embed.addFields({
-                    name: capitalize(price.name),
-                    value: `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`,
-                    inline: true,
-                });
-            }
-    
-            msg.channel.send({
-                embeds: [embed],
+
+            const pages = new Paginate({
+                sourceMessage: msg,
+                itemsPerPage: 9,
+                displayFunction: (price: any) => {
+                    return {
+                        name: capitalize(price.name),
+                        value: `$${numberWithCommas(price.usd.toString())} (${roundToNPlaces(price.usd_24h_change, 2)}%)`,
+                        inline: true,
+                    };
+                },
+                displayType: DisplayType.EmbedFieldData,
+                data: prices,
+                embed,
             });
+
+            await pages.sendMessage();
         } else {
             try {
                 const err = await data.text();
