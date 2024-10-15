@@ -201,6 +201,88 @@ export const Commands: Command[] = [
         },
     },
     {
+        aliases: ['groundhog', 'woodchuck', 'hog'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGroundhog,
+            description: 'Make the groundhog say something',
+            examples: [
+                {
+                    value: 'groundhog Slorg',
+                },
+                {
+                    value: 'groundhog @Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['dance', 'groove'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGroove,
+            description: 'Dance for me',
+            examples: [
+                {
+                    value: 'groove Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['kek', 'lmao'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKek,
+            description: 'Kek slug say thing',
+            examples: [
+                {
+                    value: 'kek Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['nut', 'nutnut'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleNut,
+            description: 'Nut slug say thing',
+            examples: [
+                {
+                    value: 'nut Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['money', 'cash'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMoney,
+            description: 'money man say thing',
+            examples: [
+                {
+                    value: 'money Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['viper'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleViper,
+            description: 'viper say thing',
+            examples: [
+                {
+                    value: 'viper Slorg',
+                },
+            ],
+        },
+    },
+
+    {
         aliases: ['doggo', 'dog', 'doggy'],
         primaryCommand: {
             argsFormat: Args.Split,
