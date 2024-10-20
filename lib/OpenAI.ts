@@ -317,9 +317,6 @@ export async function handleTradGf(msg: Message, args: string): Promise<void> {
 }
 
 export async function handleAIQuote(msg: Message, args: string): Promise<void> {
-    const permittedChans = ['746507379310461010', '1076313241078202471', '483470443001413675'];
-    if (!permittedChans.includes(msg.channel.id)) return;
-
     let systemPrompt = 'Your job is to randomly generate or complete quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
     if (args.trim() !== '') {
         systemPrompt += ` Topic/author: "${args.trim()}"`;
