@@ -247,7 +247,7 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
     const data = await res.json();
 
     const gen3Date = new Date('2022-11-14');
-    const gen4Date = new Date('2030-11-14');
+    const gen4Date = new Date('2024-10-24');
 
     let gen3Count = 0;
     let burns = 0;
@@ -2396,7 +2396,7 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
 
     const data = await res.json();
     const gen3Date = new Date('2022-11-14');
-    const gen4Date = new Date('2030-11-14');
+    const gen4Date = new Date('2024-10-24');
 
     // Create a map to store Gen4 eligibility for each user
     const userGen4Eligibility = new Map<string, number>();
