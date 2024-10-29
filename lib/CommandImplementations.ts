@@ -2445,3 +2445,29 @@ export async function handleMilton(msg: Message) {
     const bust = getRandomInt(0, Number.MAX_SAFE_INTEGER);
     await msg.channel.send(`https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/500x500.jpg?cachebuster=${bust}`);
 }
+
+export async function handleSlugFloor(msg: Message): Promise<void> {
+    const url = "https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats";
+
+    try {
+        const res = await fetch(url);
+        
+        if (!res.ok) {
+            await replyWithMention(msg, "Failed to fetch Sol Slugs floor price from Magic Eden!");
+            return;
+        }
+        
+        const data = await res.json();
+        
+        // Format the floor price from lamports to SOL (divide by 1e9)
+        const floorPriceSOL = (data.floorPrice / 1e9).toFixed(2);
+        
+        await replyWithMention(
+            msg,
+            `The current Sol Slugs floor price is ${floorPriceSOL} SOL`
+        );
+    } catch (error) {
+        await replyWithMention(msg, "An error occurred while fetching the floor price!");
+        console.error("Error fetching Sol Slugs floor price:", error);
+    }
+}
