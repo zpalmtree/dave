@@ -280,19 +280,18 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
         if (gen3Count === 0) {
             await replyWithMention(
                 msg,
-                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every four slugs burnt will get you one generation 4 slug. Burn ${burnsForNextSlug} ${burns > 0 ? 'more ' : ''}${slugStr} to be eligible for your first generation 4 slug.`
+                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every four slugs burnt will get you one generation 4 slug. Unfortunately, you missed the gen4 burn cutoff!`
             );
         } else {
             await replyWithMention(
                 msg,
-                `You are currently set to receive ${gen3Count} generation 4 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${burnsForNextSlug} more ${slugStr} to be eligible for another generation 4 slug.`,
+                `You are currently set to receive ${gen3Count} generation 4 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns.`,
             );
         }
     } else {
-        await replyWithMention(msg, `The current projected Generation 4 slug supply is ${gen3Count}`);
+        await replyWithMention(msg, `The current projected Generation 4 slug supply is 410.`);
     }
 }
-
 
 export async function handleBurnt(msg: Message, args: string): Promise<void> {
     const address = args.trim();
