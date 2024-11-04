@@ -2436,6 +2436,123 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
     await msg.channel.send({ embeds: [embed] });
 }
 
+export async function handleGen5Leaderboard(msg: Message): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch burn stats from API!');
+        return;
+    }
+
+    const data = await res.json();
+    const gen4Date = new Date('2024-10-24');
+    const gen5Date = new Date('2030-10-24');
+
+    // Create a map to store Gen5 eligibility for each user
+    const userGen5Eligibility = new Map<string, number>();
+
+    for (const user of data.burnStats.users) {
+        if (excludedGen4.includes(user.address)) {
+            continue;
+        }
+
+        let eligibleBurns = 0;
+        for (const burn of user.transactions) {
+            const burnDate = new Date(burn.timestamp);
+            if (burnDate >= gen4Date && burnDate <= gen5Date) {
+                eligibleBurns += burn.slugsBurnt.length;
+            }
+        }
+        userGen5Eligibility.set(user.address, Math.floor(eligibleBurns / 5));
+    }
+
+    // Sort users by Gen5 eligibility and get top 10
+    const topUsers = Array.from(userGen5Eligibility.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+
+    // Create embed
+    const embed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('Top 10 Gen5 Eligibility');
+
+    const leaderboardFields = topUsers.map((user, index) => {
+        const address = user[0];
+        const gen5Eligibility = user[1];
+        return `${index + 1}. ${address}\n   Eligible: ${gen5Eligibility}`;
+    });
+
+    embed.setDescription(leaderboardFields.join('\n\n'));
+
+    await msg.channel.send({ embeds: [embed] });
+}
+
+export async function handleGen5Count(msg: Message, args: string): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    const address = args.trim();
+
+    if (address !== '' && !isValidSolAddress(address)) {
+        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
+        return;
+    }
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch Gen4 count from API!');
+        return;
+    }
+
+    const data = await res.json();
+
+    const gen4Date = new Date('2024-10-24');
+    const gen5Date = new Date('2030-10-24');
+
+    let gen5Count = 0;
+    let burns = 0;
+
+    for (const user of data.burnStats.users) {
+        if (excludedGen4.includes(user.address)) {
+            continue;
+        }
+
+        if (address !== '' && user.address !== address) {
+            continue;
+        }
+
+        let eligibleBurns = 0;
+
+        for (const burn of user.transactions) {
+            if (new Date(burn.timestamp) >= gen4Date && new Date(burn.timestamp) <= gen5Date) {
+                eligibleBurns += burn.slugsBurnt.length;
+            }
+        }
+
+        gen5Count += Math.floor(eligibleBurns / 5);
+        burns += eligibleBurns;
+    }
+
+    if (address !== '') {
+        const burnsForNextSlug = 5 - (burns % 5);
+        const slugStr = burnsForNextSlug === 1 ? 'slug' : 'slugs';
+
+        if (gen5Count === 0) {
+            await replyWithMention(
+                msg,
+                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every five slugs burnt will get you one generation 5 slug. Burn ${burnsForNextSlug} ${burns > 0 ? 'more ' : ''}${slugStr} to be eligible for your first generation 5 slug.`
+            );
+        } else {
+            await replyWithMention(
+                msg,
+                `You are currently set to receive ${gen5Count} generation 5 slug${gen5Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${burnsForNextSlug} more ${slugStr} to be eligible for another generation 5 slug.`,
+            );
+        }
+    } else {
+        await replyWithMention(msg, `The current projected Generation 5 slug supply is ${gen5Count}`);
+    }
+}
+
 function getRandomInt(min: number, max: number) {
     return Math.floor(Math.random() * (max - min) + min); // The maximum is exclusive and the minimum is inclusive
 }

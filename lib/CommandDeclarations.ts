@@ -71,6 +71,8 @@ import {
     handleGen3CountLegacy,
     handleGen4Count,
     handleGen4Leaderboard,
+    handleGen5Count,
+    handleGen5Leaderboard,
     handleItsOver,
     handleUtility,
     handleSlime,
@@ -135,7 +137,6 @@ export const Commands: Command[] = [
             description: 'Displays the historical Generation 3 eligiblity',
         }
     },
-
     {
         aliases: ['gen4', 'gen4count', 'gen4supply'],
         primaryCommand: {
@@ -150,6 +151,22 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleGen4Leaderboard,
             description: 'Display users getting the most gen4 slugs',
+        },
+    },
+    {
+        aliases: ['gen5', 'gen5count', 'gen5supply'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen5Count,
+            description: 'Displays the current Generation 5 slug supply',
+        }
+    },
+    {
+        aliases: ['gen5leaderboard', 'leaderboard'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen5Leaderboard,
+            description: 'Display users getting the most gen5 slugs',
         },
     },
     {
