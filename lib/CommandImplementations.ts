@@ -289,7 +289,7 @@ export async function handleGen4Count(msg: Message, args: string): Promise<void>
             );
         }
     } else {
-        await replyWithMention(msg, `The current projected Generation 4 slug supply is 410.`);
+        await replyWithMention(msg, `The current projected Generation 4 slug supply is 411.`);
     }
 }
 
