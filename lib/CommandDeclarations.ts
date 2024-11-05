@@ -82,6 +82,7 @@ import {
     handleDot,
     handleMilton,
     handleSlugFloor,
+    handleSlugPride,
 } from './CommandImplementations.js';
 
 import {
@@ -1377,6 +1378,14 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleSlugFloor,
             description: 'Get sol slugs floor price',
+        },
+    },
+    {
+        aliases: ['slugpride'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSlugPride,
+            description: 'Get slug pride video',
         },
     },
 ];

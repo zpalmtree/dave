@@ -2587,3 +2587,7 @@ export async function handleSlugFloor(msg: Message): Promise<void> {
         console.error("Error fetching Sol Slugs floor price:", error);
     }
 }
+
+export async function handleSlugPride(msg: Message): Promise<void> {
+    await msg.channel.send('https://cdn.discordapp.com/attachments/891081495706480690/1114374514005004489/slugpride.mp4?ex=672acf24&is=67297da4&hm=a46182d421d814a509b4e386b0392a19e1d9146ecca433789a1ae18c986287d8');
+}
