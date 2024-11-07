@@ -574,6 +574,11 @@ export async function handleSuggest(msg: Message, suggestion: string, db: Databa
         return;
     }
 
+    if (msg.author.id === '492200446044274697') {
+        await msg.reply('fuck off');
+        return;
+    }
+
     await insertQuery(
         `INSERT INTO quote
             (quote, channel_id)
