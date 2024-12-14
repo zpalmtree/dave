@@ -334,6 +334,20 @@ export async function handleBurnt(msg: Message, args: string): Promise<void> {
     }
 }
 
+export async function handleSupply(msg: Message): Promise<void> {
+    const url = "https://letsalllovelain.com/slugs/";
+    const res = await fetch(url);
+
+    if (!res.ok) {
+        await msg.reply('Failed to fetch supply count from API!');
+        return;
+    }
+    
+    const data = await res.json();
+
+    await replyWithMention(msg, `Current slug supply: ${data.slugStats.slugCount}`);
+}
+
 export async function handleFortune(msg: Message): Promise<void> {
     await msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
 }
