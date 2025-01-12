@@ -80,7 +80,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             if (repliedMessage) {
                 previousConvo.push({
                     role: 'user',
-                    content: repliedMessage.content,
+                    content: repliedMessage.content || ' ',
                 });
             }
         }
