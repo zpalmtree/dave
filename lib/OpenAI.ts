@@ -7,8 +7,8 @@ import { config } from './Config.js';
 import {
     truncateResponse,
     extractURLs,
-    extractURLsAndValidateExtensions,
     getUsername,
+    getImageURLsFromMessage,
 } from './Utilities.js';
 
 const openai = new OpenAI({
@@ -360,7 +360,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         msg,
         args: '$buggles: ',
         systemPrompt,
-        model: 'ft:gpt-4o-2024-08-06:personal:buggles-v40:9zFllc7l',
+        model: 'ft:gpt-4o-2024-08-06:personal:buggles-v41:AoPLqrVu:ckpt-step-1932',
     });
 
     if (response.result) {
@@ -518,49 +518,6 @@ export async function aiSummarize(
         maxTokens: DEFAULT_SETTINGS.maxTokens,
         temperature: DEFAULT_SETTINGS.temperature,
     });
-}
-
-export function getImageURLsFromMessage(
-    msg: Message,
-    repliedMessage?: Message,
-): string[] {
-    const urlSet = new Set<string>();
-    const supportedExtensions = ['png', 'gif', 'jpg', 'jpeg', 'webp'];
-    const supportedMimeTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp'];
-
-    function processMessage(message: Message) {
-        // Check attachments
-        message.attachments.forEach((attachment) => {
-            if (supportedMimeTypes.includes(attachment.contentType || '')) {
-                urlSet.add(attachment.url);
-            } else {
-                const extension = attachment.name?.split('.').pop()?.toLowerCase();
-                if (extension && supportedExtensions.includes(extension)) {
-                    urlSet.add(attachment.url);
-                }
-            }
-        });
-
-        // Check embeds
-        message.embeds.forEach((embed) => {
-            if (embed.image) urlSet.add(embed.image.url);
-            if (embed.thumbnail) urlSet.add(embed.thumbnail.url);
-        });
-
-        // Extract URLs from content
-        const { validURLs } = extractURLsAndValidateExtensions(
-            message.content,
-            supportedExtensions,
-        );
-        validURLs.forEach((url) => urlSet.add(url));
-    }
-
-    processMessage(msg);
-    if (repliedMessage) {
-        processMessage(repliedMessage);
-    }
-
-    return Array.from(urlSet);
 }
 
 export async function handleTranslate(msg: Message, args: string): Promise<void> {

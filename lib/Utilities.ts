@@ -404,3 +404,46 @@ export function monthDurationToSeconds(months: string): number {
     const futureDate = moment().add(months, 'months');
     return futureDate.unix() - now.unix();
 }
+
+export function getImageURLsFromMessage(
+    msg: Message,
+    repliedMessage?: Message,
+): string[] {
+    const urlSet = new Set<string>();
+    const supportedExtensions = ['png', 'gif', 'jpg', 'jpeg', 'webp'];
+    const supportedMimeTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp'];
+
+    function processMessage(message: Message) {
+        // Check attachments
+        message.attachments.forEach((attachment) => {
+            if (supportedMimeTypes.includes(attachment.contentType || '')) {
+                urlSet.add(attachment.url);
+            } else {
+                const extension = attachment.name?.split('.').pop()?.toLowerCase();
+                if (extension && supportedExtensions.includes(extension)) {
+                    urlSet.add(attachment.url);
+                }
+            }
+        });
+
+        // Check embeds
+        message.embeds.forEach((embed) => {
+            if (embed.image) urlSet.add(embed.image.url);
+            if (embed.thumbnail) urlSet.add(embed.thumbnail.url);
+        });
+
+        // Extract URLs from content
+        const { validURLs } = extractURLsAndValidateExtensions(
+            message.content,
+            supportedExtensions,
+        );
+        validURLs.forEach((url) => urlSet.add(url));
+    }
+
+    processMessage(msg);
+    if (repliedMessage) {
+        processMessage(repliedMessage);
+    }
+
+    return Array.from(urlSet);
+}

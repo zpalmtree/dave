@@ -51,7 +51,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         maxTokens = DEFAULT_SETTINGS.maxTokens,
     } = options;
 
-    if (config.devChannels.includes(msg.channel.id)) {
+    if (config.devChannels.includes(msg.channel.id) && !config.devEnv) {
         return {};
     }
 
