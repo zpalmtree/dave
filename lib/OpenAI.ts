@@ -184,7 +184,7 @@ export async function handleChatGPT(msg: Message, args: string): Promise<void> {
     const response = await masterOpenAIHandler({
         msg,
         args,
-        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext`
+        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext. Make responses compact to use limited space in the discord chat where you are running - e.g. limited extra newlines.`
     });
 
     if (response.result) {
