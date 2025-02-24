@@ -878,16 +878,18 @@ export async function handlePurge(msg: Message) {
     ];
 
     if (inProgress) {
+        console.log('Purge already in progress');
+        return;
+    }
+
+    if (!allowed.includes(msg.author.id)) {
+        console.log(`User ${msg.author.id} cannot access purge bot`);
         return;
     }
 
     inProgress = true;
 
-    if (!allowed.includes(msg.author.id)) {
-        return;
-    }
-
-    const target = '901540415176597534';
+    const target = msg.author.id;
 
     console.log(`Deletion started by ${msg.author.id}`);
 
