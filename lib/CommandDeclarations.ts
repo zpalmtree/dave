@@ -1096,14 +1096,6 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['purge'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handlePurge,
-            description: 'Delete all your messages in a channel',
-        },
-    },
-    {
         aliases: ['slime'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
