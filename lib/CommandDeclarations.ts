@@ -390,7 +390,6 @@ export const Commands: Command[] = [
     },
     {
         aliases: ['purge'],
-        hidden: true,
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handlePurge,
