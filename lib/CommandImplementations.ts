@@ -874,6 +874,7 @@ export async function handlePurge(msg: Message) {
     const allowed = [
         '354701063955152898',
         '901540415176597534',
+        '1231731968064880692',
     ];
 
     if (inProgress) {
@@ -883,7 +884,6 @@ export async function handlePurge(msg: Message) {
     inProgress = true;
 
     if (!allowed.includes(msg.author.id)) {
-        await msg.reply('fuck off');
         return;
     }
 
