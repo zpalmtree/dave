@@ -1,14 +1,15 @@
 import { Message } from 'discord.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
-import { truncateResponse, getUsername } from './Utilities.js';
+import { truncateResponse, getUsername, extractURLsAndValidateExtensions } from './Utilities.js';
+import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
     apiKey: config.claudeApiKey,
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-3-5-sonnet-20240620',
+    model: 'claude-3-7-sonnet-20250219',
     temperature: 0.5,
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
@@ -22,6 +23,7 @@ interface ClaudeHandlerOptions {
     systemPrompt?: string;
     temperature?: number;
     maxTokens?: number;
+    includeImages?: boolean;
 }
 
 interface ClaudeResponse {
@@ -42,6 +44,84 @@ function combineConsecutiveUserMessages(messages: Anthropic.MessageParam[]): Ant
     }, []);
 }
 
+async function convertImageToBase64(url: string): Promise<{ data: string; mediaType: string } | null> {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+            return null;
+        }
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.startsWith('image/')) {
+            console.error(`URL did not return an image: ${contentType}`);
+            return null;
+        }
+
+        // Check if the media type is supported
+        const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (!supportedTypes.includes(contentType)) {
+            console.error(`Unsupported image type: ${contentType}`);
+            return null;
+        }
+
+        const buffer = await response.buffer();
+        const base64Data = buffer.toString('base64');
+
+        return {
+            data: base64Data,
+            mediaType: contentType,
+        };
+    } catch (error) {
+        console.error('Error converting image to base64:', error);
+        return null;
+    }
+}
+
+// Function to extract image URLs from message
+function getImageURLsFromMessage(
+    msg: Message,
+    repliedMessage?: Message,
+): string[] {
+    const urlSet = new Set<string>();
+    const supportedExtensions = ['png', 'gif', 'jpg', 'jpeg', 'webp'];
+    const supportedMimeTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp'];
+
+    function processMessage(message: Message) {
+        // Check attachments
+        message.attachments.forEach((attachment) => {
+            if (supportedMimeTypes.includes(attachment.contentType || '')) {
+                urlSet.add(attachment.url);
+            } else {
+                const extension = attachment.name?.split('.').pop()?.toLowerCase();
+                if (extension && supportedExtensions.includes(extension)) {
+                    urlSet.add(attachment.url);
+                }
+            }
+        });
+
+        // Check embeds
+        message.embeds.forEach((embed) => {
+            if (embed.image) urlSet.add(embed.image.url);
+            if (embed.thumbnail) urlSet.add(embed.thumbnail.url);
+        });
+
+        // Extract URLs from content
+        const { validURLs } = extractURLsAndValidateExtensions(
+            message.content,
+            supportedExtensions,
+        );
+        validURLs.forEach((url) => urlSet.add(url));
+    }
+
+    processMessage(msg);
+    if (repliedMessage) {
+        processMessage(repliedMessage);
+    }
+
+    return Array.from(urlSet);
+}
+
 async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<ClaudeResponse> {
     const {
         msg,
@@ -49,6 +129,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         systemPrompt,
         temperature = DEFAULT_SETTINGS.temperature,
         maxTokens = DEFAULT_SETTINGS.maxTokens,
+        includeImages = true,
     } = options;
 
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
@@ -79,12 +160,63 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
     }
 
     let messages: Anthropic.MessageParam[] = [
-        ...previousConvo,
-        { role: 'user' as const, content: prompt }
+        ...previousConvo
     ];
 
     // Combine consecutive user messages
     messages = combineConsecutiveUserMessages(messages);
+
+    let imageURLs: string[] = [];
+    let repliedMessage: Message | undefined;
+
+    // Process images if enabled
+    if (includeImages) {
+        if (msg.reference?.messageId) {
+            try {
+                repliedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+            } catch (error) {
+                console.error("Failed to fetch replied message:", error);
+            }
+        }
+
+        imageURLs = getImageURLsFromMessage(msg, repliedMessage);
+    }
+
+    // If there are images, create content blocks with images and text
+    let userContent: string | Array<any>;
+    
+    if (imageURLs.length > 0) {
+        userContent = [];
+        
+        // Process each image
+        for (const url of imageURLs) {
+            const base64Image = await convertImageToBase64(url);
+            if (base64Image) {
+                userContent.push({
+                    type: "image",
+                    source: {
+                        type: "base64",
+                        media_type: base64Image.mediaType,
+                        data: base64Image.data
+                    }
+                });
+            }
+        }
+        
+        // Add the text content after the images
+        if (prompt) {
+            userContent.push({
+                type: "text",
+                text: prompt
+            });
+        }
+    } else {
+        // No images, just use the text prompt
+        userContent = prompt;
+    }
+
+    // Add the user message with content
+    messages.push({ role: 'user', content: userContent });
 
     try {
         const completion = await anthropic.messages.create({
@@ -112,6 +244,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
 
         return { error: 'Unexpected response from API' };
     } catch (err) {
+        console.error('Claude API Error:', err);
         return { error: (err as Error).toString() };
     }
 }
@@ -139,7 +272,8 @@ export async function handleClaude(msg: Message, args: string): Promise<void> {
     const response = await masterClaudeHandler({
         msg,
         args,
-        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`
+        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`,
+        includeImages: true
     });
 
     if (response.result) {
