@@ -3,7 +3,8 @@ import {
     EmbedBuilder,
     AttachmentBuilder,
 } from 'discord.js';
-import { GoogleGenerativeAI, GenerateContentRequest, GenerateContentResult, Content, GenerationConfig, Part } from '@google/generative-ai';
+import { GoogleGenerativeAI, GenerateContentRequest, GenerateContentResult, Content, GenerationConfig, Part, InlineDataPart } from '@google/generative-ai';
+
 import { config } from './Config.js';
 import {
     truncateResponse,
@@ -11,12 +12,18 @@ import {
     getImageURLsFromMessage,
 } from './Utilities.js';
 
+// Define extended generation config with responseModalities
+interface ExtendedGenerationConfig extends GenerationConfig {
+  responseModalities?: string[];
+}
+
 // Define interfaces for our handler
 interface GeminiOptions {
     systemPrompt?: string;
     temperature?: number;
     maxOutputTokens?: number;
     imageOnly?: boolean;
+    timeoutMs?: number;
 }
 
 interface ImageData {
@@ -136,7 +143,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
     try {
         const {
             systemPrompt = "You are Gemini, a helpful and versatile AI. You can provide both text responses and generate images. Keep responses concise and informative.",
-            temperature = 0.7,
+            temperature = 1,
             maxOutputTokens = 1024,
             imageOnly = false // When true, prioritize image output with minimal text
         } = options;
@@ -193,14 +200,13 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         });
         
         // Always use the experimental model that supports image generation
-        const modelName = "models/gemini-2.0-flash-exp";
+        const modelName = "models/gemini-2.0-flash-exp-image-generation";
         
         // Define generation config - always enable both text and image modalities
-        const generationConfig: any = {
+        const generationConfig: ExtendedGenerationConfig = {
             temperature: temperature,
             maxOutputTokens: maxOutputTokens,
-            topP: 0.9,
-            topK: 40,
+            topP: 0.95,
             responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE]
         };
         
@@ -228,7 +234,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             chat = geminiModel.startChat({
                 history: [{
                     role: "user", 
-                    parts: [{ text: systemPrompt }]
+                    parts: [{ text: systemPrompt }] as Part[]
                 }],
                 generationConfig: generationConfig
             });
@@ -316,7 +322,6 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         } else if (attachments.length > 0) {
             replyMessage = await msg.reply({
                 files: attachments,
-                content: "Here's your generated image:",
             });
         } else {
             // If we have no text or images and didn't catch any safety issues yet,
@@ -493,21 +498,361 @@ async function processResponseImages(response: any): Promise<string[]> {
 }
 
 /**
- * Handle Gemini image generation (mainly for backward compatibility)
+ * Generate a single image using Gemini with timeout
+ * @param {string} prompt - The image description
+ * @param {GeminiOptions} options - Additional options
+ * @param {ImageData|null} sourceImage - Optional source image for editing
+ * @returns {Promise<string[]>} - Array of paths to saved images
+ */
+async function generateSingleImage(
+    prompt: string, 
+    options: GeminiOptions = {}, 
+    sourceImage: ImageData | null = null
+): Promise<string[]> {
+    // Add timeout for reliability
+    const timeoutMs = options.timeoutMs || 30000; // 30 seconds default
+    
+    const timeoutPromise = new Promise<string[]>((_, reject) => {
+        setTimeout(() => reject(new Error("Image generation timed out")), timeoutMs);
+    });
+    
+    const generationPromise = async (): Promise<string[]> => {
+        // Set defaults for image generation
+        const imageOptions: GeminiOptions = {
+            temperature: options.temperature || 1,
+            maxOutputTokens: options.maxOutputTokens || 1024,
+            imageOnly: true,
+            systemPrompt: options.systemPrompt || "You are an artistic image generator. Focus on creating detailed, high-quality images based on the user's description with minimal explanatory text."
+        };
+        
+        // Ensure the prompt is formatted for image generation or editing
+        let effectivePrompt = prompt.trim();
+        if (sourceImage) {
+            // For image editing, use the prompt directly as instructions for editing
+            if (!effectivePrompt.toLowerCase().includes("edit") && 
+                !effectivePrompt.toLowerCase().includes("modify") &&
+                !effectivePrompt.toLowerCase().includes("change")) {
+                effectivePrompt = "Edit this image to " + effectivePrompt;
+            }
+        } else if (!effectivePrompt.toLowerCase().startsWith("generate") && 
+                  !effectivePrompt.toLowerCase().startsWith("create")) {
+            effectivePrompt = "Generate an image of " + effectivePrompt;
+        }
+        
+        // Initialize the model
+        const modelName = "models/gemini-2.0-flash-exp-image-generation";
+        
+        const generationConfig: ExtendedGenerationConfig = {
+            temperature: imageOptions.temperature,
+            maxOutputTokens: imageOptions.maxOutputTokens,
+            topP: 0.95,
+            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE]
+        };
+        
+        const geminiModel = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: generationConfig,
+        });
+        
+        // Create chat instance
+        const chat = geminiModel.startChat({
+            history: [{
+                role: "user", 
+                parts: [{ text: imageOptions.systemPrompt || "" }] as Part[]
+            }],
+            generationConfig: generationConfig
+        });
+        
+        // Prepare content parts
+        const contentParts: Part[] = [{ text: effectivePrompt } as Part];
+        
+        // Add source image if provided
+        if (sourceImage) {
+            contentParts.push({
+                inlineData: {
+                    mimeType: sourceImage.mimeType,
+                    data: sourceImage.data
+                }
+            } as InlineDataPart);
+        }
+        
+        // Send message for image generation
+        const result = await chat.sendMessage(contentParts);
+        
+        // Process and return image paths
+        return processResponseImages(result.response.candidates?.[0]?.content);
+    };
+    
+    // Race between timeout and generation
+    return Promise.race([generationPromise(), timeoutPromise]);
+}
+
+/**
+ * Handle Gemini image generation with multiple images
  * @param {Message} msg - Discord message object
  * @param {string} args - Message content
  * @returns {Promise<void>}
  */
 export async function handleGeminiImageGen(msg: Message, args: string): Promise<void> {
-    // Use the main handler with imageOnly flag
-    await handleGemini(msg, args, {
-        imageOnly: true,
-        systemPrompt: "You are an artistic image generator. Focus on creating detailed, high-quality images based on the user's description with minimal explanatory text."
-    });
+    // Create an array to track created image paths for cleanup
+    const allImagePaths: string[] = [];
+    
+    try {
+        // Send typing indicator if the channel has typing capability
+        if (msg.channel && 'sendTyping' in msg.channel) {
+            await msg.channel.sendTyping();
+        }
+        
+        // Check for images in message or replied message
+        let imageURLs = getImageURLsFromMessage(msg);
+        let contextMessage: Message | undefined;
+        
+        // Check for replied message with image if no images in current message
+        if (imageURLs.length === 0 && msg.reference?.messageId) {
+            try {
+                contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+                if (contextMessage) {
+                    imageURLs = getImageURLsFromMessage(contextMessage);
+                }
+            } catch (error) {
+                console.error("Failed to fetch replied message:", error);
+            }
+        }
+        
+        // Generate multiple images
+        if (imageURLs.length > 0) {
+            // SOURCE IMAGE MODE: Use the first image as source for editing
+            const sourceImageUrl = imageURLs[0];
+            const sourceImageData = await fetchImageAsBase64(sourceImageUrl);
+            
+            if (!sourceImageData) {
+                await msg.reply("Failed to process the source image. Please try with a different image.");
+                return;
+            }
+            
+            // Generate variations with the source image
+            const imagePromises = [];
+            for (let i = 0; i < 3; i++) {
+                const temperature = 1;
+                imagePromises.push(
+                    generateSingleImage(args, { temperature }, sourceImageData)
+                );
+            }
+            
+            // Use Promise.allSettled to handle partial successes
+            const results = await Promise.allSettled(imagePromises);
+            
+            // Collect successful image paths
+            results.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    allImagePaths.push(...result.value);
+                }
+            });
+        } else {
+            // NO SOURCE IMAGE MODE: Generate from text only
+            const imagePromises = [];
+            for (let i = 0; i < 3; i++) {
+                const temperature = 1;
+                imagePromises.push(generateSingleImage(args, { temperature }));
+            }
+            
+            // Use Promise.allSettled to handle partial successes
+            const results = await Promise.allSettled(imagePromises);
+            
+            // Collect successful image paths
+            results.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    allImagePaths.push(...result.value);
+                }
+            });
+        }
+        
+        if (allImagePaths.length === 0) {
+            const errorMessage = imageURLs.length > 0
+                ? "I couldn't edit the image based on that prompt. Please try a different description or image."
+                : "I couldn't generate any images based on that prompt. Please try a different description.";
+            
+            await msg.reply(errorMessage);
+            return;
+        }
+        
+        // Create attachments for Discord
+        const attachments = [];
+        for (const imagePath of allImagePaths) {
+            const attachment = new AttachmentBuilder(imagePath)
+                .setName(imagePath.split('/').pop() || 'generated-image.png');
+            attachments.push(attachment);
+        }
+        
+        await msg.reply({
+            files: attachments,
+        });
+    } catch (error: unknown) {
+        console.error("Error in Gemini image generation:", error);
+        await msg.reply("An error occurred while generating images. Please try again with a different prompt.");
+    } finally {
+        // Clean up temporary files
+        for (const imagePath of allImagePaths) {
+            const fs = await import('fs/promises');
+            await fs.unlink(imagePath).catch(err => {
+                console.error(`Failed to delete temp file ${imagePath}:`, err);
+            });
+        }
+    }
+}
+
+/**
+ * Handle adding captions to images
+ * @param {Message} msg - Discord message object
+ * @param {string} args - Message content (caption text)
+ * @returns {Promise<void>}
+ */
+export async function handleGeminiCaption(msg: Message, args: string): Promise<void> {
+    // Create an array to track created image paths for cleanup
+    const imagePaths: string[] = [];
+    
+    try {
+        if (!args || args.trim() === '') {
+            await msg.reply("Please provide caption text. Example usage: `!caption This is my vacation photo`");
+            return;
+        }
+        
+        // Send typing indicator if the channel has typing capability
+        if (msg.channel && 'sendTyping' in msg.channel) {
+            await msg.channel.sendTyping();
+        }
+        
+        // Get image URLs from message or replied message
+        let imageURLs = getImageURLsFromMessage(msg);
+        
+        // Check for replied message with image if no images in current message
+        if (imageURLs.length === 0 && msg.reference?.messageId) {
+            try {
+                const contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+                imageURLs = getImageURLsFromMessage(contextMessage);
+            } catch (error) {
+                console.error("Failed to fetch replied message:", error);
+            }
+        }
+        
+        if (imageURLs.length === 0) {
+            await msg.reply("Please provide an image to add a caption to. You can upload an image with your command or reply to a message containing an image.");
+            return;
+        }
+        
+        // We'll only use the first image if multiple are provided
+        const imageUrl = imageURLs[0];
+        const imageData = await fetchImageAsBase64(imageUrl);
+        
+        if (!imageData) {
+            await msg.reply("Failed to process the image. Please try with a different image.");
+            return;
+        }
+        
+        // Create a specific prompt for adding captions
+        const captionText = args.trim();
+        const captionPrompt = `Add the following text as a visible caption directly ON this image (not as a separate image or description):
+
+"${captionText}"
+
+The caption should be:
+1. Clearly visible and readable 
+2. Properly positioned (preferably at the bottom, top, or where it fits best)
+3. Have sufficient contrast with the background (add shadow, outline, or background to text if needed)
+4. Match the style/mood of the image
+5. Use an appropriate font size and style
+
+IMPORTANT: DO NOT describe what you're doing or explain your process. ONLY generate the image with the caption text overlaid.`;
+        
+        // Initialize model with specific caption settings
+        const systemPrompt = "You are an expert at adding text captions directly onto images. You always position text in visually appealing ways, ensure readability, and never return images without the requested caption text visibly overlaid on them.";
+        
+        // Initialize the model
+        const modelName = "models/gemini-2.0-flash-exp-image-generation";
+        
+        const generationConfig: ExtendedGenerationConfig = {
+            temperature: 0.7,
+            maxOutputTokens: 512,
+            topP: 0.95,
+            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE]
+        };
+        
+        const geminiModel = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: generationConfig,
+        });
+        
+        // Create chat instance
+        const chat = geminiModel.startChat({
+            history: [{
+                role: "user", 
+                parts: [{ text: systemPrompt }] as Part[]
+            }],
+            generationConfig: generationConfig
+        });
+        
+        // Prepare content parts with both text and image
+        const contentParts: Part[] = [
+            { text: captionPrompt } as Part,
+            {
+                inlineData: {
+                    mimeType: imageData.mimeType,
+                    data: imageData.data
+                }
+            } as InlineDataPart
+        ];
+        
+        // Generate response
+        const result = await chat.sendMessage(contentParts);
+        const response = result.response;
+        
+        // Process images in the response
+        const generatedImagePaths = await processResponseImages(response.candidates?.[0]?.content);
+        imagePaths.push(...generatedImagePaths);
+        
+        if (imagePaths.length === 0) {
+            await msg.reply("I couldn't add a caption to the image. This might be due to content guidelines or technical limitations. Please try a different image or caption text.");
+            return;
+        }
+        
+        // Create attachment for Discord
+        const attachments = [];
+        for (const imagePath of imagePaths) {
+            const attachment = new AttachmentBuilder(imagePath)
+                .setName(imagePath.split('/').pop() || 'captioned-image.png');
+            attachments.push(attachment);
+        }
+        
+        // Send the captioned image
+        await msg.reply({
+            files: attachments,
+            content: "Here's your image with the caption added:",
+        });
+    } catch (error: unknown) {
+        console.error("Error in Gemini caption:", error);
+        let errorMessage = "An error occurred while adding the caption. Please try again with a different image or caption text.";
+        
+        if (error instanceof Error && error.message) {
+            if (error.message.includes("safety")) {
+                errorMessage = "The Gemini API rejected this request due to safety policies. Please try a different image or caption.";
+            }
+        }
+        
+        await msg.reply(errorMessage);
+    } finally {
+        // Clean up temporary files
+        for (const imagePath of imagePaths) {
+            const fs = await import('fs/promises');
+            await fs.unlink(imagePath).catch(err => {
+                console.error(`Failed to delete temp file ${imagePath}:`, err);
+            });
+        }
+    }
 }
 
 // Export additional functions as needed for your Discord bot
 export default {
     handleGemini,
-    handleGeminiImageGen
+    handleGeminiImageGen,
+    handleGeminiCaption
 };
