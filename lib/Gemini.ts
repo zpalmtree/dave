@@ -260,9 +260,11 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 await fs.unlink(imagePath).catch(console.error);
             }
         } else if (imageOnly) {
+            console.log(response);
             // If image-only mode but no images generated, inform the user
             await processingMsg.edit(responseText || "I couldn't generate an image based on your request. Please try a different description.");
         } else if (!responseText) {
+            console.log(response);
             // No text or images in response
             await processingMsg.edit("I couldn't generate a response. Please try again.");
         }
