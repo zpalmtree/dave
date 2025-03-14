@@ -79,6 +79,7 @@ import {
 import {
     handleGemini,
     handleGeminiImageGen,
+    handleGeminiCaption,
 } from './Gemini.js';
 import {
     handleClaude,
@@ -1221,6 +1222,17 @@ export const Commands: Command[] = [
             argsFormat: Args.Combined,
             implementation: handleGeminiImageGen,
             description: 'Generate an image using Gemini',
+        },
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['caption'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGeminiCaption,
+            description: 'Caption an image using Gemini',
         },
         commandGates: [
             slugUserGate,
