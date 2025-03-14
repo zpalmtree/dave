@@ -102,6 +102,9 @@ import {
 } from './OpenAI.js';
 
 import {
+    handleGemini,
+} from './Gemini.js';
+import {
     handleClaude,
 } from './Claude.js';
 
@@ -1387,6 +1390,17 @@ export const Commands: Command[] = [
             implementation: handleSupply,
             description: 'Get current sol slugs supply',
         },
+    },
+    {
+        aliases: ['gemini'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGemini,
+            description: 'Ask Gemini something',
+        },
+        commandGates: [
+            slugUserGate,
+        ],
     },
 ];
 

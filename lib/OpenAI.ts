@@ -45,6 +45,10 @@ interface OpenAIHandlerOptions {
     maxTokens?: number;
     maxCompletionTokens?: number;
     includeFiles?: boolean;
+    overrideConfig?: {
+        apiKey?: string;
+        baseURL?: string;
+    };
 }
 
 export interface OpenAIResponse {
@@ -65,6 +69,7 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
         maxTokens = DEFAULT_SETTINGS.maxTokens,
         maxCompletionTokens,
         includeFiles = true,
+        overrideConfig,
     } = options;
 
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
@@ -118,8 +123,14 @@ async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boole
     content.push(...imageURLs.map(url => ({ type: 'image_url', image_url: { url } } as OpenAI.Chat.ChatCompletionContentPart)));
     messages.push({ role: 'user', content });
 
+    // Create a custom OpenAI instance if overrideConfig is provided
+    const aiClient = overrideConfig ? new OpenAI({
+        apiKey: overrideConfig.apiKey || config.openaiApiKey,
+        baseURL: overrideConfig.baseURL,
+    }) : openai;
+
     try {
-        const completion = await openai.chat.completions.create({
+        const completion = await aiClient.chat.completions.create({
             model,
             messages,
             ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
