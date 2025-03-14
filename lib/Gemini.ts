@@ -1,6 +1,7 @@
 import {
     Message,
     EmbedBuilder,
+    AttachmentBuilder,
 } from 'discord.js';
 import { GoogleGenerativeAI, GenerateContentRequest, GenerateContentResult, Content, GenerationConfig, Part } from '@google/generative-ai';
 import { config } from './Config.js';
@@ -121,13 +122,10 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         // Get username for personalization
         const username = await getUsername(msg.author.id, msg.guild);
         
-        // Create typing indicator to show processing
-        await msg.channel.sendTyping();
-        
         // Check for replied message for context
         const replyMsgId = msg?.reference?.messageId;
         let history: any[] = [];
-        let replyMessage: Message | undefined;
+        let contextMessage: Message | undefined;
         
         if (replyMsgId) {
             const cachedHistory = chatHistoryCache.get(replyMsgId);
@@ -138,7 +136,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             // If no history found but replying to message, fetch it for context
             if (history.length === 0) {
                 try {
-                    replyMessage = await msg.channel?.messages.fetch(replyMsgId);
+                    contextMessage = await msg.channel?.messages.fetch(replyMsgId);
                 } catch (error) {
                     console.error("Failed to fetch replied message:", error);
                 }
@@ -147,8 +145,8 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         
         // Get image URLs if any
         let imageURLs: string[] = [];
-        if (replyMessage) {
-            imageURLs = getImageURLsFromMessage(msg, replyMessage);
+        if (contextMessage) {
+            imageURLs = getImageURLsFromMessage(msg, contextMessage);
         } else {
             imageURLs = getImageURLsFromMessage(msg);
         }
@@ -204,11 +202,6 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             });
         }
         
-        // Indicate processing first before sending the actual request
-        const processingMsg = await msg.reply(imageOnly ? 
-            "Generating image... Please wait, this may take a moment." : 
-            "Processing your request...");
-        
         // Prepare content parts (text and images)
         const contentParts = await prepareContentParts(effectivePrompt, imageURLs);
         
@@ -230,43 +223,36 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         const imagePaths = await processResponseImages(rawResponse);
         hasImages = imagePaths.length > 0;
         
-        // Update the processing message with the text response (if appropriate)
-        if (responseText && (!imageOnly || !hasImages)) {
-            await processingMsg.edit(truncateResponse(responseText));
-        } else if (hasImages && imageOnly) {
-            // For image-only mode with successful image generation, 
-            // either keep the "generating" message or replace with minimal text
-            if (responseText.length > 200) {
-                // If there's substantial text, truncate it significantly
-                await processingMsg.edit(responseText.substring(0, 200) + "...");
-            } else {
-                // Otherwise use a simple message
-                await processingMsg.edit("Here's your generated image:");
-            }
+        // Reply with the text response
+        let replyMessage;
+
+        const attachments = [];
+
+        for (const imagePath of imagePaths) {
+            const attachment = new AttachmentBuilder(imagePath)
+                .setName(imagePath.split('/').pop() || 'generated-image.png');
+
+            attachments.push(attachment);
+        }
+
+        if (responseText) {
+            replyMessage = await msg.reply({
+                files: attachments,
+                content: truncateResponse(responseText),
+            });
+        } else if (attachments.length > 0) {
+            replyMessage = await msg.reply({
+                files: attachments,
+                content: "Here's your generated image:",
+            });
+        } else {
+            console.log(response);
+            replyMessage = await msg.reply("I couldn't generate a response. Please try again.");
         }
         
-        // Send any generated images
-        if (hasImages) {
-            for (const imagePath of imagePaths) {
-                await msg.channel.send({
-                    files: [{
-                        attachment: imagePath,
-                        name: imagePath.split('/').pop() || 'generated-image.png'
-                    }]
-                });
-                
-                // Clean up the temporary file
-                const fs = await import('fs/promises');
-                await fs.unlink(imagePath).catch(console.error);
-            }
-        } else if (imageOnly) {
-            console.log(response);
-            // If image-only mode but no images generated, inform the user
-            await processingMsg.edit(responseText || "I couldn't generate an image based on your request. Please try a different description.");
-        } else if (!responseText) {
-            console.log(response);
-            // No text or images in response
-            await processingMsg.edit("I couldn't generate a response. Please try again.");
+        for (const imagePath of imagePaths) {
+            const fs = await import('fs/promises');
+            await fs.unlink(imagePath).catch(console.error);
         }
         
         // Update chat history
@@ -308,7 +294,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         });
         
         // Cache updated history with the message ID
-        chatHistoryCache.set(processingMsg.id, updatedHistory);
+        chatHistoryCache.set(replyMessage.id, updatedHistory);
     } catch (error: any) {
         console.error("Error in Gemini handler:", error);
         
@@ -367,7 +353,7 @@ async function saveBase64ImageToFile(base64Data: string, mimeType: string): Prom
     const randomName = crypto.randomBytes(16).toString('hex');
     const extension = mimeType.split('/')[1] || 'png';
     const filename = `gemini_${randomName}.${extension}`;
-    const tempDir = './temp';
+    const tempDir = '/tmp';
     const filePath = path.join(tempDir, filename);
     
     // Create temp directory if it doesn't exist
