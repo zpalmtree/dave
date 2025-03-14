@@ -24,6 +24,18 @@ interface ImageData {
     data: string;
 }
 
+// Finish reason types for safety checks
+// Using string literals instead of an enum to match the Google API strings exactly
+type FinishReason = 
+    | 'STOP'
+    | 'MAX_TOKENS' 
+    | 'SAFETY' 
+    | 'RECITATION' 
+    | 'OTHER' 
+    | 'UNSPECIFIED' 
+    | 'IMAGE_SAFETY' 
+    | 'TEXT_SAFETY';
+
 // Hardcoded banned users list
 const BANNED_USERS = ['663270358161293343'];
 
@@ -90,6 +102,27 @@ async function prepareContentParts(text: string, imageURLs: string[] = []): Prom
     }
     
     return contentParts;
+}
+
+/**
+ * Get user-friendly message for safety rejections
+ * @param {string} safetyReason - The safety reason type
+ * @param {boolean} imageOnly - Whether this was an image generation request
+ * @returns {string} - User-friendly error message
+ */
+function getSafetyErrorMessage(safetyReason: string, imageOnly: boolean): string {
+    switch (safetyReason) {
+        case 'IMAGE_SAFETY':
+            return "The Gemini API refused to generate this image. Please try a different image description.";
+        case 'TEXT_SAFETY':
+            return "The Gemini API refused to process this text content. Please try rephrasing your request.";
+        case 'SAFETY':
+            return imageOnly 
+                ? "The Gemini API refused to generate this image. Try a different description."
+                : "The Gemini API refused to respond to this request. Please try a different prompt.";
+        default:
+            return "The Gemini API rejected this request. Please try again with different content.";
+    }
 }
 
 /**
@@ -163,7 +196,6 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         const modelName = "models/gemini-2.0-flash-exp";
         
         // Define generation config - always enable both text and image modalities
-        // Removed mediaResolution: "HIGH" that was causing the error
         const generationConfig: any = {
             temperature: temperature,
             maxOutputTokens: maxOutputTokens,
@@ -209,6 +241,20 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         const result = await chat.sendMessage(contentParts);
         const response = result.response;
         
+        // Check if response has candidates
+        if (response && response.candidates && response.candidates.length > 0) {
+            // Check for safety finish reasons directly in candidates
+            for (const candidate of response.candidates) {
+                const finishReason = candidate.finishReason as string;
+                if (finishReason === 'SAFETY' || 
+                    finishReason === 'IMAGE_SAFETY' || 
+                    finishReason === 'TEXT_SAFETY') {
+                    await msg.reply(getSafetyErrorMessage(finishReason, imageOnly));
+                    return;
+                }
+            }
+        }
+        
         // Variables to track response components
         let responseText = "";
         let hasImages = false;
@@ -222,6 +268,33 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         const rawResponse = response.candidates?.[0]?.content;
         const imagePaths = await processResponseImages(rawResponse);
         hasImages = imagePaths.length > 0;
+        
+        // If we have no text and no images, check for candidates with safety issues again
+        // This catches the case in your error log where we have candidates with finishReason: 'IMAGE_SAFETY'
+        // but no actual content
+        if (!responseText && !hasImages && response && response.candidates && response.candidates.length > 0) {
+            for (const candidate of response.candidates) {
+                const finishReason = candidate.finishReason as string;
+                if (finishReason === 'SAFETY' || 
+                    finishReason === 'IMAGE_SAFETY' || 
+                    finishReason === 'TEXT_SAFETY') {
+                    await msg.reply(getSafetyErrorMessage(finishReason, imageOnly));
+                    return;
+                }
+            }
+        }
+        
+        // If this was an image request but no images were generated (without safety trigger)
+        if (imageOnly && !hasImages && responseText) {
+            // Check if the response text indicates inability to generate an image
+            if (responseText.toLowerCase().includes("can't generate") || 
+                responseText.toLowerCase().includes("cannot generate") ||
+                responseText.toLowerCase().includes("unable to generate") ||
+                responseText.toLowerCase().includes("couldn't generate")) {
+                await msg.reply("I couldn't generate that image. This might be due to content guidelines or technical limitations. Please try a different description.");
+                return;
+            }
+        }
         
         // Reply with the text response
         let replyMessage;
@@ -246,10 +319,24 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 content: "Here's your generated image:",
             });
         } else {
-            console.log(response);
-            replyMessage = await msg.reply("I couldn't generate a response. Please try again.");
+            // If we have no text or images and didn't catch any safety issues yet,
+            // there might be a different issue or an empty response
+            console.log("Empty response details:", response);
+            
+            // Check one more time for any finish reasons in the raw response object
+            let errorMessage = "The Gemini API returned an empty response. Please try rephrasing or simplifying your prompt.";
+            
+            if (response && response.candidates && response.candidates.length > 0) {
+                const finishReason = response.candidates[0].finishReason as string;
+                if (finishReason && finishReason !== 'STOP') {
+                    errorMessage = `The Gemini API couldn't complete this request (${finishReason}). Please try a different prompt.`;
+                }
+            }
+            
+            replyMessage = await msg.reply(errorMessage);
         }
         
+        // Clean up temporary files
         for (const imagePath of imagePaths) {
             const fs = await import('fs/promises');
             await fs.unlink(imagePath).catch(console.error);
@@ -304,16 +391,16 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         if (error.message && typeof error.message === 'string') {
             // Check for common error types with better messaging
             if (error.message.includes("safety")) {
-                errorMessage = "I couldn't respond to that due to safety concerns.";
+                errorMessage = "The Gemini API rejected this request due to safety policies. Please try a different prompt.";
             } else if (error.message.includes("invalid image") || error.message.includes("unsupported image")) {
-                errorMessage = "There was a problem processing the image. Please try a different image format.";
+                errorMessage = "The Gemini API couldn't process this image format. Please try a different image.";
             } else if (error.message.includes("Invalid value at 'generation_config.media_resolution'")) {
-                errorMessage = "There was a configuration issue with the image quality settings. Please try again.";
+                errorMessage = "The Gemini API rejected the image quality settings. Please try again.";
             } else if (error.message.includes("First content should be with role")) {
-                errorMessage = "There was an issue with the conversation history format. Please try starting a new conversation.";
+                errorMessage = "The Gemini API rejected the conversation format. Please try starting a new conversation.";
             } else if (error.status === 400) {
                 // More specific error for 400 status
-                errorMessage = "The request format was invalid. This might be due to a configuration issue.";
+                errorMessage = "The Gemini API rejected the request format. This might be a configuration issue.";
                 // Try to extract field violations
                 if (error.errorDetails && Array.isArray(error.errorDetails)) {
                     const violations = error.errorDetails.flatMap((detail: any) => 
@@ -321,17 +408,14 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                     );
                     if (violations.length > 0) {
                         const violationMessages = violations.map((v: any) => v.description || "Unknown field error").join("; ");
-                        errorMessage = `Request error: ${violationMessages}`;
+                        errorMessage = `Gemini API error: ${violationMessages}`;
                     }
                 }
             } else if (error.status === 429) {
-                errorMessage = "Rate limit exceeded. Please try again in a few minutes.";
+                errorMessage = "The Gemini API rate limit was exceeded. Please try again in a few minutes.";
             } else if (error.status === 500 || error.status === 503) {
-                errorMessage = "The Gemini service is currently experiencing issues. Please try again later.";
+                errorMessage = "The Gemini API is currently experiencing issues. Please try again later.";
             }
-            
-            // Log the full error details for debugging
-            console.error(`Gemini error:`, error);
         }
         
         await msg.reply(errorMessage);
