@@ -195,18 +195,10 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 generationConfig: generationConfig
             });
         } else {
-            // Add system prompt as first message when starting new chat
-            const fullSystemPrompt = `System Information (do not use in image generation) [The current date is ${now}. The person interacting with you is named ${username}].${systemPrompt}`;
-            
-            // For image-only mode, add an additional instruction
-            const initialPrompt = imageOnly 
-                ? fullSystemPrompt + " Focus primarily on generating images based on the user's description with minimal text explanation."
-                : fullSystemPrompt;
-            
             chat = geminiModel.startChat({
                 history: [{
                     role: "user", 
-                    parts: [{ text: initialPrompt }]
+                    parts: [{ text: systemPrompt }]
                 }],
                 generationConfig: generationConfig
             });
