@@ -3,7 +3,7 @@ import {
     EmbedBuilder,
     AttachmentBuilder,
 } from 'discord.js';
-import { GoogleGenerativeAI, GenerateContentRequest, GenerateContentResult, Content, GenerationConfig, Part, InlineDataPart } from '@google/generative-ai';
+import { GoogleGenerativeAI, GenerateContentRequest, GenerateContentResult, Content, GenerationConfig, Part, InlineDataPart, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
 import { config } from './Config.js';
 import {
@@ -14,7 +14,7 @@ import {
 
 // Define extended generation config with responseModalities
 interface ExtendedGenerationConfig extends GenerationConfig {
-  responseModalities?: string[];
+    responseModalities?: string[];
 }
 
 // Define interfaces for our handler
@@ -207,13 +207,35 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             temperature: temperature,
             maxOutputTokens: maxOutputTokens,
             topP: 0.95,
-            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE]
+            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE],
         };
         
         // Initialize the model
         const geminiModel = genAI.getGenerativeModel({
             model: modelName,
             generationConfig: generationConfig,
+            safetySettings: [
+                {
+                    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+            ],
         });
         
         // Adjust the prompt based on whether this is image-only mode
@@ -546,12 +568,34 @@ async function generateSingleImage(
             temperature: imageOptions.temperature,
             maxOutputTokens: imageOptions.maxOutputTokens,
             topP: 0.95,
-            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE]
+            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE],
         };
         
         const geminiModel = genAI.getGenerativeModel({
             model: modelName,
             generationConfig: generationConfig,
+            safetySettings: [
+                {
+                    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+            ],
         });
         
         // Create chat instance
@@ -774,12 +818,34 @@ IMPORTANT: DO NOT describe what you're doing or explain your process. ONLY gener
             temperature: 0.7,
             maxOutputTokens: 512,
             topP: 0.95,
-            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE]
+            responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE],
         };
         
         const geminiModel = genAI.getGenerativeModel({
             model: modelName,
             generationConfig: generationConfig,
+            safetySettings: [
+                {
+                    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+                {
+                    category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+                    threshold: HarmBlockThreshold.BLOCK_NONE
+                },
+            ],
         });
         
         // Create chat instance
