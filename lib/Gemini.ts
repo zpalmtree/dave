@@ -562,7 +562,7 @@ async function generateSingleImage(
         }
         
         // Initialize the model
-        const modelName = "models/gemini-2.0-flash-exp-image-generation";
+        const modelName = "gemini-2.0-flash-exp-image-generation";
         
         const generationConfig: ExtendedGenerationConfig = {
             temperature: imageOptions.temperature,
