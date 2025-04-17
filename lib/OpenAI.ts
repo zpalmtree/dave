@@ -18,7 +18,7 @@ const openai = new OpenAI({
 const DEFAULT_SETTINGS = {
     temperature: 1.1,
     maxTokens: 1024,
-    maxCompletionTokens: 25000,
+    maxCompletionTokens: 50000,
     model: 'gpt-4o',
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
@@ -377,16 +377,16 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
     }
 }
 
-export async function handleO1(msg: Message, args: string): Promise<void> {
+export async function handleO3(msg: Message, args: string): Promise<void> {
     const response = await masterOpenAIHandler({
         msg,
         args,
         systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible.`,
-        model: 'o1-preview',
-        includeSystemPrompt: false,
+        model: 'o3',
+        includeSystemPrompt: true,
         maxCompletionTokens: DEFAULT_SETTINGS.maxCompletionTokens,
         temperature: 1,
-        includeFiles: false,
+        includeFiles: true,
     });
 
     if (response.result) {
