@@ -640,6 +640,8 @@ async function generateSingleImage(
 export async function handleGeminiImageGen(msg: Message, args: string): Promise<void> {
     // Create an array to track created image paths for cleanup
     const allImagePaths: string[] = [];
+    // Array to collect error messages from failed generations
+    const errorMessages: string[] = [];
     
     try {
         // Send typing indicator if the channel has typing capability
@@ -686,10 +688,21 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             // Use Promise.allSettled to handle partial successes
             const results = await Promise.allSettled(imagePromises);
             
-            // Collect successful image paths
+            // Collect successful image paths and error messages
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
                     allImagePaths.push(...result.value);
+                } else if (result.status === 'rejected') {
+                    // Extract error message
+                    let errorMsg = "Unknown error";
+                    if (result.reason instanceof Error) {
+                        errorMsg = result.reason.message;
+                    } else if (typeof result.reason === 'string') {
+                        errorMsg = result.reason;
+                    } else if (result.reason && typeof result.reason === 'object') {
+                        errorMsg = JSON.stringify(result.reason);
+                    }
+                    errorMessages.push(errorMsg);
                 }
             });
         } else {
@@ -703,20 +716,84 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             // Use Promise.allSettled to handle partial successes
             const results = await Promise.allSettled(imagePromises);
             
-            // Collect successful image paths
+            // Collect successful image paths and error messages
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
                     allImagePaths.push(...result.value);
+                } else if (result.status === 'rejected') {
+                    // Extract error message
+                    let errorMsg = "Unknown error";
+                    if (result.reason instanceof Error) {
+                        errorMsg = result.reason.message;
+                    } else if (typeof result.reason === 'string') {
+                        errorMsg = result.reason;
+                    } else if (result.reason && typeof result.reason === 'object') {
+                        errorMsg = JSON.stringify(result.reason);
+                    }
+                    errorMessages.push(errorMsg);
                 }
             });
         }
         
         if (allImagePaths.length === 0) {
-            const errorMessage = imageURLs.length > 0
-                ? "I couldn't edit the image based on that prompt. Please try a different description or image."
-                : "I couldn't generate any images based on that prompt. Please try a different description.";
-            
-            await msg.reply(errorMessage);
+            // If we have error messages, provide them to the user
+            if (errorMessages.length > 0) {
+                // Categorize errors by type
+                const safetyErrors = errorMessages.filter(err => 
+                    err.includes("safety") || err.includes("Safety")).length;
+                const timeoutErrors = errorMessages.filter(err => 
+                    err.includes("timeout") || err.includes("timed out")).length;
+                const imageFormatErrors = errorMessages.filter(err => 
+                    err.includes("invalid image") || err.includes("unsupported image")).length;
+                const rateLimitErrors = errorMessages.filter(err => 
+                    err.includes("rate limit") || err.includes("quota")).length;
+                const serverErrors = errorMessages.filter(err => 
+                    err.includes("500") || err.includes("503") || err.includes("server error")).length;
+                
+                // Determine the most common error type
+                const errorCounts = [
+                    { type: "safety", count: safetyErrors, message: "The content may violate safety policies (potentially sensitive content)" },
+                    { type: "timeout", count: timeoutErrors, message: "The generation process timed out (try a simpler description)" },
+                    { type: "format", count: imageFormatErrors, message: "There was an issue with the image format" },
+                    { type: "rateLimit", count: rateLimitErrors, message: "API rate limit reached (please try again later)" },
+                    { type: "server", count: serverErrors, message: "The Gemini service is experiencing issues (please try again later)" }
+                ];
+                
+                // Sort by count, descending
+                errorCounts.sort((a, b) => b.count - a.count);
+                
+                // Create a user-friendly error message focusing on the most common error
+                let errorResponse = imageURLs.length > 0
+                    ? "I couldn't edit the image based on that prompt. "
+                    : "I couldn't generate any images based on that prompt. ";
+                
+                if (errorCounts[0].count > 0) {
+                    // Include the most common error
+                    errorResponse += `Error: ${errorCounts[0].message}. `;
+                    
+                    // If there's a second common error that's different, include it too
+                    if (errorCounts[1].count > 0 && errorCounts[1].count >= errorCounts[0].count * 0.5) {
+                        errorResponse += `Additionally: ${errorCounts[1].message}. `;
+                    }
+                } else {
+                    // If none of our categorized errors matched, include the first unique error
+                    const uniqueErrors = [...new Set(errorMessages)];
+                    if (uniqueErrors.length > 0) {
+                        errorResponse += `Error: ${uniqueErrors[0]}. `;
+                    }
+                }
+                
+                errorResponse += "Please try a different description or try again later.";
+                
+                await msg.reply(errorResponse);
+            } else {
+                // Fallback if no specific errors were captured
+                const errorMessage = imageURLs.length > 0
+                    ? "I couldn't edit the image based on that prompt. The API didn't return any specific errors. Please try a different description or image."
+                    : "I couldn't generate any images based on that prompt. The API didn't return any specific errors. Please try a different description.";
+                
+                await msg.reply(errorMessage);
+            }
             return;
         }
         
@@ -733,7 +810,54 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
         });
     } catch (error: unknown) {
         console.error("Error in Gemini image generation:", error);
-        await msg.reply("An error occurred while generating images. Please try again with a different prompt.");
+        
+        // Extract detailed error information
+        let errorMessage = "An error occurred while generating images.";
+        
+        if (error instanceof Error) {
+            // Process the error message to extract useful information
+            const errMsg = error.message;
+            
+            if (errMsg.includes("safety") || errMsg.includes("Safety")) {
+                errorMessage = "The Gemini API rejected this request due to safety policies. Please try a different prompt.";
+            } else if (errMsg.includes("timeout") || errMsg.includes("timed out")) {
+                errorMessage = "The image generation process timed out. Please try a simpler description.";
+            } else if (errMsg.includes("invalid image") || errMsg.includes("unsupported image")) {
+                errorMessage = "The Gemini API couldn't process this image format. Please try a different image.";
+            } else if (errMsg.includes("rate limit") || errMsg.includes("quota")) {
+                errorMessage = "The Gemini API rate limit was exceeded. Please try again later.";
+            } else if (errMsg.includes("500") || errMsg.includes("503") || errMsg.includes("server")) {
+                errorMessage = "The Gemini API is currently experiencing issues. Please try again later.";
+            } else {
+                // Include a sanitized version of the error message
+                // Remove any sensitive information like API keys
+                const sanitizedMsg = errMsg.replace(/key[-=a-zA-Z0-9]{5,}/g, "[API_KEY]");
+                errorMessage = `Error: ${sanitizedMsg}. Please try again with a different prompt.`;
+            }
+        } else if (typeof error === 'string') {
+            errorMessage = `Error: ${error}. Please try again with a different prompt.`;
+        } else if (error && typeof error === 'object') {
+            try {
+                // For API errors that might be objects with status codes and messages
+                const errorObj = error as any;
+                if (errorObj.status) {
+                    errorMessage = `API Error (${errorObj.status}): `;
+                    if (errorObj.message) {
+                        errorMessage += errorObj.message;
+                    } else if (errorObj.error) {
+                        errorMessage += errorObj.error;
+                    } else {
+                        errorMessage += "Unknown error";
+                    }
+                } else {
+                    errorMessage = `Error: ${JSON.stringify(error)}`;
+                }
+            } catch (e) {
+                errorMessage = "An unexpected error occurred. Please try again.";
+            }
+        }
+        
+        await msg.reply(errorMessage);
     } finally {
         // Clean up temporary files
         for (const imagePath of allImagePaths) {
