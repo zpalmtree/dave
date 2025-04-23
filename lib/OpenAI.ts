@@ -9,6 +9,7 @@ import {
     extractURLs,
     getUsername,
     getImageURLsFromMessage,
+    withTyping,
 } from './Utilities.js';
 
 const openai = new OpenAI({
@@ -64,10 +65,7 @@ export interface OpenAIResponse {
  * Adjust if OpenAI adds more.
  */
 const RESPONSES_MODELS = [
-  /^gpt-4o/i,
   /^o3/i,
-  /^gpt-4\.1/i,
-  /^gpt-4o-mini/i,
 ];
 
 /**
@@ -123,186 +121,195 @@ async function masterOpenAIHandler(
   options: OpenAIHandlerOptions,
   isRetry: boolean = false,
 ): Promise<OpenAIResponse> {
-  const {
-    msg,
-    args,
-    systemPrompt,
-    temperature = DEFAULT_SETTINGS.temperature,
-    model = DEFAULT_SETTINGS.model,
-    includeSystemPrompt = true,
-    files = [],
-    maxTokens = DEFAULT_SETTINGS.maxTokens,
-    maxCompletionTokens,
-    includeFiles = true,
-    overrideConfig,
-  } = options;
+  return withTyping(options.msg.channel, async () => {
+      const {
+        msg,
+        args,
+        systemPrompt,
+        temperature = DEFAULT_SETTINGS.temperature,
+        model = DEFAULT_SETTINGS.model,
+        includeSystemPrompt = true,
+        files = [],
+        maxTokens = DEFAULT_SETTINGS.maxTokens,
+        maxCompletionTokens,
+        includeFiles = true,
+        overrideConfig,
+      } = options;
 
-  // dev / banned checks
-  if (config.devChannels.includes(msg.channel.id) && !config.devEnv) return {};
-  if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id))
-    return { error: `Sorry, this function has been disabled for your user.` };
+      // dev / banned checks
+      if (config.devChannels.includes(msg.channel.id) && !config.devEnv) return {};
+      if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id))
+        return { error: `Sorry, this function has been disabled for your user.` };
 
-  // ---------- build conversation ----------
-  const prompt = args.trim();
-  const username = await getUsername(msg.author.id, msg.guild);
-  const fullSystemPrompt = createSystemPrompt(
-    systemPrompt || getDefaultSystemPrompt(),
-    username,
-  );
+      // ---------- build conversation ----------
+      const prompt = args.trim();
+      const username = await getUsername(msg.author.id, msg.guild);
+      const fullSystemPrompt = createSystemPrompt(
+        systemPrompt || getDefaultSystemPrompt(),
+        username,
+      );
 
-  // fetch reply-thread history (our cache stores UniversalMessage[])
-  const reply = msg?.reference?.messageId;
-  let previousConvo: UniversalMessage[] = [];
-  if (reply) {
-    previousConvo = chatHistoryCache.get(reply) || [];
-    if (previousConvo.length === 0) {
-      const repliedMessage = await msg.channel?.messages.fetch(reply);
-      if (repliedMessage) {
-        previousConvo.push({ role: 'user', content: repliedMessage.content });
+      // fetch reply-thread history (our cache stores UniversalMessage[])
+      const reply = msg?.reference?.messageId;
+      let previousConvo: UniversalMessage[] = [];
+      if (reply) {
+        previousConvo = chatHistoryCache.get(reply) || [];
+        if (previousConvo.length === 0) {
+          const repliedMessage = await msg.channel?.messages.fetch(reply);
+          if (repliedMessage) {
+            previousConvo.push({ role: 'user', content: repliedMessage.content });
+          }
+        }
       }
-    }
-  }
 
-  // Add (optional) inline images only on the first attempt
-  let imageURLs: string[] = [];
-  if (!isRetry && includeFiles) {
-    let repliedMessage: Message | undefined;
-    if (msg.reference?.messageId) {
+      // Add (optional) inline images only on the first attempt
+      let imageURLs: string[] = [];
+      if (!isRetry && includeFiles) {
+        let repliedMessage: Message | undefined;
+        if (msg.reference?.messageId) {
+          try {
+            repliedMessage = await msg.channel?.messages.fetch(
+              msg.reference.messageId,
+            );
+          } catch (e) {
+            console.error('Failed to fetch replied message:', e);
+          }
+        }
+        imageURLs = getImageURLsFromMessage(msg, repliedMessage);
+      }
+
+      // Build current user message
+      const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
+        { type: 'text', text: prompt },
+        ...imageURLs.map(
+          (url) =>
+            ({ type: 'image_url', image_url: { url } }) as OpenAI.Chat.ChatCompletionContentPart,
+        ),
+      ];
+
+      // -- merge into conversation buffer
+      const convo: UniversalMessage[] = [...previousConvo];
+      if (includeSystemPrompt) {
+        convo.unshift({ role: 'system', content: fullSystemPrompt });
+      }
+      convo.push({ role: 'user', content: contentParts });
+
+      // ---------- pick correct endpoint ----------
+      const useResponsesAPI = RESPONSES_MODELS.some((r) => r.test(model));
+      const aiClient =
+        overrideConfig !== undefined
+          ? new OpenAI({
+              apiKey: overrideConfig.apiKey || config.openaiApiKey,
+              baseURL: overrideConfig.baseURL,
+            })
+          : openai;
+
       try {
-        repliedMessage = await msg.channel?.messages.fetch(
-          msg.reference.messageId,
-        );
-      } catch (e) {
-        console.error('Failed to fetch replied message:', e);
-      }
-    }
-    imageURLs = getImageURLsFromMessage(msg, repliedMessage);
-  }
-
-  // Build current user message
-  const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
-    { type: 'text', text: prompt },
-    ...imageURLs.map(
-      (url) =>
-        ({ type: 'image_url', image_url: { url } }) as OpenAI.Chat.ChatCompletionContentPart,
-    ),
-  ];
-
-  // -- merge into conversation buffer
-  const convo: UniversalMessage[] = [...previousConvo];
-  if (includeSystemPrompt) {
-    convo.unshift({ role: 'system', content: fullSystemPrompt });
-  }
-  convo.push({ role: 'user', content: contentParts });
-
-  // ---------- pick correct endpoint ----------
-  const useResponsesAPI = RESPONSES_MODELS.some((r) => r.test(model));
-  const aiClient =
-    overrideConfig !== undefined
-      ? new OpenAI({
-          apiKey: overrideConfig.apiKey || config.openaiApiKey,
-          baseURL: overrideConfig.baseURL,
-        })
-      : openai;
-
-  try {
-    // ------------- RESPONSES branch ---------------
-    if (useResponsesAPI) {
-        const { messagesForInput, previousResponseId } = (() => {
+        // ------------- RESPONSES branch ---------------
+        if (useResponsesAPI) {
+          const { messagesForInput, previousResponseId } = (() => {
             const roleMsgs = convo
               .filter((m): m is RoleMessage => typeof (m as any).role === "string")
-              .map(toResponsesMessage);            // <-- NEW
-
+              .map(toResponsesMessage);
             const prevId =
-                (previousConvo.at(-1) as any)?.previous_response_id ?? undefined;
-
+              (previousConvo.at(-1) as any)?.previous_response_id ?? undefined;
             return { messagesForInput: roleMsgs, previousResponseId: prevId };
-        })();
+          })();
 
-      const resp = (await aiClient.responses.create(
-        {
-          model,
-          instructions: fullSystemPrompt, // system prompt lives here
-          input: messagesForInput as ResponsesCreateParams['input'],
-          ...(previousResponseId && { previous_response_id: previousResponseId }),
-          ...(maxCompletionTokens
-            ? { max_output_tokens: maxCompletionTokens }
-            : { max_output_tokens: maxTokens }),
-          user: msg.author.id,
-        },
-        {
-          timeout: DEFAULT_SETTINGS.timeout,
-          maxRetries: 0,
-        },
-      )) as SimpleResponsesResult;
+          const t0 = Date.now();
 
-      const assistantText =
-        resp.output_text ??
-        resp.output?.[0]?.content?.[0]?.text?.trim() ??
-        '';
+          const result = await aiClient.responses.create({
+              model,
+              instructions: fullSystemPrompt,
+              input: messagesForInput as ResponsesCreateParams["input"],
+              ...(previousResponseId && { previous_response_id: previousResponseId }),
+              ...(maxCompletionTokens
+                ? { max_output_tokens: maxCompletionTokens }
+                : { max_output_tokens: maxTokens }),
+              user: msg.author.id,
+              reasoning: {
+                effort: 'high',
+                summary: 'auto',
+              },
+          });
 
-      if (!assistantText) {
-        return { error: 'Unexpected empty response from API.' };
+          const secs = ((Date.now() - t0) / 1000).toFixed(1);
+
+          if (!result.output_text) return { error: "Unexpected empty response from API." };
+
+          const thinking = result.output.find((o) => o.type === 'reasoning');
+
+          let thinkingData;
+
+          if (thinking) {
+              console.log(thinking);
+            thinkingData = (thinking as any).summary.map((t: any) => t.text).join('');
+          }
+
+          let response = `${result.output_text}\n\n*Thought for ${secs} seconds*`;
+
+          if (thinkingData) {
+              response = "```" + thinkingData + "```\n" + result.output_text + `\n\n*Thought for ${secs} seconds*`;
+          }
+
+          convo.push({
+            role: "assistant",
+            content: result.output_text,
+            previous_response_id: Date.now().toString()
+          } as any);
+
+          return { result: response, messages: convo };
+        }
+
+        const chatMsgs = convo.filter(
+          (m): m is OpenAI.Chat.ChatCompletionMessageParam =>
+            (typeof (m as any).role === 'string') &&
+            ['system', 'user', 'assistant'].includes((m as any).role),
+        );
+
+        // ------------- Chat-Completions branch ---------------
+        const completion = await aiClient.chat.completions.create(
+          {
+            model,
+            messages: chatMsgs,           // <- no compile error now
+            ...(maxCompletionTokens
+              ? { max_completion_tokens: maxCompletionTokens }
+              : { max_tokens: maxTokens }),
+            temperature,
+            user: msg.author.id,
+          },
+          {
+            timeout: DEFAULT_SETTINGS.timeout,
+            maxRetries: 0,
+          },
+        );
+
+        if (!completion.choices?.length) {
+          return { error: 'Unexpected response from API.' };
+        }
+
+        const generation = completion.choices[0].message.content?.trim() || '';
+        if (generation === '') {
+          if (completion.choices[0].finish_reason === 'length') {
+            return { error: 'Error: Not enough reasoning tokens to generate output.' };
+          }
+          return { error: 'Unexpected response from API.' };
+        }
+
+        convo.push({ role: 'assistant', content: generation });
+        return { result: generation, messages: convo };
+      } catch (err: any) {
+        // Retry without images if image format is unsupported
+        if (
+          err.message?.includes('unsupported image') ||
+          err.message?.includes('Invalid image')
+        ) {
+          console.log('Retrying without images due to unsupported image error');
+          return masterOpenAIHandler(options, true);
+        }
+        return { error: err.toString() };
       }
-
-      // Persist assistant reply and the response-id for context chaining
-      convo.push({
-        role: 'assistant',
-        content: assistantText,
-        previous_response_id: resp.id,
-      } as any);
-
-      return { result: assistantText, messages: convo };
-    }
-
-    const chatMsgs = convo.filter(
-      (m): m is OpenAI.Chat.ChatCompletionMessageParam =>
-        (typeof (m as any).role === 'string') &&
-        ['system', 'user', 'assistant'].includes((m as any).role),
-    );
-
-    // ------------- Chat-Completions branch ---------------
-    const completion = await aiClient.chat.completions.create(
-      {
-        model,
-        messages: chatMsgs,           // <- no compile error now
-        ...(maxCompletionTokens
-          ? { max_completion_tokens: maxCompletionTokens }
-          : { max_tokens: maxTokens }),
-        temperature,
-        user: msg.author.id,
-      },
-      {
-        timeout: DEFAULT_SETTINGS.timeout,
-        maxRetries: 0,
-      },
-    );
-
-    if (!completion.choices?.length) {
-      return { error: 'Unexpected response from API.' };
-    }
-
-    const generation = completion.choices[0].message.content?.trim() || '';
-    if (generation === '') {
-      if (completion.choices[0].finish_reason === 'length') {
-        return { error: 'Error: Not enough reasoning tokens to generate output.' };
-      }
-      return { error: 'Unexpected response from API.' };
-    }
-
-    convo.push({ role: 'assistant', content: generation });
-    return { result: generation, messages: convo };
-  } catch (err: any) {
-    // Retry without images if image format is unsupported
-    if (
-      err.message?.includes('unsupported image') ||
-      err.message?.includes('Invalid image')
-    ) {
-      console.log('Retrying without images due to unsupported image error');
-      return masterOpenAIHandler(options, true);
-    }
-    return { error: err.toString() };
-  }
+  });
 }
 
 function createSystemPrompt(prompt: string, username: string): string {
@@ -715,4 +722,3 @@ function toResponsesMessage(m: RoleMessage): ResponsesInputMessage {
     content: convertedParts,
   } as ResponsesInputMessage;
 }
-

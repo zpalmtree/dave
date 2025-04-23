@@ -447,3 +447,29 @@ export function getImageURLsFromMessage(
 
     return Array.from(urlSet);
 }
+
+// helper ­– put in a shared util file
+export function withTyping<T>(
+  channel: import('discord.js').TextBasedChannel,
+  fn: () => Promise<T>,
+) {
+  let keepAlive: NodeJS.Timeout | undefined;
+
+  const start = async () => {
+    await channel.sendTyping();               // immediately
+    keepAlive = setInterval(
+      () => channel.sendTyping().catch(() => {}), // refresh every 8 s
+      8_000,
+    );
+  };
+  const stop = () => keepAlive && clearInterval(keepAlive);
+
+  return (async () => {
+    await start();
+    try {
+      return await fn();
+    } finally {
+      stop();
+    }
+  })();
+}
