@@ -16,9 +16,9 @@ const openai = new OpenAI({
 });
 
 const DEFAULT_SETTINGS = {
-    temperature: 1.1,
+    temperature: 0.7,
     maxTokens: 1024,
-    maxCompletionTokens: 50000,
+    maxCompletionTokens: 100_000,
     model: 'gpt-4o',
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
@@ -32,7 +32,8 @@ const VALID_CONTENT_TYPES = [
     "audio/wav", "audio/x-wav", "video/webm", "audio/webm"
 ];
 
-const chatHistoryCache = new Map<string, OpenAI.Chat.ChatCompletionMessageParam[]>();
+const chatHistoryCache = new Map<string, UniversalMessage[]>();
+
 
 interface OpenAIHandlerOptions {
     msg: Message;
@@ -52,124 +53,256 @@ interface OpenAIHandlerOptions {
 }
 
 export interface OpenAIResponse {
-    result?: string;
-    error?: string;
-    messages?: OpenAI.Chat.ChatCompletionMessageParam[];
+  result?: string;
+  error?: string;
+  messages?: UniversalMessage[];
 }
 
-async function masterOpenAIHandler(options: OpenAIHandlerOptions, isRetry: boolean = false): Promise<OpenAIResponse> {
-    const {
-        msg,
-        args,
-        systemPrompt,
-        temperature = DEFAULT_SETTINGS.temperature,
-        model = DEFAULT_SETTINGS.model,
-        includeSystemPrompt = true,
-        files = [],
-        maxTokens = DEFAULT_SETTINGS.maxTokens,
-        maxCompletionTokens,
-        includeFiles = true,
-        overrideConfig,
-    } = options;
+// ---------- helpers & typings ---------------
+/**
+ * Models that support the new /responses endpoint.
+ * Adjust if OpenAI adds more.
+ */
+const RESPONSES_MODELS = [
+  /^gpt-4o/i,
+  /^o3/i,
+  /^gpt-4\.1/i,
+  /^gpt-4o-mini/i,
+];
 
-    if (config.devChannels.includes(msg.channel.id) && !config.devEnv) {
-        return {};
+/**
+ * Strongly-typed request-body for `client.responses.create`.
+ * We obtain it straight from the method signature, so it can’t go out of sync
+ * when you upgrade the SDK.
+ */
+type ResponsesCreateParams = Parameters<
+  // the instance’s `responses.create` method
+  InstanceType<typeof OpenAI>['responses']['create']
+>[0];
+
+/**
+ * One element of the array-flavoured `input` field.
+ * (When `input` is a plain string this `Extract` drops it.)
+ */
+type ResponsesInputMessage = Extract<
+  ResponsesCreateParams['input'],
+  Array<any>
+>[number];
+
+/**
+ * Our chat-history union now uses the new alias.
+ */
+type UniversalMessage =
+  | OpenAI.Chat.ChatCompletionMessageParam
+  | ResponsesInputMessage;
+
+/**
+ * Sub-union of UniversalMessage that actually owns a `role` key
+ * (Responses tool-call outputs don’t have one, which is why the
+ * previous predicate failed the assignability check - TS2677).
+ */
+type RoleMessage = Extract<UniversalMessage, { role: string }>;
+
+/**
+ * Narrow extract of the Responses object we care about
+ * (avoids depending on the entire @types tree).
+ */
+interface SimpleResponsesResult {
+  id: string;
+  output_text?: string;
+  output?: Array<{
+    content: Array<{
+      text?: string;
+    }>;
+  }>;
+  previous_response_id?: string;
+}
+// ---------- main handler -------------------
+
+async function masterOpenAIHandler(
+  options: OpenAIHandlerOptions,
+  isRetry: boolean = false,
+): Promise<OpenAIResponse> {
+  const {
+    msg,
+    args,
+    systemPrompt,
+    temperature = DEFAULT_SETTINGS.temperature,
+    model = DEFAULT_SETTINGS.model,
+    includeSystemPrompt = true,
+    files = [],
+    maxTokens = DEFAULT_SETTINGS.maxTokens,
+    maxCompletionTokens,
+    includeFiles = true,
+    overrideConfig,
+  } = options;
+
+  // dev / banned checks
+  if (config.devChannels.includes(msg.channel.id) && !config.devEnv) return {};
+  if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id))
+    return { error: `Sorry, this function has been disabled for your user.` };
+
+  // ---------- build conversation ----------
+  const prompt = args.trim();
+  const username = await getUsername(msg.author.id, msg.guild);
+  const fullSystemPrompt = createSystemPrompt(
+    systemPrompt || getDefaultSystemPrompt(),
+    username,
+  );
+
+  // fetch reply-thread history (our cache stores UniversalMessage[])
+  const reply = msg?.reference?.messageId;
+  let previousConvo: UniversalMessage[] = [];
+  if (reply) {
+    previousConvo = chatHistoryCache.get(reply) || [];
+    if (previousConvo.length === 0) {
+      const repliedMessage = await msg.channel?.messages.fetch(reply);
+      if (repliedMessage) {
+        previousConvo.push({ role: 'user', content: repliedMessage.content });
+      }
+    }
+  }
+
+  // Add (optional) inline images only on the first attempt
+  let imageURLs: string[] = [];
+  if (!isRetry && includeFiles) {
+    let repliedMessage: Message | undefined;
+    if (msg.reference?.messageId) {
+      try {
+        repliedMessage = await msg.channel?.messages.fetch(
+          msg.reference.messageId,
+        );
+      } catch (e) {
+        console.error('Failed to fetch replied message:', e);
+      }
+    }
+    imageURLs = getImageURLsFromMessage(msg, repliedMessage);
+  }
+
+  // Build current user message
+  const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
+    { type: 'text', text: prompt },
+    ...imageURLs.map(
+      (url) =>
+        ({ type: 'image_url', image_url: { url } }) as OpenAI.Chat.ChatCompletionContentPart,
+    ),
+  ];
+
+  // -- merge into conversation buffer
+  const convo: UniversalMessage[] = [...previousConvo];
+  if (includeSystemPrompt) {
+    convo.unshift({ role: 'system', content: fullSystemPrompt });
+  }
+  convo.push({ role: 'user', content: contentParts });
+
+  // ---------- pick correct endpoint ----------
+  const useResponsesAPI = RESPONSES_MODELS.some((r) => r.test(model));
+  const aiClient =
+    overrideConfig !== undefined
+      ? new OpenAI({
+          apiKey: overrideConfig.apiKey || config.openaiApiKey,
+          baseURL: overrideConfig.baseURL,
+        })
+      : openai;
+
+  try {
+    // ------------- RESPONSES branch ---------------
+    if (useResponsesAPI) {
+        const { messagesForInput, previousResponseId } = (() => {
+            const roleMsgs = convo
+              .filter((m): m is RoleMessage => typeof (m as any).role === "string")
+              .map(toResponsesMessage);            // <-- NEW
+
+            const prevId =
+                (previousConvo.at(-1) as any)?.previous_response_id ?? undefined;
+
+            return { messagesForInput: roleMsgs, previousResponseId: prevId };
+        })();
+
+      const resp = (await aiClient.responses.create(
+        {
+          model,
+          instructions: fullSystemPrompt, // system prompt lives here
+          input: messagesForInput as ResponsesCreateParams['input'],
+          ...(previousResponseId && { previous_response_id: previousResponseId }),
+          ...(maxCompletionTokens
+            ? { max_output_tokens: maxCompletionTokens }
+            : { max_output_tokens: maxTokens }),
+          user: msg.author.id,
+        },
+        {
+          timeout: DEFAULT_SETTINGS.timeout,
+          maxRetries: 0,
+        },
+      )) as SimpleResponsesResult;
+
+      const assistantText =
+        resp.output_text ??
+        resp.output?.[0]?.content?.[0]?.text?.trim() ??
+        '';
+
+      if (!assistantText) {
+        return { error: 'Unexpected empty response from API.' };
+      }
+
+      // Persist assistant reply and the response-id for context chaining
+      convo.push({
+        role: 'assistant',
+        content: assistantText,
+        previous_response_id: resp.id,
+      } as any);
+
+      return { result: assistantText, messages: convo };
     }
 
-    if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
-        return { error: `Sorry, this function has been disabled for your user.` };
+    const chatMsgs = convo.filter(
+      (m): m is OpenAI.Chat.ChatCompletionMessageParam =>
+        (typeof (m as any).role === 'string') &&
+        ['system', 'user', 'assistant'].includes((m as any).role),
+    );
+
+    // ------------- Chat-Completions branch ---------------
+    const completion = await aiClient.chat.completions.create(
+      {
+        model,
+        messages: chatMsgs,           // <- no compile error now
+        ...(maxCompletionTokens
+          ? { max_completion_tokens: maxCompletionTokens }
+          : { max_tokens: maxTokens }),
+        temperature,
+        user: msg.author.id,
+      },
+      {
+        timeout: DEFAULT_SETTINGS.timeout,
+        maxRetries: 0,
+      },
+    );
+
+    if (!completion.choices?.length) {
+      return { error: 'Unexpected response from API.' };
     }
 
-    const prompt = args.trim();
-
-    const username = await getUsername(msg.author.id, msg.guild);
-    const fullSystemPrompt = createSystemPrompt(systemPrompt || getDefaultSystemPrompt(), username);
-
-    const reply = msg?.reference?.messageId;
-    let previousConvo: OpenAI.Chat.ChatCompletionMessageParam[] = [];
-
-    if (reply) {
-        previousConvo = chatHistoryCache.get(reply) || [];
-
-        if (previousConvo.length === 0) {
-            const repliedMessage = await msg.channel?.messages.fetch(reply);
-
-            if (repliedMessage) {
-                previousConvo.push({
-                    role: 'user',
-                    content: repliedMessage.content,
-                });
-            }
-        }
+    const generation = completion.choices[0].message.content?.trim() || '';
+    if (generation === '') {
+      if (completion.choices[0].finish_reason === 'length') {
+        return { error: 'Error: Not enough reasoning tokens to generate output.' };
+      }
+      return { error: 'Unexpected response from API.' };
     }
 
-    const messages = [...previousConvo];
-    if (includeSystemPrompt && (messages.length === 0 || messages[0].role !== 'system')) {
-        messages.unshift({ role: 'system', content: fullSystemPrompt });
+    convo.push({ role: 'assistant', content: generation });
+    return { result: generation, messages: convo };
+  } catch (err: any) {
+    // Retry without images if image format is unsupported
+    if (
+      err.message?.includes('unsupported image') ||
+      err.message?.includes('Invalid image')
+    ) {
+      console.log('Retrying without images due to unsupported image error');
+      return masterOpenAIHandler(options, true);
     }
-
-    let imageURLs: string[] = [];
-
-    if (!isRetry && includeFiles) {
-        let repliedMessage: Message | undefined;
-        if (msg.reference?.messageId) {
-            try {
-                repliedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
-            } catch (error) {
-                console.error("Failed to fetch replied message:", error);
-            }
-        }
-
-        imageURLs = getImageURLsFromMessage(msg, repliedMessage);
-    }
-
-    const content: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: 'text', text: prompt }];
-    content.push(...imageURLs.map(url => ({ type: 'image_url', image_url: { url } } as OpenAI.Chat.ChatCompletionContentPart)));
-    messages.push({ role: 'user', content });
-
-    // Create a custom OpenAI instance if overrideConfig is provided
-    const aiClient = overrideConfig ? new OpenAI({
-        apiKey: overrideConfig.apiKey || config.openaiApiKey,
-        baseURL: overrideConfig.baseURL,
-    }) : openai;
-
-    try {
-        const completion = await aiClient.chat.completions.create({
-            model,
-            messages,
-            ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
-            temperature,
-            user: msg.author.id,
-        }, {
-            timeout: DEFAULT_SETTINGS.timeout,
-            maxRetries: 0,
-        });
-
-        if (completion.choices && completion.choices.length > 0) {
-            const choice = completion.choices[0];
-
-            if (choice.message.content) {
-                const generation = choice.message.content!.trim();
-                messages.push({ role: 'assistant', content: generation });
-                return { result: generation, messages };
-            } else if (choice.finish_reason === 'length') {
-                return { error: 'Error: Not enough reasoning tokens to generate an output.' };
-            } else {
-                return { error: 'Unexpected response from API' };
-            }
-        } else {
-            return { error: 'Unexpected response from API' };
-        }
-    } catch (err: any) {
-        const isInvalidImage = err.message.includes('unsupported image') || err.message.includes('Invalid image');
-
-        if (isInvalidImage) {
-            console.log("Retrying without images due to unsupported image error");
-            return masterOpenAIHandler(options, true);
-        }
-
-        return { error: err.toString() };
-    }
+    return { error: err.toString() };
+  }
 }
 
 function createSystemPrompt(prompt: string, username: string): string {
@@ -392,7 +525,7 @@ export async function handleO3(msg: Message, args: string): Promise<void> {
         model: 'o3',
         includeSystemPrompt: true,
         maxCompletionTokens: DEFAULT_SETTINGS.maxCompletionTokens,
-        temperature: 1,
+        temperature: 0.3,
         includeFiles: true,
     });
 
@@ -547,3 +680,39 @@ export async function handleTranslate(msg: Message, args: string): Promise<void>
         await msg.reply(response.error);
     }
 }
+
+
+/**
+ * Convert an in-memory chat / role message into the shape the
+ * Responses API expects.
+ */
+function toResponsesMessage(m: RoleMessage): ResponsesInputMessage {
+  // 1️⃣ ensure we always have an array of parts
+  const rawParts =
+    typeof m.content === 'string'
+      ? [{ type: 'text', text: m.content }]
+      : m.content ?? []; // <-- fallback to empty array
+
+  // 2️⃣ map part types
+  const convertedParts = rawParts.map((p: any) => {
+    if (p.type === 'text')
+      return {
+        type: m.role === 'assistant' ? 'output_text' : 'input_text',
+        text: p.text,
+      };
+    if (p.type === 'image_url')
+      return { type: 'input_image', image_url: p.image_url };
+    return p; // unknown/tool parts flow through unchanged
+  });
+
+  // 3️⃣ clamp role to one accepted by the endpoint
+  const allowedRole =
+    m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user';
+
+  // 4️⃣ assert correct final shape
+  return {
+    role: allowedRole,
+    content: convertedParts,
+  } as ResponsesInputMessage;
+}
+
