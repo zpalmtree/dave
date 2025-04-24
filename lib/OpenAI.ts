@@ -239,16 +239,20 @@ async function masterOpenAIHandler(
           const thinking = result.output.find((o) => o.type === 'reasoning');
 
           let thinkingData;
+          let response;
 
           if (thinking) {
-              console.log(thinking);
             thinkingData = (thinking as any).summary.map((t: any) => t.text).join('');
           }
 
-          let response = `${result.output_text}\n\n*Thought for ${secs} seconds*`;
+          // Base response without thinking
+          const baseResponse = `${result.output_text}\n\n*Thought for ${secs} seconds*`;
 
-          if (thinkingData) {
-              response = "```" + thinkingData + "```\n" + result.output_text + `\n\n*Thought for ${secs} seconds*`;
+          // Check if adding thinking data would exceed Discord character limit
+          if (thinkingData && (baseResponse.length + thinkingData.length + 10) <= 2000) {
+            response = "```" + thinkingData + "```\n" + result.output_text + `\n\n*Thought for ${secs} seconds*`;
+          } else {
+            response = baseResponse;
           }
 
           convo.push({
