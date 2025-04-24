@@ -726,7 +726,10 @@ function toResponsesMessage(m: RoleMessage): ResponsesInputMessage {
         text: p.text,
       };
     if (p.type === 'image_url')
-      return { type: 'input_image', image_url: p.image_url };
+      return { 
+        type: 'input_image', 
+        image_url: typeof p.image_url === 'string' ? p.image_url : p.image_url.url 
+      };
     return p; // unknown/tool parts flow through unchanged
   });
 
