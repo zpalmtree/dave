@@ -213,26 +213,42 @@ async function masterOpenAIHandler(
               .map(toResponsesMessage);
             const prevId =
               (previousConvo.at(-1) as any)?.previous_response_id ?? undefined;
+            
+            // Log for debugging
+            console.log('Previous response ID:', prevId);
+            if (prevId) {
+              console.log('Previous response ID type:', typeof prevId);
+            }
+            
             return { messagesForInput: roleMsgs, previousResponseId: prevId };
           })();
 
           const t0 = Date.now();
+          
+          // Create the request params
+          const requestParams: any = {
+            model,
+            instructions: fullSystemPrompt,
+            input: messagesForInput as ResponsesCreateParams["input"],
+            ...(maxCompletionTokens
+              ? { max_output_tokens: maxCompletionTokens }
+              : { max_output_tokens: maxTokens }),
+            user: msg.author.id,
+            reasoning: {
+              effort: 'high',
+              summary: 'auto',
+            }
+          };
+          
+          // Only add previous_response_id if it exists and is valid (starts with 'resp')
+          if (previousResponseId && typeof previousResponseId === 'string' && previousResponseId.startsWith('resp')) {
+            requestParams.previous_response_id = previousResponseId;
+            console.log('Adding previous_response_id to request:', previousResponseId);
+          }
 
-          const result = await aiClient.responses.create({
-              model,
-              instructions: fullSystemPrompt,
-              input: messagesForInput as ResponsesCreateParams["input"],
-              ...(previousResponseId && { previous_response_id: previousResponseId }),
-              ...(maxCompletionTokens
-                ? { max_output_tokens: maxCompletionTokens }
-                : { max_output_tokens: maxTokens }),
-              user: msg.author.id,
-              reasoning: {
-                effort: 'high',
-                summary: 'auto',
-              },
-          });
-
+          // Execute the request with the proper parameters
+          const result = await aiClient.responses.create(requestParams);
+          
           const secs = ((Date.now() - t0) / 1000).toFixed(1);
 
           if (!result.output_text) return { error: "Unexpected empty response from API." };
@@ -259,7 +275,7 @@ async function masterOpenAIHandler(
           convo.push({
             role: "assistant",
             content: result.output_text,
-            previous_response_id: Date.now().toString()
+            previous_response_id: result.id // Store the actual response ID from the API
           } as any);
 
           return { result: response, messages: convo };
@@ -542,6 +558,7 @@ export async function handleO3(msg: Message, args: string): Promise<void> {
 
     if (response.result) {
         const reply = await msg.reply(truncateResponse(response.result));
+        console.log(response.result);
         if (response.messages) {
             chatHistoryCache.set(reply.id, response.messages);
         }
@@ -741,7 +758,7 @@ function toResponsesMessage(m: RoleMessage): ResponsesInputMessage {
   const allowedRole =
     m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user';
 
-  // 4️⃣ assert correct final shape
+  // 4️⃣ return basic message structure (previous_response_id should NOT be in the message)
   return {
     role: allowedRole,
     content: convertedParts,
