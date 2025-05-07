@@ -24,6 +24,7 @@ interface ClaudeHandlerOptions {
     temperature?: number;
     maxTokens?: number;
     includeImages?: boolean;
+    enableWebSearch?: boolean;
 }
 
 interface ClaudeResponse {
@@ -130,6 +131,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         temperature = DEFAULT_SETTINGS.temperature,
         maxTokens = DEFAULT_SETTINGS.maxTokens,
         includeImages = true,
+        enableWebSearch = true,
     } = options;
 
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
@@ -219,7 +221,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
     messages.push({ role: 'user', content: userContent });
 
     try {
-        const completion = await anthropic.messages.create({
+        const completionOptions: Anthropic.MessageCreateParams = {
             model: DEFAULT_SETTINGS.model,
             max_tokens: maxTokens,
             messages,
@@ -228,18 +230,46 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
             metadata: {
                 user_id: msg.author.id,
             },
-        });
+        };
 
-        if (completion.content && completion.content.length > 0) {
-            const contentBlock = completion.content[0];
-            if ('text' in contentBlock) {
-                const generation = contentBlock.text.trim();
-                if (generation === '') {
-                    return { error: 'Got same completion as input. Try with an altered prompt.' };
+        // Add web search tool if enabled
+        if (enableWebSearch) {
+            completionOptions.tools = [
+                {
+                    type: "web_search_20250305",
+                    name: "web_search",
+                    max_uses: 5
                 }
-                messages.push({ role: 'assistant' as const, content: generation });
-                return { result: generation, messages };
+            ];
+        }
+
+        // Make API call with web search enabled
+        const completion = await anthropic.messages.create(completionOptions);
+
+        // Process the response from Claude
+        if (completion.content && completion.content.length > 0) {
+            // Combine all text blocks into a single response
+            let fullResponse = '';
+            let hasServerToolUse = false;
+
+            for (const block of completion.content) {
+                if (block.type === 'text') {
+                    fullResponse += block.text;
+                } else if (block.type === 'server_tool_use') {
+                    hasServerToolUse = true;
+                    // Server is handling the tool use, we don't need to do anything
+                }
             }
+
+            // Trim the response
+            const generation = fullResponse.trim();
+            
+            if (generation === '') {
+                return { error: 'Got empty response from Claude. Try with a different prompt.' };
+            }
+            
+            messages.push({ role: 'assistant' as const, content: generation });
+            return { result: generation, messages };
         }
 
         return { error: 'Unexpected response from API' };
@@ -273,7 +303,8 @@ export async function handleClaude(msg: Message, args: string): Promise<void> {
         msg,
         args,
         systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`,
-        includeImages: true
+        includeImages: true,
+        enableWebSearch: true
     });
 
     if (response.result) {
