@@ -1,7 +1,7 @@
 import { Message } from 'discord.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
-import { truncateResponse, getUsername, extractURLsAndValidateExtensions } from './Utilities.js';
+import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTyping } from './Utilities.js';
 import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
@@ -299,12 +299,14 @@ function getDefaultSystemPrompt(): string {
 }
 
 export async function handleClaude(msg: Message, args: string): Promise<void> {
-    const response = await masterClaudeHandler({
-        msg,
-        args,
-        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`,
-        includeImages: true,
-        enableWebSearch: true
+    const response = await withTyping(msg.channel, async () => {
+        return masterClaudeHandler({
+            msg,
+            args,
+            systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`,
+            includeImages: true,
+            enableWebSearch: true
+        });
     });
 
     if (response.result) {
