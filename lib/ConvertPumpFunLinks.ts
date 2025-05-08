@@ -22,7 +22,7 @@ export async function convertPumpFunLinks(msg: Message): Promise<void> {
 
         while ((match = pumpFunRegex.exec(content)) !== null) {
             const tokenAddress = match[1];
-            const fixedURL = `https://birdeye.so/token/${tokenAddress}`;
+            const fixedURL = `https://birdeye.so/token/${tokenAddress}?chain=solana`;
             fixedURLs.push(fixedURL);
         }
 
@@ -30,13 +30,8 @@ export async function convertPumpFunLinks(msg: Message): Promise<void> {
             const username = await getUsername(msg.author.id, msg.guild);
             const content = `${fixedURLs.join('\n')}`;
 
-            const suppressPromise = msg.suppressEmbeds(true);
-            const sendPromise = msg.channel.send(content);
-
-            const [, sentMsg] = await Promise.all([
-                suppressPromise,
-                sendPromise,
-            ]);
+            // Send the birdeye links without suppressing the original embed
+            const sentMsg = await msg.channel.send(content);
 
             await tryReactMessage(sentMsg, '❌');
 
@@ -48,11 +43,6 @@ export async function convertPumpFunLinks(msg: Message): Promise<void> {
             collector.on('collect', async () => {
                 await sentMsg.delete();
             });
-
-            await sleep(2000);
-
-            /* Sometimes takes time for embed to load */
-            await msg.suppressEmbeds(true);
         }
     } catch (err) {
         console.log(err);
