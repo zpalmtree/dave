@@ -10,6 +10,7 @@ import {
     truncateResponse,
     getUsername,
     getImageURLsFromMessage,
+    replyLongMessage,
 } from './Utilities.js';
 
 // Define extended generation config with responseModalities
@@ -337,10 +338,19 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         }
 
         if (responseText) {
-            replyMessage = await msg.reply({
-                files: attachments,
-                content: truncateResponse(responseText),
-            });
+            if (responseText.length > 1999) {
+                // Use replyLongMessage for text content
+                const replies = await replyLongMessage(msg, responseText, { files: attachments });
+                if (replies.length > 0) {
+                    replyMessage = replies[0]; // Use the first message for history
+                }
+            } else {
+                // Use regular reply for short messages
+                replyMessage = await msg.reply({
+                    files: attachments,
+                    content: responseText,
+                });
+            }
         } else if (attachments.length > 0) {
             replyMessage = await msg.reply({
                 files: attachments,
@@ -408,7 +418,9 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         });
         
         // Cache updated history with the message ID
-        chatHistoryCache.set(replyMessage.id, updatedHistory);
+        if (replyMessage) {
+            chatHistoryCache.set(replyMessage.id, updatedHistory);
+        }
     } catch (error: any) {
         console.error("Error in Gemini handler:", error);
         
