@@ -1,7 +1,7 @@
 import { Message } from 'discord.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
-import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTyping } from './Utilities.js';
+import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTyping, replyLongMessage } from './Utilities.js';
 import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
@@ -310,9 +310,9 @@ export async function handleClaude(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);

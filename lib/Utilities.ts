@@ -349,6 +349,123 @@ export function truncateResponse(msg: string, limit: number = 1999): string {
     return msg.slice(0, limit);
 }
 
+/**
+ * Splits a message into multiple parts if it exceeds the Discord character limit
+ * @param message The message to split
+ * @param limit The character limit per message (default: 1999)
+ * @returns An array of message parts
+ */
+export function splitMessage(message: string, limit: number = 1999): string[] {
+    if (!message) return [];
+    if (message.length <= limit) return [message];
+
+    const parts: string[] = [];
+    let currentIndex = 0;
+
+    while (currentIndex < message.length) {
+        // Find a good split point (at a newline, space, or punctuation if possible)
+        let endIndex = currentIndex + limit;
+        
+        if (endIndex >= message.length) {
+            // Last part
+            parts.push(message.slice(currentIndex));
+            break;
+        }
+        
+        // Look for a better split point by moving backward from the limit
+        let splitIndex = endIndex;
+        
+        // Try to find a newline first
+        const newlineIndex = message.lastIndexOf('\n', endIndex);
+        if (newlineIndex > currentIndex && newlineIndex > endIndex - 100) {
+            splitIndex = newlineIndex + 1; // Include the newline in the first part
+        } else {
+            // Then try to find a space
+            const spaceIndex = message.lastIndexOf(' ', endIndex);
+            if (spaceIndex > currentIndex && spaceIndex > endIndex - 30) {
+                splitIndex = spaceIndex + 1; // Include the space in the first part
+            } else {
+                // If no good natural break found, look for punctuation
+                for (let i = endIndex; i > endIndex - 30 && i > currentIndex; i--) {
+                    const char = message[i];
+                    if ('.!?,;:)]}'.includes(char)) {
+                        splitIndex = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Fall back to hard split if no good break point found
+        if (splitIndex === endIndex && splitIndex > currentIndex) {
+            // Just split at the limit
+            splitIndex = endIndex;
+        }
+        
+        // Add this part
+        parts.push(message.slice(currentIndex, splitIndex));
+        currentIndex = splitIndex;
+    }
+
+    return parts;
+}
+
+/**
+ * Sends a message as multiple parts if it exceeds Discord's character limit
+ * @param channel The Discord channel to send the message to
+ * @param content The content to send
+ * @param options Additional options for the message
+ * @returns An array of sent messages
+ */
+export async function sendLongMessage(
+    channel: import('discord.js').TextBasedChannel,
+    content: string,
+    options: any = {}
+): Promise<import('discord.js').Message[]> {
+    const parts = splitMessage(content);
+    const messages: import('discord.js').Message[] = [];
+    
+    for (const part of parts) {
+        const sentMessage = await channel.send({
+            ...options,
+            content: part
+        });
+        messages.push(sentMessage);
+    }
+    
+    return messages;
+}
+
+/**
+ * Replies to a message with content that may exceed Discord's character limit
+ * @param message The message to reply to
+ * @param content The content of the reply
+ * @param options Additional options for the reply
+ * @returns An array of sent reply messages
+ */
+export async function replyLongMessage(
+    message: import('discord.js').Message,
+    content: string,
+    options: any = {}
+): Promise<import('discord.js').Message[]> {
+    const parts = splitMessage(content);
+    const messages: import('discord.js').Message[] = [];
+    
+    for (let i = 0; i < parts.length; i++) {
+        // Only use reply reference for the first message to avoid multiple notifications
+        const replyOptions = i === 0 ? options : { ...options, failIfNotExists: false };
+        
+        const sentMessage = await message.reply({
+            ...replyOptions,
+            content: parts[i]
+        });
+        
+        messages.push(sentMessage);
+    }
+    
+    return messages;
+}
+
 export function extractURLs(messageContent: string): string[] {
     // This regular expression is designed to match most common URLs.
     const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%_+.~#?&//=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)/gi;

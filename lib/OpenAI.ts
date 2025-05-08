@@ -10,6 +10,7 @@ import {
     getUsername,
     getImageURLsFromMessage,
     withTyping,
+    replyLongMessage,
 } from './Utilities.js';
 
 const openai = new OpenAI({
@@ -359,9 +360,10 @@ export async function handleChatGPT(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            // Use the first message ID for the history cache
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -389,9 +391,9 @@ If the user is annoying, abruptly end the conversation.`,
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -407,9 +409,9 @@ export async function handleDrunk(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -426,9 +428,9 @@ export async function handleDavinci(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -444,9 +446,9 @@ export async function handleDoctor(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -463,9 +465,9 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -482,9 +484,9 @@ export async function handleTradGf(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -508,9 +510,9 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -535,9 +537,9 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -557,10 +559,10 @@ export async function handleO3(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
+        const replies = await replyLongMessage(msg, response.result);
         console.log(response.result);
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
@@ -719,9 +721,9 @@ export async function handleTranslate(msg: Message, args: string): Promise<void>
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
+        const replies = await replyLongMessage(msg, response.result);
+        if (response.messages && replies.length > 0) {
+            chatHistoryCache.set(replies[0].id, response.messages);
         }
     } else if (response.error) {
         await msg.reply(response.error);
