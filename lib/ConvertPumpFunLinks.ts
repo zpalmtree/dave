@@ -14,7 +14,7 @@ export async function convertPumpFunLinks(msg: Message): Promise<void> {
 
     try {
         const content = msg.content.trim();
-        const pumpFunRegex = /https:\/\/pump\.fun\/coin\/([a-zA-Z0-9]{44,45}pump)/gi;
+        const pumpFunRegex = /https:\/\/pump\.fun\/coin\/([a-zA-Z0-9]{40,41}pump)/gi;
 
         let match;
 
