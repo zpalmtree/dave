@@ -48,6 +48,10 @@ import { cacheMessageForSummarization } from './Summarize.js';
 import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 import { handleAutoTranscribe } from './OpenAI.js';
 
+const BLACKLISTED_USERS = [
+    '492200446044274697',
+];
+
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
     if (config.devEnv && !config.devChannels.includes(msg.channel.id)) {
@@ -55,6 +59,10 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
     }
 
     if (msg.author.id === msg.client.user.id) {
+        return;
+    }
+
+    if (BLACKLISTED_USERS.includes(msg.author.id)) {
         return;
     }
 
