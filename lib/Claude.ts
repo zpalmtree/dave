@@ -9,7 +9,7 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-3-7-sonnet-20250219',
+    model: 'claude-sonnet-4-20250514',
     temperature: 0.5,
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
@@ -238,7 +238,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
                 {
                     type: "web_search_20250305",
                     name: "web_search",
-                    max_uses: 5
+                    max_uses: 1,
                 }
             ];
         }
@@ -303,7 +303,7 @@ export async function handleClaude(msg: Message, args: string): Promise<void> {
         return masterClaudeHandler({
             msg,
             args,
-            systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`,
+            systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext. Only use search if it is required to answer accurately.`,
             includeImages: true,
             enableWebSearch: true
         });
