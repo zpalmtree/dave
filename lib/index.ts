@@ -49,7 +49,7 @@ import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 import { handleAutoTranscribe } from './OpenAI.js';
 
 const BLACKLISTED_USERS = [
-    '492200446044274697',
+    //'492200446044274697',
 ];
 
 /* This is the main entry point to handling messages. */
