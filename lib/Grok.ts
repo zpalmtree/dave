@@ -4,7 +4,8 @@ import { config } from './Config.js';
 import { 
     truncateResponse, 
     getUsername,
-    getImageURLsFromMessage 
+    getImageURLsFromMessage,
+    withTyping,
 } from './Utilities.js';
 
 const grok = new OpenAI({
@@ -240,9 +241,11 @@ Your X handle is @grok and your task is to respond to user's posts that tag you 
 }
 
 export async function handleGrok(msg: Message, args: string): Promise<void> {
-    const response = await masterGrokHandler({
-        msg,
-        args,
+    const response = await withTyping(msg.channel, async () => {
+        return masterGrokHandler({
+            msg,
+            args,
+        });
     });
 
     if (response.result) {
