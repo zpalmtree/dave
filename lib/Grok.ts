@@ -126,6 +126,8 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             search_parameters: {
                 mode: 'auto',
                 return_citations: true,
+                max_search_results: 6,
+                sources: [{ type: "x" }],
             },
         } as any, {
             timeout: DEFAULT_SETTINGS.timeout,
