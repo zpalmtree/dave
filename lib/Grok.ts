@@ -13,8 +13,8 @@ const grok = new OpenAI({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'grok-2-1212',  // or 'grok-2-vision-1212' for vision support
-    temperature: 1.1,
+    model: 'grok-4-latest',  // or 'grok-2-vision-1212' for vision support
+    temperature: 1,
     maxTokens: 1024,
     maxCompletionTokens: 25000,
     timeout: 60000,
