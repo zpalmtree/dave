@@ -150,7 +150,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
               };
 
               const citationLine = citations?.length
-                ? citations.map(formatLink).join(' ')
+                ? `sources: [ ${citations.map(formatLink).join(' | ')} ]`
                 : null;
 
               const generation = [
