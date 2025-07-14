@@ -108,8 +108,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
 
     const content: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: 'text', text: prompt }];
     
-    // Only add image content if using vision model and images are present
-    if (model === 'grok-2-vision-1212' && imageURLs.length > 0) {
+    if (imageURLs.length > 0) {
         content.push(...imageURLs.map(url => ({ 
             type: 'image_url', 
             image_url: { url } 
@@ -124,7 +123,11 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             messages,
             ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
             temperature,
-        }, {
+            search_parameters: {
+                mode: 'auto',
+                return_citations: true,
+            },
+        } as any, {
             timeout: DEFAULT_SETTINGS.timeout,
             maxRetries: 0,
         });
@@ -133,9 +136,19 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             const choice = completion.choices[0];
 
             if (choice.message.content) {
-                const generation = choice.message.content.trim();
-                messages.push({ role: 'assistant', content: generation });
-                return { result: generation, messages };
+              let generation = choice.message.content.trim();
+
+              // Attach sources, if any
+              const citations: string[] | undefined =
+                (choice.message as any).citations || (completion as any).citations;
+
+              if (citations?.length) {
+                generation +=
+                  "\n\n**Sources:**\n" + citations.map((u) => `<${u}>`).join("\n");
+              }
+
+              messages.push({ role: "assistant", content: generation });
+              return { result: generation, messages };
             } else if (choice.finish_reason === 'length') {
                 return { error: 'Error: Not enough reasoning tokens to generate an output.' };
             } else {
