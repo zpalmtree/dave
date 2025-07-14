@@ -124,12 +124,9 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
             temperature,
             search_parameters: {
-              mode: "auto",          // or "on" if you always want a search
-              return_citations: false,
-              sources: [
-                { type: "x" }        // <- restricts Grok to X posts
-              ]
-            }
+                mode: 'auto',
+                return_citations: true,
+            },
         } as any, {
             timeout: DEFAULT_SETTINGS.timeout,
             maxRetries: 0,
@@ -139,7 +136,27 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             const choice = completion.choices[0];
 
             if (choice.message.content) {
-              let generation = choice.message.content.trim();
+              const citations: string[] | undefined =
+                (choice.message as any).citations || (completion as any).citations;
+
+              const formatLink = (url: string) => {
+                try {
+                  const { hostname } = new URL(url);
+                  const shortHost = hostname.replace(/^www\./, '');
+                  return `[${shortHost}](${url})`;
+                } catch {
+                  return `[link](${url})`;
+                }
+              };
+
+              const citationLine = citations?.length
+                ? citations.map(formatLink).join(' ')
+                : null;
+
+              const generation = [
+                citationLine,
+                choice.message.content.trim()
+              ].filter(Boolean).join('\n\n'); // skip empty line if no citations
 
               messages.push({ role: "assistant", content: generation });
               return { result: generation, messages };
