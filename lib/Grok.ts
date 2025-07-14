@@ -139,26 +139,29 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
               const citations: string[] | undefined =
                 (choice.message as any).citations || (completion as any).citations;
 
-              const formatLink = (url: string) => {
+              // Turn URLs → hostnames and de-duplicate
+              const toHostname = (url: string) => {
                 try {
-                  const { hostname } = new URL(url);
-                  const shortHost = hostname.replace(/^www\./, '');
-                  return `[${shortHost}](${url})`;
+                  return new URL(url).hostname.replace(/^www\./, '');
                 } catch {
-                  return `[link](${url})`;
+                  return url;
                 }
               };
 
-              const citationLine = citations?.length
-                ? citations.map(formatLink).join(' ')
+              const hosts = citations
+                ? Array.from(new Set(citations.map(toHostname)))
+                : [];
+
+              const sourcesLine = hosts.length
+                ? `sources: [ ${hosts.join(' | ')} ]`
                 : null;
 
               const generation = [
-                citationLine,
-                choice.message.content.trim()
-              ].filter(Boolean).join('\n\n'); // skip empty line if no citations
+                sourcesLine,                           // first line (if any)
+                choice.message.content.trim()          // Grok's main answer
+              ].filter(Boolean).join('\n\n');          // skip empty lines if no sources
 
-              messages.push({ role: "assistant", content: generation });
+              messages.push({ role: 'assistant', content: generation });
               return { result: generation, messages };
             } else if (choice.finish_reason === 'length') {
                 return { error: 'Error: Not enough reasoning tokens to generate an output.' };
