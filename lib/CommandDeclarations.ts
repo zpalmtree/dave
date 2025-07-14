@@ -86,7 +86,7 @@ import {
 } from './Claude.js';
 
 import {
-    handleGrokVision,
+    handleGrok,
 } from './Grok.js';
 
 import {
@@ -1193,7 +1193,7 @@ export const Commands: Command[] = [
         aliases: ['grok'],
         primaryCommand: {
             argsFormat: Args.Combined,
-            implementation: handleGrokVision,
+            implementation: handleGrok,
             description: 'Ask Grok something',
         },
         relatedCommands: [

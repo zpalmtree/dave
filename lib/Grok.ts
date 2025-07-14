@@ -13,7 +13,7 @@ const grok = new OpenAI({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'grok-4-latest',  // or 'grok-2-vision-1212' for vision support
+    model: 'grok-4-latest',
     temperature: 1,
     maxTokens: 1024,
     maxCompletionTokens: 25000,
@@ -118,6 +118,12 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
     messages.push({ role: 'user', content });
 
     try {
+        const twoMonthsAgo = (() => {
+          const d = new Date();
+          d.setMonth(d.getMonth() - 2);        // go back exactly 2 calendar months
+          return d.toISOString().slice(0, 10); // "YYYY-MM-DD"
+        })();
+
         const completion = await grok.chat.completions.create({
             model,
             messages,
@@ -128,6 +134,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 return_citations: true,
                 max_search_results: 6,
                 sources: [{ type: "x" }],
+                from_date: twoMonthsAgo,
             },
         } as any, {
             timeout: DEFAULT_SETTINGS.timeout,
@@ -236,25 +243,6 @@ export async function handleGrok(msg: Message, args: string): Promise<void> {
     const response = await masterGrokHandler({
         msg,
         args,
-        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`
-    });
-
-    if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
-        if (response.messages) {
-            chatHistoryCache.set(reply.id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
-}
-
-export async function handleGrokVision(msg: Message, args: string): Promise<void> {
-    const response = await masterGrokHandler({
-        msg,
-        args,
-        model: 'grok-2-vision-1212',
-        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext.`
     });
 
     if (response.result) {
