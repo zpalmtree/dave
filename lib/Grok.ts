@@ -124,9 +124,12 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
             temperature,
             search_parameters: {
-                mode: 'auto',
-                return_citations: true,
-            },
+              mode: "auto",          // or "on" if you always want a search
+              return_citations: false,
+              sources: [
+                { type: "x" }        // <- restricts Grok to X posts
+              ]
+            }
         } as any, {
             timeout: DEFAULT_SETTINGS.timeout,
             maxRetries: 0,
