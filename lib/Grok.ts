@@ -138,15 +138,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             if (choice.message.content) {
               let generation = choice.message.content.trim();
 
-              // Attach sources, if any
-              const citations: string[] | undefined =
-                (choice.message as any).citations || (completion as any).citations;
-
-              if (citations?.length) {
-                generation +=
-                  "\n\n**Sources:**\n" + citations.map((u) => `<${u}>`).join("\n");
-              }
-
               messages.push({ role: "assistant", content: generation });
               return { result: generation, messages };
             } else if (choice.finish_reason === 'length') {
