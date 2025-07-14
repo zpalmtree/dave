@@ -141,29 +141,37 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
               const citations: string[] | undefined =
                 (choice.message as any).citations || (completion as any).citations;
 
-              const formatLink = (url: string) => {
+              const extractHandle = (url: string): string | null => {
                 try {
-                  const { hostname } = new URL(url);
-                  const shortHost = hostname.replace(/^www\./, '');
-                  return `[${shortHost}](<${url}>)`;
+                  // pathname looks like "/handle/status/12345"
+                  const [, handle] = new URL(url).pathname.split('/', 3);
+                  return handle ? `@${handle}` : null;
                 } catch {
-                  return `[link](<${url}>)`;
+                  return null;
                 }
               };
 
               const citationLine = citations?.length
-                ? `sources: [ ${citations.map(formatLink).join(' | ')} ]`
+                ? 'sources: [ ' +
+                    citations
+                      .map((url) => {
+                        const text = extractHandle(url) ?? url;
+                        // angle-bracket URL prevents Discord embeds
+                        return `[${text}](<${url}>)`;
+                      })
+                      .join(' | ') +
+                    ' ]'
                 : null;
 
               const generation = [
                 citationLine,
-                choice.message.content.trim()
-              ].filter(Boolean).join('\n\n'); // skip empty line if no citations
+                choice.message.content.trim(),
+              ]
+                .filter(Boolean)
+                .join('\n\n');
 
-              messages.push({ role: "assistant", content: generation });
+              messages.push({ role: 'assistant', content: generation });
               return { result: generation, messages };
-            } else if (choice.finish_reason === 'length') {
-                return { error: 'Error: Not enough reasoning tokens to generate an output.' };
             } else {
                 return { error: 'Unexpected response from API' };
             }
