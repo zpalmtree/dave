@@ -130,7 +130,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
             temperature,
             search_parameters: {
-                mode: 'on',
+                mode: 'auto',
                 return_citations: true,
                 max_search_results: 6,
                 sources: [{ type: "x" }],
