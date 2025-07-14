@@ -15,8 +15,8 @@ const grok = new OpenAI({
 
 const DEFAULT_SETTINGS = {
     model: 'grok-4-latest',
-    temperature: 1,
-    maxTokens: 1024,
+    temperature: 0.7,
+    maxTokens: 4096,
     maxCompletionTokens: 25000,
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
@@ -182,6 +182,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
               return { result: generation, messages };
             } else {
                 console.log(completion);
+                console.log(completion.message);
                 return { error: 'Unexpected response from API' };
             }
         } else {
