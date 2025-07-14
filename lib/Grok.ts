@@ -182,7 +182,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
               return { result: generation, messages };
             } else {
                 console.log(completion);
-                console.log(completion.message);
+                console.log(choice.message);
                 return { error: 'Unexpected response from API' };
             }
         } else {
