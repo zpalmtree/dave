@@ -112,6 +112,10 @@ import {
 } from './Claude.js';
 
 import {
+    handleGrok,
+} from './Grok.js';
+
+import {
     handleTimers,
     handleTimer,
     deleteTimer,
@@ -1393,6 +1397,22 @@ export const Commands: Command[] = [
             implementation: handleSupply,
             description: 'Get current sol slugs supply',
         },
+    },
+    {
+        aliases: ['grok'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGrok,
+            description: 'Ask Grok something',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'claude',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
     },
     {
         aliases: ['gemini'],
