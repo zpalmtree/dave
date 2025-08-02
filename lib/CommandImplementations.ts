@@ -9,7 +9,6 @@ import TextOnGif from 'text-on-gif';
 
 import { stringify, unescape } from 'querystring';
 import { evaluate } from 'mathjs';
-import he from 'he';
 import { Database } from 'sqlite3';
 
 import {
@@ -23,11 +22,6 @@ import {
     AttachmentBuilder,
     EmbedBuilder,
 } from 'discord.js';
-
-import {
-    parse,
-    HTMLElement
-} from 'node-html-parser';
 
 import { config } from './Config.js';
 import { catBreeds } from './Cats.js';
@@ -847,221 +841,6 @@ export async function handlePurge(msg: Message) {
     inProgress = false;
 }
 
-async function getQueryResults(query: string): Promise<false | HTMLElement> {
-    const params = {
-        q: query,
-        kl: 'us-en', // US location
-        kp: 1, // safe search on
-        kac: -1, // auto suggest off
-        kav: 1, // load all results
-    };
-
-    const url = `https://html.duckduckgo.com/html/?${stringify(params)}`;
-
-    let data: any;
-
-    try {
-        const response = await fetch(url);
-        data = await response.text();
-    } catch (err) {
-        console.log(err);
-        return false;
-    }
-
-    const html = parse(data);
-
-    return html;
-}
-
-async function displayQueryResults(html: HTMLElement, msg: Message): Promise<void> {
-    const results = [];
-    const errors = [];
-
-    for (const resultNode of html.querySelectorAll('.result__body')) {
-        const isAd = resultNode.querySelector('.badge--ad');
-
-        if (isAd) {
-            continue;
-        }
-
-        const linkNode = resultNode.querySelector('.result__a');
-
-        const protocolRegex = /\/\/duckduckgo\.com\/l\/\?uddg=(https|http)/;
-        const [ , protocol = 'https' ] = protocolRegex.exec(linkNode.getAttribute('href') || '') || [ undefined ];
-
-        if (protocol === 'http') {
-            continue;
-        }
-
-        const linkTitle = he.decode(linkNode.childNodes[0].text.trim());
-        const link = he.decode(resultNode.querySelector('.result__url').childNodes[0].text.trim());
-        const snippetNode = resultNode.querySelector('.result__snippet');
-
-        /* sometimes we just have a url with no snippet */
-        if (!snippetNode || !snippetNode.childNodes) {
-            continue;
-        }
-
-        const snippet = snippetNode.childNodes.map((n) => he.decode(n.text)).join('');
-        const linkURL = `${protocol}://${link}`;
-
-        if (linkTitle === '' || link === '' || snippet === '') {
-            errors.push(`Failed to parse HTML, linkTitle: ${linkTitle} link: ${link} snippet: ${snippet}`);
-            continue;
-        }
-
-        try {
-            new URL(linkURL);
-        } catch (err) {
-            console.log(`Skipping invalid url ${linkURL}`);
-            continue;
-        }
-
-        results.push({
-            linkTitle,
-            linkURL,
-            snippet,
-        });
-    }
-
-    if (results.length > 0) {
-        const embed = new EmbedBuilder();
-
-        const pages = new Paginate({
-            sourceMessage: msg,
-            itemsPerPage: 3,
-            displayFunction: (result: any) => {
-                return {
-                    name: `${result.linkTitle} - ${result.linkURL}`,
-                    value: result.snippet,
-                    inline: false,
-                };
-            },
-            displayType: DisplayType.EmbedFieldData,
-            data: results,
-            embed,
-        });
-
-        pages.sendMessage();
-    } else {
-        msg.reply(`Failed to find any results: ${errors.join(', ')}!`);
-    }
-}
-
-async function getInstantAnswerResults(query: string) {
-    const params = {
-        q: query.toLowerCase(),
-        format: 'json',
-        t: 'Dave the Discord Bot', // identify ourselves to their servers
-        no_html: 1,
-        no_redirect: 1, // don't follow redirects in bang queries
-        skip_disambig: 1,
-        kp: -2,
-        kl: 'us-en', // US location
-    };
-
-    const url = `https://api.duckduckgo.com/?${stringify(params)}`;
-
-    let data: any;
-
-    try {
-        const response = await fetch(url);
-        data = await response.json();
-    } catch (err) {
-        console.log(err);
-        return false;
-    }
-
-    if (!data || (!data.Heading && !data.Redirect)) {
-        return false;
-    }
-
-    return data;
-}
-
-async function displayInstantAnswerResult(data: any, msg: Message): Promise<void> {
-    if (data.Redirect) {
-        await msg.reply(data.Redirect);
-        return;
-    }
-
-    const embed = new EmbedBuilder()
-        .setTitle(data.Heading);
-
-    if (data.Image) {
-        embed.setImage(`https://duckduckgo.com${data.Image}`);
-    }
-
-    if (data.AbstractURL) {
-        embed.setURL(data.AbstractURL);
-    }
-
-    let haveDescription = false;
-
-    if (data.Answer) {
-        embed.setDescription(data.Answer);
-        haveDescription = true;
-    } else if (data.AbstractText) {
-        embed.setDescription(data.AbstractText);
-        haveDescription = true;
-    }
-
-    const results = data.Results.length > 0
-        ? data.Results
-        : data.RelatedTopics;
-
-    if (!haveDescription) {
-        const pages = new Paginate({
-            sourceMessage: msg,
-            itemsPerPage: 3,
-            displayFunction: (topic: any) => {
-                const regex = /<a href="https:\/\/duckduckgo\.com\/.+">(.+)<\/a>(.+)/;
-
-                const innerTopic = topic.Text
-                    ? topic
-                    : topic.Topics[0];
-
-                let description = innerTopic.Text;
-
-                const regexMatch = regex.exec(innerTopic.Result);
-
-                const [, header=undefined, result=undefined ] = (regexMatch || [ undefined, undefined, undefined ]);
-
-                if (result) {
-                    description = result;
-                }
-
-                let title = '';
-
-                if (innerTopic.Name) {
-                    title += `(${innerTopic.Name}) `;
-                }
-
-                if (header) {
-                    title += header + ' - ';
-                }
-
-                title += innerTopic.FirstURL;
-
-                return {
-                    name: title,
-                    value: description,
-                    inline: false,
-                };
-            },
-            displayType: DisplayType.EmbedFieldData,
-            data: results,
-            embed,
-        });
-
-        pages.sendMessage();
-    }
-
-    await msg.channel.send({
-        embeds: [embed],
-    });
-}
-
 export async function handleQuery(msg: Message, args: string): Promise<void> {
     if (args.trim() === '') {
         await msg.reply('No query given');
@@ -1069,8 +848,31 @@ export async function handleQuery(msg: Message, args: string): Promise<void> {
     }
 
     try {
-        getInstantAnswerResults(args).then((res) => res ? displayInstantAnswerResult(res!, msg) : {});
-        getQueryResults(args).then((res) => res ? displayQueryResults(res as HTMLElement, msg) : {});
+        const results = await getGoogleSearchResults(args);
+
+        if (!results || results.length === 0) {
+            await msg.reply('No results found!');
+            return;
+        }
+
+        const embed = new EmbedBuilder();
+
+        const pages = new Paginate({
+            sourceMessage: msg,
+            itemsPerPage: 3,
+            displayFunction: (result: any) => {
+                return {
+                    name: `${result.title} - ${result.link}`,
+                    value: result.snippet || 'No description available',
+                    inline: false,
+                };
+            },
+            displayType: DisplayType.EmbedFieldData,
+            data: results,
+            embed,
+        });
+
+        await pages.sendMessage();
     } catch (err) {
         await msg.reply(`Error getting query results: ${(err as any).toString()}`);
     }
@@ -1198,10 +1000,10 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const displayImage = (duckduckgoItem: any, embed: EmbedBuilder) => {
-        embed.setTitle(duckduckgoItem.title);
-        embed.setImage(duckduckgoItem.image);
-        embed.setDescription(duckduckgoItem.url);
+    const displayImage = (googleItem: any, embed: EmbedBuilder) => {
+        embed.setTitle(googleItem.title);
+        embed.setImage(googleItem.link);
+        embed.setDescription(googleItem.displayLink);
     };
 
     const embed = new EmbedBuilder();
@@ -1217,6 +1019,7 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
     await pages.sendMessage();
 }
 
+// Updated handleImageImpl function
 export async function handleImageImpl(msg: Message, args: string, site?: string): Promise<undefined | any[]> {
     if (args.trim() === '') {
         await msg.reply('No query given');
@@ -1230,146 +1033,114 @@ export async function handleImageImpl(msg: Message, args: string, site?: string)
         query += ` site:${site}`;
     }
 
-    const tokenParams = {
-        q: query,
-        kl: 'us-en', // US location
-        kp: 1, // safe search off
-        kac: -1, // auto suggest off
-        kav: 1, // load all results
-    };
-
-    const tokenOptions = {
-        headers: {
-            'cookie': 'p=-2',
-        },
-    };
-
-    // gotta get our magic token to perform an image search
-    const tokenURL = `https://safe.duckduckgo.com/?${stringify(tokenParams)}`;
-
-    let data: any;
-
     try {
-        const response = await fetch(tokenURL, tokenOptions);
-        data = await response.text();
+        const results = await getGoogleImageResults(query);
+        
+        if (!results || results.length === 0) {
+            await msg.reply('No results found!');
+            return;
+        }
+
+        return results;
     } catch (err) {
-        await msg.reply((err as any));
+        await msg.reply(`Error getting image results: ${(err as any).toString()}`);
         return;
     }
+}
 
-    // gimme that token...
-    const regex = /vqd=([\d-]+)\&/;
-
-    const [, token ] = regex.exec(data) || [ undefined, undefined ];
-
-    if (!token) {
-        await msg.reply('Failed to get token!');
-        return;
-    }
-
-    const imageParams = {
+// Helper function for Google web search
+async function getGoogleSearchResults(query: string): Promise<any[]> {
+    const params = {
+        key: config.googleApiKey,
+        cx: config.googleSearchEngineId,
         q: query,
-        l: 'us-en', // US location
-        ac: -1, // auto suggest off
-        av: 1, // load all results
-        p: 1,  // safe search off - for some reason this needs to be -1, not -2, not sure why
-        vqd: token, // magic token!
-        f: ',,,',
-        v7exp: 'a',
-        o: 'json',
+        num: '10',
+        safe: 'off',
+        lr: 'lang_en',
+        gl: 'us',
     };
 
-    const options = {
-        headers: {
-            'authority': 'duckduckgo.com',
-            'accept': 'application/json, text/javascript, */*; q=0.01',
-            'sec-fetch-dest': 'empty',
-            'x-requested-with': 'XMLHttpRequest',
-            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36',
-            'sec-fetch-site': 'same-origin',
-            'sec-fetch-mode': 'cors',
-            'referer': 'https://duckduckgo.com/',
-            'accept-language': 'en-US,en;q=0.9',
-            'cookie': 'p=-2',
-        },
-    };
+    const url = `https://www.googleapis.com/customsearch/v1?${stringify(params)}`;
 
-    const imageURL = `https://safe.duckduckgo.com/i.js?${stringify(imageParams)}`;
-
-    let imageData: any;
-
-    try {
-        const response = await fetch(imageURL, options);
-        imageData = await response.json();
-    } catch (err) {
-        await msg.reply((err as any));
-        return;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+        throw new Error(`Google API error: ${response.status} ${response.statusText}`);
     }
 
-    if (!imageData.results || imageData.results.length === 0) {
-        await msg.reply('No results found!');
-        return;
+    const data = await response.json();
+
+    if (!data.items) {
+        return [];
     }
 
-    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webm', 'mp4'];
+    return data.items.map((item: any) => ({
+        title: item.title,
+        link: item.link,
+        snippet: item.snippet,
+        displayLink: item.displayLink,
+    }));
+}
 
-    const isValidExtension = (img: any) => {
-        const url = new URL(img.image);
-
-        if (url.protocol === 'http:') {
-            return false;
-        }
-
-        const file = url.pathname;
-
-        return validExtensions.some((ext) => file.endsWith(`.${ext}`));
+// Helper function for Google image search
+async function getGoogleImageResults(query: string): Promise<any[]> {
+    const params = {
+        key: config.googleApiKey,
+        cx: config.googleSearchEngineId,
+        q: query,
+        searchType: 'image',
+        num: '10',
+        safe: 'off',
+        lr: 'lang_en',
+        gl: 'us',
+        imgSize: 'large',
+        imgType: 'photo',
     };
 
-    const blacklistedDomains: string[] = [
-    ];
+    const url = `https://www.googleapis.com/customsearch/v1?${stringify(params)}`;
 
-    const isBlacklistedDomain = (img: any) => {
-        const url = new URL(img.image);
-
-        return blacklistedDomains.includes(url.hostname);
-    };
-
-    const images = new Set<string>();
-
-    const filtered = imageData.results.filter((img: any, position: number) => {
-        /* Verify the image doesn't appear in the results multiple times */
-        if (images.has(img.image)) {
-            return false;
-        }
-
-        /* Skip known bad domains */
-        if (isBlacklistedDomain(img)) {
-            return false;
-        }
-
-        /* Verify it has a valid extension, discord will not display a preview without one */
-        if (!isValidExtension(img)) {
-            return false;
-        }
-
-        try {
-            new URL(img.image);
-        } catch (err) {
-            console.log(`Skipping invalid image url ${img.image}`);
-        }
-
-        /* Add to url cache */
-        images.add(img.image);
-
-        return true;
-    });
-
-    if (filtered.length === 0) {
-        await msg.reply('No results found!');
-        return;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+        throw new Error(`Google API error: ${response.status} ${response.statusText}`);
     }
 
-    return filtered;
+    const data = await response.json();
+
+    if (!data.items) {
+        return [];
+    }
+
+    // Filter for valid image URLs and HTTPS
+    return data.items
+        .filter((item: any) => {
+            try {
+                const url = new URL(item.link);
+                return url.protocol === 'https:' && isValidImageUrl(item.link);
+            } catch {
+                return false;
+            }
+        })
+        .map((item: any) => ({
+            title: item.title,
+            link: item.link,
+            image: item.link,
+            url: item.image?.contextLink || item.link,
+            displayLink: item.displayLink,
+        }));
+}
+
+// Helper function to validate image URLs
+function isValidImageUrl(url: string): boolean {
+    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname.toLowerCase();
+    
+    return validExtensions.some(ext => 
+        pathname.endsWith(`.${ext}`) || 
+        pathname.includes(`.${ext}?`) ||
+        pathname.includes(`.${ext}#`)
+    ) || url.includes('googleusercontent.com') || url.includes('imgur.com');
 }
 
 async function handleUserStats(msg: Message, db: Database, user: string): Promise<void> {
