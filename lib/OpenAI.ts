@@ -21,7 +21,7 @@ const DEFAULT_SETTINGS = {
     temperature: 0.7,
     maxTokens: 1024,
     maxCompletionTokens: 100_000,
-    model: 'gpt-4o',
+    model: 'gpt-5',
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
 };
