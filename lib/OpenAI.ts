@@ -60,13 +60,11 @@ export interface OpenAIResponse {
   messages?: UniversalMessage[];
 }
 
-// ---------- helpers & typings ---------------
-/**
- * Models that support the new /responses endpoint.
- * Adjust if OpenAI adds more.
- */
 const RESPONSES_MODELS = [
-  /^o3/i,
+  /^o\d/i,       // o3, o4, etc.
+  /^gpt-5/i,     // gpt-5 family
+  /^gpt-4\.1/i,  // (optional) route these through Responses too
+  /^gpt-4o/i,    // (optional)
 ];
 
 /**
