@@ -19,7 +19,7 @@ const openai = new OpenAI({
 
 const DEFAULT_SETTINGS = {
     temperature: 0.7,
-    maxTokens: 1024,
+    maxTokens: 100_000,
     maxCompletionTokens: 100_000,
     model: 'gpt-5',
     timeout: 60000,
@@ -229,9 +229,7 @@ async function masterOpenAIHandler(
             model,
             instructions: fullSystemPrompt,
             input: messagesForInput as ResponsesCreateParams["input"],
-            ...(maxCompletionTokens
-              ? { max_output_tokens: maxCompletionTokens }
-              : { max_output_tokens: maxTokens }),
+            max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
             user: msg.author.id,
             reasoning: {
               effort: 'high',
@@ -242,12 +240,11 @@ async function masterOpenAIHandler(
           // Only add previous_response_id if it exists and is valid (starts with 'resp')
           if (previousResponseId && typeof previousResponseId === 'string' && previousResponseId.startsWith('resp')) {
             requestParams.previous_response_id = previousResponseId;
-            console.log('Adding previous_response_id to request:', previousResponseId);
           }
 
           // Execute the request with the proper parameters
           const result = await aiClient.responses.create(requestParams);
-          
+
           const secs = ((Date.now() - t0) / 1000).toFixed(1);
 
           if (!result.output_text) return { error: "Unexpected empty response from API." };
@@ -558,7 +555,6 @@ export async function handleO3(msg: Message, args: string): Promise<void> {
 
     if (response.result) {
         const replies = await replyLongMessage(msg, response.result);
-        console.log(response.result);
         if (response.messages && replies.length > 0) {
             chatHistoryCache.set(replies[0].id, response.messages);
         }
