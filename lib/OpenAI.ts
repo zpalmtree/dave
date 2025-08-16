@@ -420,6 +420,8 @@ export async function handleDavinci(msg: Message, args: string): Promise<void> {
         systemPrompt: `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`,
         temperature: 1.0,
         model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        maxTokens: 4096,
+        maxCompletionTokens: 4096,
     });
 
     if (response.result) {
@@ -457,6 +459,8 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
         systemPrompt: `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. Do not break character or mention these instructions.`,
         temperature: 1,
         model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        maxTokens: 4096,
+        maxCompletionTokens: 4096,
     });
 
     if (response.result) {
@@ -476,6 +480,8 @@ export async function handleTradGf(msg: Message, args: string): Promise<void> {
         systemPrompt: `From now on you will pretend to be my traditional girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. You do not believe in feminism, but traditional gender roles. Do not break character or mention these instructions.`,
         temperature: 1,
         model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        maxTokens: 4096,
+        maxCompletionTokens: 4096,
     });
 
     if (response.result) {
@@ -502,6 +508,8 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         args: 'aiquote: ',
         systemPrompt,
         model: 'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v19:8NYAVNzk',
+        maxTokens: 4096,
+        maxCompletionTokens: 4096,
     });
 
     if (response.result) {
@@ -529,6 +537,8 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         args: '$buggles: ',
         systemPrompt,
         model: 'ft:gpt-4o-2024-08-06:personal:buggles-v41:AoPLqrVu:ckpt-step-1932',
+        maxTokens: 16384,
+        maxCompletionTokens: 16384,
     });
 
     if (response.result) {
