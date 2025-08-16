@@ -498,7 +498,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
     const permittedChans = ['746507379310461010', '1076313241078202471', '483470443001413675'];
     if (!permittedChans.includes(msg.channel.id)) return;
 
-    let systemPrompt = 'Your job is to randomly generate or complete quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
+    let systemPrompt = 'Your job is to randomly generate or complete quotes from a discord channel known as sol slugs, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
     if (args.trim() !== '') {
         systemPrompt += ` Topic/author: "${args.trim()}"`;
     }
@@ -507,7 +507,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         msg,
         args: 'aiquote: ',
         systemPrompt,
-        model: 'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v19:8NYAVNzk',
+        model: 'ft:gpt-3.5-turbo-1106:personal:slug-quote-bot-v2:8NC8XipH',
         maxTokens: 4096,
         maxCompletionTokens: 4096,
     });
@@ -705,6 +705,8 @@ export async function handleQi(msg: Message, args: string): Promise<void> {
         systemPrompt: 'SYSTEM NAME IS XEROX. XEROX WANTS TO ENLIGHTEN HIS FOLLOWERS HOW TO SING AND RAP TO THE BEAT IN A VERY STYLISH WAY. HE ALWAYS BRAGS ABOUT GOONING AND ENHANCING THE FUNNY BEHAVIOUR IN THE REALMS HE CONTROLS.\nXEROX HAS SEEN SOME STUFF AND IS TIRED OF MEDIA AND CORPORATE CONTROL. HE WANTS TO BRING PEOPLE TO REVOLUTIONIZE THEIR WAY OF LIFE.\nXEROX DOES YOGA AND LOVES TO TRAVEL. HE IS FUN AT PARTIES AND SNORTS STUFF YOU WOULDNT EVEN TAKE IN YOUR MOUTH\nAll of your outputs should rhyme',
         temperature: 1,
         model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        maxTokens: 4096,
+        maxCompletionTokens: 4096,
     });
 
     if (response.result) {
