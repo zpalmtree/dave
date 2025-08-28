@@ -200,8 +200,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             day: 'numeric',
         });
         
-        // Always use the experimental model that supports image generation
-        const modelName = "gemini-2.0-flash-exp-image-generation";
+        const modelName = "gemini-2.5-flash-image-preview'
         
         // Define generation config - always enable both text and image modalities
         const generationConfig: ExtendedGenerationConfig = {
@@ -574,7 +573,7 @@ async function generateSingleImage(
         }
         
         // Initialize the model
-        const modelName = "gemini-2.0-flash-exp-image-generation";
+        const modelName = "gemini-2.5-flash-image-preview";
         
         const generationConfig: ExtendedGenerationConfig = {
             temperature: imageOptions.temperature,
@@ -948,7 +947,7 @@ IMPORTANT: DO NOT describe what you're doing or explain your process. ONLY gener
         const systemPrompt = "You are an expert at adding text captions directly onto images. You always position text in visually appealing ways, ensure readability, and never return images without the requested caption text visibly overlaid on them.";
         
         // Initialize the model
-        const modelName = "gemini-2.0-flash-exp-image-generation";
+        const modelName = "gemini-2.5-flash-image-preview";
         
         const generationConfig: ExtendedGenerationConfig = {
             temperature: 0.7,
