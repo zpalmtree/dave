@@ -200,7 +200,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             day: 'numeric',
         });
         
-        const modelName = "gemini-2.5-flash-image-preview'
+        const modelName = "gemini-2.5-flash-image-preview";
         
         // Define generation config - always enable both text and image modalities
         const generationConfig: ExtendedGenerationConfig = {
