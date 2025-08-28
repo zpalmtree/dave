@@ -543,7 +543,7 @@ async function generateSingleImage(
     sourceImage: ImageData | null = null
 ): Promise<string[]> {
     // Add timeout for reliability
-    const timeoutMs = options.timeoutMs || 30000; // 30 seconds default
+    const timeoutMs = options.timeoutMs || 120_000;
     
     const timeoutPromise = new Promise<string[]>((_, reject) => {
         setTimeout(() => reject(new Error("Image generation timed out")), timeoutMs);
