@@ -690,7 +690,8 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             // Generate variations with the source image
             const imagePromises = [];
             for (let i = 0; i < 3; i++) {
-                const temperature = 1;
+                const temperature = 0.95 + (0.05 * i);
+
                 imagePromises.push(
                     generateSingleImage(args, { temperature }, sourceImageData)
                 );
@@ -720,7 +721,8 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             // NO SOURCE IMAGE MODE: Generate from text only
             const imagePromises = [];
             for (let i = 0; i < 3; i++) {
-                const temperature = 1;
+                const temperature = 0.95 + (0.05 * i);
+
                 imagePromises.push(generateSingleImage(args, { temperature }));
             }
             
@@ -950,7 +952,7 @@ IMPORTANT: DO NOT describe what you're doing or explain your process. ONLY gener
         const modelName = "gemini-2.5-flash-image-preview";
         
         const generationConfig: ExtendedGenerationConfig = {
-            temperature: 0.7,
+            temperature: 1,
             maxOutputTokens: 512,
             topP: 0.95,
             responseModalities: [MODALITIES.TEXT, MODALITIES.IMAGE],
