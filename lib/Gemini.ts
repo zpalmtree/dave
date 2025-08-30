@@ -60,8 +60,6 @@ const MODEL = 'gpt-4o-mini';
 
 const ART_STYLES = [
     'pixel art',
-    'watercolor',
-    'impressionist',
     'vaporwave',
     'synthwave',
     'retrofuturism',
@@ -70,7 +68,6 @@ const ART_STYLES = [
     'cyberdelic',
     'kawaii',
     'anime',
-    'cartoon',
     'post-apocalyptic surrealism',
     'Abstract Expressionism',
     'Ghibli-esque',
@@ -78,7 +75,14 @@ const ART_STYLES = [
     'rubber hose',
     'claymation',
     'comic strip',
-    'vintage cartoon',
+    'steampunk',
+    'photorealistic',
+    'hyperrealistic',
+    'isometric',
+    'neon',
+    'geometric',
+    'organic',
+    'biomechanical',
 ];
 
 // Define response modalities for various content types
