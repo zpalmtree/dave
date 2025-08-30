@@ -4,6 +4,7 @@ import {
     AttachmentBuilder,
 } from 'discord.js';
 import { GoogleGenerativeAI, GenerateContentRequest, GenerateContentResult, Content, GenerationConfig, Part, InlineDataPart, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import { OpenAI } from 'openai';
 
 import { config } from './Config.js';
 import {
@@ -50,6 +51,36 @@ const BANNED_USERS = ['663270358161293343'];
 // Initialize the Gemini API client
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
+// Initialize OpenAI client for prompt enhancement
+const openai = new OpenAI({
+    apiKey: config.openaiApiKey,
+});
+
+const MODEL = 'gpt-4o-mini';
+
+const ART_STYLES = [
+    'pixel art',
+    'watercolor',
+    'impressionist',
+    'vaporwave',
+    'synthwave',
+    'retrofuturism',
+    'psychedelic',
+    'biopunk',
+    'cyberdelic',
+    'kawaii',
+    'anime',
+    'cartoon',
+    'post-apocalyptic surrealism',
+    'Abstract Expressionism',
+    'Ghibli-esque',
+    'yokai',
+    'rubber hose',
+    'claymation',
+    'comic strip',
+    'vintage cartoon',
+];
+
 // Define response modalities for various content types
 const MODALITIES = {
     TEXT: "TEXT",
@@ -58,6 +89,131 @@ const MODALITIES = {
 
 // Cache for conversation history
 const chatHistoryCache = new Map<string, any[]>();
+
+function appendArtStyle(prompt: string, numStyles: number = 0) {
+    if (numStyles === 0) {
+        return prompt;
+    }
+
+    const styles = [];
+    for (let i = 0; i < numStyles; i++) {
+        const artStyle = ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)];
+        styles.push(`${artStyle} art style`);
+    }
+    
+    return `${prompt}, ${styles.join(', ')}`;
+}
+
+interface PromptEnhancementResult {
+    enhancedPrompt: string;
+    refused: boolean;
+    originalPrompt: string;
+}
+
+const SYSTEM_PROMPT = `You are a minimal prompt enhancer for image generation. Your job is to add ONLY small, subtle improvements while preserving the user's exact intent and style.
+
+CRITICAL: If the user prompt contains editing instructions (like "edit this image to", "change the", "modify", "give him", "add", "remove", etc.), preserve these EXACTLY as written.
+
+Enhancement rules:
+1. Add only 2-3 descriptive adjectives maximum or a little flavor
+2. Keep the original structure and tone completely intact
+3. Do NOT change the core subject, action, or style
+4. Set refused=true ONLY for clearly harmful content (abuse, extreme violence)
+
+Examples:
+Input: "a cat"
+Output: "a cute orange fluffy cat"
+
+Input: "edit this image to give him orange hair"
+Output: "edit this image to give him bright orange hair"
+
+Input: "woman in a field"
+Output: "beautiful blonde woman in a green field"
+
+Input: "cyberpunk city"
+Output: "cyberpunk city at dawn, giant structure in middle"
+
+Return a JSON object with:
+{
+    "enhancedPrompt": "minimally enhanced prompt",
+    "refused": boolean
+}
+
+Return exactly this JSON - do not wrap it in a quote block, etc, your entire response should be only valid JSON!
+
+Enhance this prompt with minimal improvements only. Return only valid JSON:
+
+{prompt}`;
+
+export async function enhanceUserPrompt(
+    userPrompt: string,
+    requestingUser: string,
+    applyArtStyle: boolean = true,
+): Promise<PromptEnhancementResult> {
+    try {
+        // Don't add art styles during enhancement - they'll be added after
+        const promptWithStyle = userPrompt;
+
+        const completion = await openai.chat.completions.create({
+            model: MODEL,
+            messages: [
+                {
+                    role: 'user',
+                    content: createSystemPrompt(SYSTEM_PROMPT.replace('{prompt}', promptWithStyle), requestingUser)
+                },
+            ],
+            temperature: 2,
+            user: requestingUser,
+        }, {
+            timeout: 1000 * 10,
+            maxRetries: 0,
+        });
+
+        const result = JSON.parse(completion.choices[0].message.content!);
+
+        // Validate the response format
+        if (!result.enhancedPrompt || result.refused === undefined) {
+            throw new Error('Invalid response format from GPT');
+        }
+
+        // Don't apply art style here - it's applied after enhancement in the calling code
+        const finalPrompt = result.enhancedPrompt;
+
+        return {
+            enhancedPrompt: finalPrompt,
+            refused: result.refused,
+            originalPrompt: userPrompt
+        };
+    } catch (err) {
+        console.error('Error enhancing prompt:', err);
+        
+        // Fallback to original prompt without art style - it's applied in calling code
+        return {
+            enhancedPrompt: userPrompt,
+            refused: false,
+            originalPrompt: userPrompt
+        };
+    }
+}
+
+function getCurrentDatePrompt() {
+    const now = new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
+
+    return `The current date is ${now}.`;
+}
+
+function getUsernamePrompt(username: string): string {
+    return `The person interacting with you is named ${username}.`;
+}
+
+function createSystemPrompt(prompt: string, username: string): string {
+    return `${getCurrentDatePrompt()} ${getUsernamePrompt(username)} ${prompt}`;
+}
 
 /**
  * Fetches an image from a URL and converts it to base64
@@ -542,6 +698,8 @@ async function generateSingleImage(
     options: GeminiOptions = {}, 
     sourceImage: ImageData | null = null
 ): Promise<string[]> {
+    console.log(prompt);
+
     // Add timeout for reliability
     const timeoutMs = options.timeoutMs || 120_000;
     
@@ -660,6 +818,9 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             await msg.channel.sendTyping();
         }
         
+        // Get username for prompt enhancement
+        const username = await getUsername(msg.author.id, msg.guild);
+        
         // Check for images in message or replied message
         let imageURLs = getImageURLsFromMessage(msg);
         let contextMessage: Message | undefined;
@@ -687,14 +848,33 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 return;
             }
             
-            // Generate variations with the source image
+            // Generate variations with the source image - enhance prompt for each
             const imagePromises = [];
             for (let i = 0; i < 3; i++) {
-                const temperature = 0.8 + (0.1 * i);
+                //const temperature = 0.8 + (0.1 * i);
+                const temperature = 1;
+                
+                // Get a unique enhanced prompt for each image, fallback to original on error
+                const numArtStyles = i < 2 ? 0 : 2;
+                const enhancementPromise = enhanceUserPrompt(args, username, numArtStyles > 0)
+                    .then(result => {
+                        console.log(result);
 
-                imagePromises.push(
-                    generateSingleImage(args, { temperature }, sourceImageData)
-                );
+                        if (result.refused) {
+                            console.log("Prompt enhancement refused, using original prompt:", args);
+                            const fallbackPrompt = appendArtStyle(args, numArtStyles);
+                            return generateSingleImage(fallbackPrompt, { temperature }, sourceImageData);
+                        }
+                        const finalPrompt = appendArtStyle(result.enhancedPrompt, numArtStyles);
+                        return generateSingleImage(finalPrompt, { temperature }, sourceImageData);
+                    })
+                    .catch(error => {
+                        console.error("Error enhancing prompt, using original:", error);
+                        const fallbackPrompt = appendArtStyle(args, numArtStyles);
+                        return generateSingleImage(fallbackPrompt, { temperature }, sourceImageData);
+                    });
+
+                imagePromises.push(enhancementPromise);
             }
             
             // Use Promise.allSettled to handle partial successes
@@ -718,12 +898,34 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 }
             });
         } else {
-            // NO SOURCE IMAGE MODE: Generate from text only
+            // NO SOURCE IMAGE MODE: Generate from text only - enhance prompt for each
             const imagePromises = [];
             for (let i = 0; i < 3; i++) {
-                const temperature = 0.8 + (0.1 * i);
+                //const temperature = 0.8 + (0.1 * i);
+                const temperature = 1;
+                
+                // Get a unique enhanced prompt for each image, fallback to original on error
+                // Progressive art styles: i=0 (none), i=1 (one style), i=2 (two styles)
+                const numArtStyles = i == 0 ? 0 : 2;
+                const enhancementPromise = enhanceUserPrompt(args, username, numArtStyles > 0)
+                    .then(result => {
+                        console.log(result);
 
-                imagePromises.push(generateSingleImage(args, { temperature }));
+                        if (result.refused) {
+                            console.log("Prompt enhancement refused, using original prompt:", args);
+                            const fallbackPrompt = appendArtStyle(args, numArtStyles);
+                            return generateSingleImage(fallbackPrompt, { temperature });
+                        }
+                        const finalPrompt = appendArtStyle(result.enhancedPrompt, numArtStyles);
+                        return generateSingleImage(finalPrompt, { temperature });
+                    })
+                    .catch(error => {
+                        console.error("Error enhancing prompt, using original:", error);
+                        const fallbackPrompt = appendArtStyle(args, numArtStyles);
+                        return generateSingleImage(fallbackPrompt, { temperature });
+                    });
+
+                imagePromises.push(enhancementPromise);
             }
             
             // Use Promise.allSettled to handle partial successes
@@ -751,6 +953,8 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
         if (allImagePaths.length === 0) {
             // If we have error messages, provide them to the user
             if (errorMessages.length > 0) {
+                // Note: Prompt enhancement errors are now handled with fallback, no need to check here
+                
                 // Categorize errors by type
                 const safetyErrors = errorMessages.filter(err => 
                     err.includes("safety") || err.includes("Safety")).length;
