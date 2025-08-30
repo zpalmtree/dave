@@ -690,7 +690,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             // Generate variations with the source image
             const imagePromises = [];
             for (let i = 0; i < 3; i++) {
-                const temperature = 1 + (0.1 * i);
+                const temperature = 0.8 + (0.1 * i);
 
                 imagePromises.push(
                     generateSingleImage(args, { temperature }, sourceImageData)
@@ -721,7 +721,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             // NO SOURCE IMAGE MODE: Generate from text only
             const imagePromises = [];
             for (let i = 0; i < 3; i++) {
-                const temperature = 1 + (0.1 * i);
+                const temperature = 0.8 + (0.1 * i);
 
                 imagePromises.push(generateSingleImage(args, { temperature }));
             }
