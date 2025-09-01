@@ -344,12 +344,25 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             }
         }
         
-        // Get image URLs if any
+        // Get image URLs - all from current message, first from replied bot message
         let imageURLs: string[] = [];
+        
+        // Always get all images from current user message
+        const currentMessageImages = getImageURLsFromMessage(msg);
+        imageURLs.push(...currentMessageImages);
+        
+        // If replying to a message, add images from it
         if (contextMessage) {
-            imageURLs = getImageURLsFromMessage(msg, contextMessage);
-        } else {
-            imageURLs = getImageURLsFromMessage(msg);
+            const repliedMessageImages = getImageURLsFromMessage(contextMessage);
+            if (repliedMessageImages.length > 0) {
+                // If replied message is from bot, only use first image
+                if (contextMessage.author.bot) {
+                    imageURLs.push(repliedMessageImages[0]);
+                } else {
+                    // If replied message is from user, use all images
+                    imageURLs.push(...repliedMessageImages);
+                }
+            }
         }
         
         // Format the date for system prompt context
@@ -422,8 +435,14 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             });
         }
         
+        // Add replied message context if present
+        let fullPrompt = effectivePrompt;
+        if (contextMessage && contextMessage.content.trim()) {
+            fullPrompt = contextMessage.content.trim() + '\n' + effectivePrompt;
+        }
+        
         // Prepare content parts (text and images)
-        const contentParts = await prepareContentParts(effectivePrompt, imageURLs);
+        const contentParts = await prepareContentParts(fullPrompt, imageURLs);
         
         // Generate response
         const result = await chat.sendMessage(contentParts);
@@ -694,13 +713,13 @@ async function processResponseImages(response: any): Promise<string[]> {
  * Generate a single image using Gemini with timeout
  * @param {string} prompt - The image description
  * @param {GeminiOptions} options - Additional options
- * @param {ImageData|null} sourceImage - Optional source image for editing
+ * @param {ImageData[]|null} sourceImages - Optional array of source images for editing
  * @returns {Promise<string[]>} - Array of paths to saved images
  */
 async function generateSingleImage(
     prompt: string, 
     options: GeminiOptions = {}, 
-    sourceImage: ImageData | null = null
+    sourceImages: ImageData[] | null = null
 ): Promise<string[]> {
     console.log(prompt);
 
@@ -722,12 +741,14 @@ async function generateSingleImage(
         
         // Ensure the prompt is formatted for image generation or editing
         let effectivePrompt = prompt.trim();
-        if (sourceImage) {
+        if (sourceImages && sourceImages.length > 0) {
             // For image editing, use the prompt directly as instructions for editing
             if (!effectivePrompt.toLowerCase().includes("edit") && 
                 !effectivePrompt.toLowerCase().includes("modify") &&
                 !effectivePrompt.toLowerCase().includes("change")) {
-                effectivePrompt = "Edit this image to " + effectivePrompt;
+                effectivePrompt = sourceImages.length === 1 
+                    ? "Edit this image to " + effectivePrompt
+                    : "Edit these images to " + effectivePrompt;
             }
         } else if (!effectivePrompt.toLowerCase().startsWith("generate") && 
                   !effectivePrompt.toLowerCase().startsWith("create")) {
@@ -783,14 +804,16 @@ async function generateSingleImage(
         // Prepare content parts
         const contentParts: Part[] = [{ text: effectivePrompt } as Part];
         
-        // Add source image if provided
-        if (sourceImage) {
-            contentParts.push({
-                inlineData: {
-                    mimeType: sourceImage.mimeType,
-                    data: sourceImage.data
-                }
-            } as InlineDataPart);
+        // Add all source images if provided
+        if (sourceImages && sourceImages.length > 0) {
+            for (const sourceImage of sourceImages) {
+                contentParts.push({
+                    inlineData: {
+                        mimeType: sourceImage.mimeType,
+                        data: sourceImage.data
+                    }
+                } as InlineDataPart);
+            }
         }
         
         // Send message for image generation
@@ -825,30 +848,54 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
         // Get username for prompt enhancement
         const username = await getUsername(msg.author.id, msg.guild);
         
-        // Check for images in message or replied message
-        let imageURLs = getImageURLsFromMessage(msg);
+        // Check for images - all from current message, first from replied bot message
+        let imageURLs: string[] = [];
         let contextMessage: Message | undefined;
         
-        // Check for replied message with image if no images in current message
-        if (imageURLs.length === 0 && msg.reference?.messageId) {
+        // Always get all images from current user message
+        const currentMessageImages = getImageURLsFromMessage(msg);
+        imageURLs.push(...currentMessageImages);
+        
+        // Check for replied message
+        if (msg.reference?.messageId) {
             try {
                 contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
                 if (contextMessage) {
-                    imageURLs = getImageURLsFromMessage(contextMessage);
+                    const repliedMessageImages = getImageURLsFromMessage(contextMessage);
+                    if (repliedMessageImages.length > 0) {
+                        // If replied message is from bot, only use first image
+                        if (contextMessage.author.bot) {
+                            imageURLs.push(repliedMessageImages[0]);
+                        } else {
+                            // If replied message is from user, use all images
+                            imageURLs.push(...repliedMessageImages);
+                        }
+                    }
                 }
             } catch (error) {
                 console.error("Failed to fetch replied message:", error);
             }
         }
         
+        // Add replied message context if present
+        let fullPrompt = args;
+        if (contextMessage && contextMessage.content.trim()) {
+            fullPrompt = contextMessage.content.trim() + '\n' + args;
+        }
+        
         // Generate multiple images
         if (imageURLs.length > 0) {
-            // SOURCE IMAGE MODE: Use the first image as source for editing
-            const sourceImageUrl = imageURLs[0];
-            const sourceImageData = await fetchImageAsBase64(sourceImageUrl);
+            // SOURCE IMAGE MODE: Process all images as sources for editing
+            const sourceImageDataArray: ImageData[] = [];
+            for (const imageUrl of imageURLs) {
+                const imageData = await fetchImageAsBase64(imageUrl);
+                if (imageData) {
+                    sourceImageDataArray.push(imageData);
+                }
+            }
             
-            if (!sourceImageData) {
-                await msg.reply("Failed to process the source image. Please try with a different image.");
+            if (sourceImageDataArray.length === 0) {
+                await msg.reply("Failed to process the source images. Please try with different images.");
                 return;
             }
             
@@ -860,22 +907,22 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 
                 // Get a unique enhanced prompt for each image, fallback to original on error
                 const numArtStyles = i < 2 ? 0 : 2;
-                const enhancementPromise = enhanceUserPrompt(args, username, numArtStyles > 0)
+                const enhancementPromise = enhanceUserPrompt(fullPrompt, username, numArtStyles > 0)
                     .then(result => {
                         console.log(result);
 
                         if (result.refused) {
-                            console.log("Prompt enhancement refused, using original prompt:", args);
-                            const fallbackPrompt = appendArtStyle(args, numArtStyles);
-                            return generateSingleImage(fallbackPrompt, { temperature }, sourceImageData);
+                            console.log("Prompt enhancement refused, using original prompt:", fullPrompt);
+                            const fallbackPrompt = appendArtStyle(fullPrompt, numArtStyles);
+                            return generateSingleImage(fallbackPrompt, { temperature }, sourceImageDataArray);
                         }
                         const finalPrompt = appendArtStyle(result.enhancedPrompt, numArtStyles);
-                        return generateSingleImage(finalPrompt, { temperature }, sourceImageData);
+                        return generateSingleImage(finalPrompt, { temperature }, sourceImageDataArray);
                     })
                     .catch(error => {
                         console.error("Error enhancing prompt, using original:", error);
-                        const fallbackPrompt = appendArtStyle(args, numArtStyles);
-                        return generateSingleImage(fallbackPrompt, { temperature }, sourceImageData);
+                        const fallbackPrompt = appendArtStyle(fullPrompt, numArtStyles);
+                        return generateSingleImage(fallbackPrompt, { temperature }, sourceImageDataArray);
                     });
 
                 imagePromises.push(enhancementPromise);
@@ -911,13 +958,13 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 // Get a unique enhanced prompt for each image, fallback to original on error
                 // Progressive art styles: i=0 (none), i=1 (one style), i=2 (two styles)
                 const numArtStyles = i == 0 ? 0 : 2;
-                const enhancementPromise = enhanceUserPrompt(args, username, numArtStyles > 0)
+                const enhancementPromise = enhanceUserPrompt(fullPrompt, username, numArtStyles > 0)
                     .then(result => {
                         console.log(result);
 
                         if (result.refused) {
-                            console.log("Prompt enhancement refused, using original prompt:", args);
-                            const fallbackPrompt = appendArtStyle(args, numArtStyles);
+                            console.log("Prompt enhancement refused, using original prompt:", fullPrompt);
+                            const fallbackPrompt = appendArtStyle(fullPrompt, numArtStyles);
                             return generateSingleImage(fallbackPrompt, { temperature });
                         }
                         const finalPrompt = appendArtStyle(result.enhancedPrompt, numArtStyles);
@@ -925,7 +972,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                     })
                     .catch(error => {
                         console.error("Error enhancing prompt, using original:", error);
-                        const fallbackPrompt = appendArtStyle(args, numArtStyles);
+                        const fallbackPrompt = appendArtStyle(fullPrompt, numArtStyles);
                         return generateSingleImage(fallbackPrompt, { temperature });
                     });
 
@@ -1111,14 +1158,29 @@ export async function handleGeminiCaption(msg: Message, args: string): Promise<v
             await msg.channel.sendTyping();
         }
         
-        // Get image URLs from message or replied message
-        let imageURLs = getImageURLsFromMessage(msg);
+        // Get image URLs - all from current message, first from replied bot message
+        let imageURLs: string[] = [];
         
-        // Check for replied message with image if no images in current message
-        if (imageURLs.length === 0 && msg.reference?.messageId) {
+        // Always get all images from current user message
+        const currentMessageImages = getImageURLsFromMessage(msg);
+        imageURLs.push(...currentMessageImages);
+        
+        // Check for replied message
+        if (msg.reference?.messageId) {
             try {
                 const contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
-                imageURLs = getImageURLsFromMessage(contextMessage);
+                if (contextMessage) {
+                    const repliedMessageImages = getImageURLsFromMessage(contextMessage);
+                    if (repliedMessageImages.length > 0) {
+                        // If replied message is from bot, only use first image
+                        if (contextMessage.author.bot) {
+                            imageURLs.push(repliedMessageImages[0]);
+                        } else {
+                            // If replied message is from user, use all images
+                            imageURLs.push(...repliedMessageImages);
+                        }
+                    }
+                }
             } catch (error) {
                 console.error("Failed to fetch replied message:", error);
             }
@@ -1129,7 +1191,7 @@ export async function handleGeminiCaption(msg: Message, args: string): Promise<v
             return;
         }
         
-        // We'll only use the first image if multiple are provided
+        // Use only the first image for captioning
         const imageUrl = imageURLs[0];
         const imageData = await fetchImageAsBase64(imageUrl);
         
