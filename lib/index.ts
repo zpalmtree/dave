@@ -47,6 +47,7 @@ import { cacheMessageForSummarization } from './Summarize.js';
 import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 import { convertPumpFunLinks } from './ConvertPumpFunLinks.js';
 import { handleAutoTranscribe } from './OpenAI.js';
+import { convertInstagramLinks } from './ConvertInstagramLinks.js';
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
@@ -66,6 +67,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         convertTwitterLinks(msg);
         convertPumpFunLinks(msg);
         handleAutoTranscribe(msg);
+        convertInstagramLinks(msg);
 
         return;
     }
