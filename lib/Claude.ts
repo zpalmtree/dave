@@ -9,7 +9,7 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-5-20250929',
     temperature: 0.5,
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
