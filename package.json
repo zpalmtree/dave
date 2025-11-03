@@ -36,7 +36,7 @@
     "mathjs": "^7.5.1",
     "moment": "^2.24.0",
     "node-fetch": "^2.6.1",
-    "openai": "^4.95.1",
+    "openai": "6.7.0",
     "sqlite3": "^5.0.0",
     "text-on-gif": "^2.0.7",
     "xml-js": "^1.6.11"

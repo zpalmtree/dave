@@ -1,8 +1,16 @@
 import {
     Message,
     EmbedBuilder,
+    AttachmentBuilder,
 } from 'discord.js';
 import { OpenAI } from 'openai';
+import type {
+  Response as ResponsesPayload,
+  ResponseOutputItem,
+  ResponseReasoningItem,
+  ResponseStreamEvent,
+} from 'openai/resources/responses/responses.js';
+import type { Stream } from 'openai/streaming';
 import { config } from './Config.js';
 import {
     truncateResponse,
@@ -58,6 +66,13 @@ export interface OpenAIResponse {
   result?: string;
   error?: string;
   messages?: UniversalMessage[];
+  images?: GeneratedImage[];
+}
+
+interface GeneratedImage {
+  data: Buffer;
+  mimeType: string;
+  filename: string;
 }
 
 const RESPONSES_MODELS = [
@@ -81,17 +96,16 @@ type ResponsesCreateParams = Parameters<
  * One element of the array-flavoured `input` field.
  * (When `input` is a plain string this `Extract` drops it.)
  */
-type ResponsesInputMessage = Extract<
-  ResponsesCreateParams['input'],
-  Array<any>
->[number];
+type ResponsesInputMessage =
+  ResponsesCreateParams['input'] extends Array<infer T> ? T : never;
 
 /**
  * Our chat-history union now uses the new alias.
  */
 type UniversalMessage =
-  | OpenAI.Chat.ChatCompletionMessageParam
-  | ResponsesInputMessage;
+  OpenAI.Chat.ChatCompletionMessageParam & {
+    previous_response_id?: string;
+  };
 
 /**
  * Sub-union of UniversalMessage that actually owns a `role` key
@@ -100,20 +114,132 @@ type UniversalMessage =
  */
 type RoleMessage = Extract<UniversalMessage, { role: string }>;
 
-/**
- * Narrow extract of the Responses object we care about
- * (avoids depending on the entire @types tree).
- */
-interface SimpleResponsesResult {
-  id: string;
-  output_text?: string;
-  output?: Array<{
-    content: Array<{
-      text?: string;
-    }>;
-  }>;
-  previous_response_id?: string;
+type ResponsesCreateReturn = Awaited<
+  ReturnType<InstanceType<typeof OpenAI>['responses']['create']>
+>;
+
+function hasRoleProperty(message: UniversalMessage): message is RoleMessage {
+  return typeof message.role === 'string';
 }
+
+function getPreviousResponseId(
+  message: UniversalMessage | undefined,
+): string | undefined {
+  return typeof message?.previous_response_id === 'string'
+    ? message.previous_response_id
+    : undefined;
+}
+
+function isReasoningItem(
+  item: ResponseOutputItem,
+): item is ResponseReasoningItem {
+  return item.type === 'reasoning';
+}
+
+function isStreamResponse(
+  response: ResponsesCreateReturn,
+): response is Stream<ResponseStreamEvent> & { _request_id?: string | null } {
+  return typeof (response as any)?.[Symbol.asyncIterator] === 'function';
+}
+
+function toNonStreamingResponse(
+  response: ResponsesCreateReturn,
+): ResponsesPayload {
+  if ('output' in response) {
+    return response;
+  }
+
+  throw new Error('Expected non-streaming response from OpenAI Responses API.');
+}
+
+function buildOpenAIResponseFromResult(
+  result: ResponsesPayload,
+  elapsedSeconds: string,
+  convo: UniversalMessage[],
+): OpenAIResponse {
+  const images = extractImagesFromResponse(result);
+  const reasoningItem = result.output.find(isReasoningItem);
+
+  let thinkingData: string | undefined;
+  if (reasoningItem) {
+    try {
+      thinkingData = reasoningItem.summary
+        .map((t: ResponseReasoningItem.Summary) => t.text)
+        .join('');
+    } catch (err) {
+      console.warn('Failed to read reasoning summary', err);
+    }
+  }
+
+  const rawOutputText =
+    typeof result.output_text === 'string' ? result.output_text : '';
+  const hasText = rawOutputText.trim().length > 0;
+  let responseText: string | undefined;
+
+  if (hasText) {
+    const baseResponse = `${rawOutputText}\n\n*Thought for ${elapsedSeconds} seconds*`;
+
+    if (
+      thinkingData &&
+      baseResponse.length + thinkingData.length + 10 <= 2000
+    ) {
+      responseText =
+        '```' +
+        thinkingData +
+        '```\n' +
+        rawOutputText +
+        `\n\n*Thought for ${elapsedSeconds} seconds*`;
+    } else {
+      responseText = baseResponse;
+    }
+  } else if (!hasText && images.length === 0) {
+    logResponseSummary('Empty response payload', result);
+    return { error: 'Unexpected empty response from API.' };
+  }
+
+  const historyContent = hasText
+    ? rawOutputText
+    : images.length > 0
+      ? '[Generated image attached]'
+      : undefined;
+
+  if (historyContent) {
+    const assistantHistory: UniversalMessage = {
+      role: 'assistant',
+      content: historyContent,
+      previous_response_id: result.id,
+    };
+    convo.push(assistantHistory);
+  }
+
+  return {
+    result: responseText,
+    messages: convo,
+    images: images.length > 0 ? images : undefined,
+  };
+}
+
+function logResponseSummary(label: string, response: ResponsesPayload) {
+  try {
+    const summarized = JSON.parse(
+      JSON.stringify(response, (_, value) => {
+        if (typeof value === 'string' && value.length > 180) {
+          return `${value.slice(0, 90)}… (${value.length} chars)`;
+        }
+        return value;
+      }),
+    );
+    console.warn(`[OpenAI] ${label}:`, JSON.stringify(summarized, null, 2));
+  } catch (err) {
+    console.warn('[OpenAI] Failed to summarize response payload', err);
+  }
+}
+
+function truncateForEmbed(text: string, max: number = 1000): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
 // ---------- main handler -------------------
 
 async function masterOpenAIHandler(
@@ -208,10 +334,9 @@ async function masterOpenAIHandler(
         if (useResponsesAPI) {
           const { messagesForInput, previousResponseId } = (() => {
             const roleMsgs = convo
-              .filter((m): m is RoleMessage => typeof (m as any).role === "string")
+              .filter(hasRoleProperty)
               .map(toResponsesMessage);
-            const prevId =
-              (previousConvo.at(-1) as any)?.previous_response_id ?? undefined;
+            const prevId = getPreviousResponseId(previousConvo.at(-1));
             
             // Log for debugging
             console.log('Previous response ID:', prevId);
@@ -223,18 +348,22 @@ async function masterOpenAIHandler(
           })();
 
           const t0 = Date.now();
-          
+
           // Create the request params
-          const requestParams: any = {
+          const requestParams: ResponsesCreateParams = {
             model,
             instructions: fullSystemPrompt,
-            input: messagesForInput as ResponsesCreateParams["input"],
+            input: messagesForInput,
             max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
             user: msg.author.id,
             reasoning: {
               effort: 'high',
               summary: 'auto',
-            }
+            },
+            tools: [
+              { type: 'image_generation', moderation: 'low' },
+            ],
+            stream: false,
           };
           
           // Only add previous_response_id if it exists and is valid (starts with 'resp')
@@ -243,44 +372,16 @@ async function masterOpenAIHandler(
           }
 
           // Execute the request with the proper parameters
-          const result = await aiClient.responses.create(requestParams);
+          const rawResult = await aiClient.responses.create(requestParams);
+          const result = toNonStreamingResponse(rawResult);
 
           const secs = ((Date.now() - t0) / 1000).toFixed(1);
-
-          if (!result.output_text) return { error: "Unexpected empty response from API." };
-
-          const thinking = result.output.find((o) => o.type === 'reasoning');
-
-          let thinkingData;
-          let response;
-
-          if (thinking) {
-            thinkingData = (thinking as any).summary.map((t: any) => t.text).join('');
-          }
-
-          // Base response without thinking
-          const baseResponse = `${result.output_text}\n\n*Thought for ${secs} seconds*`;
-
-          // Check if adding thinking data would exceed Discord character limit
-          if (thinkingData && (baseResponse.length + thinkingData.length + 10) <= 2000) {
-            response = "```" + thinkingData + "```\n" + result.output_text + `\n\n*Thought for ${secs} seconds*`;
-          } else {
-            response = baseResponse;
-          }
-
-          convo.push({
-            role: "assistant",
-            content: result.output_text,
-            previous_response_id: result.id // Store the actual response ID from the API
-          } as any);
-
-          return { result: response, messages: convo };
+          return buildOpenAIResponseFromResult(result, secs, convo);
         }
 
         const chatMsgs = convo.filter(
           (m): m is OpenAI.Chat.ChatCompletionMessageParam =>
-            (typeof (m as any).role === 'string') &&
-            ['system', 'user', 'assistant'].includes((m as any).role),
+            m.role === 'system' || m.role === 'user' || m.role === 'assistant',
         );
 
         // ------------- Chat-Completions branch ---------------
@@ -328,6 +429,157 @@ async function masterOpenAIHandler(
   });
 }
 
+async function replyWithOpenAIResponse(
+  msg: Message,
+  response: OpenAIResponse,
+  { cacheHistory = true }: { cacheHistory?: boolean } = {},
+): Promise<void> {
+  if (response.error) {
+    await msg.reply(response.error);
+    return;
+  }
+
+  const replies = await sendResponseMessages(msg, response);
+
+  if (cacheHistory && response.messages && replies.length > 0) {
+    chatHistoryCache.set(replies[0].id, response.messages);
+  }
+}
+
+async function sendResponseMessages(
+  msg: Message,
+  response: OpenAIResponse,
+): Promise<import('discord.js').Message[]> {
+  const images = response.images ?? [];
+  const attachments = buildImageAttachments(images);
+  const hasAttachments = attachments.length > 0;
+  const text = response.result;
+
+  if (text && text.length > 1999) {
+    return replyLongMessage(
+      msg,
+      text,
+      hasAttachments ? { files: attachments } : undefined,
+    );
+  }
+
+  if (text) {
+    const sent = await msg.reply({
+      content: text,
+      ...(hasAttachments ? { files: attachments } : {}),
+    });
+    return [sent];
+  }
+
+  if (hasAttachments) {
+    const sent = await msg.reply({ files: attachments });
+    return [sent];
+  }
+
+  return [];
+}
+
+function buildImageAttachments(images: GeneratedImage[]): AttachmentBuilder[] {
+  return images.map((image, index) => {
+    const fallbackName = `openai-image-${index}.${getExtensionFromMime(image.mimeType)}`;
+    return new AttachmentBuilder(image.data, {
+      name: image.filename || fallbackName,
+    });
+  });
+}
+
+function extractImagesFromResponse(result: ResponsesPayload): GeneratedImage[] {
+  const images: GeneratedImage[] = [];
+  const timestamp = Date.now();
+
+  result.output.forEach((item, index) => {
+    if (item.type !== 'image_generation_call') return;
+
+    const acceptableStatuses = new Set(['completed', 'generating', 'in_progress']);
+    if (item.status && !acceptableStatuses.has(item.status)) return;
+
+    const maybeResults: Array<string | null | undefined> = [];
+    if (typeof item.result === 'string') {
+      maybeResults.push(item.result);
+    }
+
+    const multiResult = (item as any)?.results;
+    if (Array.isArray(multiResult)) {
+      multiResult.forEach((entry: any) => {
+        if (typeof entry?.b64_json === 'string') {
+          maybeResults.push(entry.b64_json);
+        } else if (typeof entry === 'string') {
+          maybeResults.push(entry);
+        }
+      });
+    }
+
+    const format =
+      (item as any)?.output_format === 'jpeg'
+        ? 'jpeg'
+        : (item as any)?.output_format === 'webp'
+          ? 'webp'
+          : 'png';
+
+    const mimeType =
+      format === 'jpeg'
+        ? 'image/jpeg'
+        : format === 'webp'
+          ? 'image/webp'
+          : 'image/png';
+
+    maybeResults.forEach((encoded, subIndex) => {
+      if (typeof encoded !== 'string' || encoded.length === 0) return;
+
+      try {
+        const buffer = Buffer.from(encoded, 'base64');
+        if (!buffer.length) return;
+
+        const filename = `openai-image-${timestamp}-${index}-${subIndex}.${format}`;
+        images.push({
+          data: buffer,
+          mimeType,
+          filename,
+        });
+      } catch (err) {
+        console.warn('Failed to decode image payload', err);
+      }
+    });
+  });
+
+  return images;
+}
+
+function getExtensionFromMime(mimeType: string): string {
+  if (!mimeType || typeof mimeType !== 'string') return 'png';
+  const parts = mimeType.split('/');
+  if (parts.length < 2) return 'png';
+  const subtype = parts[1].split('+')[0];
+  return subtype || 'png';
+}
+
+async function gatherImageURLsForRequest(msg: Message): Promise<string[]> {
+  const urls = new Set<string>(getImageURLsFromMessage(msg));
+
+  if (msg.reference?.messageId) {
+    try {
+      const referenced = await msg.channel?.messages.fetch(msg.reference.messageId);
+      if (referenced) {
+        const referencedUrls = getImageURLsFromMessage(referenced);
+        if (referenced.author?.bot && referencedUrls.length > 0) {
+          urls.add(referencedUrls[0]);
+        } else {
+          referencedUrls.forEach((url) => urls.add(url));
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch referenced message for image context', err);
+    }
+  }
+
+  return Array.from(urls);
+}
+
 function createSystemPrompt(prompt: string, username: string): string {
     const now = new Date().toLocaleDateString('en-US', {
         weekday: 'long',
@@ -354,15 +606,7 @@ export async function handleChatGPT(msg: Message, args: string): Promise<void> {
         systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible. Do not use markdown formatting for math/science equations, leave them plaintext. Make responses compact to use limited space in the discord chat where you are running - e.g. limited extra newlines.`
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            // Use the first message ID for the history cache
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleGLADOS(msg: Message, args: string): Promise<void> {
@@ -385,14 +629,7 @@ If the user is annoying, abruptly end the conversation.`,
         temperature: 1.3,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleDrunk(msg: Message, args: string): Promise<void> {
@@ -403,14 +640,7 @@ export async function handleDrunk(msg: Message, args: string): Promise<void> {
         temperature: 1.2,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleDavinci(msg: Message, args: string): Promise<void> {
@@ -424,14 +654,7 @@ export async function handleDavinci(msg: Message, args: string): Promise<void> {
         maxCompletionTokens: 4096,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleDoctor(msg: Message, args: string): Promise<void> {
@@ -442,14 +665,7 @@ export async function handleDoctor(msg: Message, args: string): Promise<void> {
         temperature: 1.1,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleGf(msg: Message, args: string): Promise<void> {
@@ -463,14 +679,7 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
         maxCompletionTokens: 4096,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleTradGf(msg: Message, args: string): Promise<void> {
@@ -484,14 +693,7 @@ export async function handleTradGf(msg: Message, args: string): Promise<void> {
         maxCompletionTokens: 4096,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleAIQuote(msg: Message, args: string): Promise<void> {
@@ -512,14 +714,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         maxCompletionTokens: 4096,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleBuggles(msg: Message, args: string): Promise<void> {
@@ -541,14 +736,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         maxCompletionTokens: 16384,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleO3(msg: Message, args: string): Promise<void> {
@@ -563,14 +751,7 @@ export async function handleO3(msg: Message, args: string): Promise<void> {
         includeFiles: true,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
-    }
+    await replyWithOpenAIResponse(msg, response);
 }
 
 export async function handleTranscribe(msg: Message) {
@@ -726,14 +907,328 @@ export async function handleTranslate(msg: Message, args: string): Promise<void>
         systemPrompt: `You are a master translator. If no language is specified, translate the input to english. Provide context as appropriate. Your replies should be in english unless specified otherwise "e.g. translate this to french".`,
     });
 
-    if (response.result) {
-        const replies = await replyLongMessage(msg, response.result);
-        if (response.messages && replies.length > 0) {
-            chatHistoryCache.set(replies[0].id, response.messages);
-        }
-    } else if (response.error) {
-        await msg.reply(response.error);
+    await replyWithOpenAIResponse(msg, response);
+}
+
+export async function handleCImage(msg: Message, args: string): Promise<void> {
+    const prompt = args.trim();
+    const MAX_STREAM_PARTIALS = 3;
+
+    if (prompt.length === 0) {
+        await msg.reply('Please provide a description for the image you want me to create.');
+        return;
     }
+
+    await withTyping(msg.channel, async () => {
+        const username = await getUsername(msg.author.id, msg.guild);
+        const imageURLs = await gatherImageURLsForRequest(msg);
+
+        const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
+            { type: 'text', text: prompt },
+            ...imageURLs.map(
+                (url): OpenAI.Chat.ChatCompletionContentPart => ({
+                    type: 'image_url',
+                    image_url: { url },
+                }),
+            ),
+        ];
+
+        const userMessageForInput: UniversalMessage = {
+            role: 'user',
+            content: contentParts,
+        };
+
+        const promptPreview =
+            prompt.length > 180 ? `${prompt.slice(0, 177)}…` : prompt;
+
+        const buildProgressEmbed = (options: {
+            status: 'starting' | 'generating' | 'done' | 'error';
+            partialCount?: number;
+            errorText?: string;
+            elapsedSeconds?: string;
+        }): EmbedBuilder => {
+            const embed = new EmbedBuilder()
+                .setTitle('Generating image')
+                .setDescription(`**Prompt:** ${promptPreview}`)
+                .setTimestamp(new Date());
+
+            const { status, partialCount = 0, errorText, elapsedSeconds } = options;
+
+            switch (status) {
+                case 'starting':
+                    embed.setColor(0x5865F2).setFooter({ text: 'Status: Starting…' });
+                    break;
+                case 'generating': {
+                    const footer =
+                        partialCount > 0
+                            ? `Status: Generating • Preview ${partialCount}/${MAX_STREAM_PARTIALS}`
+                            : 'Status: Generating';
+                    embed.setColor(0x5865F2).setFooter({ text: footer });
+                    break;
+                }
+                case 'done': {
+                    const footer = elapsedSeconds
+                        ? `Status: Completed • ${elapsedSeconds}s`
+                        : 'Status: Completed';
+                    embed.setColor(0x57F287).setFooter({ text: footer });
+                    break;
+                }
+                case 'error':
+                    embed.setColor(0xED4245).setFooter({ text: 'Status: Failed' });
+                    break;
+            }
+
+            if (errorText) {
+                embed.addFields({
+                    name: 'Error',
+                    value: errorText.slice(0, 1024),
+                });
+            }
+
+            if (status !== 'done') {
+                embed.addFields({
+                    name: 'Note',
+                    value:
+                        status === 'error'
+                            ? 'No image was generated.'
+                            : 'Final image will be posted once generation completes.',
+                });
+            }
+
+            return embed;
+        };
+
+        let progressMessage: Message | null = null;
+
+        const updateProgress = async (options: {
+            status: 'starting' | 'generating' | 'done' | 'error';
+            partialCount?: number;
+            partialBuffer?: Buffer | null;
+            errorText?: string;
+            elapsedSeconds?: string;
+            showImage?: boolean;
+            createIfMissing?: boolean;
+        }) => {
+            const { partialBuffer, status, showImage, createIfMissing = false } = options;
+            const embed = buildProgressEmbed(options);
+            const editPayload: any = { embeds: [embed] };
+
+            if (partialBuffer && showImage) {
+                editPayload.files = [
+                    new AttachmentBuilder(partialBuffer, {
+                        name: 'partial.png',
+                    }),
+                ];
+                editPayload.attachments = [];
+                embed.setImage('attachment://partial.png');
+            } else if (status === 'done' || status === 'error') {
+                editPayload.attachments = [];
+            }
+
+            try {
+                if (!progressMessage) {
+                    if (!createIfMissing) return;
+                    progressMessage = await msg.reply(editPayload);
+                } else {
+                    await progressMessage.edit(editPayload);
+                }
+            } catch (editErr) {
+                console.warn('Failed to update image generation progress embed', editErr);
+            }
+        };
+
+        const showFinalResult = async (
+            payload: OpenAIResponse,
+            elapsedSeconds: string,
+        ) => {
+            const images = payload.images ?? [];
+            const attachments = buildImageAttachments(images);
+
+            const finalEmbed = buildProgressEmbed({
+                status: 'done',
+                elapsedSeconds,
+            });
+
+            let description = `**Prompt:** ${promptPreview}`;
+            if (payload.result) {
+                description += `\n\n**Response:** ${truncateForEmbed(payload.result)}`;
+            }
+            finalEmbed.setDescription(description);
+
+            if (attachments.length > 0) {
+                const primaryName = attachments[0].name;
+                finalEmbed.setImage(`attachment://${primaryName}`);
+            }
+
+            const messagePayload: any = {
+                embeds: [finalEmbed],
+            };
+
+            if (attachments.length > 0) {
+                messagePayload.files = attachments;
+                messagePayload.attachments = [];
+            } else {
+                messagePayload.attachments = [];
+            }
+
+            if (progressMessage) {
+                await progressMessage.edit(messagePayload);
+            } else {
+                progressMessage = await msg.reply(messagePayload);
+            }
+        };
+
+        try {
+            const requestPayload: ResponsesCreateParams = {
+                model: 'gpt-5',
+                instructions: createSystemPrompt(
+                    'You are a creative visual artist. Always respond by calling the image_generation tool to produce imagery that matches the user request.',
+                    username,
+                ),
+                input: [toResponsesMessage(userMessageForInput)],
+                tools: [
+                    {
+                        type: 'image_generation',
+                        moderation: 'low',
+                        output_format: 'jpeg',
+                        output_compression: 50,
+                        partial_images: MAX_STREAM_PARTIALS,
+                    },
+                ],
+                user: msg.author.id,
+                stream: true,
+            };
+
+            const startedAt = Date.now();
+            const rawResult = await openai.responses.create(requestPayload);
+
+            if (!isStreamResponse(rawResult)) {
+                const result = toNonStreamingResponse(rawResult);
+                const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+                const payload = buildOpenAIResponseFromResult(result, elapsed, []);
+
+                if (payload.error) {
+                    await updateProgress({
+                        status: 'error',
+                        errorText: payload.error,
+                        createIfMissing: true,
+                    });
+                    return;
+                }
+
+                await showFinalResult(payload, elapsed);
+                return;
+            }
+
+            let finalResponse: ResponsesPayload | null = null;
+            let streamError: string | undefined;
+            let latestPartial: Buffer | null = null;
+            let lastPartialIndex = -1;
+            let partialCount = 0;
+
+            for await (const event of rawResult) {
+                switch (event.type) {
+                    case 'response.image_generation_call.partial_image': {
+                        if (event.partial_image_index !== lastPartialIndex) {
+                            lastPartialIndex = event.partial_image_index;
+                            partialCount = Math.max(
+                                partialCount,
+                                event.partial_image_index + 1,
+                            );
+                        }
+                        latestPartial = Buffer.from(event.partial_image_b64, 'base64');
+                        await updateProgress({
+                            status: 'generating',
+                            partialCount,
+                            partialBuffer: latestPartial,
+                            showImage: true,
+                            createIfMissing: true,
+                        });
+                        break;
+                    }
+                    case 'response.image_generation_call.in_progress':
+                    case 'response.image_generation_call.generating':
+                        await updateProgress({
+                            status: 'generating',
+                            partialCount,
+                            showImage: false,
+                        });
+                        break;
+                    case 'response.image_generation_call.completed':
+                        await updateProgress({
+                            status: 'generating',
+                            partialCount,
+                            showImage: !!latestPartial,
+                            partialBuffer: latestPartial,
+                        });
+                        break;
+                    case 'response.completed':
+                        finalResponse = event.response;
+                        break;
+                    case 'response.failed':
+                        streamError =
+                            event.response.error?.message ||
+                            'Image generation failed.';
+                        break;
+                    case 'error':
+                        streamError = event.message || 'Image generation failed.';
+                        break;
+                    default:
+                        break;
+                }
+
+                if (streamError) {
+                    break;
+                }
+            }
+
+            if (streamError) {
+                await updateProgress({
+                    status: 'error',
+                    errorText: streamError,
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            if (!finalResponse) {
+                await updateProgress({
+                    status: 'error',
+                    errorText: 'Image generation ended unexpectedly without a result.',
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+            const payload = buildOpenAIResponseFromResult(finalResponse, elapsed, []);
+
+            if (payload.error) {
+                logResponseSummary('Empty streamed response payload', finalResponse);
+                await updateProgress({
+                    status: 'error',
+                    errorText: payload.error,
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            await showFinalResult(payload, elapsed);
+        } catch (error: any) {
+            console.error('Failed to generate image with OpenAI Responses API:', error);
+            const message =
+                typeof error?.response?.data?.error?.message === 'string'
+                    ? error.response.data.error.message
+                    : typeof error?.message === 'string'
+                        ? error.message
+                        : 'Unknown error';
+            await updateProgress({
+                status: 'error',
+                errorText: message,
+                createIfMissing: true,
+            });
+        }
+    });
 }
 
 /**
