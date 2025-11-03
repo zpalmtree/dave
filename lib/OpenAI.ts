@@ -152,6 +152,61 @@ function toNonStreamingResponse(
   throw new Error('Expected non-streaming response from OpenAI Responses API.');
 }
 
+function extractAssistantOutputText(result: ResponsesPayload): string {
+  if (typeof result.output_text === 'string') {
+    const trimmed = result.output_text.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  const segments: string[] = [];
+
+  for (const item of result.output ?? []) {
+    if (item?.type !== 'message') continue;
+
+    const role = (item as any)?.role;
+    if (role !== 'assistant') continue;
+
+    const contentParts = (item as any)?.content;
+    if (!Array.isArray(contentParts)) continue;
+
+    for (const part of contentParts) {
+      if (part?.type === 'output_text' && typeof part.text === 'string') {
+        const formatted = part.text.trim();
+        if (formatted.length > 0) {
+          segments.push(formatted);
+        }
+      }
+    }
+  }
+
+  if (segments.length === 0) return '';
+
+  return segments.join('\n\n');
+}
+
+function extractErrorMessage(result: ResponsesPayload): string | undefined {
+  const topLevelError = (result as any)?.error?.message;
+  if (typeof topLevelError === 'string' && topLevelError.trim().length > 0) {
+    return topLevelError.trim();
+  }
+
+  for (const item of result.output ?? []) {
+    const message = (item as any)?.error?.message;
+    if (typeof message === 'string' && message.trim().length > 0) {
+      return message.trim();
+    }
+  }
+
+  const incompleteReason = (result as any)?.incomplete_details?.reason;
+  if (typeof incompleteReason === 'string' && incompleteReason.trim().length > 0) {
+    return `Request incomplete: ${incompleteReason.trim()}`;
+  }
+
+  return undefined;
+}
+
 function buildOpenAIResponseFromResult(
   result: ResponsesPayload,
   elapsedSeconds: string,
@@ -171,9 +226,8 @@ function buildOpenAIResponseFromResult(
     }
   }
 
-  const rawOutputText =
-    typeof result.output_text === 'string' ? result.output_text : '';
-  const hasText = rawOutputText.trim().length > 0;
+  const rawOutputText = extractAssistantOutputText(result);
+  const hasText = rawOutputText.length > 0;
   let responseText: string | undefined;
 
   if (hasText) {
@@ -193,6 +247,11 @@ function buildOpenAIResponseFromResult(
       responseText = baseResponse;
     }
   } else if (!hasText && images.length === 0) {
+    const errorMessage = extractErrorMessage(result);
+    if (errorMessage) {
+      return { error: errorMessage };
+    }
+
     logResponseSummary('Empty response payload', result);
     return { error: 'Unexpected empty response from API.' };
   }
@@ -557,22 +616,28 @@ function getExtensionFromMime(mimeType: string): string {
   return subtype || 'png';
 }
 
-async function gatherImageURLsForRequest(msg: Message): Promise<string[]> {
+async function gatherImageURLsForRequest(
+  msg: Message,
+  referencedMessage?: Message,
+): Promise<string[]> {
   const urls = new Set<string>(getImageURLsFromMessage(msg));
 
-  if (msg.reference?.messageId) {
+  let contextMessage = referencedMessage;
+
+  if (!contextMessage && msg.reference?.messageId) {
     try {
-      const referenced = await msg.channel?.messages.fetch(msg.reference.messageId);
-      if (referenced) {
-        const referencedUrls = getImageURLsFromMessage(referenced);
-        if (referenced.author?.bot && referencedUrls.length > 0) {
-          urls.add(referencedUrls[0]);
-        } else {
-          referencedUrls.forEach((url) => urls.add(url));
-        }
-      }
+      contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
     } catch (err) {
       console.warn('Failed to fetch referenced message for image context', err);
+    }
+  }
+
+  if (contextMessage) {
+    const referencedUrls = getImageURLsFromMessage(contextMessage);
+    if (contextMessage.author?.bot && referencedUrls.length > 0) {
+      urls.add(referencedUrls[0]);
+    } else {
+      referencedUrls.forEach((url) => urls.add(url));
     }
   }
 
@@ -889,8 +954,23 @@ export async function handleTranslate(msg: Message, args: string): Promise<void>
 }
 
 export async function handleCImage(msg: Message, args: string): Promise<void> {
-    const prompt = args.trim();
+    const userArgs = args.trim();
     const MAX_STREAM_PARTIALS = 3;
+
+    let referencedMessage: Message | undefined;
+    if (msg.reference?.messageId) {
+        try {
+            referencedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+        } catch (err) {
+            console.warn('Failed to fetch referenced message for prompt context', err);
+        }
+    }
+
+    const referencedText = referencedMessage?.content?.trim();
+    let prompt = userArgs;
+    if (referencedText && referencedText.length > 0) {
+        prompt = prompt.length > 0 ? `${referencedText}\n${prompt}` : referencedText;
+    }
 
     if (prompt.length === 0) {
         await msg.reply('Please provide a description for the image you want me to create.');
@@ -899,7 +979,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
 
     await withTyping(msg.channel, async () => {
         const username = await getUsername(msg.author.id, msg.guild);
-        const imageURLs = await gatherImageURLsForRequest(msg);
+        const imageURLs = await gatherImageURLsForRequest(msg, referencedMessage);
 
         const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
             { type: 'text', text: prompt },
