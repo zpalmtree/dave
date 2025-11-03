@@ -74,6 +74,7 @@ import {
     handleBuggles,
     handleO3,
     handleTranslate,
+    handleCImage,
 } from './OpenAI.js';
 
 import {
@@ -1223,6 +1224,23 @@ export const Commands: Command[] = [
             implementation: handleGeminiImageGen,
             description: 'Generate an image using Gemini',
         },
+        relatedCommands: [
+            'cimage',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['cimage'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCImage,
+            description: 'Generate an image using GPT Image 1',
+        },
+        relatedCommands: [
+            'gimage',
+        ],
         commandGates: [
             slugUserGate,
         ],

@@ -2610,18 +2610,10 @@ onetime@^6.0.0:
   dependencies:
     mimic-fn "^4.0.0"
 
-openai@^4.95.1:
-  version "4.95.1"
-  resolved "https://registry.yarnpkg.com/openai/-/openai-4.95.1.tgz#7157697c2b150a546b13eb860180c4a6058051da"
-  integrity sha512-IqJy+ymeW+k/Wq+2YVN3693OQMMcODRtHEYOlz263MdUwnN/Dwdl9c2EXSxLLtGEHkSHAfvzpDMHI5MaWJKXjQ==
-  dependencies:
-    "@types/node" "^18.11.18"
-    "@types/node-fetch" "^2.6.4"
-    abort-controller "^3.0.0"
-    agentkeepalive "^4.2.1"
-    form-data-encoder "1.7.2"
-    formdata-node "^4.3.2"
-    node-fetch "^2.6.7"
+openai@6.7.0:
+  version "6.7.0"
+  resolved "https://registry.yarnpkg.com/openai/-/openai-6.7.0.tgz#86c3add2a14fba23307ed4c5b9ba7f6cb48c0262"
+  integrity sha512-mgSQXa3O/UXTbA8qFzoa7aydbXBJR5dbLQXCRapAOtoNT+v69sLdKMZzgiakpqhclRnhPggPAXoniVGn2kMY2A==
 
 optionator@^0.8.1:
   version "0.8.3"

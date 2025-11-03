@@ -452,7 +452,16 @@ export async function replyLongMessage(
     
     for (let i = 0; i < parts.length; i++) {
         // Only use reply reference for the first message to avoid multiple notifications
-        const replyOptions = i === 0 ? options : { ...options, failIfNotExists: false };
+        let replyOptions: any;
+        if (i === 0) {
+            replyOptions = options;
+        } else {
+            const { files: _files, attachments: _attachments, ...rest } = options || {};
+            replyOptions = {
+                ...rest,
+                failIfNotExists: false,
+            };
+        }
         
         const sentMessage = await message.reply({
             ...replyOptions,
