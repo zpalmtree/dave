@@ -2155,10 +2155,10 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
         description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
     }
 
-    const dotGraphAttachment = new AttachmentBuilder(dotGraph.toBuffer())
+    const dotGraphAttachment = new AttachmentBuilder(dotGraph.toBuffer('image/png'))
         .setName('dot-graph.png');
 
-    const dotAttachment = new AttachmentBuilder(dot.toBuffer())
+    const dotAttachment = new AttachmentBuilder(dot.toBuffer('image/png'))
         .setName('dot.png');
 
     const percentage = Math.floor(currentDotValue * 100);
