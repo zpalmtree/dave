@@ -26,11 +26,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.41.0",
-    "@google/generative-ai": "^0.24.0",
+    "@google/genai": "^1.30.0",
     "@solana/web3.js": "^1.91.3",
     "discord.js": "^14.13.0",
     "fabric": "^4.3.1",
-    "form-data": "^4.0.0",
+    "form-data": "^4.0.4",
+    "groq-sdk": "^0.9.1",
     "imagemin": "^8.0.1",
     "imagemin-gifsicle": "https://github.com/imagemin/imagemin-gifsicle.git",
     "mathjs": "^7.5.1",
@@ -39,6 +40,10 @@
     "openai": "6.7.0",
     "sqlite3": "^5.0.0",
     "text-on-gif": "^2.0.7",
-    "xml-js": "^1.6.11"
+    "xml-js": "^1.6.11",
+    "canvas": "npm:@napi-rs/canvas@^0.1.82"
+  },
+  "resolutions": {
+    "canvas": "npm:@napi-rs/canvas@^0.1.82"
   }
 }
