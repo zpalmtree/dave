@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 
 import { xml2json } from 'xml-js';
 
-import canvas from 'canvas';
+import { Canvas, createCanvas, loadImage } from 'canvas';
 
 import { RGB } from './Types.js';
 
@@ -37,8 +37,8 @@ const COLORS: {color1: string, color2: string}[] = [
 ];
 
 // generate dot color stops
-let DOT_IMAGES: canvas.Image[] = [];
-let DOT_COLORS: { tail: number, mc: canvas.Image }[] = [];
+let DOT_IMAGES: Canvas[] = [];
+let DOT_COLORS: { tail: number, mc: Canvas }[] = [];
 
 export async function initDot() {
     if (DOT_IMAGES.length === 0) {
@@ -61,49 +61,69 @@ export async function initDot() {
     }
 }
 
-async function generateDotImages(): Promise<canvas.Image[]> {
-    const dotSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_WIDTH}' height='${DOT_HEIGHT}'>
-    <defs>
-        <filter id='f1'>
-            <feGaussianBlur in='SourceGraphic' stdDeviation='9 3' />
-        </filter>
-        <radialGradient id='highlight' cy='5%' r='50%' gradientTransform='translate(-0.25 0) scale(1.5 1)'>
-            <stop offset='10%' stop-color='white' stop-opacity='100'/>
-            <stop offset='100%' stop-color='white' stop-opacity='0'/>
-        </radialGradient>
-        <radialGradient id='grad' cy='92%' r='60%' gradientTransform='translate(-0.2 0) scale(1.4 1)'>
-            <stop offset='0%' stop-color='$$COLOR1$$'/>
-            <stop offset='100%' stop-color='$$COLOR2$$'/>
-        </radialGradient>
-    </defs>
-    <circle fill='url(#grad)' cx='50%' cy='45%' r='45%'/>
-    <clipPath id='ic'>
-        <circle cx='50%' cy='40%' r='37%' />
-    </clipPath>
-    <g filter='url(#f1)'>
-        <circle fill='url(#highlight)' cx='50%' cy='50%' r='48%' clip-path='url(#ic)' />
-    </g>
-</svg>`;
-
-    // generate dot color stops
-    const DOT_IMAGES: canvas.Image[] = [];
+async function generateDotImages(): Promise<Canvas[]> {
+    const images: Canvas[] = [];
 
     for (const { color1, color2 } of COLORS) {
-        const svg = dotSvg.replace('$$COLOR1$$', color1).replace('$$COLOR2$$', color2);
-        const img = new canvas.Image();
+        const dotCanvas = createCanvas(DOT_WIDTH, DOT_HEIGHT);
+        const ctx = dotCanvas.getContext('2d');
 
-        const image = await canvas.loadImage(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+        // soft drop shadow
+        ctx.save();
+        ctx.filter = `blur(${SHADOW_BLUR}px)`;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.beginPath();
+        ctx.arc(DOT_WIDTH / 2, DOT_HEIGHT * 0.49, DOT_WIDTH * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
 
-        image.width = DOT_WIDTH;
-        image.height = DOT_HEIGHT;
+        // base gradient
+        const grad = ctx.createRadialGradient(
+            DOT_WIDTH * 0.3,
+            DOT_HEIGHT * 0.9,
+            0,
+            DOT_WIDTH * 0.5,
+            DOT_HEIGHT * 0.45,
+            DOT_WIDTH * 0.55
+        );
+        grad.addColorStop(0, color1);
+        grad.addColorStop(1, color2);
 
-        DOT_IMAGES.push(image);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(DOT_WIDTH / 2, DOT_HEIGHT * 0.45, DOT_WIDTH * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+
+        // glossy highlight on top
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(DOT_WIDTH / 2, DOT_HEIGHT * 0.4, DOT_WIDTH * 0.37, 0, Math.PI * 2);
+        ctx.clip();
+
+        const highlight = ctx.createRadialGradient(
+            DOT_WIDTH * 0.5,
+            DOT_HEIGHT * 0.1,
+            0,
+            DOT_WIDTH * 0.5,
+            DOT_HEIGHT * 0.1,
+            DOT_WIDTH * 0.6
+        );
+        highlight.addColorStop(0, 'rgba(255,255,255,0.95)');
+        highlight.addColorStop(0.6, 'rgba(255,255,255,0.35)');
+        highlight.addColorStop(1, 'rgba(255,255,255,0)');
+
+        ctx.filter = 'blur(6px)';
+        ctx.fillStyle = highlight;
+        ctx.fillRect(0, 0, DOT_WIDTH, DOT_HEIGHT);
+        ctx.restore();
+
+        images.push(dotCanvas);
     }
 
-    return DOT_IMAGES;
+    return images;
 }
 
-export async function renderDot(): Promise<[string, number, canvas.Canvas]> {
+export async function renderDot(): Promise<[string, number, Canvas]> {
     const response = await fetch('http://gcpdot.com/gcpindex.php');
 
     const dotXML = await response.text();
@@ -117,24 +137,8 @@ export async function renderDot(): Promise<[string, number, canvas.Canvas]> {
         return item.attributes.t === serverTime
     }).elements[0].text);
 
-    const dotCanvas = canvas.createCanvas(DOT_WIDTH, DOT_HEIGHT);
+    const dotCanvas = createCanvas(DOT_WIDTH, DOT_HEIGHT);
     const dotContext = dotCanvas.getContext('2d');
-
-    const shadowSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_WIDTH}' height='${DOT_HEIGHT}' style='opacity:0.7'>
-    <defs>
-        <filter id='fh'>
-            <feGaussianBlur in='SourceGraphic' stdDeviation='${SHADOW_BLUR} ${SHADOW_BLUR}' />
-        </filter>
-    </defs>
-    <circle filter='url(#fh)' fill='black' cx='50%' cy='49%' r='45%'/>
-</svg>`;
-
-    /* Generate dot drop shadow */
-    const shadowImage = await canvas.loadImage(`data:image/svg+xml;base64,${Buffer.from(shadowSvg).toString('base64')}`);
-    shadowImage.width = DOT_WIDTH;
-    shadowImage.height = DOT_HEIGHT;
-
-    dotContext.drawImage(shadowImage, 0, 0);
 
     let blendRGB: RGB = {r: 255, g: 255, b: 255}; // if the final output is white you know shit's fucked
     for (let i = 0; i < DOT_COLORS.length - 1; i++) {
@@ -169,12 +173,12 @@ export async function renderDot(): Promise<[string, number, canvas.Canvas]> {
     return [ rgbToHex(blendRGB), currentDotValue, dotCanvas ];
 };
 
-export async function renderDotGraph(timespan: number): Promise<[ number, canvas.Canvas ]> {
+export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
     const inv_ch = 1.0 / DOT_GRAPH_HEIGHT;
 
-    var canvasData = canvas.createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    var canvasData = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
     var context = canvasData.getContext('2d');
-    var outCanvas = canvas.createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    var outCanvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
     var outContext = outCanvas.getContext("2d");
 
     const response = await fetch(`http://global-mind.org/gcpdot/gcpgraph.php?pixels=${DOT_GRAPH_WIDTH}&seconds=${timespan}`);
@@ -202,7 +206,7 @@ export async function renderDotGraph(timespan: number): Promise<[ number, canvas
     <rect width='100%' height='100%' fill='url(#g)'/>
 </svg>`;
 
-    const bgImage = await canvas.loadImage(`data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`);
+    const bgImage = await loadImage(`data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`);
 
     context.drawImage(bgImage, 0, 0);
 

@@ -40,6 +40,10 @@
     "openai": "6.7.0",
     "sqlite3": "^5.0.0",
     "text-on-gif": "^2.0.7",
-    "xml-js": "^1.6.11"
+    "xml-js": "^1.6.11",
+    "canvas": "npm:@napi-rs/canvas@^0.1.82"
+  },
+  "resolutions": {
+    "canvas": "npm:@napi-rs/canvas@^0.1.82"
   }
 }
