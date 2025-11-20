@@ -1441,20 +1441,6 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['testimage'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGeminiImageGen,
-            description: 'Generate an image using Gemini',
-        },
-        relatedCommands: [
-            'cimage',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
         aliases: ['cimage'],
         primaryCommand: {
             argsFormat: Args.Combined,
