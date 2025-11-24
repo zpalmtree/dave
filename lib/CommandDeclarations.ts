@@ -101,6 +101,7 @@ import {
     handleO3,
     handleTranslate,
     handleCImage,
+    handleRemoveBg,
 } from './OpenAI.js';
 
 import {
@@ -1448,6 +1449,30 @@ export const Commands: Command[] = [
             description: 'Generate an image using GPT Image 1',
         },
         relatedCommands: [
+            'gimage',
+            'removebg',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['removebg'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleRemoveBg,
+            description: 'Remove the background from an image using GPT Image 1',
+            examples: [
+                {
+                    value: 'removebg',
+                },
+                {
+                    value: 'removebg clean edges',
+                },
+            ],
+        },
+        relatedCommands: [
+            'cimage',
             'gimage',
         ],
         commandGates: [
