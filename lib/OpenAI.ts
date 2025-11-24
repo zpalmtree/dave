@@ -21,6 +21,33 @@ import {
     replyLongMessage,
 } from './Utilities.js';
 
+// Polyfill File for environments running on Node < 20 so OpenAI uploads work.
+void (async () => {
+    if (typeof globalThis.File !== 'undefined') return;
+
+    let FileCtor: typeof File | undefined;
+
+    try {
+        FileCtor = (await import('node:buffer') as any).File;
+    } catch (err) {
+        console.warn('Unable to import node:buffer while polyfilling File.', err);
+    }
+
+    if (!FileCtor) {
+        try {
+            FileCtor = (await import('undici') as any).File;
+        } catch (err) {
+            console.warn('Unable to import undici while polyfilling File.', err);
+        }
+    }
+
+    if (FileCtor) {
+        (globalThis as any).File = FileCtor;
+    } else {
+        console.warn('File constructor not available; OpenAI file uploads may fail on this Node version.');
+    }
+})();
+
 const openai = new OpenAI({
     apiKey: config.openaiApiKey,
 });
@@ -35,6 +62,22 @@ const DEFAULT_SETTINGS = {
 };
 
 const MAX_FILE_SIZE = 1024 * 1024 * 25; // 25MB
+
+const CONTENT_TYPE_EXTENSION: Record<string, string> = {
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'audio/flac': 'flac',
+    'audio/ogg': 'ogg',
+    'video/ogg': 'ogg',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/webm': 'webm',
+    'video/webm': 'webm',
+    'video/mp4': 'mp4',
+    'video/mpeg': 'mpeg',
+};
 
 const VALID_CONTENT_TYPES = [
     "audio/flac", "audio/mpeg", "video/mp4", "video/mpeg",
@@ -297,6 +340,39 @@ function logResponseSummary(label: string, response: ResponsesPayload) {
 function truncateForEmbed(text: string, max: number = 1000): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
+}
+
+function contentTypeToExtension(contentType?: string | null): string | undefined {
+    if (!contentType) return undefined;
+    const normalized = contentType.split(';')[0].trim().toLowerCase();
+    return CONTENT_TYPE_EXTENSION[normalized];
+}
+
+function buildFilename(url: string, contentType?: string | null): string {
+    try {
+        const pathname = new URL(url).pathname;
+        const base = pathname.split('/').pop() || 'audio';
+        if (base.includes('.')) return base;
+
+        const ext = contentTypeToExtension(contentType);
+        return ext ? `${base}.${ext}` : `${base}.mp3`;
+    } catch {
+        const ext = contentTypeToExtension(contentType) || 'mp3';
+        return `audio.${ext}`;
+    }
+}
+
+async function fetchUrlAsFile(url: string): Promise<File> {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type') || undefined;
+    const filename = buildFilename(url, contentType);
+    const buffer = await response.arrayBuffer();
+
+    return new File([buffer], filename, { type: contentType });
 }
 
 // ---------- main handler -------------------
@@ -891,8 +967,9 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
 
     for (const url of urls) {
         try {
+            const audioFile = await fetchUrlAsFile(url);
             const transcription = await openai.audio.transcriptions.create({
-                file: await fetch(url),
+                file: audioFile,
                 model: 'whisper-1',
             });
 
@@ -951,6 +1028,350 @@ export async function handleTranslate(msg: Message, args: string): Promise<void>
     });
 
     await replyWithOpenAIResponse(msg, response);
+}
+
+export async function handleRemoveBg(msg: Message, args: string): Promise<void> {
+    const userArgs = args.trim();
+    const MAX_STREAM_PARTIALS = 3;
+
+    let referencedMessage: Message | undefined;
+    if (msg.reference?.messageId) {
+        try {
+            referencedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+        } catch (err) {
+            console.warn('Failed to fetch referenced message for prompt context', err);
+        }
+    }
+
+    const imageURLs = await gatherImageURLsForRequest(msg, referencedMessage);
+    if (imageURLs.length === 0) {
+        await msg.reply('Please attach an image (or reply to a message with one) for me to remove the background.');
+        return;
+    }
+
+    const referencedText = referencedMessage?.content?.trim();
+    const instructions: string[] = [
+        'Remove the background from the provided image(s), keeping the primary subject intact with crisp, accurate edges. Return a PNG with a fully transparent (alpha) background and no added shadows, text, or props. Preserve the subject\'s colors, proportions, and lighting. Crop tightly around the subject so there is minimal empty padding.',
+    ];
+
+    if (userArgs.length > 0) {
+        instructions.push(`User notes: ${userArgs}`);
+    }
+
+    if (referencedText && referencedText.length > 0) {
+        instructions.push(`Context from the replied message: ${referencedText}`);
+    }
+
+    const prompt = instructions.join('\n\n');
+
+    await withTyping(msg.channel, async () => {
+        const username = await getUsername(msg.author.id, msg.guild);
+
+        const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
+            { type: 'text', text: prompt },
+            ...imageURLs.map(
+                (url): OpenAI.Chat.ChatCompletionContentPart => ({
+                    type: 'image_url',
+                    image_url: { url },
+                }),
+            ),
+        ];
+
+        const userMessageForInput: UniversalMessage = {
+            role: 'user',
+            content: contentParts,
+        };
+
+        const promptPreview =
+            prompt.length > 180 ? `${prompt.slice(0, 177)}…` : prompt;
+
+        const buildProgressEmbed = (options: {
+            status: 'starting' | 'generating' | 'done' | 'error';
+            partialCount?: number;
+            errorText?: string;
+            elapsedSeconds?: string;
+        }): EmbedBuilder => {
+            const embed = new EmbedBuilder()
+                .setTitle('Removing background')
+                .setDescription(`**Instructions:** ${promptPreview}`)
+                .setTimestamp(new Date());
+
+            const { status, partialCount = 0, errorText, elapsedSeconds } = options;
+
+            switch (status) {
+                case 'starting':
+                    embed.setColor(0x5865F2).setFooter({ text: 'Status: Starting…' });
+                    break;
+                case 'generating': {
+                    const footer =
+                        partialCount > 0
+                            ? `Status: Processing • Preview ${partialCount}/${MAX_STREAM_PARTIALS}`
+                            : 'Status: Processing';
+                    embed.setColor(0x5865F2).setFooter({ text: footer });
+                    break;
+                }
+                case 'done': {
+                    const footer = elapsedSeconds
+                        ? `Status: Completed • ${elapsedSeconds}s`
+                        : 'Status: Completed';
+                    embed.setColor(0x57F287).setFooter({ text: footer });
+                    break;
+                }
+                case 'error':
+                    embed.setColor(0xED4245).setFooter({ text: 'Status: Failed' });
+                    break;
+            }
+
+            if (errorText) {
+                embed.addFields({
+                    name: 'Error',
+                    value: errorText.slice(0, 1024),
+                });
+            }
+
+            if (status !== 'done') {
+                embed.addFields({
+                    name: 'Note',
+                    value:
+                        status === 'error'
+                            ? 'No image was generated.'
+                            : 'Final image will be posted once processing completes.',
+                });
+            }
+
+            return embed;
+        };
+
+        let progressMessage: Message | null = null;
+
+        const updateProgress = async (options: {
+            status: 'starting' | 'generating' | 'done' | 'error';
+            partialCount?: number;
+            partialBuffer?: Buffer | null;
+            errorText?: string;
+            elapsedSeconds?: string;
+            showImage?: boolean;
+            createIfMissing?: boolean;
+        }) => {
+            const { partialBuffer, status, showImage, createIfMissing = false } = options;
+            const embed = buildProgressEmbed(options);
+            const editPayload: any = { embeds: [embed] };
+
+            if (partialBuffer && showImage) {
+                editPayload.files = [
+                    new AttachmentBuilder(partialBuffer, {
+                        name: 'partial.png',
+                    }),
+                ];
+                editPayload.attachments = [];
+                embed.setImage('attachment://partial.png');
+            } else if (status === 'done' || status === 'error') {
+                editPayload.attachments = [];
+            }
+
+            try {
+                if (!progressMessage) {
+                    if (!createIfMissing) return;
+                    progressMessage = await msg.reply(editPayload);
+                } else {
+                    await progressMessage.edit(editPayload);
+                }
+            } catch (editErr) {
+                console.warn('Failed to update background removal progress embed', editErr);
+            }
+        };
+
+        const showFinalResult = async (
+            payload: OpenAIResponse,
+            elapsedSeconds: string,
+        ) => {
+            const images = payload.images ?? [];
+            const attachments = buildImageAttachments(images);
+
+            const finalEmbed = buildProgressEmbed({
+                status: 'done',
+                elapsedSeconds,
+            });
+
+            let description = `**Instructions:** ${promptPreview}`;
+            if (payload.result) {
+                description += `\n\n**Response:** ${truncateForEmbed(payload.result)}`;
+            }
+            finalEmbed.setDescription(description);
+
+            if (attachments.length > 0) {
+                const primaryName = attachments[0].name;
+                finalEmbed.setImage(`attachment://${primaryName}`);
+            }
+
+            const messagePayload: any = {
+                embeds: [finalEmbed],
+            };
+
+            if (attachments.length > 0) {
+                messagePayload.files = attachments;
+                messagePayload.attachments = [];
+            } else {
+                messagePayload.attachments = [];
+            }
+
+            if (progressMessage) {
+                await progressMessage.edit(messagePayload);
+            } else {
+                progressMessage = await msg.reply(messagePayload);
+            }
+        };
+
+        try {
+            const requestPayload: ResponsesCreateParams = {
+                model: 'gpt-5',
+                instructions: createSystemPrompt(
+                    'You are an expert photo editor. Always respond by calling the image_generation tool to remove backgrounds from provided images. Keep the subject identical, output a transparent PNG cutout (alpha background), crop tightly to the subject to avoid empty space, and avoid adding new elements.',
+                    username,
+                ),
+                input: [toResponsesMessage(userMessageForInput)],
+                tools: [
+                    {
+                        type: 'image_generation',
+                        moderation: 'low',
+                        output_format: 'png',
+                        partial_images: MAX_STREAM_PARTIALS,
+                    },
+                ],
+                user: msg.author.id,
+                stream: true,
+            };
+
+            const startedAt = Date.now();
+            const rawResult = await openai.responses.create(requestPayload);
+
+            if (!isStreamResponse(rawResult)) {
+                const result = toNonStreamingResponse(rawResult);
+                const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+                const payload = buildOpenAIResponseFromResult(result, elapsed, []);
+
+                if (payload.error) {
+                    await updateProgress({
+                        status: 'error',
+                        errorText: payload.error,
+                        createIfMissing: true,
+                    });
+                    return;
+                }
+
+                await showFinalResult(payload, elapsed);
+                return;
+            }
+
+            let finalResponse: ResponsesPayload | null = null;
+            let streamError: string | undefined;
+            let latestPartial: Buffer | null = null;
+            let lastPartialIndex = -1;
+            let partialCount = 0;
+
+            for await (const event of rawResult) {
+                switch (event.type) {
+                    case 'response.image_generation_call.partial_image': {
+                        if (event.partial_image_index !== lastPartialIndex) {
+                            lastPartialIndex = event.partial_image_index;
+                            partialCount = Math.max(
+                                partialCount,
+                                event.partial_image_index + 1,
+                            );
+                        }
+                        latestPartial = Buffer.from(event.partial_image_b64, 'base64');
+                        await updateProgress({
+                            status: 'generating',
+                            partialCount,
+                            partialBuffer: latestPartial,
+                            showImage: true,
+                            createIfMissing: true,
+                        });
+                        break;
+                    }
+                    case 'response.image_generation_call.in_progress':
+                    case 'response.image_generation_call.generating':
+                        await updateProgress({
+                            status: 'generating',
+                            partialCount,
+                            showImage: false,
+                        });
+                        break;
+                    case 'response.image_generation_call.completed':
+                        await updateProgress({
+                            status: 'generating',
+                            partialCount,
+                            showImage: !!latestPartial,
+                            partialBuffer: latestPartial,
+                        });
+                        break;
+                    case 'response.completed':
+                        finalResponse = event.response;
+                        break;
+                    case 'response.failed':
+                        streamError =
+                            event.response.error?.message ||
+                            'Background removal failed.';
+                        break;
+                    case 'error':
+                        streamError = event.message || 'Background removal failed.';
+                        break;
+                    default:
+                        break;
+                }
+
+                if (streamError) {
+                    break;
+                }
+            }
+
+            if (streamError) {
+                await updateProgress({
+                    status: 'error',
+                    errorText: streamError,
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            if (!finalResponse) {
+                await updateProgress({
+                    status: 'error',
+                    errorText: 'Background removal ended unexpectedly without a result.',
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+            const payload = buildOpenAIResponseFromResult(finalResponse, elapsed, []);
+
+            if (payload.error) {
+                logResponseSummary('Empty streamed response payload', finalResponse);
+                await updateProgress({
+                    status: 'error',
+                    errorText: payload.error,
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            await showFinalResult(payload, elapsed);
+        } catch (error: any) {
+            console.error('Failed to remove image background with OpenAI Responses API:', error);
+            const message =
+                typeof error?.response?.data?.error?.message === 'string'
+                    ? error.response.data.error.message
+                    : typeof error?.message === 'string'
+                        ? error.message
+                        : 'Unknown error';
+            await updateProgress({
+                status: 'error',
+                errorText: message,
+                createIfMissing: true,
+            });
+        }
+    });
 }
 
 export async function handleCImage(msg: Message, args: string): Promise<void> {
