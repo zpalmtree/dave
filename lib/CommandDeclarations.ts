@@ -1559,9 +1559,11 @@ export function handleHelp(msg: Message, args: string): void {
                     });
                 }
 
-                msg.channel.send({
-                    embeds: [embed],
-                });
+                if ('send' in msg.channel) {
+                    msg.channel.send({
+                        embeds: [embed],
+                    });
+                }
 
                 return;
             }
