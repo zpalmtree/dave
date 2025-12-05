@@ -12,3 +12,5 @@ dist/
 resize.sh
 
 **/.claude/settings.local.json
+.claude
+.yarn
