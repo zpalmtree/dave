@@ -2227,7 +2227,7 @@ export async function handleGen4Leaderboard(msg: Message): Promise<void> {
 
     embed.setDescription(leaderboardFields.join('\n\n'));
 
-    await msg.channel.send({ embeds: [embed] });
+    await (msg.channel as TextChannel).send({ embeds: [embed] });
 }
 
 export async function handleGen5Leaderboard(msg: Message): Promise<void> {
@@ -2279,7 +2279,7 @@ export async function handleGen5Leaderboard(msg: Message): Promise<void> {
 
     embed.setDescription(leaderboardFields.join('\n\n'));
 
-    await msg.channel.send({ embeds: [embed] });
+    await (msg.channel as TextChannel).send({ embeds: [embed] });
 }
 
 export async function handleGen5Count(msg: Message, args: string): Promise<void> {
@@ -2383,5 +2383,5 @@ export async function handleSlugFloor(msg: Message): Promise<void> {
 }
 
 export async function handleSlugPride(msg: Message): Promise<void> {
-    await msg.channel.send('https://cdn.discordapp.com/attachments/891081495706480690/1114374514005004489/slugpride.mp4?ex=672acf24&is=67297da4&hm=a46182d421d814a509b4e386b0392a19e1d9146ecca433789a1ae18c986287d8');
+    await (msg.channel as TextChannel).send('https://cdn.discordapp.com/attachments/891081495706480690/1114374514005004489/slugpride.mp4?ex=672acf24&is=67297da4&hm=a46182d421d814a509b4e386b0392a19e1d9146ecca433789a1ae18c986287d8');
 }
