@@ -514,8 +514,9 @@ export function extractURLsAndValidateExtensions(
             } else {
                 invalidURLs.push(url);
             }
-        } else { // If there's no filename, then the URL is valid
-            validURLs.push(url);
+        } else {
+            // No recognizable file extension - not an image URL
+            invalidURLs.push(url);
         }
     }
 

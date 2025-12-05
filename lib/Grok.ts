@@ -1,28 +1,57 @@
 import { Message } from 'discord.js';
-import OpenAI from 'openai';
 import { config } from './Config.js';
-import { 
-    truncateResponse, 
+import {
+    truncateResponse,
     getUsername,
     getImageURLsFromMessage,
     withTyping,
 } from './Utilities.js';
 
-const grok = new OpenAI({
-    apiKey: config.grokApiKey,
-    baseURL: "https://api.x.ai/v1"
-});
+const XAI_BASE_URL = "https://api.x.ai/v1";
 
 const DEFAULT_SETTINGS = {
-    model: 'grok-4-latest',
+    model: 'grok-4-1-fast',
     temperature: 0.7,
     maxTokens: 4096,
     maxCompletionTokens: 25000,
-    timeout: 60000,
+    timeout: 180000, // 3 minutes for agentic tool calls
     bannedUsers: ['663270358161293343'],
 };
 
-const chatHistoryCache = new Map<string, OpenAI.Chat.ChatCompletionMessageParam[]>();
+interface XAIMessage {
+    role: 'system' | 'user' | 'assistant';
+    content: string | XAIContentPart[];
+}
+
+interface XAIContentPart {
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: { url: string };
+}
+
+interface XAITool {
+    type: 'web_search' | 'x_search' | 'code_execution';
+    from_date?: string;
+    to_date?: string;
+    enable_image_understanding?: boolean;
+}
+
+interface XAIResponseMessage {
+    role: string;
+    content: string;
+}
+
+interface XAIResponse {
+    id: string;
+    output: XAIResponseMessage[];
+    citations?: string[];
+    usage?: {
+        input_tokens: number;
+        output_tokens: number;
+    };
+}
+
+const chatHistoryCache = new Map<string, XAIMessage[]>();
 
 interface GrokHandlerOptions {
     msg: Message;
@@ -40,7 +69,7 @@ interface GrokHandlerOptions {
 interface GrokResponse {
     result?: string;
     error?: string;
-    messages?: OpenAI.Chat.ChatCompletionMessageParam[];
+    messages?: XAIMessage[];
 }
 
 async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean = false): Promise<GrokResponse> {
@@ -70,7 +99,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
     const fullSystemPrompt = createSystemPrompt(systemPrompt || getDefaultSystemPrompt(), username);
 
     const reply = msg?.reference?.messageId;
-    let previousConvo: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    let previousConvo: XAIMessage[] = [];
 
     if (reply) {
         previousConvo = chatHistoryCache.get(reply) || [];
@@ -87,11 +116,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         }
     }
 
-    const messages = [...previousConvo];
-    if (includeSystemPrompt && (messages.length === 0 || messages[0].role !== 'system')) {
-        messages.unshift({ role: 'system', content: fullSystemPrompt });
-    }
-
+    // Build input for Responses API
     let imageURLs: string[] = [];
 
     if (!isRetry && includeFiles) {
@@ -107,94 +132,186 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         imageURLs = getImageURLsFromMessage(msg, repliedMessage);
     }
 
-    const content: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: 'text', text: prompt }];
-    
+    // Build conversation context from previous messages
+    const conversationContext = previousConvo
+        .filter(m => m.role !== 'system')
+        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${typeof m.content === 'string' ? m.content : '[message with images]'}`)
+        .join('\n\n');
+
+    // Build the full prompt with system instructions and context
+    const fullPrompt = [
+        includeSystemPrompt ? `[System Instructions]\n${fullSystemPrompt}\n[End Instructions]` : null,
+        conversationContext ? `[Previous Conversation]\n${conversationContext}\n[End Conversation]` : null,
+        `User: ${prompt}`,
+    ].filter(Boolean).join('\n\n');
+
+    // Build input - use string for simple requests, or structured for images
+    let inputMessages: string | XAIMessage[];
     if (imageURLs.length > 0) {
-        content.push(...imageURLs.map(url => ({ 
-            type: 'image_url', 
-            image_url: { url } 
-        } as OpenAI.Chat.ChatCompletionContentPart)));
+        inputMessages = [{
+            role: 'user' as const,
+            content: [
+                { type: 'text' as const, text: fullPrompt },
+                ...imageURLs.map(url => ({
+                    type: 'image_url' as const,
+                    image_url: { url }
+                }))
+            ]
+        }];
+    } else {
+        // Use simple string input for text-only requests
+        inputMessages = fullPrompt;
     }
-    
-    messages.push({ role: 'user', content });
 
     try {
         const twoMonthsAgo = (() => {
-          const d = new Date();
-          d.setMonth(d.getMonth() - 2);        // go back exactly 2 calendar months
-          return d.toISOString().slice(0, 10); // "YYYY-MM-DD"
+            const d = new Date();
+            d.setMonth(d.getMonth() - 2);
+            return d.toISOString().slice(0, 10);
         })();
 
-        const completion = await grok.chat.completions.create({
-            model,
-            messages,
-            ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : { max_tokens: maxTokens }),
-            temperature,
-            search_parameters: {
-                mode: 'auto',
-                return_citations: true,
-                max_search_results: 6,
-                sources: [{ type: "x" }],
+        // Configure tools for the Responses API
+        const tools: XAITool[] = [
+            {
+                type: 'x_search',
                 from_date: twoMonthsAgo,
+                enable_image_understanding: true,
             },
-        } as any, {
-            timeout: DEFAULT_SETTINGS.timeout,
-            maxRetries: 0,
+            {
+                type: 'web_search',
+                enable_image_understanding: true,
+            },
+        ];
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), DEFAULT_SETTINGS.timeout);
+
+        const response = await fetch(`${XAI_BASE_URL}/responses`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.grokApiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                input: inputMessages,
+                tools,
+                temperature,
+                max_output_tokens: maxCompletionTokens || maxTokens,
+            }),
+            signal: controller.signal,
         });
 
-        if (completion.choices && completion.choices.length > 0) {
-            const choice = completion.choices[0];
+        clearTimeout(timeoutId);
 
-            if (choice.message.content) {
-              const citations: string[] | undefined =
-                (choice.message as any).citations || (completion as any).citations;
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('xAI API error:', response.status, errorText);
+            return { error: `API error: ${response.status}` };
+        }
 
-              const extractHandle = (url: string): string | null => {
-                try {
-                  // pathname looks like "/handle/status/12345"
-                  const [, handle] = new URL(url).pathname.split('/', 3);
-                  return handle ? `@${handle}` : null;
-                } catch {
-                  return null;
-                }
-              };
+        const completion: XAIResponse = await response.json();
 
-              const citationLine = citations?.length
-                ? 'sources: [ ' +
-                    citations
-                      .map((url) => {
-                        const text = extractHandle(url) ?? url;
-                        // angle-bracket URL prevents Discord embeds
-                        return `[${text}](<${url}>)`;
-                      })
-                      .join(' | ') +
-                    ' ]'
-                : null;
+        // Find the assistant message in the output
+        const assistantOutput = completion.output?.find(o => o.role === 'assistant');
 
-              const generation = [
-                citationLine,
-                choice.message.content.trim(),
-              ]
-                .filter(Boolean)
-                .join('\n\n');
-
-              messages.push({ role: 'assistant', content: generation });
-              return { result: generation, messages };
-            } else {
-                console.log(completion);
-                console.log(choice.message);
-                return { error: 'Unexpected response from API' };
+        // Extract text content (could be string or array of content parts)
+        const getTextContent = (content: any): string | null => {
+            if (typeof content === 'string') return content;
+            if (Array.isArray(content)) {
+                const textPart = content.find((p: any) => p.type === 'text' || p.type === 'output_text');
+                return textPart?.text || textPart?.content || null;
             }
+            if (content?.text) return content.text;
+            if (content?.content) return content.content;
+            return null;
+        };
+
+        const responseText = getTextContent(assistantOutput?.content);
+
+        if (responseText) {
+            // Extract citations from annotations in content
+            let citations: string[] = [];
+            if (assistantOutput && Array.isArray(assistantOutput.content)) {
+                for (const part of (assistantOutput.content as any[])) {
+                    if (part.annotations && Array.isArray(part.annotations)) {
+                        for (const annotation of part.annotations) {
+                            // Try different possible URL field names
+                            const url = annotation.url || annotation.href || annotation.link || annotation.source;
+                            if (url) {
+                                citations.push(url);
+                            }
+                        }
+                    }
+                }
+            }
+            // Fallback to other possible locations
+            if (!citations.length) {
+                citations = completion.citations ||
+                    (assistantOutput as any)?.citations ||
+                    (completion as any).search_results?.map((r: any) => r.url) ||
+                    [];
+            }
+
+            const extractHandle = (url: string): string | null => {
+                try {
+                    const [, handle] = new URL(url).pathname.split('/', 3);
+                    return handle ? `@${handle}` : null;
+                } catch {
+                    return null;
+                }
+            };
+
+            // Keep original text and build citation list at bottom
+            let processedText = responseText.trim();
+
+            // Collect unique citations with their numbers
+            const citationMap = new Map<string, string>(); // title -> url
+            if (assistantOutput && Array.isArray(assistantOutput.content)) {
+                for (const part of (assistantOutput.content as any[])) {
+                    if (part.annotations && Array.isArray(part.annotations)) {
+                        for (const ann of part.annotations) {
+                            if (ann.url && ann.title) {
+                                citationMap.set(ann.title, ann.url);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Build citation footer
+            let citationFooter = '';
+            if (citationMap.size > 0) {
+                const sortedCitations = Array.from(citationMap.entries())
+                    .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+                citationFooter = '\n\n' + sortedCitations
+                    .map(([num, url]) => `[${num}] ${url}`)
+                    .join('\n');
+            }
+
+            const generation = processedText + citationFooter;
+
+            // Build messages array for cache (for conversation continuity)
+            const messagesForCache: XAIMessage[] = [
+                ...previousConvo.filter(m => m.role !== 'system'),
+                { role: 'user', content: prompt },
+                { role: 'assistant', content: generation },
+            ];
+            return { result: generation, messages: messagesForCache };
         } else {
-            console.log(completion);
+            console.log('Unexpected response structure:', JSON.stringify(completion, null, 2));
             return { error: 'Unexpected response from API' };
         }
     } catch (err: any) {
-        const isInvalidImage = err.message.includes('unsupported image') || err.message.includes('Invalid image');
+        if (err.name === 'AbortError') {
+            return { error: 'Request timed out' };
+        }
+
+        const isInvalidImage = err.message?.includes('unsupported image') || err.message?.includes('Invalid image');
 
         if (isInvalidImage && !isRetry) {
             console.log("Retrying without images due to unsupported image error");
-            return masterGrokHandler(options, true);
+            return masterGrokHandler({ ...options, includeFiles: false }, true);
         }
 
         return { error: err.toString() };
