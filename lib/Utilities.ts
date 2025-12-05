@@ -425,11 +425,13 @@ export async function sendLongMessage(
     const messages: import('discord.js').Message[] = [];
     
     for (const part of parts) {
-        const sentMessage = await channel.send({
-            ...options,
-            content: part
-        });
-        messages.push(sentMessage);
+        if ('send' in channel) {
+            const sentMessage = await (channel as TextChannel).send({
+                ...options,
+                content: part
+            });
+            messages.push(sentMessage);
+        }
     }
     
     return messages;
@@ -575,6 +577,11 @@ export function getImageURLsFromMessage(
     return Array.from(urlSet);
 }
 
+// Type guard for sendable channels
+export function isSendableChannel(channel: import('discord.js').TextBasedChannel): channel is import('discord.js').TextBasedChannel & { send: TextChannel['send']; sendTyping: TextChannel['sendTyping'] } {
+    return 'send' in channel && typeof (channel as any).send === 'function';
+}
+
 // helper ­– put in a shared util file
 export function withTyping<T>(
   channel: import('discord.js').TextBasedChannel,
@@ -583,9 +590,10 @@ export function withTyping<T>(
   let keepAlive: NodeJS.Timeout | undefined;
 
   const start = async () => {
+    if (!isSendableChannel(channel)) return;
     await channel.sendTyping();               // immediately
     keepAlive = setInterval(
-      () => channel.sendTyping().catch(() => {}), // refresh every 8 s
+      () => (channel as any).sendTyping?.().catch(() => {}), // refresh every 8 s
       8_000,
     );
   };
