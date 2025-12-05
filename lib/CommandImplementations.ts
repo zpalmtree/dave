@@ -21,6 +21,8 @@ import {
     PermissionFlagsBits,
     AttachmentBuilder,
     EmbedBuilder,
+    MessageReaction,
+    Collection,
 } from 'discord.js';
 
 import { config } from './Config.js';
@@ -150,7 +152,7 @@ export async function replyWithMention(msg: Message, reply: string): Promise<voi
         const usersMentioned = [...msg.mentions.users.keys()].map((id) => `<@${id}>`).join(' ');
         await msg.reply(`${usersMentioned} ${reply}`);
     } else {
-        await msg.channel.send(reply);
+        await (msg.channel as TextChannel).send(reply);
     }
 }
 
@@ -489,9 +491,9 @@ export async function handleQuote(msg: Message, db: Database): Promise<void> {
     }
 
     if (timestamp) {
-        await msg.channel.send(`${quote} - ${moment.utc(timestamp).format('YYYY-MM-DD')}`);
+        await (msg.channel as TextChannel).send(`${quote} - ${moment.utc(timestamp).format('YYYY-MM-DD')}`);
     } else {
-        await msg.channel.send(quote);
+        await (msg.channel as TextChannel).send(quote);
     }
 }
 
@@ -542,7 +544,7 @@ export async function handleKitty(msg: Message, args: string): Promise<void> {
 
         const attachment = new AttachmentBuilder(data[0].url);
 
-        await msg.channel.send({
+        await (msg.channel as TextChannel).send({
             files: [attachment],
         });
     } catch (err) {
@@ -597,7 +599,7 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
 
         const attachment = new AttachmentBuilder(data.message);
 
-        await msg.channel.send({
+        await (msg.channel as TextChannel).send({
             files: [attachment],
         });
     } catch (err) {
@@ -607,7 +609,7 @@ export async function handleDoggo(msg: Message, breed: string[]): Promise<void> 
 
 export async function handleStock(msg: Message, args: string[]) {
     if (args.length === 0) {
-        await msg.channel.send(`You need to include a ticker. Example: \`${config.prefix}stock IBM\``);
+        await (msg.channel as TextChannel).send(`You need to include a ticker. Example: \`${config.prefix}stock IBM\``);
         return;
     }
 
@@ -619,7 +621,7 @@ export async function handleStock(msg: Message, args: string[]) {
         const stockData = await res.json();
 
         if (Object.entries(stockData['Global Quote']).length === 0) {
-            await msg.channel.send("No ticker " + ticker.toUpperCase());
+            await (msg.channel as TextChannel).send("No ticker " + ticker.toUpperCase());
             return;
         }
 
@@ -662,11 +664,11 @@ export async function handleStock(msg: Message, args: string[]) {
         );
     
     
-        await msg.channel.send({
+        await (msg.channel as TextChannel).send({
             embeds: [embed],
         });
     } else {
-        await msg.channel.send("Something went wrong fetching stock info for " + ticker.toUpperCase());
+        await (msg.channel as TextChannel).send("Something went wrong fetching stock info for " + ticker.toUpperCase());
     }
 }
 
@@ -757,7 +759,7 @@ export async function handleCountdown(
         return;
     }
 
-    const sentMessage = await msg.channel.send(secs.toString());
+    const sentMessage = await (msg.channel as TextChannel).send(secs.toString());
 
     while (secs > 0) {
         secs--;
@@ -917,7 +919,7 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
     const embed = new EmbedBuilder()
         .setTitle(`${amountToConvert} ${fromCurrency} is ${roundToNPlaces(amount as number, 2)} ${toCurrency}`);
 
-    await msg.channel.send({
+    await (msg.channel as TextChannel).send({
         embeds: [embed],
     });
 }
@@ -935,20 +937,20 @@ export async function handleAvatar(msg: Message): Promise<void> {
         let guildUser = await msg.guild.members.fetch(user.id);
 
         if (guildUser) {
-            await msg.channel.send(guildUser.displayAvatarURL({
+            await (msg.channel as TextChannel).send(guildUser.displayAvatarURL({
                 extension: 'png',
                 forceStatic: false,
                 size: 4096,
             }));
         } else {
-            await msg.channel.send(user.displayAvatarURL({
+            await (msg.channel as TextChannel).send(user.displayAvatarURL({
                 extension: 'png',
                 forceStatic: false,
                 size: 4096,
             }));
         }
     } else {
-        await msg.channel.send(user.displayAvatarURL({
+        await (msg.channel as TextChannel).send(user.displayAvatarURL({
             extension: 'png',
             forceStatic: false,
             size: 4096,
@@ -1446,7 +1448,7 @@ export async function handleReady(msg: Message, args: string, db: Database) {
         .setDescription(description)
         .addFields(fields);
 
-    const sentMessage = await msg.channel.send({
+    const sentMessage = await (msg.channel as TextChannel).send({
         embeds: [embed],
     });
 
@@ -1454,13 +1456,13 @@ export async function handleReady(msg: Message, args: string, db: Database) {
     await tryReactMessage(sentMessage, '👎');
 
     const collector = sentMessage.createReactionCollector({
-        filter: (reaction, user) => {
+        filter: (reaction: MessageReaction, user: User) => {
             return reaction.emoji.name !== null && ['👍', '👎'].includes(reaction.emoji.name) && !user.bot;
         },
         time: 60 * 15 * 1000,
     });
 
-    collector.on('collect', async (reaction, user) => {
+    collector.on('collect', async (reaction: MessageReaction, user: User) => {
         tryDeleteReaction(reaction, user.id);
 
         if (reaction.emoji.name === '👍') {
@@ -1483,7 +1485,7 @@ export async function handleReady(msg: Message, args: string, db: Database) {
             collector.stop('messageDelete');
             tryDeleteMessage(sentMessage);
             const ping = [...readyUsers].map((x) => `<@${x}>`).join(' ');
-            await msg.channel.send({
+            await (msg.channel as TextChannel).send({
                 content: `${ping} Everyone is ready, let's go!`,
             });
             await handleCountdown("Let's jam!", msg, '7');
@@ -1496,7 +1498,7 @@ export async function handleReady(msg: Message, args: string, db: Database) {
         }
     });
 
-    collector.on('end', async (collected, reason) => {
+    collector.on('end', async (collected: Collection<string, MessageReaction>, reason: string) => {
         if (reason !== 'messageDelete') {
             const notReadyNames = await Promise.all([...notReadyUsers].map((user) => getUsername(user, msg.guild)));
             embed.setDescription(`Countdown cancelled! ${notReadyNames.join(', ')} did not ready up in time.`);
@@ -1544,12 +1546,12 @@ export async function handlePoll(msg: Message, args: string) {
         .setTitle(title)
         .setFooter({ text: 'React with 👍 or 👎 to vote' });
 
-    const sentMessage = await msg.channel.send({
+    const sentMessage = await (msg.channel as TextChannel).send({
         embeds: [embed],
     });
 
     const collector = sentMessage.createReactionCollector({
-        filter: (reaction, user) => {
+        filter: (reaction: MessageReaction, user: User) => {
             if (!reaction.emoji.name) {
                 return false;
             }
@@ -1559,7 +1561,7 @@ export async function handlePoll(msg: Message, args: string) {
         time: 60 * 15 * 1000,
     });
 
-    collector.on('collect', async (reaction, user) => {
+    collector.on('collect', async (reaction: MessageReaction, user: User) => {
         tryDeleteReaction(reaction, user.id);
 
         if (reaction.emoji.name === '👍') {
@@ -1674,7 +1676,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
         .addFields(fields)
         .setFooter({ text: 'React with the emoji indicated to cast your vote' });
 
-    const sentMessage = await msg.channel.send({
+    const sentMessage = await (msg.channel as TextChannel).send({
         embeds: [embed]
     });
     
@@ -1705,7 +1707,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
     }
     
     const collector = sentMessage.createReactionCollector({
-        filter: (reaction, user) => {
+        filter: (reaction: MessageReaction, user: User) => {
             if (!reaction.emoji.name) {
                 return false;
             }
@@ -1716,7 +1718,7 @@ export async function handleMultiPoll(msg: Message, args: string) {
         dispose: true,
     });
 
-    collector.on('collect', async (reaction, user) => {
+    collector.on('collect', async (reaction: MessageReaction, user: User) => {
         tryDeleteReaction(reaction, user.id);
         toggleSelect(reaction, user);
     });
@@ -2025,7 +2027,7 @@ export async function handleItsOver(msg: Message, args: string): Promise<void> {
         }
     }
 
-    await msg.channel.send(file);
+    await (msg.channel as TextChannel).send(file);
 }
 
 export async function handleSlime(msg: Message): Promise<void> {
@@ -2114,7 +2116,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
         .setImage('attachment://dot-graph.png')
         .setDescription(description);
 
-    await msg.channel.send({
+    await (msg.channel as TextChannel).send({
         embeds: [embed],
         files: [dotAttachment, dotGraphAttachment],
     });
@@ -2126,5 +2128,5 @@ function getRandomInt(min: number, max: number) {
 
 export async function handleMilton(msg: Message) {
     const bust = getRandomInt(0, Number.MAX_SAFE_INTEGER);
-    await msg.channel.send(`https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/500x500.jpg?cachebuster=${bust}`);
+    await (msg.channel as TextChannel).send(`https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/500x500.jpg?cachebuster=${bust}`);
 }

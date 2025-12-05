@@ -31,7 +31,7 @@ export async function convertPumpFunLinks(msg: Message): Promise<void> {
             const content = `${fixedURLs.join('\n')}`;
 
             // Send the birdeye links without suppressing the original embed
-            const sentMsg = await msg.channel.send(content);
+            const sentMsg = await (msg.channel as TextChannel).send(content);
 
             await tryReactMessage(sentMsg, '❌');
 

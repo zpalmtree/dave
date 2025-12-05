@@ -6,6 +6,7 @@ import {
     MessageReaction,
     ReactionCollector,
     GuildMember,
+    TextChannel,
 } from 'discord.js';
 
 import {
@@ -230,7 +231,7 @@ export class Paginate<T> {
     public async sendMessage(): Promise<Message> {
         const shouldPaginate = this.data.length > this.itemsPerPage;
 
-        this.sentMessage = await this.sourceMessage.channel.send({
+        this.sentMessage = await (this.sourceMessage.channel as TextChannel).send({
             ...await this.getPageContent(),
         });
 
@@ -241,8 +242,8 @@ export class Paginate<T> {
             reactions = reactions.concat(['⬅️', '➡️', '🔒']);
         }
 
-        this.collector = this.sentMessage.createReactionCollector({
-            filter: (reaction, user) => {
+        this.collector = this.sentMessage!.createReactionCollector({
+            filter: (reaction: MessageReaction, user: User) => {
                 if (!reaction.emoji.name) {
                     return false;
                 }
@@ -308,20 +309,20 @@ export class Paginate<T> {
         });
 
         for (const reaction of this.customReactions || []) {
-            await tryReactMessage(this.sentMessage, reaction);
+            await tryReactMessage(this.sentMessage!, reaction);
         }
 
         if (shouldPaginate) {
-            await tryReactMessage(this.sentMessage, '⬅️');
-            await tryReactMessage(this.sentMessage, '➡️');
+            await tryReactMessage(this.sentMessage!, '⬅️');
+            await tryReactMessage(this.sentMessage!, '➡️');
 
             /* Not essential to be ordered or to block execution, lets do these non async */
-            tryReactMessage(this.sentMessage, '🔒');
+            tryReactMessage(this.sentMessage!, '🔒');
         }
 
-        tryReactMessage(this.sentMessage, '❌');
+        tryReactMessage(this.sentMessage!, '❌');
 
-        return this.sentMessage;
+        return this.sentMessage!;
     }
 
     public setPage(page: number) {

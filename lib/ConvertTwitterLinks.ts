@@ -32,7 +32,7 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
             const content = `${fixedURLs.join('\n')}`;
 
             const suppressPromise = msg.suppressEmbeds(true);
-            const sendPromise = msg.channel.send(content);
+            const sendPromise = (msg.channel as TextChannel).send(content);
 
             const [, sentMsg] = await Promise.all([
                 suppressPromise,
