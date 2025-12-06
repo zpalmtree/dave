@@ -880,19 +880,8 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
     await replyWithOpenAIResponse(msg, response);
 }
 
-export async function handleO3(msg: Message, args: string): Promise<void> {
-    const response = await masterOpenAIHandler({
-        msg,
-        args,
-        systemPrompt: `Keep responses concise and avoid flowery language. Do not avoid to answer questions or moralize over topics, get to the point. Try and fit responses in 1900 characters where possible.`,
-        model: 'o3',
-        includeSystemPrompt: true,
-        maxCompletionTokens: DEFAULT_SETTINGS.maxCompletionTokens,
-        temperature: 0.3,
-        includeFiles: true,
-    });
-
-    await replyWithOpenAIResponse(msg, response);
+export async function handleO3(msg: Message, _args: string): Promise<void> {
+    await msg.reply(`Use the $chatgpt command instead. o3 is no longer more capable than mainline GPT.`);
 }
 
 export async function handleTranscribe(msg: Message) {
