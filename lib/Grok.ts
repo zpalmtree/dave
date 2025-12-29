@@ -377,3 +377,72 @@ export async function handleGrok(msg: Message, args: string): Promise<void> {
         await msg.reply(response.error);
     }
 }
+
+export interface SummarizeResponse {
+    result?: string;
+    error?: string;
+}
+
+export async function grokSummarize(
+    contentToSummarize: string,
+    requestingUser: string,
+): Promise<SummarizeResponse> {
+    const systemPrompt = `You are a witty summarizer with a talent for capturing the essence of chaotic Discord conversations. Your job is to provide entertaining yet accurate summaries.
+
+Style guidelines:
+- Be funny and irreverent, but don't make stuff up
+- Use dry humor and gentle roasts where appropriate
+- Highlight the absurd, the dramatic, and the memorable moments
+- Call out any particularly unhinged takes or galaxy-brain moments
+- Keep it punchy - no filler, every sentence should earn its place
+- You can be a bit snarky but stay good-natured
+- End with a zinger or amusing observation if the material warrants it
+
+The person requesting this summary is named ${requestingUser}.
+Keep your summary under 1900 characters. Jump directly into the summary without preamble.`;
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const response = await fetch(`${XAI_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.grokApiKey}`,
+            },
+            body: JSON.stringify({
+                model: 'grok-3-fast',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: contentToSummarize },
+                ],
+                temperature: 0.8,
+                max_tokens: 2048,
+            }),
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('xAI API error:', response.status, errorText);
+            return { error: `API error: ${response.status}` };
+        }
+
+        const completion = await response.json();
+        const result = completion.choices?.[0]?.message?.content;
+
+        if (result) {
+            return { result };
+        } else {
+            return { error: 'No response from API' };
+        }
+    } catch (err: any) {
+        if (err.name === 'AbortError') {
+            return { error: 'Request timed out' };
+        }
+        return { error: err.toString() };
+    }
+}

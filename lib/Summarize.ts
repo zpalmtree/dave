@@ -1,7 +1,7 @@
 import { Message, Guild } from 'discord.js';
 
-import { aiSummarize } from './OpenAI.js';
-import { getUsername, truncateResponse } from './Utilities.js';
+import { grokSummarize } from './Grok.js';
+import { getUsername, splitMessage } from './Utilities.js';
 
 export interface CachedMessage {
     content: string;
@@ -30,8 +30,7 @@ export async function summarizeMessages(
     guild: Guild | null,
     authorId: string,
     messageCount: number,
-    maxLength: number,
-    systemPrompt?: string) {
+    maxLength: number) {
 
     const previousMessages = cachedMessages.get(channel) || [];
 
@@ -94,12 +93,9 @@ export async function summarizeMessages(
         contentToSummarize = contentToSummarize.slice(startIndex);
     }
 
-    return aiSummarize(
-        msg,
-        contentToSummarize,
-        authorId,
-        systemPrompt,
-    );
+    const requestingUser = await getUsername(authorId, guild);
+
+    return grokSummarize(contentToSummarize, requestingUser);
 }
 
 export async function handleSummarize(msg: Message): Promise<void> {
@@ -119,7 +115,10 @@ export async function handleSummarize(msg: Message): Promise<void> {
         return;
     }
 
-    await msg.reply(truncateResponse(result));
+    const parts = splitMessage(result);
+    for (const part of parts) {
+        await msg.reply(part);
+    }
 }
 
 export async function handleLongSummarize(msg: Message): Promise<void> {
@@ -139,7 +138,10 @@ export async function handleLongSummarize(msg: Message): Promise<void> {
         return;
     }
 
-    await msg.reply(truncateResponse(result));
+    const parts = splitMessage(result);
+    for (const part of parts) {
+        await msg.reply(part);
+    }
 }
 
 export async function cacheMessageForSummarization(msg: Message): Promise<void> {
