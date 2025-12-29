@@ -285,7 +285,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 const sortedCitations = Array.from(citationMap.entries())
                     .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
                 citationFooter = '\n\n' + sortedCitations
-                    .map(([num, url]) => `[${num}] ${url}`)
+                    .map(([num, url]) => `[${num}] <${url}>`)
                     .join('\n');
             }
 
