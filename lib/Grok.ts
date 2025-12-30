@@ -263,7 +263,10 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             };
 
             // Keep original text and build citation list at bottom
-            let processedText = responseText.trim();
+            // Wrap URLs in markdown links with <> to prevent Discord link expansion
+            // [1](https://...) -> [1](<https://...>)
+            let processedText = responseText.trim()
+                .replace(/\]\((https?:\/\/[^\s\)>]+)\)/g, '](<$1>)');
 
             // Collect unique citations with their numbers
             const citationMap = new Map<string, string>(); // title -> url
