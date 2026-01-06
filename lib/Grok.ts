@@ -186,19 +186,33 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), DEFAULT_SETTINGS.timeout);
 
-        const response = await fetch(`${XAI_BASE_URL}/responses`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.grokApiKey}`,
-            },
-            body: JSON.stringify({
+        // Use chat/completions for images (responses endpoint doesn't support multimodal input)
+        // Use responses endpoint for text-only (supports agentic tools like web_search)
+        const hasImages = imageURLs.length > 0;
+        const endpoint = hasImages ? `${XAI_BASE_URL}/chat/completions` : `${XAI_BASE_URL}/responses`;
+
+        const requestBody = hasImages
+            ? {
+                model,
+                messages: inputMessages as XAIMessage[],
+                temperature,
+                max_tokens: maxCompletionTokens || maxTokens,
+            }
+            : {
                 model,
                 input: inputMessages,
                 tools,
                 temperature,
                 max_output_tokens: maxCompletionTokens || maxTokens,
-            }),
+            };
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.grokApiKey}`,
+            },
+            body: JSON.stringify(requestBody),
             signal: controller.signal,
         });
 
@@ -210,10 +224,17 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             return { error: `API error: ${response.status}` };
         }
 
-        const completion: XAIResponse = await response.json();
+        const completion = await response.json();
 
-        // Find the assistant message in the output
-        const assistantOutput = completion.output?.find(o => o.role === 'assistant');
+        // Find the assistant message - different structure for chat/completions vs responses
+        let assistantOutput: XAIResponseMessage | undefined;
+        if (hasImages) {
+            // chat/completions format: { choices: [{ message: { role, content } }] }
+            assistantOutput = (completion as any).choices?.[0]?.message;
+        } else {
+            // responses format: { output: [{ role, content }] }
+            assistantOutput = (completion as XAIResponse).output?.find(o => o.role === 'assistant');
+        }
 
         // Extract text content (could be string or array of content parts)
         const getTextContent = (content: any): string | null => {
