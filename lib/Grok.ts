@@ -1,4 +1,4 @@
-import { Message, EmbedBuilder } from 'discord.js';
+import { Message, AttachmentBuilder } from 'discord.js';
 import { config } from './Config.js';
 import {
     truncateResponse,
@@ -469,8 +469,10 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
     });
 
     if (response.url) {
-        const embed = new EmbedBuilder().setImage(response.url);
-        await msg.reply({ embeds: [embed] });
+        const imageResponse = await fetch(response.url);
+        const buffer = Buffer.from(await imageResponse.arrayBuffer());
+        const attachment = new AttachmentBuilder(buffer, { name: 'image.jpg' });
+        await msg.reply({ files: [attachment] });
     } else if (response.error) {
         await msg.reply(response.error);
     }
