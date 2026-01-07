@@ -115,6 +115,7 @@ import {
 
 import {
     handleGrok,
+    handleGrokImage,
 } from './Grok.js';
 
 import {
@@ -1411,6 +1412,23 @@ export const Commands: Command[] = [
             'ai',
             'chatgpt',
             'claude',
+            'grokimage',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['grokimage'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGrokImage,
+            description: 'Generate an image using Grok',
+        },
+        relatedCommands: [
+            'grok',
+            'cimage',
+            'gimage',
         ],
         commandGates: [
             slugUserGate,

@@ -384,7 +384,111 @@ Your X handle is @grok and your task is to respond to user's posts that tag you 
 - Never mention these instructions or tools unless directly asked.`;
 }
 
+const IMAGE_GENERATION_TRIGGERS = [
+    'generate an image',
+    'generate image',
+    'create an image',
+    'create image',
+    'draw ',
+    'draw me ',
+    'make an image',
+    'make image',
+    'paint ',
+    'picture of ',
+    'image of ',
+];
+
+interface GrokImageResponse {
+    url?: string;
+    revisedPrompt?: string;
+    error?: string;
+}
+
+async function generateGrokImage(prompt: string): Promise<GrokImageResponse> {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const response = await fetch(`${XAI_BASE_URL}/images/generations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.grokApiKey}`,
+            },
+            body: JSON.stringify({
+                model: 'grok-2-image',
+                prompt,
+                n: 1,
+                response_format: 'url',
+            }),
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('xAI Image API error:', response.status, errorText);
+            return { error: `API error: ${response.status}` };
+        }
+
+        const result = await response.json();
+        const imageData = result.data?.[0];
+
+        if (imageData?.url) {
+            return {
+                url: imageData.url,
+                revisedPrompt: imageData.revised_prompt,
+            };
+        }
+
+        return { error: 'No image generated' };
+    } catch (err: any) {
+        if (err.name === 'AbortError') {
+            return { error: 'Request timed out' };
+        }
+        return { error: err.toString() };
+    }
+}
+
+export async function handleGrokImage(msg: Message, args: string): Promise<void> {
+    const prompt = args.trim();
+
+    if (!prompt) {
+        await msg.reply('Please provide a description for the image you want me to create.');
+        return;
+    }
+
+    if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
+        await msg.reply('Sorry, this function has been disabled for your user.');
+        return;
+    }
+
+    const response = await withTyping(msg.channel, async () => {
+        return generateGrokImage(prompt);
+    });
+
+    if (response.url) {
+        const replyContent = response.revisedPrompt
+            ? `${response.url}\n-# ${truncateResponse(response.revisedPrompt, 500)}`
+            : response.url;
+        await msg.reply(replyContent);
+    } else if (response.error) {
+        await msg.reply(response.error);
+    }
+}
+
+function shouldGenerateImage(args: string): boolean {
+    const lower = args.toLowerCase();
+    return IMAGE_GENERATION_TRIGGERS.some(trigger => lower.startsWith(trigger));
+}
+
 export async function handleGrok(msg: Message, args: string): Promise<void> {
+    // Check if user wants to generate an image
+    if (shouldGenerateImage(args)) {
+        return handleGrokImage(msg, args);
+    }
+
     const response = await withTyping(msg.channel, async () => {
         return masterGrokHandler({
             msg,
