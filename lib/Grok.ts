@@ -416,7 +416,7 @@ async function generateGrokImage(prompt: string): Promise<GrokImageResponse> {
                 'Authorization': `Bearer ${config.grokApiKey}`,
             },
             body: JSON.stringify({
-                model: 'grok-2-image',
+                model: 'grok-2-image-1212',
                 prompt,
                 n: 1,
                 response_format: 'url',
