@@ -1385,6 +1385,24 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
     });
 }
 
+
+const TRANSPARENCY_KEYWORDS = [
+    'transparent',
+    'png',
+    'alpha',
+    'isolate',
+    'isolated',
+    'cutout',
+    'cut out',
+    'no background',
+    'remove background',
+    'without background',
+];
+
+function wantsTransparentOutput(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+    return TRANSPARENCY_KEYWORDS.some(keyword => lower.includes(keyword));
+}
 export async function handleCImage(msg: Message, args: string): Promise<void> {
     const userArgs = args.trim();
     const MAX_STREAM_PARTIALS = 3;
@@ -1569,6 +1587,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
         };
 
         try {
+            const usePng = wantsTransparentOutput(prompt);
             const requestPayload: ResponsesCreateParams = {
                 model: 'gpt-5',
                 instructions: createSystemPrompt(
@@ -1580,8 +1599,8 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                     {
                         type: 'image_generation',
                         moderation: 'low',
-                        output_format: 'jpeg',
-                        output_compression: 50,
+                        output_format: usePng ? 'png' : 'jpeg',
+                        ...(usePng ? {} : { output_compression: 50 }),
                         partial_images: MAX_STREAM_PARTIALS,
                     },
                 ],
