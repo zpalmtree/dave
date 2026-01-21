@@ -1578,7 +1578,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                         type: 'image_generation',
                         moderation: 'low',
                         output_format: usePng ? 'png' : 'jpeg',
-                        ...(usePng ? {} : { output_compression: 50 }),
+                        ...(usePng ? { background: 'transparent' } : { output_compression: 50 }),
                         partial_images: MAX_STREAM_PARTIALS,
                     },
                 ],
