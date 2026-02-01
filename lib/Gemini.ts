@@ -49,6 +49,27 @@ type FinishReason =
 // Hardcoded banned users list
 const BANNED_USERS = ['663270358161293343'];
 
+// Rate limiting for image generation: 3 requests per 5 minutes per user
+const IMAGE_RATE_LIMIT = { maxRequests: 3, windowMs: 5 * 60 * 1000 };
+const imageRateLimitMap = new Map<string, number[]>();
+
+function checkImageRateLimit(userId: string): { allowed: boolean; retryAfterMs: number } {
+    const now = Date.now();
+    const timestamps = imageRateLimitMap.get(userId) || [];
+    const recent = timestamps.filter(t => now - t < IMAGE_RATE_LIMIT.windowMs);
+    imageRateLimitMap.set(userId, recent);
+
+    if (recent.length >= IMAGE_RATE_LIMIT.maxRequests) {
+        const oldestInWindow = recent[0];
+        const retryAfterMs = IMAGE_RATE_LIMIT.windowMs - (now - oldestInWindow);
+        return { allowed: false, retryAfterMs };
+    }
+
+    recent.push(now);
+    imageRateLimitMap.set(userId, recent);
+    return { allowed: true, retryAfterMs: 0 };
+}
+
 // Initialize the Gemini API client
 const genAI = new GoogleGenAI({
     apiKey: config.geminiApiKey,
@@ -654,6 +675,14 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
     const errorMessages: string[] = [];
 
     try {
+        // Check rate limit
+        const rateCheck = checkImageRateLimit(msg.author.id);
+        if (!rateCheck.allowed) {
+            const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
+            await msg.reply(`You've reached the image generation limit (3 per 5 minutes). Try again in ~${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.`);
+            return;
+        }
+
         // Send typing indicator if the channel has typing capability
         if (msg.channel && 'sendTyping' in msg.channel) {
             await msg.channel.sendTyping();
@@ -710,71 +739,24 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 return;
             }
 
-            // Generate variations with the source image - enhance prompt for each
-            const imagePromises = [];
-            for (let i = 0; i < 3; i++) {
-                //const temperature = 0.8 + (0.1 * i);
-                const temperature = 1;
-
-                const numArtStyles = i < 2 ? 0 : 2;
-                const finalPrompt = appendArtStyle(fullPrompt, numArtStyles);
-                imagePromises.push(generateSingleImage(finalPrompt, { temperature }, sourceImageDataArray));
+            // Generate a single image with the source image
+            try {
+                const paths = await generateSingleImage(fullPrompt, { temperature: 1 }, sourceImageDataArray);
+                allImagePaths.push(...paths);
+            } catch (error: any) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                errorMessages.push(errorMsg);
             }
-
-            // Use Promise.allSettled to handle partial successes
-            const results = await Promise.allSettled(imagePromises);
-
-            // Collect successful image paths and error messages
-            results.forEach(result => {
-                if (result.status === 'fulfilled') {
-                    allImagePaths.push(...result.value);
-                } else if (result.status === 'rejected') {
-                    // Extract error message
-                    let errorMsg = "Unknown error";
-                    if (result.reason instanceof Error) {
-                        errorMsg = result.reason.message;
-                    } else if (typeof result.reason === 'string') {
-                        errorMsg = result.reason;
-                    } else if (result.reason && typeof result.reason === 'object') {
-                        errorMsg = JSON.stringify(result.reason);
-                    }
-                    errorMessages.push(errorMsg);
-                }
-            });
         } else {
-            // NO SOURCE IMAGE MODE: Generate from text only - enhance prompt for each
-            const imagePromises = [];
-            for (let i = 0; i < 3; i++) {
-                //const temperature = 0.8 + (0.1 * i);
-                const temperature = 1;
-
-                const numArtStyles = i == 0 ? 0 : 2;
-                const finalPrompt = appendArtStyle(fullPrompt, numArtStyles);
-                imagePromises.push(generateSingleImage(finalPrompt, { temperature }));
+            // Generate a single image from text
+            try {
+                const paths = await generateSingleImage(fullPrompt, { temperature: 1 });
+                allImagePaths.push(...paths);
+            } catch (error: any) {
+                console.error("Image generation error:", error);
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                errorMessages.push(errorMsg);
             }
-
-            // Use Promise.allSettled to handle partial successes
-            const results = await Promise.allSettled(imagePromises);
-
-            // Collect successful image paths and error messages
-            results.forEach(result => {
-                if (result.status === 'fulfilled') {
-                    allImagePaths.push(...result.value);
-                } else if (result.status === 'rejected') {
-                    console.log(result);
-
-                    // Extract error message
-                    let errorMsg = "Unknown error";
-                    if (result.reason instanceof Error) {
-                        errorMsg = result.reason.message;
-                    } else if (typeof result.reason === 'string') {
-                        errorMsg = result.reason;
-                    } else if (result.reason && typeof result.reason === 'object') {
-                        errorMsg = JSON.stringify(result.reason);
-                    }
-                    errorMessages.push(errorMsg);
-                }
-            });
         }
 
         if (allImagePaths.length === 0) {
