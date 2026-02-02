@@ -352,6 +352,14 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 }
             }
 
+            // Check rate limit
+            const rateCheck = checkImageRateLimit(msg.author.id);
+            if (!rateCheck.allowed) {
+                const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
+                await msg.reply(`You've reached the image generation limit (3 per 5 minutes). Try again in ~${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.`);
+                return;
+            }
+
             const imagePaths = await generateSingleImage(fullPrompt, options, sourceImages);
             if (imagePaths.length === 0) {
                 await msg.reply("I couldn't generate an image for that request. Please try a different description.");
