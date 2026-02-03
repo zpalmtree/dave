@@ -20,8 +20,6 @@ import {
 
 import {
     insertQuery,
-    selectQuery,
-    executeQuery,
     createTablesIfNeeded,
     deleteTablesIfNeeded,
 } from './Database.js';
@@ -200,29 +198,6 @@ async function main() {
 
         restoreTimers(db, client);
 
-        /* Backfill guild_id for existing log rows */
-        const rows = await selectQuery(
-            `SELECT DISTINCT channel_id FROM logs WHERE guild_id IS NULL`,
-            db,
-            []
-        );
-
-        for (const row of rows) {
-            try {
-                const channel = await client.channels.fetch(row.channel_id);
-
-                if (channel && 'guildId' in channel && channel.guildId) {
-                    await executeQuery(
-                        `UPDATE logs SET guild_id = ? WHERE channel_id = ? AND guild_id IS NULL`,
-                        db,
-                        [channel.guildId, row.channel_id]
-                    );
-                    console.log(`Backfilled guild_id for channel ${row.channel_id}`);
-                }
-            } catch (err) {
-                console.log(`Could not resolve channel ${row.channel_id}, skipping backfill`);
-            }
-        }
     });
 
     client.on('messageCreate', async (msg) => {
