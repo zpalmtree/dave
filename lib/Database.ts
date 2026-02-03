@@ -170,6 +170,13 @@ export async function createTablesIfNeeded(db: Database) {
         timestamp TIMESTAMP NOT NULL
     )`, db);
 
+    /* Add guild_id column if it doesn't exist yet (migration for existing DBs) */
+    try {
+        await executeQuery(`ALTER TABLE logs ADD COLUMN guild_id VARCHAR(255)`, db);
+    } catch {
+        /* Column already exists */
+    }
+
     await executeQuery(`CREATE TABLE IF NOT EXISTS tank_games (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id VARCHAR(255) NOT NULL,
