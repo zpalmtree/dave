@@ -1244,14 +1244,14 @@ async function handleUserStats(msg: Message, db: Database, user: string): Promis
         FROM
             logs
         WHERE
-            channel_id = ?
+            guild_id = ?
             AND user_id = ?
         GROUP BY
             command
         ORDER BY
             usage DESC`,
         db,
-        [ msg.channel.id, user ]
+        [ msg.guild?.id, user ]
     );
 
     if (commands.length === 0) {
@@ -1289,13 +1289,13 @@ export async function handleUsersStats(msg: Message, db: Database): Promise<void
         FROM
             logs
         WHERE
-            channel_id = ?
+            guild_id = ?
         GROUP BY
             user_id
         ORDER BY
             usage DESC`,
         db,
-        [ msg.channel.id ]
+        [ msg.guild?.id ]
     );
 
     const embed = new EmbedBuilder()
@@ -1328,14 +1328,14 @@ async function handleCommandStats(msg: Message, db: Database, command: string): 
         FROM
             logs
         WHERE
-            channel_id = ?
+            guild_id = ?
             AND command = ?
         GROUP BY
             user_id
         ORDER BY
             usage DESC`,
         db,
-        [ msg.channel.id, command ]
+        [ msg.guild?.id, command ]
     );
 
     const embed = new EmbedBuilder()
@@ -1387,13 +1387,13 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
         FROM
             logs
         WHERE
-            channel_id = ?
+            guild_id = ?
         GROUP BY
             command
         ORDER BY
             usage DESC`,
         db,
-        [ msg.channel.id ]
+        [ msg.guild?.id ]
     );
 
     const embed = new EmbedBuilder()

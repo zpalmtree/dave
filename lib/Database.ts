@@ -164,6 +164,7 @@ export async function createTablesIfNeeded(db: Database) {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id VARCHAR(255) NOT NULL,
         channel_id VARCHAR(255) NOT NULL,
+        guild_id VARCHAR(255),
         command VARCHAR(255) NOT NULL,
         args VARCHAR(2000),
         timestamp TIMESTAMP NOT NULL
