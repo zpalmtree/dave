@@ -352,12 +352,14 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 }
             }
 
-            // Check rate limit
-            const rateCheck = checkImageRateLimit(msg.author.id);
-            if (!rateCheck.allowed) {
-                const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
-                await msg.reply(`You've reached the image generation limit (3 per 5 minutes). Try again in ~${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.`);
-                return;
+            // Check rate limit (god user is exempt)
+            if (msg.author.id !== config.god) {
+                const rateCheck = checkImageRateLimit(msg.author.id);
+                if (!rateCheck.allowed) {
+                    const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
+                    await msg.reply(`You've reached the image generation limit (3 per 5 minutes). Try again in ~${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.`);
+                    return;
+                }
             }
 
             const imagePaths = await generateSingleImage(fullPrompt, options, sourceImages);
@@ -683,12 +685,14 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
     const errorMessages: string[] = [];
 
     try {
-        // Check rate limit
-        const rateCheck = checkImageRateLimit(msg.author.id);
-        if (!rateCheck.allowed) {
-            const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
-            await msg.reply(`You've reached the image generation limit (3 per 5 minutes). Try again in ~${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.`);
-            return;
+        // Check rate limit (god user is exempt)
+        if (msg.author.id !== config.god) {
+            const rateCheck = checkImageRateLimit(msg.author.id);
+            if (!rateCheck.allowed) {
+                const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
+                await msg.reply(`You've reached the image generation limit (3 per 5 minutes). Try again in ~${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}.`);
+                return;
+            }
         }
 
         // Send typing indicator if the channel has typing capability
