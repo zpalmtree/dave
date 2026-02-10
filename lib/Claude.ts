@@ -9,7 +9,7 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-opus-4-5-20251101',
+    model: 'claude-opus-4-6',
     temperature: 0.5,
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
