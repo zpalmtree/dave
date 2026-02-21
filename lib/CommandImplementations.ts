@@ -1065,9 +1065,11 @@ async function getGoogleSearchResults(query: string): Promise<any[]> {
     const url = `https://www.googleapis.com/customsearch/v1?${stringify(params)}`;
 
     const response = await fetch(url);
-    
+
     if (!response.ok) {
-        throw new Error(`Google API error: ${response.status} ${response.statusText}`);
+        const body = await response.json().catch(() => null);
+        const reason = body?.error?.message || `${response.status} ${response.statusText}`;
+        throw new Error(`Google API error: ${reason}`);
     }
 
     const data = await response.json();
@@ -1102,9 +1104,11 @@ async function getGoogleImageResults(query: string): Promise<any[]> {
     const url = `https://www.googleapis.com/customsearch/v1?${stringify(params)}`;
 
     const response = await fetch(url);
-    
+
     if (!response.ok) {
-        throw new Error(`Google API error: ${response.status} ${response.statusText}`);
+        const body = await response.json().catch(() => null);
+        const reason = body?.error?.message || `${response.status} ${response.statusText}`;
+        throw new Error(`Google API error: ${reason}`);
     }
 
     const data = await response.json();
