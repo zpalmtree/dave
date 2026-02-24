@@ -232,7 +232,7 @@ async function main() {
         ],
     });
 
-    client.on('clientReady', async () => {
+    client.on('ready', async () => {
         console.log('Logged in');
 
         magicEdenStatUpdater(client);
