@@ -50,7 +50,7 @@ type FinishReason =
 const BANNED_USERS = ['663270358161293343'];
 
 // Users exempt from image generation rate limits (in addition to god user)
-const RATE_LIMIT_EXEMPT_USERS = ['283097824021839873', '590587699795329045'];
+const RATE_LIMIT_EXEMPT_USERS = ['283097824021839873', '590587699795329045', '518203238474973193'];
 
 // Rate limiting for image generation: 3 requests per 5 minutes per user
 const IMAGE_RATE_LIMIT = { maxRequests: 3, windowMs: 5 * 60 * 1000 };
