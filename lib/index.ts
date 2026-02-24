@@ -193,7 +193,7 @@ async function main() {
         ],
     });
 
-    client.on('ready', async () => {
+    client.on('clientReady', async () => {
         console.log('Logged in');
 
         restoreTimers(db, client);
