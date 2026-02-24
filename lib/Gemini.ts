@@ -49,6 +49,9 @@ type FinishReason =
 // Hardcoded banned users list
 const BANNED_USERS = ['663270358161293343'];
 
+// Users exempt from image generation rate limits (in addition to god user)
+const RATE_LIMIT_EXEMPT_USERS = ['283097824021839873', '590587699795329045'];
+
 // Rate limiting for image generation: 3 requests per 5 minutes per user
 const IMAGE_RATE_LIMIT = { maxRequests: 3, windowMs: 5 * 60 * 1000 };
 const imageRateLimitMap = new Map<string, number[]>();
@@ -352,8 +355,8 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 }
             }
 
-            // Check rate limit (god user is exempt)
-            if (msg.author.id !== config.god) {
+            // Check rate limit (god user and exempt users are exempt)
+            if (msg.author.id !== config.god && !RATE_LIMIT_EXEMPT_USERS.includes(msg.author.id)) {
                 const rateCheck = checkImageRateLimit(msg.author.id);
                 if (!rateCheck.allowed) {
                     const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
@@ -685,8 +688,8 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
     const errorMessages: string[] = [];
 
     try {
-        // Check rate limit (god user is exempt)
-        if (msg.author.id !== config.god) {
+        // Check rate limit (god user and exempt users are exempt)
+        if (msg.author.id !== config.god && !RATE_LIMIT_EXEMPT_USERS.includes(msg.author.id)) {
             const rateCheck = checkImageRateLimit(msg.author.id);
             if (!rateCheck.allowed) {
                 const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
