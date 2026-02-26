@@ -1423,7 +1423,7 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleGrokImage,
-            description: 'Generate an image using Grok',
+            description: 'Generate or edit an image using Grok',
         },
         relatedCommands: [
             'grok',
