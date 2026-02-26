@@ -8,6 +8,8 @@ import {
 } from './Utilities.js';
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
+const XAI_IMAGE_MODEL = 'grok-imagine-image';
+const MAX_GROK_IMAGE_EDIT_SOURCES = 3;
 
 const DEFAULT_SETTINGS = {
     model: 'grok-4-1-fast',
@@ -400,27 +402,56 @@ const IMAGE_GENERATION_TRIGGERS = [
 
 interface GrokImageResponse {
     url?: string;
+    imageBuffer?: Buffer;
     revisedPrompt?: string;
     error?: string;
 }
 
-async function generateGrokImage(prompt: string): Promise<GrokImageResponse> {
+async function generateGrokImage(
+    prompt: string,
+    sourceImageURLs: string[] = [],
+): Promise<GrokImageResponse> {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const isImageEdit = sourceImageURLs.length > 0;
+        const endpoint = isImageEdit
+            ? `${XAI_BASE_URL}/images/edits`
+            : `${XAI_BASE_URL}/images/generations`;
+        const commonBody = {
+            model: XAI_IMAGE_MODEL,
+            prompt,
+        };
 
-        const response = await fetch(`${XAI_BASE_URL}/images/generations`, {
+        const requestBody = isImageEdit
+            ? sourceImageURLs.length === 1
+                ? {
+                    ...commonBody,
+                    image: {
+                        url: sourceImageURLs[0],
+                        type: 'image_url',
+                    },
+                }
+                : {
+                    ...commonBody,
+                    images: sourceImageURLs.map((url) => ({
+                        url,
+                        type: 'image_url',
+                    })),
+                }
+            : {
+                ...commonBody,
+                n: 1,
+                response_format: 'url',
+            };
+
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${config.grokApiKey}`,
             },
-            body: JSON.stringify({
-                model: 'grok-2-image-1212',
-                prompt,
-                n: 1,
-                response_format: 'url',
-            }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal,
         });
 
@@ -442,6 +473,13 @@ async function generateGrokImage(prompt: string): Promise<GrokImageResponse> {
             };
         }
 
+        if (imageData?.b64_json) {
+            return {
+                imageBuffer: Buffer.from(imageData.b64_json, 'base64'),
+                revisedPrompt: imageData.revised_prompt,
+            };
+        }
+
         return { error: 'No image generated' };
     } catch (err: any) {
         if (err.name === 'AbortError') {
@@ -455,7 +493,7 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
     const prompt = args.trim();
 
     if (!prompt) {
-        await msg.reply('Please provide a description for the image you want me to create.');
+        await msg.reply('Please provide instructions for the image you want me to create or edit.');
         return;
     }
 
@@ -464,13 +502,39 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
         return;
     }
 
+    let repliedMessage: Message | undefined;
+    if (msg.reference?.messageId) {
+        try {
+            repliedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+        } catch (error) {
+            console.error("Failed to fetch replied message:", error);
+        }
+    }
+
+    const sourceImageURLs = getImageURLsFromMessage(msg, repliedMessage)
+        .slice(0, MAX_GROK_IMAGE_EDIT_SOURCES);
+
     const response = await withTyping(msg.channel, async () => {
-        return generateGrokImage(prompt);
+        return generateGrokImage(prompt, sourceImageURLs);
     });
 
-    if (response.url) {
-        const imageResponse = await fetch(response.url);
-        const buffer = Buffer.from(await imageResponse.arrayBuffer());
+    if (response.url || response.imageBuffer) {
+        let buffer = response.imageBuffer;
+
+        if (!buffer && response.url) {
+            const imageResponse = await fetch(response.url);
+            if (!imageResponse.ok) {
+                await msg.reply('Failed to download generated image.');
+                return;
+            }
+            buffer = Buffer.from(await imageResponse.arrayBuffer());
+        }
+
+        if (!buffer) {
+            await msg.reply('Image generation returned an empty result.');
+            return;
+        }
+
         const attachment = new AttachmentBuilder(buffer, { name: 'image.jpg' });
         await msg.reply({ files: [attachment] });
     } else if (response.error) {
