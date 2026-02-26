@@ -490,13 +490,6 @@ async function generateGrokImage(
 }
 
 export async function handleGrokImage(msg: Message, args: string): Promise<void> {
-    const prompt = args.trim();
-
-    if (!prompt) {
-        await msg.reply('Please provide instructions for the image you want me to create or edit.');
-        return;
-    }
-
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
         await msg.reply('Sorry, this function has been disabled for your user.');
         return;
@@ -511,11 +504,22 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
         }
     }
 
+    const repliedText = repliedMessage?.content?.trim() ?? '';
+    const prompt = args.trim();
+    const effectivePrompt = repliedText.length > 0
+        ? (prompt.length > 0 ? `${repliedText}\n${prompt}` : repliedText)
+        : prompt;
+
+    if (!effectivePrompt) {
+        await msg.reply('Please provide instructions for the image you want me to create or edit.');
+        return;
+    }
+
     const sourceImageURLs = getImageURLsFromMessage(msg, repliedMessage)
         .slice(0, MAX_GROK_IMAGE_EDIT_SOURCES);
 
     const response = await withTyping(msg.channel, async () => {
-        return generateGrokImage(prompt, sourceImageURLs);
+        return generateGrokImage(effectivePrompt, sourceImageURLs);
     });
 
     if (response.url || response.imageBuffer) {
