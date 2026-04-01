@@ -70,7 +70,7 @@ async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> 
         const referencedMessage = await msg.channel.messages.fetch(msg.reference.messageId);
 
         for (const restriction of relevantRestrictions) {
-            if (referencedMessage.author.id !== restriction.blockedUserId) {
+            if (!restriction.blockedUserIds.includes(referencedMessage.author.id)) {
                 continue;
             }
 
