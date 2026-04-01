@@ -14,6 +14,7 @@ import { evaluate } from 'mathjs';
 import { config } from './Config.js';
 import {
     canAccessCommand,
+    tryDeleteMessage,
     tryReactMessage,
     numberWithCommas
 } from './Utilities.js';
@@ -48,10 +49,50 @@ import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 import { convertPumpFunLinks } from './ConvertPumpFunLinks.js';
 import { handleAutoTranscribe } from './OpenAI.js';
 import { userChannelRestrictions } from './UserChannelRestrictions.js';
+import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
+
+async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
+    if (!msg.reference?.messageId) {
+        return false;
+    }
+
+    const relevantRestrictions = externalBotReplyRestrictions.filter(
+        ({ botUserId }) => botUserId === msg.author.id
+    );
+
+    if (relevantRestrictions.length === 0) {
+        return false;
+    }
+
+    try {
+        const referencedMessage = await msg.channel.messages.fetch(msg.reference.messageId);
+
+        for (const restriction of relevantRestrictions) {
+            if (referencedMessage.author.id !== restriction.blockedUserId) {
+                continue;
+            }
+
+            if (!restriction.triggerPattern.test(referencedMessage.content)) {
+                continue;
+            }
+
+            await tryDeleteMessage(msg);
+            return true;
+        }
+    } catch (err) {
+        console.log(`Failed to inspect referenced message ${msg.reference.messageId}, ${(err as any).toString()}`);
+    }
+
+    return false;
+}
 
 /* This is the main entry point to handling messages. */
 async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> {
     if (msg.author.id === msg.client.user.id) {
+        return;
+    }
+
+    if (await handleRestrictedExternalBotReply(msg)) {
         return;
     }
 
