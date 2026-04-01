@@ -78,6 +78,14 @@ async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> 
                 continue;
             }
 
+            const userChannelRestriction = userChannelRestrictions.find(
+                ({ userId }) => userId === referencedMessage.author.id
+            );
+
+            if (userChannelRestriction?.allowedChannels.includes(msg.channel.id)) {
+                continue;
+            }
+
             await tryDeleteMessage(msg);
             return true;
         }

@@ -10,6 +10,6 @@ export const userChannelRestrictions: UserChannelRestriction[] = [
     },
     {
         userId: '673794444579045386',
-        allowedChannels: ['1073613902706909214'],
+        allowedChannels: ['1234575197114204202', '1073613902706909214'],
     },
 ];
