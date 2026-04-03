@@ -30,7 +30,7 @@
     "@solana/web3.js": "^1.91.3",
     "canvas": "npm:@napi-rs/canvas@^0.1.82",
     "discord.js": "^14.13.0",
-    "fabric": "^4.3.1",
+    "fabric": "^7.2.0",
     "form-data": "^4.0.4",
     "groq-sdk": "^0.9.1",
     "imagemin": "^8.0.1",
