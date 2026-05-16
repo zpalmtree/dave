@@ -120,10 +120,12 @@ function collectErrorParts(value: unknown, parts: string[], seen = new Set<unkno
         collectErrorParts(value[key], parts, seen, depth + 1);
     }
 
-    for (const key of META_KEYS) {
-        const item = value[key];
-        if (typeof item === 'string' || typeof item === 'number') {
-            pushUnique(parts, `${key}: ${item}`);
+    if (parts.length === initialPartCount) {
+        for (const key of META_KEYS) {
+            const item = value[key];
+            if (typeof item === 'string' || typeof item === 'number') {
+                pushUnique(parts, `${key}: ${item}`);
+            }
         }
     }
 
@@ -155,19 +157,12 @@ export function formatProviderApiError(options: ProviderApiErrorOptions): string
     const status = options.status ?? (isRecord(options.error) && typeof options.error.status === 'number'
         ? options.error.status
         : undefined);
-    const statusText = options.statusText ?? (isRecord(options.error) && typeof options.error.statusText === 'string'
-        ? options.error.statusText
-        : undefined);
-
-    const statusLabel = status
-        ? ` (${status}${statusText ? ` ${statusText}` : ''})`
-        : '';
     const verb = status && status >= 400 && status < 500
         ? 'rejected the request'
         : 'failed';
-    const fallback = options.fallback || `${options.provider} API ${verb}${statusLabel}.`;
+    const fallback = options.fallback || `${status ? `${status}: ` : ''}${options.provider} API ${verb}.`;
     const message = parts.length > 0
-        ? `${options.provider} API ${verb}${statusLabel}: ${parts.join('; ')}`
+        ? `${status ? `${status}: ` : ''}${parts.join('; ')}`
         : fallback;
 
     return truncateMessage(message, options.maxLength ?? 1900);
