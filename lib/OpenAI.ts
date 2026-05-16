@@ -20,6 +20,7 @@ import {
     withTyping,
     replyLongMessage,
 } from './Utilities.js';
+import { formatProviderApiError } from './ApiErrors.js';
 
 // Polyfill File for environments running on Node < 20 so OpenAI uploads work.
 void (async () => {
@@ -558,7 +559,7 @@ async function masterOpenAIHandler(
           console.log('Retrying without images due to unsupported image error');
           return masterOpenAIHandler(options, true);
         }
-        return { error: err.toString() };
+        return { error: formatProviderApiError({ provider: 'OpenAI', error: err }) };
       }
   });
 }
@@ -1348,15 +1349,9 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
             await showFinalResult(payload, elapsed);
         } catch (error: any) {
             console.error('Failed to remove image background with OpenAI Responses API:', error);
-            const message =
-                typeof error?.response?.data?.error?.message === 'string'
-                    ? error.response.data.error.message
-                    : typeof error?.message === 'string'
-                        ? error.message
-                        : 'Unknown error';
             await updateProgress({
                 status: 'error',
-                errorText: message,
+                errorText: formatProviderApiError({ provider: 'OpenAI', error }),
                 createIfMissing: true,
             });
         }
@@ -1703,15 +1698,9 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             await showFinalResult(payload, elapsed);
         } catch (error: any) {
             console.error('Failed to generate image with OpenAI Responses API:', error);
-            const message =
-                typeof error?.response?.data?.error?.message === 'string'
-                    ? error.response.data.error.message
-                    : typeof error?.message === 'string'
-                        ? error.message
-                        : 'Unknown error';
             await updateProgress({
                 status: 'error',
-                errorText: message,
+                errorText: formatProviderApiError({ provider: 'OpenAI', error }),
                 createIfMissing: true,
             });
         }

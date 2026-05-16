@@ -2,6 +2,7 @@ import { Message } from 'discord.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
 import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTyping, replyLongMessage } from './Utilities.js';
+import { formatProviderApiError } from './ApiErrors.js';
 import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
@@ -275,7 +276,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         return { error: 'Unexpected response from API' };
     } catch (err) {
         console.error('Claude API Error:', err);
-        return { error: (err as Error).toString() };
+        return { error: formatProviderApiError({ provider: 'Claude', error: err }) };
     }
 }
 

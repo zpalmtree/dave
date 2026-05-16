@@ -19,6 +19,7 @@ import {
     getImageURLsFromMessage,
     replyLongMessage,
 } from './Utilities.js';
+import { formatProviderApiError } from './ApiErrors.js';
 
 // Define interfaces for our handler
 interface GeminiOptions {
@@ -209,49 +210,46 @@ async function prepareContentParts(text: string, imageURLs: string[] = []): Prom
  * @param {boolean} imageOnly - Whether this was an image generation request
  * @returns {string} - User-friendly error message
  */
-function getSafetyErrorMessage(safetyReason: string, imageOnly: boolean): string {
+function formatGeminiSafetyRatings(candidate?: unknown): string | undefined {
+    const ratings = (candidate as any)?.safetyRatings;
+    if (!Array.isArray(ratings)) return undefined;
+
+    const details = ratings
+        .filter((rating: any) => rating?.blocked || (rating?.probability && rating.probability !== 'NEGLIGIBLE'))
+        .map((rating: any) => {
+            const category = rating?.category || 'unknown category';
+            const probability = rating?.probability ? `: ${rating.probability}` : '';
+            const blocked = rating?.blocked ? ' blocked' : '';
+            return `${category}${probability}${blocked}`;
+        });
+
+    return details.length > 0 ? details.join('; ') : undefined;
+}
+
+function getSafetyErrorMessage(safetyReason: string, imageOnly: boolean, candidate?: unknown): string {
+    const details = formatGeminiSafetyRatings(candidate);
+    const detailText = details ? ` Details: ${details}.` : '';
+
     switch (safetyReason) {
         case 'IMAGE_SAFETY':
-            return "The Gemini API refused to generate this image. Please try a different image description.";
+            return `The Gemini API refused to generate this image (${safetyReason}).${detailText} Please try a different image description.`;
         case 'TEXT_SAFETY':
-            return "The Gemini API refused to process this text content. Please try rephrasing your request.";
+            return `The Gemini API refused to process this text content (${safetyReason}).${detailText} Please try rephrasing your request.`;
         case 'SAFETY':
             return imageOnly
-                ? "The Gemini API refused to generate this image. Try a different description."
-                : "The Gemini API refused to respond to this request. Please try a different prompt.";
+                ? `The Gemini API refused to generate this image (${safetyReason}).${detailText} Try a different description.`
+                : `The Gemini API refused to respond to this request (${safetyReason}).${detailText} Please try a different prompt.`;
         default:
-            return "The Gemini API rejected this request. Please try again with different content.";
+            return `The Gemini API rejected this request (${safetyReason}).${detailText} Please try again with different content.`;
     }
 }
 
 function formatGeminiError(error: any, action: string): string {
-    let errorMessage = `An error occurred while ${action}.`;
-
-    if (error?.message && typeof error.message === 'string') {
-        const errMsg = error.message;
-        if (errMsg.includes("safety")) {
-            return "The Gemini API rejected this request due to safety policies. Please try a different prompt.";
-        }
-        if (errMsg.includes("invalid image") || errMsg.includes("unsupported image")) {
-            return "The Gemini API couldn't process this image format. Please try a different image.";
-        }
-        if (errMsg.includes("timeout")) {
-            return "The request timed out. Please try again with a shorter prompt.";
-        }
-        errorMessage = `Error: ${errMsg}`;
-    }
-
-    if (typeof error === 'object' && error) {
-        if (error.status === 400) {
-            errorMessage = "The Gemini API rejected the request format. This might be a configuration issue.";
-        } else if (error.status === 429) {
-            errorMessage = "The Gemini API rate limit was exceeded. Please try again in a few minutes.";
-        } else if (error.status === 500 || error.status === 503) {
-            errorMessage = "The Gemini API is currently experiencing issues. Please try again later.";
-        }
-    }
-
-    return errorMessage;
+    return formatProviderApiError({
+        provider: 'Gemini',
+        error,
+        fallback: `Gemini API failed while ${action}.`,
+    });
 }
 
 /**
@@ -408,7 +406,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 if (finishReason === 'SAFETY' ||
                     finishReason === 'IMAGE_SAFETY' ||
                     finishReason === 'TEXT_SAFETY') {
-                    await msg.reply(getSafetyErrorMessage(finishReason, imageOnly));
+                    await msg.reply(getSafetyErrorMessage(finishReason, imageOnly, candidate));
                     return;
                 }
             }
@@ -425,7 +423,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
                 if (finishReason === 'SAFETY' ||
                     finishReason === 'IMAGE_SAFETY' ||
                     finishReason === 'TEXT_SAFETY') {
-                    await msg.reply(getSafetyErrorMessage(finishReason, imageOnly));
+                    await msg.reply(getSafetyErrorMessage(finishReason, imageOnly, candidate));
                     return;
                 }
             }
@@ -759,8 +757,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 const paths = await generateSingleImage(fullPrompt, { temperature: 1 }, sourceImageDataArray);
                 allImagePaths.push(...paths);
             } catch (error: any) {
-                const errorMsg = error instanceof Error ? error.message : String(error);
-                errorMessages.push(errorMsg);
+                errorMessages.push(formatProviderApiError({ provider: 'Gemini', error }));
             }
         } else {
             // Generate a single image from text
@@ -769,8 +766,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
                 allImagePaths.push(...paths);
             } catch (error: any) {
                 console.error("Image generation error:", error);
-                const errorMsg = error instanceof Error ? error.message : String(error);
-                errorMessages.push(errorMsg);
+                errorMessages.push(formatProviderApiError({ provider: 'Gemini', error }));
             }
         }
 
