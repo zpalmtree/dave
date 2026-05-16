@@ -1583,22 +1583,29 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
 
         try {
             const usePng = wantsTransparentOutput(prompt);
+            const imageGenerationTool = usePng
+                ? {
+                    type: 'image_generation',
+                    moderation: 'low',
+                    output_format: 'png',
+                    background: 'transparent',
+                    partial_images: MAX_STREAM_PARTIALS,
+                }
+                : {
+                    type: 'image_generation',
+                    model: 'gpt-image-2',
+                    moderation: 'low',
+                    output_format: 'jpeg',
+                    output_compression: 50,
+                };
             const requestPayload: ResponsesCreateParams = {
-                model: 'gpt-5',
+                model: 'gpt-5.5',
                 instructions: createSystemPrompt(
                     'You are a creative visual artist. Always respond by calling the image_generation tool to produce imagery that matches the user request.',
                     username,
                 ),
                 input: [toResponsesMessage(userMessageForInput)],
-                tools: [
-                    {
-                        type: 'image_generation',
-                        moderation: 'low',
-                        output_format: usePng ? 'png' : 'jpeg',
-                        ...(usePng ? { background: 'transparent' } : { output_compression: 50 }),
-                        partial_images: MAX_STREAM_PARTIALS,
-                    },
-                ],
+                tools: [imageGenerationTool as any],
                 user: msg.author.id,
                 stream: true,
             };
