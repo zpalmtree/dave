@@ -252,6 +252,128 @@ function formatGeminiError(error: any, action: string): string {
     });
 }
 
+function formatGeminiSafetyAttributes(attributes?: unknown): string | undefined {
+    const categories = (attributes as any)?.categories;
+    if (!Array.isArray(categories) || categories.length === 0) return undefined;
+
+    return categories
+        .filter((category: unknown): category is string => typeof category === 'string' && category.trim().length > 0)
+        .join(', ');
+}
+
+function formatGeminiPromptBlockReason(reason: string): string {
+    switch (reason) {
+        case 'SAFETY':
+        case 'IMAGE_SAFETY':
+        case 'PROHIBITED_CONTENT':
+            return 'Prompt rejected by content moderation.';
+        case 'BLOCKLIST':
+            return 'Prompt rejected by Gemini blocklist.';
+        case 'MODEL_ARMOR':
+            return 'Prompt rejected by Model Armor.';
+        case 'JAILBREAK':
+            return 'Prompt rejected as a jailbreak attempt.';
+        default:
+            return `Prompt rejected: ${reason}.`;
+    }
+}
+
+function formatGeminiFinishReason(reason: string): string {
+    switch (reason) {
+        case 'SAFETY':
+        case 'IMAGE_SAFETY':
+        case 'IMAGE_PROHIBITED_CONTENT':
+        case 'PROHIBITED_CONTENT':
+            return 'Generated image rejected by content moderation.';
+        case 'BLOCKLIST':
+            return 'Generated image rejected by Gemini blocklist.';
+        case 'NO_IMAGE':
+            return 'Gemini did not return a generated image.';
+        case 'RECITATION':
+            return 'Gemini stopped generation due to recitation policy.';
+        case 'LANGUAGE':
+            return 'Gemini stopped generation due to unsupported language.';
+        case 'MAX_TOKENS':
+            return 'Gemini stopped generation after reaching the token limit.';
+        default:
+            return `Gemini stopped generation: ${reason}.`;
+    }
+}
+
+function extractGeminiResponseText(response: GenerateContentResponse): string | undefined {
+    const parts = response.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts)) return undefined;
+
+    const text = parts
+        .map((part: Part) => part.text)
+        .filter((partText): partText is string => typeof partText === 'string' && partText.trim().length > 0)
+        .join('\n')
+        .trim();
+
+    return text.length > 0 ? text : undefined;
+}
+
+function formatGeminiImageResponseError(
+    response: GenerateContentResponse | GenerateImagesResponse | undefined,
+): string | undefined {
+    if (!response) return 'Gemini API returned no response.';
+
+    if ('generatedImages' in response && response.generatedImages) {
+        const filteredReasons = response.generatedImages
+            .map((image) => image?.raiFilteredReason)
+            .filter((reason): reason is string => typeof reason === 'string' && reason.trim().length > 0);
+        if (filteredReasons.length > 0) {
+            return [...new Set(filteredReasons)].join('; ');
+        }
+
+        const safetyDetails = formatGeminiSafetyAttributes(response.positivePromptSafetyAttributes);
+        if (safetyDetails) {
+            return `Prompt rejected by content moderation: ${safetyDetails}.`;
+        }
+    }
+
+    if ('promptFeedback' in response && response.promptFeedback) {
+        const { blockReason, blockReasonMessage } = response.promptFeedback;
+        if (typeof blockReasonMessage === 'string' && blockReasonMessage.trim().length > 0) {
+            return blockReasonMessage.trim();
+        }
+        if (typeof blockReason === 'string' && blockReason.trim().length > 0) {
+            return formatGeminiPromptBlockReason(blockReason);
+        }
+
+        const safetyDetails = formatGeminiSafetyRatings(response.promptFeedback);
+        if (safetyDetails) {
+            return `Prompt rejected by content moderation: ${safetyDetails}.`;
+        }
+    }
+
+    if ('candidates' in response && response.candidates) {
+        for (const candidate of response.candidates) {
+            const finishMessage = candidate.finishMessage;
+            if (typeof finishMessage === 'string' && finishMessage.trim().length > 0) {
+                return finishMessage.trim();
+            }
+
+            const finishReason = candidate.finishReason;
+            if (typeof finishReason === 'string' && finishReason.trim().length > 0 && finishReason !== 'STOP') {
+                return formatGeminiFinishReason(finishReason);
+            }
+
+            const safetyDetails = formatGeminiSafetyRatings(candidate);
+            if (safetyDetails) {
+                return `Generated image rejected by content moderation: ${safetyDetails}.`;
+            }
+        }
+
+        const responseText = extractGeminiResponseText(response);
+        if (responseText) {
+            return responseText;
+        }
+    }
+
+    return 'Gemini API returned no generated image.';
+}
+
 /**
  * Handle Gemini chat requests with history support and integrated image generation
  * @param {Message} msg - Discord message object
@@ -667,7 +789,12 @@ async function generateSingleImage(
             },
         });
 
-        return processResponseImages(response);
+        const imagePaths = await processResponseImages(response);
+        if (imagePaths.length > 0) {
+            return imagePaths;
+        }
+
+        throw new Error(formatGeminiImageResponseError(response));
     };
 
     return Promise.race([generationPromise(), timeoutPromise]);
@@ -773,56 +900,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
         if (allImagePaths.length === 0) {
             // If we have error messages, provide them to the user
             if (errorMessages.length > 0) {
-                // Note: Prompt enhancement errors are now handled with fallback, no need to check here
-
-                // Categorize errors by type
-                const safetyErrors = errorMessages.filter(err =>
-                    err.includes("safety") || err.includes("Safety")).length;
-                const timeoutErrors = errorMessages.filter(err =>
-                    err.includes("timeout") || err.includes("timed out")).length;
-                const imageFormatErrors = errorMessages.filter(err =>
-                    err.includes("invalid image") || err.includes("unsupported image")).length;
-                const rateLimitErrors = errorMessages.filter(err =>
-                    err.includes("rate limit") || err.includes("quota")).length;
-                const serverErrors = errorMessages.filter(err =>
-                    err.includes("500") || err.includes("503") || err.includes("server error")).length;
-
-                // Determine the most common error type
-                const errorCounts = [
-                    { type: "safety", count: safetyErrors, message: "The content may violate safety policies (potentially sensitive content)" },
-                    { type: "timeout", count: timeoutErrors, message: "The generation process timed out (try a simpler description)" },
-                    { type: "format", count: imageFormatErrors, message: "There was an issue with the image format" },
-                    { type: "rateLimit", count: rateLimitErrors, message: "API rate limit reached (please try again later)" },
-                    { type: "server", count: serverErrors, message: "The Gemini service is experiencing issues (please try again later)" }
-                ];
-
-                // Sort by count, descending
-                errorCounts.sort((a, b) => b.count - a.count);
-
-                // Create a user-friendly error message focusing on the most common error
-                let errorResponse = imageURLs.length > 0
-                    ? "I couldn't edit the image based on that prompt. "
-                    : "I couldn't generate any images based on that prompt. ";
-
-                if (errorCounts[0].count > 0) {
-                    // Include the most common error
-                    errorResponse += `Error: ${errorCounts[0].message}. `;
-
-                    // If there's a second common error that's different, include it too
-                    if (errorCounts[1].count > 0 && errorCounts[1].count >= errorCounts[0].count * 0.5) {
-                        errorResponse += `Additionally: ${errorCounts[1].message}. `;
-                    }
-                } else {
-                    // If none of our categorized errors matched, include the first unique error
-                    const uniqueErrors = [...new Set(errorMessages)];
-                    if (uniqueErrors.length > 0) {
-                        errorResponse += `Error: ${uniqueErrors[0]}. `;
-                    }
-                }
-
-                errorResponse += "Please try a different description or try again later.";
-
-                await msg.reply(errorResponse);
+                await msg.reply([...new Set(errorMessages)].join('\n').slice(0, 1900));
             } else {
                 // Fallback if no specific errors were captured
                 const errorMessage = imageURLs.length > 0
