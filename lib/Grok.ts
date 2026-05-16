@@ -6,6 +6,7 @@ import {
     getImageURLsFromMessage,
     withTyping,
 } from './Utilities.js';
+import { formatProviderApiError } from './ApiErrors.js';
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const XAI_IMAGE_MODEL = 'grok-imagine-image';
@@ -223,7 +224,14 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         if (!response.ok) {
             const errorText = await response.text();
             console.error('xAI API error:', response.status, errorText);
-            return { error: `API error: ${response.status}` };
+            return {
+                error: formatProviderApiError({
+                    provider: 'xAI',
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: errorText,
+                }),
+            };
         }
 
         const completion = await response.json();
@@ -340,7 +348,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             return masterGrokHandler({ ...options, includeFiles: false }, true);
         }
 
-        return { error: err.toString() };
+        return { error: formatProviderApiError({ provider: 'xAI', error: err }) };
     }
 }
 
@@ -460,7 +468,14 @@ async function generateGrokImage(
         if (!response.ok) {
             const errorText = await response.text();
             console.error('xAI Image API error:', response.status, errorText);
-            return { error: `API error: ${response.status}` };
+            return {
+                error: formatProviderApiError({
+                    provider: 'xAI Image',
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: errorText,
+                }),
+            };
         }
 
         const result = await response.json();
@@ -485,7 +500,7 @@ async function generateGrokImage(
         if (err.name === 'AbortError') {
             return { error: 'Request timed out' };
         }
-        return { error: err.toString() };
+        return { error: formatProviderApiError({ provider: 'xAI Image', error: err }) };
     }
 }
 
@@ -624,7 +639,14 @@ Keep your summary under 1900 characters. Jump directly into the summary without 
         if (!response.ok) {
             const errorText = await response.text();
             console.error('xAI API error:', response.status, errorText);
-            return { error: `API error: ${response.status}` };
+            return {
+                error: formatProviderApiError({
+                    provider: 'xAI',
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: errorText,
+                }),
+            };
         }
 
         const completion = await response.json();
@@ -639,6 +661,6 @@ Keep your summary under 1900 characters. Jump directly into the summary without 
         if (err.name === 'AbortError') {
             return { error: 'Request timed out' };
         }
-        return { error: err.toString() };
+        return { error: formatProviderApiError({ provider: 'xAI', error: err }) };
     }
 }
