@@ -288,7 +288,7 @@ function formatGeminiFinishReason(reason: string): string {
         case 'BLOCKLIST':
             return 'Generated image rejected by Gemini blocklist.';
         case 'NO_IMAGE':
-            return 'Gemini returned NO_IMAGE: no generated image and no further rejection details.';
+            return 'Gemini did not return an image; prompt likely rejected by content moderation.';
         case 'RECITATION':
             return 'Gemini stopped generation due to recitation policy.';
         case 'LANGUAGE':
