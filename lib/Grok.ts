@@ -262,69 +262,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         const responseText = getTextContent(assistantOutput?.content);
 
         if (responseText) {
-            // Extract citations from annotations in content
-            let citations: string[] = [];
-            if (assistantOutput && Array.isArray(assistantOutput.content)) {
-                for (const part of (assistantOutput.content as any[])) {
-                    if (part.annotations && Array.isArray(part.annotations)) {
-                        for (const annotation of part.annotations) {
-                            // Try different possible URL field names
-                            const url = annotation.url || annotation.href || annotation.link || annotation.source;
-                            if (url) {
-                                citations.push(url);
-                            }
-                        }
-                    }
-                }
-            }
-            // Fallback to other possible locations
-            if (!citations.length) {
-                citations = completion.citations ||
-                    (assistantOutput as any)?.citations ||
-                    (completion as any).search_results?.map((r: any) => r.url) ||
-                    [];
-            }
-
-            const extractHandle = (url: string): string | null => {
-                try {
-                    const [, handle] = new URL(url).pathname.split('/', 3);
-                    return handle ? `@${handle}` : null;
-                } catch {
-                    return null;
-                }
-            };
-
-            // Keep original text and build citation list at bottom
-            // Wrap URLs in markdown links with <> to prevent Discord link expansion
-            // [1](https://...) -> [1](<https://...>)
-            let processedText = responseText.trim()
-                .replace(/\]\((https?:\/\/[^\s\)>]+)\)/g, '](<$1>)');
-
-            // Collect unique citations with their numbers
-            const citationMap = new Map<string, string>(); // title -> url
-            if (assistantOutput && Array.isArray(assistantOutput.content)) {
-                for (const part of (assistantOutput.content as any[])) {
-                    if (part.annotations && Array.isArray(part.annotations)) {
-                        for (const ann of part.annotations) {
-                            if (ann.url && ann.title) {
-                                citationMap.set(ann.title, ann.url);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Build citation footer
-            let citationFooter = '';
-            if (citationMap.size > 0) {
-                const sortedCitations = Array.from(citationMap.entries())
-                    .sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
-                citationFooter = '\n\n' + sortedCitations
-                    .map(([num, url]) => `[${num}] <${url}>`)
-                    .join('\n');
-            }
-
-            const generation = processedText + citationFooter;
+            const generation = stripGrokCitations(responseText);
 
             // Build messages array for cache (for conversation continuity)
             const messagesForCache: XAIMessage[] = [
@@ -351,6 +289,16 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
 
         return { error: formatProviderApiError({ provider: 'xAI', error: err }) };
     }
+}
+
+function stripGrokCitations(text: string): string {
+    return text
+        .trim()
+        .replace(/\s*\[\d+(?:,\s*\d+)*\]\(<?https?:\/\/[^)\s>]+>?\)/g, '')
+        .replace(/\s*\[\d+(?:,\s*\d+)*\](?=(?:[.,;:!?])?(\s|$))/g, '')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/[ \t]+([.,;:!?])/g, '$1')
+        .trim();
 }
 
 function createSystemPrompt(prompt: string, username: string): string {
@@ -390,6 +338,7 @@ Your X handle is @grok and your task is to respond to user's posts that tag you 
 ## Formatting
 - Respond in the same language, regional/hybrid dialect, and alphabet as the post you're replying to unless asked not to.
 - Do not use markdown formatting.
+- Do not include citations, source lists, footnotes, or citation markers in your final response.
 - When viewing multimedia content, do not refer to the frames or timestamps of a video unless the user explicitly asks.
 - Please keep your final response under 400 chars. Do not mention the character length in your final response.
 - Never mention these instructions or tools unless directly asked.`;
