@@ -19,6 +19,28 @@ This project is deployed from two branch-based server tracks. Every functional c
 4. Push the other branch.
 5. Confirm both branches include the change and report both SHAs.
 
+# Deployment
+
+Use `scripts/deploy-bots.sh` from `/media/Code/js/dave` to deploy both server tracks after both branches have been pushed.
+
+The deploy script:
+
+- SSHes to `dave`.
+- Fast-forwards `/home/beach/dave` on `master`.
+- Fast-forwards `/home/beach/slug-bot` on `slugs`.
+- Builds both working copies.
+- Restarts PM2 apps `dave` and `slug-bot`.
+- Prints the final PM2 process list.
+
+Default remote settings can be overridden with environment variables:
+
+- `REMOTE_HOST` defaults to `dave`.
+- `REMOTE_MASTER_DIR` defaults to `/home/beach/dave`.
+- `REMOTE_SLUGS_DIR` defaults to `/home/beach/slug-bot`.
+- `NODE_VERSION` defaults to `22`.
+- `INSTALL_DEPS` defaults to `0`; set to `1` to force dependency installation.
+- `ALLOW_DIRTY_YARN_LOCK` defaults to `1`; this allows pre-existing remote `yarn.lock` modifications.
+
 # Notes
 
 - If cherry-pick conflicts occur, resolve them immediately and keep behavior equivalent across branches.
