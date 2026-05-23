@@ -20,10 +20,10 @@ const SHADOW_BLUR = 2.75;
 const GCP2_API_URL = 'https://rng.observer/api/gcp2';
 const GCP2_CACHE_MS = 5000;
 const DOT_GRAPH_MAX_TIMESPAN = 86400;
-const DOT_GRAPH_MIN_CORE_HEIGHT = 1.1 / DOT_GRAPH_HEIGHT;
-const DOT_GRAPH_MIN_FADE_HEIGHT = 3.5 / DOT_GRAPH_HEIGHT;
-const DOT_GRAPH_SMOOTH_RADIUS = 2;
-const DOT_GRAPH_SPINE_WIDTH = 1.4;
+const DOT_GRAPH_MIN_CORE_HEIGHT = 0.55 / DOT_GRAPH_HEIGHT;
+const DOT_GRAPH_MIN_FADE_HEIGHT = 1.65 / DOT_GRAPH_HEIGHT;
+const DOT_GRAPH_SMOOTH_RADIUS = 1;
+const DOT_GRAPH_SPINE_WIDTH = 0.45;
 
 const GRAPH_COLOR_STOPS: { offset: number, color: string }[] = [
     { offset: 0.00, color: '#FF00FF' },
@@ -453,7 +453,7 @@ function getGraphBand(values: number[]): DotGraphBand {
     const q1Value = quantile(sorted, 0.25);
     const q3Value = quantile(sorted, 0.75);
     const coreHalfHeight = Math.max((q3Value - q1Value) / 2, DOT_GRAPH_MIN_CORE_HEIGHT);
-    const fadeHalfHeight = Math.max((max - min) * 0.55, coreHalfHeight + DOT_GRAPH_MIN_FADE_HEIGHT);
+    const fadeHalfHeight = Math.max((max - min) * 0.45, coreHalfHeight + DOT_GRAPH_MIN_FADE_HEIGHT);
     const top = clamp(median - fadeHalfHeight, 0, 1);
     const bottom = clamp(median + fadeHalfHeight, 0, 1);
 
@@ -503,17 +503,17 @@ function smoothGraphBands(bands: DotGraphBand[]): DotGraphBand[] {
     return smoothed.map((band, index) => {
         const previous = smoothed[Math.max(0, index - 1)];
         const next = smoothed[Math.min(smoothed.length - 1, index + 1)];
-        const coreHalfHeight = Math.max((band.q3 - band.q1) / 2, DOT_GRAPH_MIN_CORE_HEIGHT);
         const topCenter = Math.min(previous.a, band.a, next.a);
         const bottomCenter = Math.max(previous.a, band.a, next.a);
-        const top = clamp(Math.min(band.top, topCenter - DOT_GRAPH_MIN_FADE_HEIGHT), 0, 1);
-        const bottom = clamp(Math.max(band.bottom, bottomCenter + DOT_GRAPH_MIN_FADE_HEIGHT), 0, 1);
+        const bridgeHeight = DOT_GRAPH_MIN_FADE_HEIGHT * 0.35;
+        const top = clamp(Math.min(band.top, topCenter - bridgeHeight), 0, 1);
+        const bottom = clamp(Math.max(band.bottom, bottomCenter + bridgeHeight), 0, 1);
 
         return {
             top,
             bottom,
-            q1: clamp(Math.min(band.q1, topCenter - coreHalfHeight), top, bottom),
-            q3: clamp(Math.max(band.q3, bottomCenter + coreHalfHeight), top, bottom),
+            q1: clamp(band.q1, top, bottom),
+            q3: clamp(band.q3, top, bottom),
             a: band.a,
         };
     });
@@ -552,7 +552,7 @@ function synthesizeGraphBands(points: DotGraphPoint[], history: DotGraphPoint[])
 function drawGraphSpine(context: ReturnType<Canvas['getContext']>, graphData: DotGraphBand[], background: CanvasGradient): void {
     context.save();
     context.strokeStyle = background;
-    context.globalAlpha = 0.92;
+    context.globalAlpha = 0.6;
     context.lineWidth = DOT_GRAPH_SPINE_WIDTH;
     context.lineJoin = 'round';
     context.lineCap = 'round';
