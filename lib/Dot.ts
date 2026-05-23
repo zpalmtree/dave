@@ -1,8 +1,6 @@
 import fetch from 'node-fetch';
 
-import { xml2json } from 'xml-js';
-
-import { Canvas, createCanvas, loadImage } from 'canvas';
+import { Canvas, createCanvas } from 'canvas';
 
 import { RGB } from './Types.js';
 
@@ -18,6 +16,17 @@ const DOT_GRAPH_WIDTH = 400;
 const DOT_GRAPH_HEIGHT = 150;
 
 const SHADOW_BLUR = 2.75;
+
+const GCP2_API_URL = 'https://rng.observer/api/gcp2';
+const GCP2_CACHE_MS = 5000;
+const DOT_GRAPH_MAX_TIMESPAN = 86400;
+
+const GRAPH_PADDING = {
+    top: 14,
+    right: 14,
+    bottom: 22,
+    left: 44,
+};
 
 const COLORS: {color1: string, color2: string}[] = [
     {color1: '#CDCDCD', color2: '#505050'},
@@ -39,6 +48,27 @@ const COLORS: {color1: string, color2: string}[] = [
 // generate dot color stops
 let DOT_IMAGES: Canvas[] = [];
 let DOT_COLORS: { tail: number, mc: Canvas }[] = [];
+
+interface Gcp2Aggregate {
+    end_epoch: number | string
+    netvar_aggregate: string
+}
+
+interface Gcp2Response {
+    currentNetvar?: {
+        netvar?: { netvar: string }[]
+    }
+    netvarAggregate24H?: {
+        aggregates?: Gcp2Aggregate[]
+    }
+}
+
+interface DotGraphPoint {
+    epoch: number
+    value: number
+}
+
+let gcp2Cache: { expiresAt: number, promise: Promise<Gcp2Response> } | undefined;
 
 export async function initDot() {
     if (DOT_IMAGES.length === 0) {
@@ -123,26 +153,133 @@ async function generateDotImages(): Promise<Canvas[]> {
     return images;
 }
 
-export async function renderDot(): Promise<[string, number, Canvas]> {
-    const response = await fetch('http://gcpdot.com/gcpindex.php');
+async function fetchGcp2Data(): Promise<Gcp2Response> {
+    const now = Date.now();
 
-    const dotXML = await response.text();
+    if (gcp2Cache && gcp2Cache.expiresAt > now) {
+        return gcp2Cache.promise;
+    }
 
-    const dotData = JSON.parse(xml2json(dotXML)).elements[0].elements;
+    const promise = (async () => {
+        const response = await fetch(GCP2_API_URL, {
+            headers: {
+                accept: 'application/json',
+                'user-agent': 'dave-discord-bot/1.1',
+            },
+        });
 
-    const serverTime = dotData[0].elements[0].text;
+        const body = await response.text();
 
-    /* Server sends back a full minute of data, we only need the current second */
-    const currentDotValue = Number(dotData[1].elements.find((item: any) => {
-        return item.attributes.t === serverTime
-    }).elements[0].text);
+        if (!response.ok) {
+            throw new Error(`GCP 2.0 API returned ${response.status} ${response.statusText}`);
+        }
+
+        try {
+            const parsed = JSON.parse(body);
+
+            if (!parsed || typeof parsed !== 'object') {
+                throw new Error('response root is not an object');
+            }
+
+            return parsed as Gcp2Response;
+        } catch (err) {
+            throw new Error(`GCP 2.0 API returned invalid JSON: ${(err as Error).message}`);
+        }
+    })();
+
+    gcp2Cache = {
+        expiresAt: now + GCP2_CACHE_MS,
+        promise,
+    };
+
+    try {
+        return await promise;
+    } catch (err) {
+        if (gcp2Cache?.promise === promise) {
+            gcp2Cache = undefined;
+        }
+
+        throw err;
+    }
+}
+
+function finiteNumber(value: unknown): number | null {
+    const parsed = Number(value);
+
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+}
+
+function parseHistory(data: Gcp2Response): DotGraphPoint[] {
+    const aggregates = data.netvarAggregate24H?.aggregates;
+
+    if (!Array.isArray(aggregates)) {
+        throw new Error('GCP 2.0 API response is missing 24h graph data');
+    }
+
+    const history = aggregates.flatMap((item) => {
+        const epoch = finiteNumber(item.end_epoch);
+        const value = finiteNumber(item.netvar_aggregate);
+
+        return epoch === null || value === null ? [] : [{ epoch, value }];
+    }).sort((a, b) => a.epoch - b.epoch);
+
+    if (history.length === 0) {
+        throw new Error('GCP 2.0 API response did not include usable graph data');
+    }
+
+    return history;
+}
+
+function getCurrentNetvar(data: Gcp2Response, history: DotGraphPoint[]): number {
+    const currentNetvar = finiteNumber(data.currentNetvar?.netvar?.[0]?.netvar);
+
+    if (currentNetvar !== null) {
+        return currentNetvar;
+    }
+
+    return history[history.length - 1].value;
+}
+
+function calculatePercentile(value: number, history: DotGraphPoint[]): number {
+    const sorted = history.map((point) => point.value).sort((a, b) => a - b);
+    let count = 0;
+
+    for (const item of sorted) {
+        if (item <= value) {
+            count++;
+        } else {
+            break;
+        }
+    }
+
+    return clamp(count / sorted.length, 0, 1);
+}
+
+async function getDotStats(): Promise<{ currentNetvar: number, currentDotValue: number, history: DotGraphPoint[] }> {
+    const data = await fetchGcp2Data();
+    const history = parseHistory(data);
+    const currentNetvar = getCurrentNetvar(data, history);
+
+    return {
+        currentNetvar,
+        currentDotValue: calculatePercentile(currentNetvar, history),
+        history,
+    };
+}
+
+function renderDotCanvas(currentDotValue: number): [string, Canvas] {
+    const dotValue = clamp(currentDotValue, 0, 1);
 
     const dotCanvas = createCanvas(DOT_WIDTH, DOT_HEIGHT);
     const dotContext = dotCanvas.getContext('2d');
 
-    let blendRGB: RGB = {r: 255, g: 255, b: 255}; // if the final output is white you know shit's fucked
+    let blendRGB: RGB = {r: 255, g: 255, b: 255};
     for (let i = 0; i < DOT_COLORS.length - 1; i++) {
-        const opacity = (currentDotValue - DOT_COLORS[i].tail) / (DOT_COLORS[i + 1].tail - DOT_COLORS[i].tail);
+        const opacity = (dotValue - DOT_COLORS[i].tail) / (DOT_COLORS[i + 1].tail - DOT_COLORS[i].tail);
 
         if (opacity >= 0 && opacity <= 1) {
             blendRGB = hexToRGB(COLORS[i + 1].color2);
@@ -170,98 +307,175 @@ export async function renderDot(): Promise<[string, number, Canvas]> {
         }
     }
 
-    return [ rgbToHex(blendRGB), currentDotValue, dotCanvas ];
+    return [ rgbToHex(blendRGB), dotCanvas ];
+}
+
+export async function renderDot(): Promise<[string, number, Canvas]> {
+    const { currentDotValue } = await getDotStats();
+    const [ currentDotColor, dotCanvas ] = renderDotCanvas(currentDotValue);
+
+    return [ currentDotColor, currentDotValue, dotCanvas ];
 };
 
+function selectGraphPoints(history: DotGraphPoint[], timespan: number): DotGraphPoint[] {
+    const latestEpoch = history[history.length - 1].epoch;
+    const requestedTimespan = Math.abs(timespan) || DOT_GRAPH_MAX_TIMESPAN;
+    const graphTimespan = Math.min(requestedTimespan, DOT_GRAPH_MAX_TIMESPAN);
+    const cutoff = latestEpoch - Math.max(graphTimespan, 60);
+    const points = history.filter((point) => point.epoch >= cutoff);
+
+    if (points.length >= 2) {
+        return points;
+    }
+
+    return history.slice(-Math.min(history.length, 2));
+}
+
+function getNetvarColor(value: number): string {
+    if (value >= 279) {
+        return '#FEFCDA';
+    } else if (value >= 219) {
+        return '#FFFF00';
+    } else if (value >= 166) {
+        return '#FFC543';
+    } else if (value >= 140) {
+        return '#00C9F8';
+    }
+
+    return '#E200E2';
+}
+
+function calculateVariance(values: number[]): number {
+    if (values.length < 2) {
+        return 0;
+    }
+
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const numerator = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0);
+
+    return numerator / (values.length - 1);
+}
+
+function renderGraphCanvas(points: DotGraphPoint[], currentNetvar: number): Canvas {
+    const canvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+    const context = canvas.getContext('2d');
+    const plotPoints = points.length === 1
+        ? [ points[0], { ...points[0], epoch: points[0].epoch + 60 } ]
+        : points;
+
+    const left = GRAPH_PADDING.left;
+    const top = GRAPH_PADDING.top;
+    const right = DOT_GRAPH_WIDTH - GRAPH_PADDING.right;
+    const bottom = DOT_GRAPH_HEIGHT - GRAPH_PADDING.bottom;
+    const width = right - left;
+    const height = bottom - top;
+
+    const minValue = Math.min(...plotPoints.map((point) => point.value));
+    const maxValue = Math.max(...plotPoints.map((point) => point.value));
+    const valuePadding = Math.max((maxValue - minValue) * 0.12, 1);
+    const graphMin = Math.max(0, minValue - valuePadding);
+    const graphMax = maxValue + valuePadding;
+    const valueRange = graphMax - graphMin || 1;
+    const firstEpoch = plotPoints[0].epoch;
+    const lastEpoch = plotPoints[plotPoints.length - 1].epoch;
+    const epochRange = lastEpoch - firstEpoch || 1;
+    const lineColor = getNetvarColor(currentNetvar);
+
+    const pointX = (point: DotGraphPoint) => left + ((point.epoch - firstEpoch) / epochRange) * width;
+    const pointY = (point: DotGraphPoint) => bottom - ((point.value - graphMin) / valueRange) * height;
+
+    context.fillStyle = '#2F3136';
+    context.fillRect(0, 0, DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
+
+    const background = context.createLinearGradient(0, top, 0, bottom);
+    background.addColorStop(0, 'rgba(86,85,202,0.28)');
+    background.addColorStop(0.45, 'rgba(33,188,241,0.18)');
+    background.addColorStop(1, 'rgba(226,0,226,0.18)');
+
+    context.fillStyle = background;
+    context.fillRect(left, top, width, height);
+
+    context.strokeStyle = 'rgba(255,255,255,0.12)';
+    context.lineWidth = 1;
+
+    for (let i = 0; i <= 4; i++) {
+        const y = top + (height / 4) * i;
+        context.beginPath();
+        context.moveTo(left, y);
+        context.lineTo(right, y);
+        context.stroke();
+    }
+
+    context.strokeStyle = 'rgba(255,255,255,0.28)';
+    context.strokeRect(left, top, width, height);
+
+    context.beginPath();
+    plotPoints.forEach((point, index) => {
+        const x = pointX(point);
+        const y = pointY(point);
+
+        if (index === 0) {
+            context.moveTo(x, y);
+        } else {
+            context.lineTo(x, y);
+        }
+    });
+
+    context.lineTo(pointX(plotPoints[plotPoints.length - 1]), bottom);
+    context.lineTo(pointX(plotPoints[0]), bottom);
+    context.closePath();
+    context.fillStyle = 'rgba(255,255,255,0.14)';
+    context.fill();
+
+    context.beginPath();
+    plotPoints.forEach((point, index) => {
+        const x = pointX(point);
+        const y = pointY(point);
+
+        if (index === 0) {
+            context.moveTo(x, y);
+        } else {
+            context.lineTo(x, y);
+        }
+    });
+
+    context.strokeStyle = lineColor;
+    context.lineWidth = 2.25;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.stroke();
+
+    const currentPoint = plotPoints[plotPoints.length - 1];
+    const currentX = pointX(currentPoint);
+    const currentY = pointY(currentPoint);
+
+    context.fillStyle = lineColor;
+    context.beginPath();
+    context.arc(currentX, currentY, 4, 0, Math.PI * 2);
+    context.fill();
+
+    context.font = '10px sans-serif';
+    context.fillStyle = 'rgba(255,255,255,0.72)';
+    context.textAlign = 'left';
+    context.textBaseline = 'top';
+    context.fillText(graphMax.toFixed(0), 6, top - 1);
+    context.textBaseline = 'bottom';
+    context.fillText(graphMin.toFixed(0), 6, bottom + 1);
+
+    context.textAlign = 'right';
+    context.textBaseline = 'top';
+    context.fillText(`${currentNetvar.toFixed(1)} netvar`, DOT_GRAPH_WIDTH - 8, top - 1);
+
+    return canvas;
+}
+
 export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
-    const inv_ch = 1.0 / DOT_GRAPH_HEIGHT;
+    const { currentNetvar, history } = await getDotStats();
+    const graphPoints = selectGraphPoints(history, timespan);
+    const values = graphPoints.map((point) => point.value);
+    const variance = calculateVariance(values);
 
-    var canvasData = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
-    var context = canvasData.getContext('2d');
-    var outCanvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
-    var outContext = outCanvas.getContext("2d");
-
-    const response = await fetch(`http://global-mind.org/gcpdot/gcpgraph.php?pixels=${DOT_GRAPH_WIDTH}&seconds=${timespan}`);
-
-    const dotXML = await response.text();
-
-    const graphData = JSON.parse(xml2json(dotXML)).elements[0].elements;
-
-    const graphSvg = `<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='xMidYMid meet' width='${DOT_GRAPH_WIDTH}' height='${DOT_GRAPH_HEIGHT}'>
-    <defs>
-        <linearGradient id='g' x1='0%' y1='0%' x2='0%' y2='100%'>
-            <stop offset='0%' style='stop-color:#FF00FF;stop-opacity:1'/>
-            <stop offset='1%' style='stop-color:#FF0000;stop-opacity:1'/>
-            <stop offset='3.5%' style='stop-color:#FF4000;stop-opacity:1'/>
-            <stop offset='6%' style='stop-color:#FF7500;stop-opacity:1'/>
-            <stop offset='11%' style='stop-color:#FFB000;stop-opacity:1'/>
-            <stop offset='22%' style='stop-color:#FFFF00;stop-opacity:1'/>
-            <stop offset='50%' style='stop-color:#00df00;stop-opacity:1'/>
-            <stop offset='90%' style='stop-color:#00df00;stop-opacity:1'/>
-            <stop offset='94%' style='stop-color:#00EEFF;stop-opacity:1'/>
-            <stop offset='99%' style='stop-color:#0034F4;stop-opacity:1'/>
-            <stop offset='100%' style='stop-color:#440088;stop-opacity:1'/>
-        </linearGradient>
-    </defs>
-    <rect width='100%' height='100%' fill='url(#g)'/>
-</svg>`;
-
-    const bgImage = await loadImage(`data:image/svg+xml;base64,${Buffer.from(graphSvg).toString('base64')}`);
-
-    context.drawImage(bgImage, 0, 0);
-
-    const imgBuffer = context.getImageData(0, 0, DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
-
-    for (let y = 0; y < DOT_GRAPH_HEIGHT; y++) {
-        for (let x = 0; x < DOT_GRAPH_WIDTH; x++) {
-            imgBuffer.data[(y * DOT_GRAPH_WIDTH + x) * 4 + 3] = 0;
-        }
-    }
-
-    for (let i = 0; i < graphData.length; i++) {
-        let top = Number(graphData[i].attributes.t);
-        let bottom = Number(graphData[i].attributes.b);
-        let q1 = Number(graphData[i].attributes.q1);
-        let q3 = Number(graphData[i].attributes.q3);
-
-        if ((bottom - top) < inv_ch) {
-            if (top > 0.5) {
-                top -= inv_ch;
-            }
-        }
-
-        for (let y = Math.floor(top * DOT_GRAPH_HEIGHT); y < bottom * DOT_GRAPH_HEIGHT; y++) {
-            const ys = y / DOT_GRAPH_HEIGHT;
-            let a = 0;
-
-            if (ys > q1 && ys <= q3 || (bottom - top) < inv_ch * 1.5) {
-                a = 1;
-            } else if (ys > top && ys <= q1) {
-                a = (ys - top) / (q1 - top);
-            } else if (ys > q3 && ys <= bottom) {
-                a = (bottom - ys) / (bottom - q3);
-            }
-
-            imgBuffer.data[(i + y * bgImage.width) * 4 + 3] = 255 * a;
-        }
-    }
-
-    // calculate variance
-    let sum: number = 0;
-    graphData.map((x: any) => sum += Number(x.attributes.a));
-
-    const mean: number = sum / graphData.length;
-    let numerator = 0;
-    graphData.map((y: any) => numerator += Math.pow(Number(y.attributes.a) - mean, 2));
-    const variance = numerator / (graphData.length - 1);
-
-    context.putImageData(imgBuffer, 0, 0);
-
-    outContext.fillStyle = '#2F3136';
-    outContext.fillRect(0, 0, outCanvas.width, outCanvas.height);
-    outContext.drawImage(canvasData, 0, 0);
-
-    return [ variance, outCanvas ];
+    return [ variance, renderGraphCanvas(graphPoints, currentNetvar) ];
 }
 
 // the following code is a bunch of util garbo for doing gaussian blur
