@@ -22,6 +22,8 @@ const GCP2_CACHE_MS = 5000;
 const DOT_GRAPH_MAX_TIMESPAN = 86400;
 const DOT_GRAPH_MIN_CORE_HEIGHT = 1.1 / DOT_GRAPH_HEIGHT;
 const DOT_GRAPH_MIN_FADE_HEIGHT = 3.5 / DOT_GRAPH_HEIGHT;
+const DOT_GRAPH_SMOOTH_RADIUS = 2;
+const DOT_GRAPH_SPINE_WIDTH = 1.4;
 
 const GRAPH_COLOR_STOPS: { offset: number, color: string }[] = [
     { offset: 0.00, color: '#FF00FF' },
@@ -464,6 +466,59 @@ function getGraphBand(values: number[]): DotGraphBand {
     };
 }
 
+function smoothGraphBands(bands: DotGraphBand[]): DotGraphBand[] {
+    const smoothed = bands.map((band, index) => {
+        let weightTotal = 0;
+        let center = 0;
+        let coreHalfHeight = 0;
+        let fadeHalfHeight = 0;
+
+        for (let offset = DOT_GRAPH_SMOOTH_RADIUS * -1; offset <= DOT_GRAPH_SMOOTH_RADIUS; offset++) {
+            const sampleIndex = Math.max(0, Math.min(bands.length - 1, index + offset));
+            const sample = bands[sampleIndex];
+            const weight = DOT_GRAPH_SMOOTH_RADIUS + 1 - Math.abs(offset);
+
+            weightTotal += weight;
+            center += sample.a * weight;
+            coreHalfHeight += ((sample.q3 - sample.q1) / 2) * weight;
+            fadeHalfHeight += ((sample.bottom - sample.top) / 2) * weight;
+        }
+
+        center /= weightTotal;
+        coreHalfHeight = Math.max(coreHalfHeight / weightTotal, DOT_GRAPH_MIN_CORE_HEIGHT);
+        fadeHalfHeight = Math.max(fadeHalfHeight / weightTotal, coreHalfHeight + DOT_GRAPH_MIN_FADE_HEIGHT);
+
+        const top = clamp(center - fadeHalfHeight, 0, 1);
+        const bottom = clamp(center + fadeHalfHeight, 0, 1);
+
+        return {
+            top,
+            bottom,
+            q1: clamp(center - coreHalfHeight, top, bottom),
+            q3: clamp(center + coreHalfHeight, top, bottom),
+            a: center,
+        };
+    });
+
+    return smoothed.map((band, index) => {
+        const previous = smoothed[Math.max(0, index - 1)];
+        const next = smoothed[Math.min(smoothed.length - 1, index + 1)];
+        const coreHalfHeight = Math.max((band.q3 - band.q1) / 2, DOT_GRAPH_MIN_CORE_HEIGHT);
+        const topCenter = Math.min(previous.a, band.a, next.a);
+        const bottomCenter = Math.max(previous.a, band.a, next.a);
+        const top = clamp(Math.min(band.top, topCenter - DOT_GRAPH_MIN_FADE_HEIGHT), 0, 1);
+        const bottom = clamp(Math.max(band.bottom, bottomCenter + DOT_GRAPH_MIN_FADE_HEIGHT), 0, 1);
+
+        return {
+            top,
+            bottom,
+            q1: clamp(Math.min(band.q1, topCenter - coreHalfHeight), top, bottom),
+            q3: clamp(Math.max(band.q3, bottomCenter + coreHalfHeight), top, bottom),
+            a: band.a,
+        };
+    });
+}
+
 function synthesizeGraphBands(points: DotGraphPoint[], history: DotGraphPoint[]): DotGraphBand[] {
     const graphPoints = getGraphPoints(points, history);
     const firstEpoch = graphPoints[0].epoch;
@@ -491,7 +546,30 @@ function synthesizeGraphBands(points: DotGraphPoint[], history: DotGraphPoint[])
         bands.push(getGraphBand(values));
     }
 
-    return bands;
+    return smoothGraphBands(bands);
+}
+
+function drawGraphSpine(context: ReturnType<Canvas['getContext']>, graphData: DotGraphBand[], background: CanvasGradient): void {
+    context.save();
+    context.strokeStyle = background;
+    context.globalAlpha = 0.92;
+    context.lineWidth = DOT_GRAPH_SPINE_WIDTH;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.beginPath();
+
+    for (let x = 0; x < graphData.length; x++) {
+        const y = clamp(graphData[x].a, 0, 1) * DOT_GRAPH_HEIGHT;
+
+        if (x === 0) {
+            context.moveTo(x, y);
+        } else {
+            context.lineTo(x, y);
+        }
+    }
+
+    context.stroke();
+    context.restore();
 }
 
 function renderGraphCanvas(points: DotGraphPoint[], history: DotGraphPoint[]): Canvas {
@@ -545,6 +623,7 @@ function renderGraphCanvas(points: DotGraphPoint[], history: DotGraphPoint[]): C
     }
 
     context.putImageData(imgBuffer, 0, 0);
+    drawGraphSpine(context, graphData, background);
 
     outContext.fillStyle = '#2F3136';
     outContext.fillRect(0, 0, outCanvas.width, outCanvas.height);
