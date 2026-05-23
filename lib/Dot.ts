@@ -22,11 +22,25 @@ const GCP2_CACHE_MS = 5000;
 const DOT_GRAPH_MAX_TIMESPAN = 86400;
 
 const GRAPH_PADDING = {
-    top: 14,
-    right: 14,
-    bottom: 22,
-    left: 44,
+    top: 8,
+    right: 8,
+    bottom: 8,
+    left: 8,
 };
+
+const GRAPH_COLOR_STOPS: { offset: number, color: string }[] = [
+    { offset: 0.00, color: '#FF00FF' },
+    { offset: 0.01, color: '#FF0000' },
+    { offset: 0.035, color: '#FF4000' },
+    { offset: 0.06, color: '#FF7500' },
+    { offset: 0.11, color: '#FFB000' },
+    { offset: 0.22, color: '#FFFF00' },
+    { offset: 0.50, color: '#00DF00' },
+    { offset: 0.90, color: '#00DF00' },
+    { offset: 0.94, color: '#00EEFF' },
+    { offset: 0.99, color: '#0034F4' },
+    { offset: 1.00, color: '#440088' },
+];
 
 const COLORS: {color1: string, color2: string}[] = [
     {color1: '#CDCDCD', color2: '#505050'},
@@ -66,6 +80,10 @@ interface Gcp2Response {
 interface DotGraphPoint {
     epoch: number
     value: number
+}
+
+interface DotGraphRenderPoint extends DotGraphPoint {
+    index: number
 }
 
 let gcp2Cache: { expiresAt: number, promise: Promise<Gcp2Response> } | undefined;
@@ -331,20 +349,6 @@ function selectGraphPoints(history: DotGraphPoint[], timespan: number): DotGraph
     return history.slice(-Math.min(history.length, 2));
 }
 
-function getNetvarColor(value: number): string {
-    if (value >= 279) {
-        return '#FEFCDA';
-    } else if (value >= 219) {
-        return '#FFFF00';
-    } else if (value >= 166) {
-        return '#FFC543';
-    } else if (value >= 140) {
-        return '#00C9F8';
-    }
-
-    return '#E200E2';
-}
-
 function calculateVariance(values: number[]): number {
     if (values.length < 2) {
         return 0;
@@ -356,12 +360,66 @@ function calculateVariance(values: number[]): number {
     return numerator / (values.length - 1);
 }
 
-function renderGraphCanvas(points: DotGraphPoint[], currentNetvar: number): Canvas {
+function upperBound(values: number[], target: number): number {
+    let low = 0;
+    let high = values.length;
+
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+
+        if (values[mid] <= target) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    return low;
+}
+
+function calculateGraphIndex(value: number, sortedValues: number[]): number {
+    return clamp(upperBound(sortedValues, value) / sortedValues.length, 0, 1);
+}
+
+function getGraphColor(index: number): string {
+    const value = clamp(index, 0, 1);
+
+    for (let i = 0; i < GRAPH_COLOR_STOPS.length - 1; i++) {
+        const start = GRAPH_COLOR_STOPS[i];
+        const end = GRAPH_COLOR_STOPS[i + 1];
+
+        if (value >= start.offset && value <= end.offset) {
+            const opacity = (value - start.offset) / (end.offset - start.offset);
+            const startColor = hexToRGB(start.color);
+            const endColor = hexToRGB(end.color);
+
+            return rgbToHex({
+                r: Math.floor(startColor.r + (endColor.r - startColor.r) * opacity),
+                g: Math.floor(startColor.g + (endColor.g - startColor.g) * opacity),
+                b: Math.floor(startColor.b + (endColor.b - startColor.b) * opacity),
+            });
+        }
+    }
+
+    return GRAPH_COLOR_STOPS[GRAPH_COLOR_STOPS.length - 1].color;
+}
+
+function getGraphPoints(points: DotGraphPoint[], history: DotGraphPoint[]): DotGraphRenderPoint[] {
+    const sortedValues = history.map((point) => point.value).sort((a, b) => a - b);
+
+    return points.map((point) => ({
+        ...point,
+        index: calculateGraphIndex(point.value, sortedValues),
+    }));
+}
+
+function renderGraphCanvas(points: DotGraphPoint[], history: DotGraphPoint[]): Canvas {
     const canvas = createCanvas(DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
     const context = canvas.getContext('2d');
-    const plotPoints = points.length === 1
-        ? [ points[0], { ...points[0], epoch: points[0].epoch + 60 } ]
-        : points;
+    const graphPoints = getGraphPoints(points, history);
+    const plotPoints = graphPoints.length === 1
+        ? [ graphPoints[0], { ...graphPoints[0], epoch: graphPoints[0].epoch + 60 } ]
+        : graphPoints;
 
     const left = GRAPH_PADDING.left;
     const top = GRAPH_PADDING.top;
@@ -370,112 +428,68 @@ function renderGraphCanvas(points: DotGraphPoint[], currentNetvar: number): Canv
     const width = right - left;
     const height = bottom - top;
 
-    const minValue = Math.min(...plotPoints.map((point) => point.value));
-    const maxValue = Math.max(...plotPoints.map((point) => point.value));
-    const valuePadding = Math.max((maxValue - minValue) * 0.12, 1);
-    const graphMin = Math.max(0, minValue - valuePadding);
-    const graphMax = maxValue + valuePadding;
-    const valueRange = graphMax - graphMin || 1;
     const firstEpoch = plotPoints[0].epoch;
     const lastEpoch = plotPoints[plotPoints.length - 1].epoch;
     const epochRange = lastEpoch - firstEpoch || 1;
-    const lineColor = getNetvarColor(currentNetvar);
 
     const pointX = (point: DotGraphPoint) => left + ((point.epoch - firstEpoch) / epochRange) * width;
-    const pointY = (point: DotGraphPoint) => bottom - ((point.value - graphMin) / valueRange) * height;
+    const pointY = (point: DotGraphRenderPoint) => top + point.index * height;
 
-    context.fillStyle = '#2F3136';
+    context.fillStyle = '#FFFFFF';
     context.fillRect(0, 0, DOT_GRAPH_WIDTH, DOT_GRAPH_HEIGHT);
 
-    const background = context.createLinearGradient(0, top, 0, bottom);
-    background.addColorStop(0, 'rgba(86,85,202,0.28)');
-    background.addColorStop(0.45, 'rgba(33,188,241,0.18)');
-    background.addColorStop(1, 'rgba(226,0,226,0.18)');
-
-    context.fillStyle = background;
-    context.fillRect(left, top, width, height);
-
-    context.strokeStyle = 'rgba(255,255,255,0.12)';
+    context.strokeStyle = '#555555';
     context.lineWidth = 1;
+    context.strokeRect(0.5, 0.5, DOT_GRAPH_WIDTH - 1, DOT_GRAPH_HEIGHT - 1);
+    context.strokeStyle = '#888888';
+    context.strokeRect(left - 0.5, top - 0.5, width + 1, height + 1);
 
-    for (let i = 0; i <= 4; i++) {
-        const y = top + (height / 4) * i;
+    context.save();
+    context.beginPath();
+    context.rect(left, top, width, height);
+    context.clip();
+    context.lineWidth = 2.5;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+
+    for (let i = 1; i < plotPoints.length; i++) {
+        const previous = plotPoints[i - 1];
+        const current = plotPoints[i];
+        const previousX = pointX(previous);
+        const previousY = pointY(previous);
+        const currentX = pointX(current);
+        const currentY = pointY(current);
+        const previousColor = getGraphColor(previous.index);
+        const currentColor = getGraphColor(current.index);
+
+        if (previousX === currentX && previousY === currentY) {
+            context.strokeStyle = currentColor;
+        } else {
+            const gradient = context.createLinearGradient(previousX, previousY, currentX, currentY);
+
+            gradient.addColorStop(0, previousColor);
+            gradient.addColorStop(1, currentColor);
+            context.strokeStyle = gradient;
+        }
+
         context.beginPath();
-        context.moveTo(left, y);
-        context.lineTo(right, y);
+        context.moveTo(previousX, previousY);
+        context.lineTo(currentX, currentY);
         context.stroke();
     }
 
-    context.strokeStyle = 'rgba(255,255,255,0.28)';
-    context.strokeRect(left, top, width, height);
-
-    context.beginPath();
-    plotPoints.forEach((point, index) => {
-        const x = pointX(point);
-        const y = pointY(point);
-
-        if (index === 0) {
-            context.moveTo(x, y);
-        } else {
-            context.lineTo(x, y);
-        }
-    });
-
-    context.lineTo(pointX(plotPoints[plotPoints.length - 1]), bottom);
-    context.lineTo(pointX(plotPoints[0]), bottom);
-    context.closePath();
-    context.fillStyle = 'rgba(255,255,255,0.14)';
-    context.fill();
-
-    context.beginPath();
-    plotPoints.forEach((point, index) => {
-        const x = pointX(point);
-        const y = pointY(point);
-
-        if (index === 0) {
-            context.moveTo(x, y);
-        } else {
-            context.lineTo(x, y);
-        }
-    });
-
-    context.strokeStyle = lineColor;
-    context.lineWidth = 2.25;
-    context.lineJoin = 'round';
-    context.lineCap = 'round';
-    context.stroke();
-
-    const currentPoint = plotPoints[plotPoints.length - 1];
-    const currentX = pointX(currentPoint);
-    const currentY = pointY(currentPoint);
-
-    context.fillStyle = lineColor;
-    context.beginPath();
-    context.arc(currentX, currentY, 4, 0, Math.PI * 2);
-    context.fill();
-
-    context.font = '10px sans-serif';
-    context.fillStyle = 'rgba(255,255,255,0.72)';
-    context.textAlign = 'left';
-    context.textBaseline = 'top';
-    context.fillText(graphMax.toFixed(0), 6, top - 1);
-    context.textBaseline = 'bottom';
-    context.fillText(graphMin.toFixed(0), 6, bottom + 1);
-
-    context.textAlign = 'right';
-    context.textBaseline = 'top';
-    context.fillText(`${currentNetvar.toFixed(1)} netvar`, DOT_GRAPH_WIDTH - 8, top - 1);
+    context.restore();
 
     return canvas;
 }
 
 export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
-    const { currentNetvar, history } = await getDotStats();
+    const { history } = await getDotStats();
     const graphPoints = selectGraphPoints(history, timespan);
     const values = graphPoints.map((point) => point.value);
     const variance = calculateVariance(values);
 
-    return [ variance, renderGraphCanvas(graphPoints, currentNetvar) ];
+    return [ variance, renderGraphCanvas(graphPoints, history) ];
 }
 
 // the following code is a bunch of util garbo for doing gaussian blur

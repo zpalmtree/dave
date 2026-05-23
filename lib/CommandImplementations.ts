@@ -2139,22 +2139,22 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     let description: string = '';
 
     if (currentDotValue < 0.05) {
-        description = 'Current GCP 2.0 network variance is in the lowest 5% of the last 24 hours.';
+        description = 'Significantly large network variance. Suggests broadly shared coherence of thought and emotion.';
     }
     else if (currentDotValue < 0.1) {
-        description = 'Current GCP 2.0 network variance is in the lowest 10% of the last 24 hours.';
+        description = 'Strongly increased network variance. May be chance fluctuation.';
     }
     else if (currentDotValue < 0.4) {
-        description = 'Current GCP 2.0 network variance is below its recent midpoint.';
+        description = 'Slightly increased network variance. Probably chance fluctuation.';
     }
     else if (currentDotValue < 0.9) {
-        description = 'Current GCP 2.0 network variance is within its usual 24-hour range.';
+        description = 'Normally random network variance. This is average or expected behavior.';
     }
     else if (currentDotValue < 0.95) {
-        description = 'Current GCP 2.0 network variance is in the highest 10% of the last 24 hours.';
+        description = 'Small network variance. Probably chance fluctuation.';
     }
     else if (currentDotValue <= 1.0) {
-        description = 'Current GCP 2.0 network variance is in the highest 5% of the last 24 hours.';
+        description = 'Significantly small network variance. Suggestive of deeply shared, internally motivated group focus.';
     }
 
     const dotGraphAttachment = new AttachmentBuilder(dotGraph.toBuffer('image/png'))
@@ -2167,7 +2167,7 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
 
     const embed = new EmbedBuilder()
         .setColor(currentDotColor as ColorResolvable)
-        .setTitle(`${percentage}% Network Variance Percentile`)
+        .setTitle(`${percentage}% Network Variance`)
         .setThumbnail('attachment://dot.png')
         .setImage('attachment://dot-graph.png')
         .setDescription(description);
