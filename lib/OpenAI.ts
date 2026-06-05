@@ -1398,6 +1398,21 @@ function wantsTransparentOutput(prompt: string): boolean {
     const lower = prompt.toLowerCase();
     return TRANSPARENCY_KEYWORDS.some(keyword => lower.includes(keyword));
 }
+
+function isUnsupportedTransparentBackgroundError(errorText?: string): boolean {
+    return /transparent background is not supported/i.test(errorText ?? '');
+}
+
+type CImageGenerationTool = {
+    type: 'image_generation';
+    model?: string;
+    moderation: 'low';
+    output_format: 'png' | 'jpeg';
+    output_compression?: number;
+    background?: 'transparent';
+    partial_images?: number;
+};
+
 export async function handleCImage(msg: Message, args: string): Promise<void> {
     const userArgs = args.trim();
     const MAX_STREAM_PARTIALS = 3;
@@ -1581,14 +1596,17 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             }
         };
 
-        try {
-            const usePng = wantsTransparentOutput(prompt);
-            const imageGenerationTool = usePng
+        const buildImageGenerationTool = (
+            usePng: boolean,
+            allowTransparentBackground: boolean,
+        ): CImageGenerationTool => (
+            usePng
                 ? {
                     type: 'image_generation',
+                    model: 'gpt-image-1',
                     moderation: 'low',
                     output_format: 'png',
-                    background: 'transparent',
+                    ...(allowTransparentBackground ? { background: 'transparent' as const } : {}),
                     partial_images: MAX_STREAM_PARTIALS,
                 }
                 : {
@@ -1597,7 +1615,12 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                     moderation: 'low',
                     output_format: 'jpeg',
                     output_compression: 50,
-                };
+                }
+        );
+
+        const runImageGeneration = async (
+            imageGenerationTool: CImageGenerationTool,
+        ): Promise<{ completed: true } | { completed: false; errorText: string }> => {
             const requestPayload: ResponsesCreateParams = {
                 model: 'gpt-5.5',
                 instructions: createSystemPrompt(
@@ -1611,7 +1634,16 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             };
 
             const startedAt = Date.now();
-            const rawResult = await openai.responses.create(requestPayload);
+            let rawResult: ResponsesCreateReturn;
+            try {
+                rawResult = await openai.responses.create(requestPayload);
+            } catch (error: any) {
+                console.error('Failed to generate image with OpenAI Responses API:', error);
+                return {
+                    completed: false,
+                    errorText: formatProviderApiError({ provider: 'OpenAI', error }),
+                };
+            }
 
             if (!isStreamResponse(rawResult)) {
                 const result = toNonStreamingResponse(rawResult);
@@ -1619,16 +1651,11 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                 const payload = buildOpenAIResponseFromResult(result, elapsed, []);
 
                 if (payload.error) {
-                    await updateProgress({
-                        status: 'error',
-                        errorText: payload.error,
-                        createIfMissing: true,
-                    });
-                    return;
+                    return { completed: false, errorText: payload.error };
                 }
 
                 await showFinalResult(payload, elapsed);
-                return;
+                return { completed: true };
             }
 
             let finalResponse: ResponsesPayload | null = null;
@@ -1637,78 +1664,79 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             let lastPartialIndex = -1;
             let partialCount = 0;
 
-            for await (const event of rawResult) {
-                switch (event.type) {
-                    case 'response.image_generation_call.partial_image': {
-                        if (event.partial_image_index !== lastPartialIndex) {
-                            lastPartialIndex = event.partial_image_index;
-                            partialCount = Math.max(
+            try {
+                for await (const event of rawResult) {
+                    switch (event.type) {
+                        case 'response.image_generation_call.partial_image': {
+                            if (event.partial_image_index !== lastPartialIndex) {
+                                lastPartialIndex = event.partial_image_index;
+                                partialCount = Math.max(
+                                    partialCount,
+                                    event.partial_image_index + 1,
+                                );
+                            }
+                            latestPartial = Buffer.from(event.partial_image_b64, 'base64');
+                            await updateProgress({
+                                status: 'generating',
                                 partialCount,
-                                event.partial_image_index + 1,
-                            );
+                                partialBuffer: latestPartial,
+                                showImage: true,
+                                createIfMissing: true,
+                            });
+                            break;
                         }
-                        latestPartial = Buffer.from(event.partial_image_b64, 'base64');
-                        await updateProgress({
-                            status: 'generating',
-                            partialCount,
-                            partialBuffer: latestPartial,
-                            showImage: true,
-                            createIfMissing: true,
-                        });
+                        case 'response.image_generation_call.in_progress':
+                        case 'response.image_generation_call.generating':
+                            await updateProgress({
+                                status: 'generating',
+                                partialCount,
+                                showImage: false,
+                            });
+                            break;
+                        case 'response.image_generation_call.completed':
+                            await updateProgress({
+                                status: 'generating',
+                                partialCount,
+                                showImage: !!latestPartial,
+                                partialBuffer: latestPartial,
+                            });
+                            break;
+                        case 'response.completed':
+                            finalResponse = event.response;
+                            break;
+                        case 'response.failed':
+                            streamError =
+                                event.response.error?.message ||
+                                'Image generation failed.';
+                            break;
+                        case 'error':
+                            streamError = event.message || 'Image generation failed.';
+                            break;
+                        default:
+                            break;
+                    }
+
+                    if (streamError) {
                         break;
                     }
-                    case 'response.image_generation_call.in_progress':
-                    case 'response.image_generation_call.generating':
-                        await updateProgress({
-                            status: 'generating',
-                            partialCount,
-                            showImage: false,
-                        });
-                        break;
-                    case 'response.image_generation_call.completed':
-                        await updateProgress({
-                            status: 'generating',
-                            partialCount,
-                            showImage: !!latestPartial,
-                            partialBuffer: latestPartial,
-                        });
-                        break;
-                    case 'response.completed':
-                        finalResponse = event.response;
-                        break;
-                    case 'response.failed':
-                        streamError =
-                            event.response.error?.message ||
-                            'Image generation failed.';
-                        break;
-                    case 'error':
-                        streamError = event.message || 'Image generation failed.';
-                        break;
-                    default:
-                        break;
                 }
-
-                if (streamError) {
-                    break;
-                }
+            } catch (error: any) {
+                console.error('Failed while streaming image generation from OpenAI Responses API:', error);
+                return {
+                    completed: false,
+                    errorText: formatProviderApiError({ provider: 'OpenAI', error }),
+                };
             }
 
             if (streamError) {
-                await updateProgress({
-                    status: 'error',
-                    errorText: streamError,
-                    createIfMissing: true,
-                });
-                return;
+                return { completed: false, errorText: streamError };
             }
 
             if (!finalResponse) {
-                await updateProgress({
-                    status: 'error',
+                return {
+                    completed: false,
                     errorText: 'Image generation ended unexpectedly without a result.',
-                    createIfMissing: true,
-                });
-                return;
+                };
             }
 
             const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -1716,15 +1744,45 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
 
             if (payload.error) {
                 logResponseSummary('Empty streamed response payload', finalResponse);
+                return { completed: false, errorText: payload.error };
+            }
+
+            await showFinalResult(payload, elapsed);
+            return { completed: true };
+        };
+
+        try {
+            const usePng = wantsTransparentOutput(prompt);
+            const result = await runImageGeneration(
+                buildImageGenerationTool(usePng, true),
+            );
+
+            if (result.completed) {
+                return;
+            }
+
+            if (usePng && isUnsupportedTransparentBackgroundError(result.errorText)) {
+                const fallbackResult = await runImageGeneration(
+                    buildImageGenerationTool(usePng, false),
+                );
+
+                if (fallbackResult.completed) {
+                    return;
+                }
+
                 await updateProgress({
                     status: 'error',
-                    errorText: payload.error,
+                    errorText: fallbackResult.errorText,
                     createIfMissing: true,
                 });
                 return;
             }
 
-            await showFinalResult(payload, elapsed);
+            await updateProgress({
+                status: 'error',
+                errorText: result.errorText,
+                createIfMissing: true,
+            });
         } catch (error: any) {
             console.error('Failed to generate image with OpenAI Responses API:', error);
             await updateProgress({
