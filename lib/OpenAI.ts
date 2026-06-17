@@ -343,6 +343,20 @@ function truncateForEmbed(text: string, max: number = 1000): string {
   return `${text.slice(0, max - 1)}…`;
 }
 
+function getMissingGeneratedImageError(payload: OpenAIResponse): string | undefined {
+  const images = payload.images ?? [];
+  if (images.length > 0) return undefined;
+
+  if (payload.result) {
+    return [
+      'No image was generated. The request appears to have triggered safety handling, so the model returned text instead of an image.',
+      `Returned text: ${truncateForEmbed(payload.result, 760)}`,
+    ].join('\n\n');
+  }
+
+  return 'No image was generated. The request completed without an image result.';
+}
+
 function contentTypeToExtension(contentType?: string | null): string | undefined {
     if (!contentType) return undefined;
     const normalized = contentType.split(';')[0].trim().toLowerCase();
@@ -1271,6 +1285,16 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
                     return;
                 }
 
+                const missingImageError = getMissingGeneratedImageError(payload);
+                if (missingImageError) {
+                    await updateProgress({
+                        status: 'error',
+                        errorText: missingImageError,
+                        createIfMissing: true,
+                    });
+                    return;
+                }
+
                 await showFinalResult(payload, elapsed);
                 return;
             }
@@ -1363,6 +1387,16 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
                 await updateProgress({
                     status: 'error',
                     errorText: payload.error,
+                    createIfMissing: true,
+                });
+                return;
+            }
+
+            const missingImageError = getMissingGeneratedImageError(payload);
+            if (missingImageError) {
+                await updateProgress({
+                    status: 'error',
+                    errorText: missingImageError,
                     createIfMissing: true,
                 });
                 return;
@@ -1654,6 +1688,11 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                     return { completed: false, errorText: payload.error };
                 }
 
+                const missingImageError = getMissingGeneratedImageError(payload);
+                if (missingImageError) {
+                    return { completed: false, errorText: missingImageError };
+                }
+
                 await showFinalResult(payload, elapsed);
                 return { completed: true };
             }
@@ -1745,6 +1784,11 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             if (payload.error) {
                 logResponseSummary('Empty streamed response payload', finalResponse);
                 return { completed: false, errorText: payload.error };
+            }
+
+            const missingImageError = getMissingGeneratedImageError(payload);
+            if (missingImageError) {
+                return { completed: false, errorText: missingImageError };
             }
 
             await showFinalResult(payload, elapsed);

@@ -8,8 +8,8 @@ This project is deployed from two branch-based server tracks. Every functional c
 
 # Local Working Copies
 
-- `/media/Code/js/dave` is the primary clone used for `master`.
-- `/media/Code/solslugs/slug-bot` is the clone used for `slugs`.
+- `/home/zp/Code/js/dave` is the primary clone used for `master`.
+- `/home/zp/Code/solslugs/slug-bot` is the clone used for `slugs`.
 
 # Required Workflow For Agents
 
@@ -21,7 +21,7 @@ This project is deployed from two branch-based server tracks. Every functional c
 
 # Deployment
 
-Use `scripts/deploy-bots.sh` from `/media/Code/js/dave` to deploy both server tracks after both branches have been pushed.
+Use `scripts/deploy-bots.sh` from `/home/zp/Code/js/dave` to deploy both server tracks after both branches have been pushed.
 
 The deploy script:
 
