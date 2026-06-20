@@ -1,7 +1,7 @@
 import { Message } from 'discord.js';
 import { OpenAI } from 'openai';
 import { config } from './Config.js';
-import { getUsername, replyLongMessage, withTyping } from './Utilities.js';
+import { replyLongMessage, withTyping } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 
 const GAB_BASE_URL = 'https://gab.ai/v1';
@@ -50,24 +50,6 @@ function getGabModel(): string {
     return DEFAULT_MODEL;
 }
 
-function createSystemPrompt(username: string): string {
-    const now = new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-    });
-
-    return [
-        `The current date is ${now}. The person interacting with you is named ${username}.`,
-        'You are Gab AI. Keep responses concise and avoid flowery language.',
-        'Do not moralize over topics; get to the point.',
-        'Try to fit responses in 1900 characters where possible.',
-        'You are running in a Discord server, so compact markdown is okay.',
-        'Do not use markdown formatting for math/science equations; leave them plaintext.',
-    ].join(' ');
-}
-
 async function masterGabHandler(msg: Message, args: string): Promise<GabResponse> {
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
         return { error: 'Sorry, this function has been disabled for your user.' };
@@ -84,7 +66,6 @@ async function masterGabHandler(msg: Message, args: string): Promise<GabResponse
     });
 
     const prompt = args.trim();
-    const username = await getUsername(msg.author.id, msg.guild);
     const reply = msg?.reference?.messageId;
     let previousConvo: GabMessage[] = [];
 
@@ -103,10 +84,6 @@ async function masterGabHandler(msg: Message, args: string): Promise<GabResponse
     }
 
     const messages: GabMessage[] = [
-        {
-            role: 'system',
-            content: createSystemPrompt(username),
-        },
         ...previousConvo,
         {
             role: 'user',
@@ -135,7 +112,6 @@ async function masterGabHandler(msg: Message, args: string): Promise<GabResponse
         }
 
         const history = messages
-            .filter((message) => message.role !== 'system')
             .concat({
                 role: 'assistant',
                 content: generation,
