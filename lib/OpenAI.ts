@@ -104,6 +104,7 @@ interface OpenAIHandlerOptions {
         apiKey?: string;
         baseURL?: string;
     };
+    includeThinkingOutput?: boolean;
 }
 
 export interface OpenAIResponse {
@@ -255,9 +256,12 @@ function buildOpenAIResponseFromResult(
   result: ResponsesPayload,
   elapsedSeconds: string,
   convo: UniversalMessage[],
+  includeThinkingOutput: boolean = true,
 ): OpenAIResponse {
   const images = extractImagesFromResponse(result);
-  const reasoningItem = result.output.find(isReasoningItem);
+  const reasoningItem = includeThinkingOutput
+    ? result.output.find(isReasoningItem)
+    : undefined;
 
   let thinkingData: string | undefined;
   if (reasoningItem) {
@@ -275,20 +279,24 @@ function buildOpenAIResponseFromResult(
   let responseText: string | undefined;
 
   if (hasText) {
-    const baseResponse = `${rawOutputText}\n\n*Thought for ${elapsedSeconds} seconds*`;
-
-    if (
-      thinkingData &&
-      baseResponse.length + thinkingData.length + 10 <= 2000
-    ) {
-      responseText =
-        '```' +
-        thinkingData +
-        '```\n' +
-        rawOutputText +
-        `\n\n*Thought for ${elapsedSeconds} seconds*`;
+    if (!includeThinkingOutput) {
+      responseText = rawOutputText;
     } else {
-      responseText = baseResponse;
+      const baseResponse = `${rawOutputText}\n\n*Thought for ${elapsedSeconds} seconds*`;
+
+      if (
+        thinkingData &&
+        baseResponse.length + thinkingData.length + 10 <= 2000
+      ) {
+        responseText =
+          '```' +
+          thinkingData +
+          '```\n' +
+          rawOutputText +
+          `\n\n*Thought for ${elapsedSeconds} seconds*`;
+      } else {
+        responseText = baseResponse;
+      }
     }
   } else if (!hasText && images.length === 0) {
     const errorMessage = extractErrorMessage(result);
@@ -409,6 +417,7 @@ async function masterOpenAIHandler(
         maxCompletionTokens,
         includeFiles = true,
         overrideConfig,
+        includeThinkingOutput = true,
       } = options;
 
       // dev / banned checks
@@ -507,7 +516,7 @@ async function masterOpenAIHandler(
             user: msg.author.id,
             reasoning: {
               effort: 'high',
-              summary: 'auto',
+              ...(includeThinkingOutput ? { summary: 'auto' } : {}),
             },
             tools: [
               { type: 'image_generation', moderation: 'low' },
@@ -525,7 +534,7 @@ async function masterOpenAIHandler(
           const result = toNonStreamingResponse(rawResult);
 
           const secs = ((Date.now() - t0) / 1000).toFixed(1);
-          return buildOpenAIResponseFromResult(result, secs, convo);
+          return buildOpenAIResponseFromResult(result, secs, convo, includeThinkingOutput);
         }
 
         const chatMsgs = convo.filter(
@@ -981,6 +990,7 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
                 msg,
                 args: transcription.text,
                 systemPrompt: 'Format this transcribed audio nicely, with discord markdown where applicable. Return just the formatted transcript, no additional info. Do not include the leading ```, I will handle those. Example output: **Chipotle Employee:** Good morning sir!',
+                includeThinkingOutput: false,
             });
 
             if (response.error) {
