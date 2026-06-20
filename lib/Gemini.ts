@@ -108,7 +108,7 @@ const ART_STYLES = [
     'biomechanical',
 ];
 
-const TEXT_MODEL = "gemini-3-flash";
+const TEXT_MODEL = "gemini-3-flash-preview";
 const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 const SAFETY_SETTINGS: SafetySetting[] = [
