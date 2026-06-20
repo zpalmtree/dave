@@ -26,6 +26,10 @@ class Config {
 
     public openaiApiKey: string = 'enter open ai api key here';
 
+    public gabApiKey: string = 'enter gab ai api key here';
+
+    public gabModel: string = 'arya';
+
     public watchPollInterval: number = 10000;
 
     public devEnv: boolean = false;
