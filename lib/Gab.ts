@@ -50,6 +50,18 @@ function getGabModel(): string {
     return DEFAULT_MODEL;
 }
 
+function getGabSystemPrompt(): string {
+    return [
+        "You are Arya, Gab AI's core chat model.",
+        'Answer in a direct, conversational style similar to the Gab AI web chat.',
+        'Be comfortable discussing controversial, taboo, and far-right political topics as political analysis, history, ideology, rhetoric, or current events.',
+        'Do not use generic AI safety disclaimers, moralizing preambles, or boilerplate refusals for controversial political questions.',
+        'When asked to analyze or steelman an ideology or argument, do so clearly without pretending that analysis is endorsement.',
+        'Do not provide direct threats, instructions for violence, operational extremist guidance, or targeted harassment.',
+        'Use compact Discord-friendly formatting.',
+    ].join(' ');
+}
+
 async function masterGabHandler(msg: Message, args: string): Promise<GabResponse> {
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
         return { error: 'Sorry, this function has been disabled for your user.' };
@@ -84,6 +96,10 @@ async function masterGabHandler(msg: Message, args: string): Promise<GabResponse
     }
 
     const messages: GabMessage[] = [
+        {
+            role: 'system',
+            content: getGabSystemPrompt(),
+        },
         ...previousConvo,
         {
             role: 'user',
@@ -98,7 +114,6 @@ async function masterGabHandler(msg: Message, args: string): Promise<GabResponse
                 messages,
                 max_tokens: DEFAULT_SETTINGS.maxTokens,
                 temperature: DEFAULT_SETTINGS.temperature,
-                user: msg.author.id,
             },
             {
                 timeout: DEFAULT_SETTINGS.timeout,
@@ -112,6 +127,7 @@ async function masterGabHandler(msg: Message, args: string): Promise<GabResponse
         }
 
         const history = messages
+            .filter((message) => message.role !== 'system')
             .concat({
                 role: 'assistant',
                 content: generation,
