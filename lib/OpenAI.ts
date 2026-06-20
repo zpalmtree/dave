@@ -15,7 +15,6 @@ import { config } from './Config.js';
 import {
     truncateResponse,
     extractURLs,
-    escapeDiscordMarkdown,
     getUsername,
     getImageURLsFromMessage,
     withTyping,
@@ -459,11 +458,6 @@ async function formatTranscriptionText(rawTranscript: string, userId: string): P
     return looksLikeTranscriptCleanup(transcript, formatted)
         ? formatted
         : transcript;
-}
-
-function buildTranscriptionDescription(speakerName: string, transcript: string): string {
-    const safeSpeakerName = escapeDiscordMarkdown(speakerName);
-    return `**${safeSpeakerName}:** ${transcript}`.slice(0, 4096);
 }
 
 // ---------- main handler -------------------
@@ -1066,10 +1060,9 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
                 console.warn(`Failed to format transcript from ${url}; using raw transcript.`, err);
             }
 
-            const speakerName = await getUsername(msg.author.id, msg.guild);
             const embed = new EmbedBuilder()
                 .setTitle('Transcribed Audio')
-                .setDescription(buildTranscriptionDescription(speakerName, formattedTranscript));
+                .setDescription(formattedTranscript.slice(0, 4096));
 
             await msg.reply({ embeds: [embed] });
         } catch (err) {
