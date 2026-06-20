@@ -1021,7 +1021,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['gab', 'arya'],
+        aliases: ['gab'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleGab,
