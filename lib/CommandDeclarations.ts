@@ -456,22 +456,22 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleQuery,
-            description: 'Query duckduckgo',
+            description: 'Search the web with Google Custom Search',
             examples: [
                 {
-                    name: 'Define something',
+                    name: 'Search the web',
                     value: 'query apple',
                 },
                 {
-                    name: 'Use duckduckgo bangs - https://duckduckgo.com/bang',
-                    value: 'query !w Arnold Schwarzenegger',
+                    name: 'Find a Wikipedia result',
+                    value: 'query Arnold Schwarzenegger wikipedia',
                 },
                 {
-                    name: `Topic Summaries`,
+                    name: 'Search for a topic',
                     value: 'query Valley Forge National Historical Park',
                 },
                 {
-                    name: 'Categories',
+                    name: 'Search for a category',
                     value: 'query Simpsons Characters',
                 },
             ],
@@ -923,7 +923,7 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleImage,
-            description: 'Query duckduckgo images',
+            description: 'Search images with Google Custom Search',
             examples: [
                 {
                     value: 'image sunset',
@@ -1631,4 +1631,3 @@ export function handleHelp(msg: Message, args: string): void {
 
     pages.sendMessage();
 }
-
