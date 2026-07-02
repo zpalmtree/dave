@@ -24,7 +24,9 @@ class Config {
 
     public imageHostPath: string = 'https://raw.githubusercontent.com/zpalmtree/dave/master/images/';
 
-    public bingApiKey: string = 'enter bing api key here';
+    public googleApiKey: string = 'enter google api key here';
+
+    public googleSearchEngineId: string = 'enter google custom search engine id here';
 
     public openaiApiKey: string = 'enter open ai api key here';
 
