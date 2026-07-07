@@ -8,6 +8,7 @@ import fetch from 'node-fetch';
 
 const EASTERN_TIME_ZONE = 'America/New_York';
 const LOOKAHEAD_DAYS = 7;
+const BRACKET_LOOKBACK_DAYS = 14;
 const MAX_MATCHES = 10;
 const ESPN_WORLD_CUP_SCOREBOARD =
     'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
@@ -70,8 +71,13 @@ interface EspnEvent {
     name?: string;
     shortName?: string;
     date?: string;
+    season?: EspnSeason;
     status?: EspnStatus;
     competitions?: EspnCompetition[];
+}
+
+interface EspnSeason {
+    slug?: string;
 }
 
 interface EspnCompetition {
@@ -90,6 +96,8 @@ interface EspnTeam {
     displayName?: string;
     shortDisplayName?: string;
     abbreviation?: string;
+    name?: string;
+    location?: string;
 }
 
 interface EspnStatus {
@@ -108,6 +116,10 @@ interface EspnStatusType {
 interface MatchDisplay {
     dateKey: string;
     event: EspnEvent;
+}
+
+interface PlaceholderResolver {
+    [teamLabel: string]: string;
 }
 
 function padDatePart(value: number): string {
@@ -167,13 +179,10 @@ function escapeDiscordText(text: string): string {
     );
 }
 
-function getEasternTime(date: Date): string {
-    return new Intl.DateTimeFormat('en-US', {
-        timeZone: EASTERN_TIME_ZONE,
-        hour: 'numeric',
-        minute: '2-digit',
-        timeZoneName: 'short',
-    }).format(date);
+function getDiscordTimestamp(date: Date): string {
+    const unixTimestamp = Math.floor(date.getTime() / 1000);
+
+    return `<t:${unixTimestamp}:t> (<t:${unixTimestamp}:R>)`;
 }
 
 function formatDateHeading(dateKey: string, todayKey: string): string {
@@ -217,6 +226,20 @@ function getTeamName(competitor: EspnCompetitor | undefined): string {
         || 'TBD';
 }
 
+function getTeamLabels(competitor: EspnCompetitor | undefined): string[] {
+    if (!competitor) {
+        return [];
+    }
+
+    return [
+        competitor.team?.abbreviation,
+        competitor.team?.shortDisplayName,
+        competitor.team?.displayName,
+        competitor.team?.name,
+        competitor.team?.location,
+    ].filter((label): label is string => !!label);
+}
+
 function getTeamFlag(competitor: EspnCompetitor | undefined): string {
     const abbreviation = competitor?.team?.abbreviation;
 
@@ -227,7 +250,16 @@ function getTeamFlag(competitor: EspnCompetitor | undefined): string {
     return TEAM_FLAGS[abbreviation] || '';
 }
 
-function formatTeam(competitor: EspnCompetitor | undefined): string {
+function formatTeam(
+    competitor: EspnCompetitor | undefined,
+    placeholderResolver: PlaceholderResolver = {},
+): string {
+    for (const label of getTeamLabels(competitor)) {
+        if (placeholderResolver[label]) {
+            return placeholderResolver[label];
+        }
+    }
+
     const flag = getTeamFlag(competitor);
     const name = escapeDiscordText(getTeamName(competitor));
 
@@ -250,11 +282,25 @@ function getHomeAwayTeams(event: EspnEvent): {
     };
 }
 
-function formatMatchup(event: EspnEvent): string {
+function wrapMatchupTeamLabel(label: string): string {
+    if (label.startsWith('Winner of ') || label.startsWith('Loser of ')) {
+        return `(${label})`;
+    }
+
+    return label;
+}
+
+function formatMatchup(
+    event: EspnEvent,
+    placeholderResolver: PlaceholderResolver = {},
+): string {
     const { home, away } = getHomeAwayTeams(event);
 
     if (home || away) {
-        return `${formatTeam(away)} vs ${formatTeam(home)}`;
+        return [
+            wrapMatchupTeamLabel(formatTeam(away, placeholderResolver)),
+            wrapMatchupTeamLabel(formatTeam(home, placeholderResolver)),
+        ].join(' vs ');
     }
 
     if (event.name) {
@@ -289,34 +335,42 @@ function getScoredCompetitors(event: EspnEvent): EspnCompetitor[] {
     return competitors;
 }
 
-function formatScore(event: EspnEvent): string {
+function formatScore(
+    event: EspnEvent,
+    placeholderResolver: PlaceholderResolver = {},
+): string {
     const scoredCompetitors = getScoredCompetitors(event);
 
     if (scoredCompetitors.length === 0) {
-        return formatMatchup(event);
+        return formatMatchup(event, placeholderResolver);
     }
 
-    return scoredCompetitors.map((competitor) => `${formatTeam(competitor)} ${getScore(competitor)}`).join(', ');
+    return scoredCompetitors
+        .map((competitor) => `${formatTeam(competitor, placeholderResolver)} ${getScore(competitor)}`)
+        .join(', ');
 }
 
-function formatCompletedScore(event: EspnEvent): string {
+function formatCompletedScore(
+    event: EspnEvent,
+    placeholderResolver: PlaceholderResolver = {},
+): string {
     const { away, home, competitors } = getHomeAwayTeams(event);
     const winner = competitors.find((competitor) => competitor.winner);
     const loser = competitors.find((competitor) => competitor !== winner);
 
     if (winner && loser) {
-        return `${formatTeam(winner)} wins ${getScore(winner)}:${getScore(loser)} over ${formatTeam(loser)}`;
+        return `${formatTeam(winner, placeholderResolver)} wins ${getScore(winner)}:${getScore(loser)} over ${formatTeam(loser, placeholderResolver)}`;
     }
 
     if (away && home && getScore(away) === getScore(home)) {
-        return `${formatTeam(away)} draws ${getScore(away)}:${getScore(home)} with ${formatTeam(home)}`;
+        return `${formatTeam(away, placeholderResolver)} draws ${getScore(away)}:${getScore(home)} with ${formatTeam(home, placeholderResolver)}`;
     }
 
     if (away && home) {
-        return `${formatTeam(away)} ${getScore(away)}:${getScore(home)} ${formatTeam(home)}`;
+        return `${formatTeam(away, placeholderResolver)} ${getScore(away)}:${getScore(home)} ${formatTeam(home, placeholderResolver)}`;
     }
 
-    return formatScore(event);
+    return formatScore(event, placeholderResolver);
 }
 
 function getLiveLabel(status: EspnStatus | undefined): string {
@@ -331,30 +385,35 @@ function getLiveLabel(status: EspnStatus | undefined): string {
     return 'Live';
 }
 
-function formatMatchLine(event: EspnEvent): string {
+function formatMatchLine(
+    event: EspnEvent,
+    placeholderResolver: PlaceholderResolver,
+): string {
     const status = getStatus(event);
     const statusType = status?.type;
     const eventDate = event.date ? new Date(event.date) : undefined;
     const hasValidDate = eventDate !== undefined && !Number.isNaN(eventDate.getTime());
 
     if (statusType?.completed || statusType?.state === 'post') {
-        return formatCompletedScore(event);
+        return formatCompletedScore(event, placeholderResolver);
     }
 
     if (statusType?.state === 'in') {
-        return `${getLiveLabel(status)} - ${formatScore(event)}`;
+        return `${getLiveLabel(status)} - ${formatScore(event, placeholderResolver)}`;
     }
 
     if (statusType?.state === 'pre') {
-        return `${hasValidDate ? getEasternTime(eventDate!) : 'TBD'} - ${formatMatchup(event)}`;
+        return `${hasValidDate ? getDiscordTimestamp(eventDate!) : 'TBD'} - ${formatMatchup(event, placeholderResolver)}`;
     }
 
     if (statusType?.shortDetail && statusType.shortDetail !== 'Scheduled') {
-        const display = statusType.completed ? formatCompletedScore(event) : formatMatchup(event);
+        const display = statusType.completed
+            ? formatCompletedScore(event, placeholderResolver)
+            : formatMatchup(event, placeholderResolver);
         return `${statusType.shortDetail} - ${display}`;
     }
 
-    return `${hasValidDate ? getEasternTime(eventDate!) : 'TBD'} - ${formatMatchup(event)}`;
+    return `${hasValidDate ? getDiscordTimestamp(eventDate!) : 'TBD'} - ${formatMatchup(event, placeholderResolver)}`;
 }
 
 async function fetchWorldCupMatches(startDateKey: string, endDateKey: string): Promise<EspnEvent[]> {
@@ -402,8 +461,114 @@ function groupMatchesByDate(matches: MatchDisplay[]): Map<string, MatchDisplay[]
     return grouped;
 }
 
+function getEventsByRound(events: EspnEvent[], roundSlug: string): EspnEvent[] {
+    return events
+        .filter((event) => event.season?.slug === roundSlug)
+        .filter((event) => {
+            if (!event.date) {
+                return false;
+            }
+
+            return !Number.isNaN(new Date(event.date).getTime());
+        })
+        .sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
+}
+
+function addPlaceholderLabels(
+    placeholderResolver: PlaceholderResolver,
+    labels: string[],
+    value: string,
+): void {
+    for (const label of labels) {
+        placeholderResolver[label] = value;
+    }
+}
+
+function getWinnerOrPlaceholderLabel(
+    event: EspnEvent,
+    placeholderResolver: PlaceholderResolver,
+): string {
+    const winner = getCompetition(event)?.competitors?.find((competitor) => competitor.winner);
+
+    if (winner && getStatus(event)?.type?.completed) {
+        return formatTeam(winner, placeholderResolver);
+    }
+
+    return `Winner of ${formatMatchup(event, placeholderResolver)}`;
+}
+
+function getLoserOrPlaceholderLabel(
+    event: EspnEvent,
+    placeholderResolver: PlaceholderResolver,
+): string {
+    const competitors = getCompetition(event)?.competitors || [];
+    const winner = competitors.find((competitor) => competitor.winner);
+    const loser = competitors.find((competitor) => competitor !== winner);
+
+    if (winner && loser && getStatus(event)?.type?.completed) {
+        return formatTeam(loser, placeholderResolver);
+    }
+
+    return `Loser of ${formatMatchup(event, placeholderResolver)}`;
+}
+
+function buildPlaceholderResolver(events: EspnEvent[]): PlaceholderResolver {
+    const placeholderResolver: PlaceholderResolver = {};
+
+    getEventsByRound(events, 'round-of-16').forEach((event, index) => {
+        const gameNumber = index + 1;
+        addPlaceholderLabels(
+            placeholderResolver,
+            [
+                `RD16 W${gameNumber}`,
+                `Round of 16 ${gameNumber} Winner`,
+            ],
+            getWinnerOrPlaceholderLabel(event, placeholderResolver),
+        );
+    });
+
+    getEventsByRound(events, 'quarterfinals').forEach((event, index) => {
+        const gameNumber = index + 1;
+        addPlaceholderLabels(
+            placeholderResolver,
+            [
+                `QFW${gameNumber}`,
+                `QF W${gameNumber}`,
+                `QW${gameNumber}`,
+                `Quarterfinal ${gameNumber} Winner`,
+            ],
+            getWinnerOrPlaceholderLabel(event, placeholderResolver),
+        );
+    });
+
+    getEventsByRound(events, 'semifinals').forEach((event, index) => {
+        const gameNumber = index + 1;
+        addPlaceholderLabels(
+            placeholderResolver,
+            [
+                `SFW${gameNumber}`,
+                `SF W${gameNumber}`,
+                `Semifinal ${gameNumber} Winner`,
+            ],
+            getWinnerOrPlaceholderLabel(event, placeholderResolver),
+        );
+        addPlaceholderLabels(
+            placeholderResolver,
+            [
+                `SF L${gameNumber}`,
+                `Semifinal ${gameNumber} Loser`,
+            ],
+            getLoserOrPlaceholderLabel(event, placeholderResolver),
+        );
+    });
+
+    return placeholderResolver;
+}
+
 function buildWorldCupEmbed(events: EspnEvent[], todayKey: string): EmbedBuilder {
-    const matches = getSortedMatchDisplays(events);
+    const placeholderResolver = buildPlaceholderResolver(events);
+    const matches = getSortedMatchDisplays(events)
+        .filter((match) => match.dateKey >= todayKey);
     const grouped = groupMatchesByDate(matches);
     const selectedDays: Array<{ dateKey: string, matches: MatchDisplay[] }> = [];
     let selectedMatchCount = 0;
@@ -417,7 +582,7 @@ function buildWorldCupEmbed(events: EspnEvent[], todayKey: string): EmbedBuilder
     selectedMatchCount += todaySelection.length;
 
     const futureDateKeys = [...grouped.keys()]
-        .filter((dateKey) => dateKey !== todayKey)
+        .filter((dateKey) => dateKey > todayKey)
         .sort();
 
     for (const dateKey of futureDateKeys) {
@@ -447,7 +612,7 @@ function buildWorldCupEmbed(events: EspnEvent[], todayKey: string): EmbedBuilder
     for (const day of selectedDays) {
         const value = day.matches.length === 0
             ? 'No matches today.'
-            : day.matches.map((match) => formatMatchLine(match.event)).join('\n');
+            : day.matches.map((match) => formatMatchLine(match.event, placeholderResolver)).join('\n\n');
 
         embed.addFields({
             name: formatDateHeading(day.dateKey, todayKey),
@@ -460,12 +625,15 @@ function buildWorldCupEmbed(events: EspnEvent[], todayKey: string): EmbedBuilder
 
 export async function handleWorldCup(msg: Message): Promise<void> {
     const todayKey = getEasternDateKey(new Date());
+    const fetchStartKey = addDaysToDateKey(todayKey, -BRACKET_LOOKBACK_DAYS);
     const endDateKey = addDaysToDateKey(todayKey, LOOKAHEAD_DAYS);
 
     try {
-        const events = await fetchWorldCupMatches(todayKey, endDateKey);
+        const events = await fetchWorldCupMatches(fetchStartKey, endDateKey);
+        const upcomingMatches = getSortedMatchDisplays(events)
+            .filter((match) => match.dateKey >= todayKey);
 
-        if (events.length === 0) {
+        if (upcomingMatches.length === 0) {
             await msg.reply('No World Cup matches found for the next 7 days.');
             return;
         }
