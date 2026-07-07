@@ -137,6 +137,8 @@ import { exchangeService } from './Exchange.js';
 
 import { handleWeather } from './Weather.js';
 
+import { handleWorldCup } from './WorldCup.js';
+
 import { config } from './Config.js';
 
 export const Commands: Command[] = [
@@ -240,6 +242,22 @@ export const Commands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handlePrice,
             description: "Displays cryptocurrency prices",
+        },
+    },
+    {
+        aliases: ['worldcup', 'wc'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleWorldCup,
+            description: 'Show upcoming World Cup matches',
+            examples: [
+                {
+                    value: 'worldcup',
+                },
+                {
+                    value: 'wc',
+                },
+            ],
         },
     },
     {
