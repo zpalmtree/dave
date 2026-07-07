@@ -502,14 +502,9 @@ function dubsType(roll: string): string {
 }
 
 interface PriceTrend {
-    arrow: string;
+    marker: string;
     change: string;
-    direction: number;
 }
-
-const PRICE_UP_COLOR = '#00853D';
-const PRICE_DOWN_COLOR = '#C8102E';
-const PRICE_NEUTRAL_COLOR = '#979C9F';
 
 function formatUsdPrice(price: number): string {
     return `$${numberWithCommas(price.toString())}`;
@@ -518,9 +513,8 @@ function formatUsdPrice(price: number): string {
 function formatPriceTrend(change: number | undefined): PriceTrend {
     if (change === undefined || !Number.isFinite(change)) {
         return {
-            arrow: '→',
+            marker: '⚪',
             change: 'n/a',
-            direction: 0,
         };
     }
 
@@ -528,41 +522,22 @@ function formatPriceTrend(change: number | undefined): PriceTrend {
 
     if (roundedChange > 0) {
         return {
-            arrow: '▲',
+            marker: '🟢',
             change: `+${roundedChange}%`,
-            direction: 1,
         };
     }
 
     if (roundedChange < 0) {
         return {
-            arrow: '▼',
+            marker: '🔴',
             change: `${roundedChange}%`,
-            direction: -1,
         };
     }
 
     return {
-        arrow: '→',
+        marker: '⚪',
         change: '0%',
-        direction: 0,
     };
-}
-
-function getPriceEmbedColor(prices: Array<{ usd_24h_change?: number }>): ColorResolvable {
-    const direction = prices.reduce((sum, price) => {
-        return sum + formatPriceTrend(price.usd_24h_change).direction;
-    }, 0);
-
-    if (direction > 0) {
-        return PRICE_UP_COLOR;
-    }
-
-    if (direction < 0) {
-        return PRICE_DOWN_COLOR;
-    }
-
-    return PRICE_NEUTRAL_COLOR;
 }
 
 export async function handlePrice(msg: Message) {
@@ -584,8 +559,7 @@ export async function handlePrice(msg: Message) {
                 return b.usd_market_cap - a.usd_market_cap;
             });
     
-            const embed = new EmbedBuilder()
-                .setColor(getPriceEmbedColor(prices));
+            const embed = new EmbedBuilder();
 
             const pages = new Paginate({
                 sourceMessage: msg,
@@ -595,7 +569,7 @@ export async function handlePrice(msg: Message) {
 
                     return {
                         name: capitalize(price.name),
-                        value: `${formatUsdPrice(price.usd)} ${trend.arrow} ${trend.change}`,
+                        value: `${formatUsdPrice(price.usd)} ${trend.marker} ${trend.change}`,
                         inline: true,
                     };
                 },
