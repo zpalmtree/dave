@@ -82,7 +82,16 @@ interface EspnSeason {
 
 interface EspnCompetition {
     competitors?: EspnCompetitor[];
+    details?: EspnDetail[];
     status?: EspnStatus;
+}
+
+interface EspnDetail {
+    scoreValue?: number;
+    shootout?: boolean;
+    team?: {
+        id?: string;
+    };
 }
 
 interface EspnCompetitor {
@@ -93,6 +102,7 @@ interface EspnCompetitor {
 }
 
 interface EspnTeam {
+    id?: string;
     displayName?: string;
     shortDisplayName?: string;
     abbreviation?: string;
@@ -106,6 +116,7 @@ interface EspnStatus {
 }
 
 interface EspnStatusType {
+    name?: string;
     state?: string;
     completed?: boolean;
     description?: string;
@@ -318,6 +329,37 @@ function getScore(competitor: EspnCompetitor | undefined): string {
     return competitor.score;
 }
 
+function isPenaltyShootout(event: EspnEvent): boolean {
+    const statusType = getStatus(event)?.type;
+
+    return statusType?.name === 'STATUS_FINAL_PEN'
+        || statusType?.detail === 'FT-Pens'
+        || statusType?.shortDetail === 'FT-Pens'
+        || getCompetition(event)?.details?.some((detail) => detail.shootout) === true;
+}
+
+function getShootoutScore(event: EspnEvent, competitor: EspnCompetitor | undefined): number | undefined {
+    const teamId = competitor?.team?.id;
+
+    if (!teamId) {
+        return undefined;
+    }
+
+    const shootoutDetails = getCompetition(event)?.details?.filter((detail) => detail.shootout) || [];
+
+    if (shootoutDetails.length === 0) {
+        return undefined;
+    }
+
+    return shootoutDetails.reduce((score, detail) => {
+        if (detail.team?.id !== teamId) {
+            return score;
+        }
+
+        return score + (detail.scoreValue || 0);
+    }, 0);
+}
+
 function getScoredCompetitors(event: EspnEvent): EspnCompetitor[] {
     const { home, away, competitors } = getHomeAwayTeams(event);
 
@@ -359,6 +401,16 @@ function formatCompletedScore(
     const loser = competitors.find((competitor) => competitor !== winner);
 
     if (winner && loser) {
+        if (isPenaltyShootout(event)) {
+            const winnerShootoutScore = getShootoutScore(event, winner);
+            const loserShootoutScore = getShootoutScore(event, loser);
+            const shootoutScore = winnerShootoutScore !== undefined && loserShootoutScore !== undefined
+                ? `${winnerShootoutScore}:${loserShootoutScore} on penalties after `
+                : 'on penalties after ';
+
+            return `${formatTeam(winner, placeholderResolver)} wins ${shootoutScore}${getScore(winner)}:${getScore(loser)} over ${formatTeam(loser, placeholderResolver)}`;
+        }
+
         return `${formatTeam(winner, placeholderResolver)} wins ${getScore(winner)}:${getScore(loser)} over ${formatTeam(loser, placeholderResolver)}`;
     }
 
