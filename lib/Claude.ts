@@ -10,8 +10,7 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-opus-4-6',
-    temperature: 0.5,
+    model: 'claude-opus-4-8',
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
 };
@@ -22,7 +21,6 @@ interface ClaudeHandlerOptions {
     msg: Message;
     args: string;
     systemPrompt?: string;
-    temperature?: number;
     maxTokens?: number;
     includeImages?: boolean;
     enableWebSearch?: boolean;
@@ -129,7 +127,6 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         msg,
         args,
         systemPrompt,
-        temperature = DEFAULT_SETTINGS.temperature,
         maxTokens = DEFAULT_SETTINGS.maxTokens,
         includeImages = true,
         enableWebSearch = true,
@@ -227,7 +224,6 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
             max_tokens: maxTokens,
             messages,
             system: fullSystemPrompt,
-            temperature,
             metadata: {
                 user_id: msg.author.id,
             },
