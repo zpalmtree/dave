@@ -502,7 +502,6 @@ function dubsType(roll: string): string {
 }
 
 interface PriceTrend {
-    emoji: string;
     arrow: string;
     change: string;
     direction: number;
@@ -519,7 +518,6 @@ function formatUsdPrice(price: number): string {
 function formatPriceTrend(change: number | undefined): PriceTrend {
     if (change === undefined || !Number.isFinite(change)) {
         return {
-            emoji: '⚪',
             arrow: '→',
             change: 'n/a',
             direction: 0,
@@ -530,7 +528,6 @@ function formatPriceTrend(change: number | undefined): PriceTrend {
 
     if (roundedChange > 0) {
         return {
-            emoji: '🟢',
             arrow: '▲',
             change: `+${roundedChange}%`,
             direction: 1,
@@ -539,7 +536,6 @@ function formatPriceTrend(change: number | undefined): PriceTrend {
 
     if (roundedChange < 0) {
         return {
-            emoji: '🔴',
             arrow: '▼',
             change: `${roundedChange}%`,
             direction: -1,
@@ -547,7 +543,6 @@ function formatPriceTrend(change: number | undefined): PriceTrend {
     }
 
     return {
-        emoji: '⚪',
         arrow: '→',
         change: '0%',
         direction: 0,
@@ -600,7 +595,7 @@ export async function handlePrice(msg: Message) {
 
                     return {
                         name: capitalize(price.name),
-                        value: `${trend.emoji} ${formatUsdPrice(price.usd)} ${trend.arrow} ${trend.change}`,
+                        value: `${formatUsdPrice(price.usd)} ${trend.arrow} ${trend.change}`,
                         inline: true,
                     };
                 },
