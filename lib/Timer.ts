@@ -21,9 +21,7 @@ import {
 } from './Database.js';
 
 import {
-    capitalize,
     getUsername,
-    getDefaultTimeZone,
     monthDurationToSeconds
 } from './Utilities.js';
 
@@ -128,7 +126,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         description
     );
 
-    const message = `Success. Timer #${timerID} will go off ${moment.utc(time).fromNow()}.`;
+    const message = `Success. Timer #${timerID} will go off ${formatDiscordTimestamp(time)}.`;
 
     await msg.reply(message);
 }
@@ -159,8 +157,6 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
     const embed = new EmbedBuilder()
         .setTitle('Running Timers');
 
-    const { offset, label } = getDefaultTimeZone();
-
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 7,
@@ -176,8 +172,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
             fields.push(
                 {
                     name: 'Time',
-                    value: `${capitalize(moment.utc(timer.expire_time).fromNow())}, ${moment.utc(timer.expire_time).utcOffset(offset).format('HH:mm')} ${label}`,
-
+                    value: formatDiscordTimestamp(moment.utc(timer.expire_time)),
                     inline: true,
                 },
                 {
@@ -195,6 +190,12 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
     });
 
     pages.sendMessage();
+}
+
+function formatDiscordTimestamp(time: moment.Moment): string {
+    const timestamp = time.unix();
+
+    return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
 }
 
 export async function restoreTimers(db: Database, client: Client) {
