@@ -11,6 +11,56 @@ const LOOKAHEAD_DAYS = 7;
 const MAX_MATCHES = 10;
 const ESPN_WORLD_CUP_SCOREBOARD =
     'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
+const TEAM_FLAGS: { [abbreviation: string]: string } = {
+    ALG: '🇩🇿',
+    ARG: '🇦🇷',
+    AUS: '🇦🇺',
+    AUT: '🇦🇹',
+    BEL: '🇧🇪',
+    BIH: '🇧🇦',
+    BRA: '🇧🇷',
+    CAN: '🇨🇦',
+    CIV: '🇨🇮',
+    COD: '🇨🇩',
+    COL: '🇨🇴',
+    CPV: '🇨🇻',
+    CRO: '🇭🇷',
+    CUW: '🇨🇼',
+    CZE: '🇨🇿',
+    ECU: '🇪🇨',
+    EGY: '🇪🇬',
+    ENG: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+    ESP: '🇪🇸',
+    FRA: '🇫🇷',
+    GER: '🇩🇪',
+    GHA: '🇬🇭',
+    HAI: '🇭🇹',
+    IRN: '🇮🇷',
+    IRQ: '🇮🇶',
+    JOR: '🇯🇴',
+    JPN: '🇯🇵',
+    KOR: '🇰🇷',
+    KSA: '🇸🇦',
+    MAR: '🇲🇦',
+    MEX: '🇲🇽',
+    NED: '🇳🇱',
+    NOR: '🇳🇴',
+    NZL: '🇳🇿',
+    PAN: '🇵🇦',
+    PAR: '🇵🇾',
+    POR: '🇵🇹',
+    QAT: '🇶🇦',
+    RSA: '🇿🇦',
+    SCO: '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
+    SEN: '🇸🇳',
+    SUI: '🇨🇭',
+    SWE: '🇸🇪',
+    TUN: '🇹🇳',
+    TUR: '🇹🇷',
+    URU: '🇺🇾',
+    USA: '🇺🇸',
+    UZB: '🇺🇿',
+};
 
 interface EspnScoreboardResponse {
     events?: EspnEvent[];
@@ -167,6 +217,23 @@ function getTeamName(competitor: EspnCompetitor | undefined): string {
         || 'TBD';
 }
 
+function getTeamFlag(competitor: EspnCompetitor | undefined): string {
+    const abbreviation = competitor?.team?.abbreviation;
+
+    if (!abbreviation) {
+        return '';
+    }
+
+    return TEAM_FLAGS[abbreviation] || '';
+}
+
+function formatTeam(competitor: EspnCompetitor | undefined): string {
+    const flag = getTeamFlag(competitor);
+    const name = escapeDiscordText(getTeamName(competitor));
+
+    return flag ? `${flag} ${name}` : name;
+}
+
 function getHomeAwayTeams(event: EspnEvent): {
     home?: EspnCompetitor;
     away?: EspnCompetitor;
@@ -187,7 +254,7 @@ function formatMatchup(event: EspnEvent): string {
     const { home, away } = getHomeAwayTeams(event);
 
     if (home || away) {
-        return `${escapeDiscordText(getTeamName(away))} vs ${escapeDiscordText(getTeamName(home))}`;
+        return `${formatTeam(away)} vs ${formatTeam(home)}`;
     }
 
     if (event.name) {
@@ -195,6 +262,14 @@ function formatMatchup(event: EspnEvent): string {
     }
 
     return 'TBD vs TBD';
+}
+
+function getScore(competitor: EspnCompetitor | undefined): string {
+    if (!competitor || competitor.score === undefined || competitor.score === '') {
+        return '0';
+    }
+
+    return competitor.score;
 }
 
 function getScoredCompetitors(event: EspnEvent): EspnCompetitor[] {
@@ -221,18 +296,32 @@ function formatScore(event: EspnEvent): string {
         return formatMatchup(event);
     }
 
-    return scoredCompetitors.map((competitor) => {
-        const score = competitor.score === undefined || competitor.score === ''
-            ? '0'
-            : competitor.score;
+    return scoredCompetitors.map((competitor) => `${formatTeam(competitor)} ${getScore(competitor)}`).join(', ');
+}
 
-        return `${escapeDiscordText(getTeamName(competitor))} ${score}`;
-    }).join(', ');
+function formatCompletedScore(event: EspnEvent): string {
+    const { away, home, competitors } = getHomeAwayTeams(event);
+    const winner = competitors.find((competitor) => competitor.winner);
+    const loser = competitors.find((competitor) => competitor !== winner);
+
+    if (winner && loser) {
+        return `${formatTeam(winner)} wins ${getScore(winner)}:${getScore(loser)} over ${formatTeam(loser)}`;
+    }
+
+    if (away && home && getScore(away) === getScore(home)) {
+        return `${formatTeam(away)} draws ${getScore(away)}:${getScore(home)} with ${formatTeam(home)}`;
+    }
+
+    if (away && home) {
+        return `${formatTeam(away)} ${getScore(away)}:${getScore(home)} ${formatTeam(home)}`;
+    }
+
+    return formatScore(event);
 }
 
 function getLiveLabel(status: EspnStatus | undefined): string {
     if (status?.type?.shortDetail === 'HT' || status?.type?.description === 'Halftime') {
-        return 'HT';
+        return 'Halftime';
     }
 
     if (status?.displayClock && status.displayClock !== "0'") {
@@ -249,7 +338,7 @@ function formatMatchLine(event: EspnEvent): string {
     const hasValidDate = eventDate !== undefined && !Number.isNaN(eventDate.getTime());
 
     if (statusType?.completed || statusType?.state === 'post') {
-        return `${statusType.shortDetail || 'FT'} - ${formatScore(event)}`;
+        return formatCompletedScore(event);
     }
 
     if (statusType?.state === 'in') {
@@ -261,7 +350,7 @@ function formatMatchLine(event: EspnEvent): string {
     }
 
     if (statusType?.shortDetail && statusType.shortDetail !== 'Scheduled') {
-        const display = statusType.completed ? formatScore(event) : formatMatchup(event);
+        const display = statusType.completed ? formatCompletedScore(event) : formatMatchup(event);
         return `${statusType.shortDetail} - ${display}`;
     }
 
@@ -313,7 +402,7 @@ function groupMatchesByDate(matches: MatchDisplay[]): Map<string, MatchDisplay[]
     return grouped;
 }
 
-function buildWorldCupEmbed(events: EspnEvent[], todayKey: string, endDateKey: string): EmbedBuilder {
+function buildWorldCupEmbed(events: EspnEvent[], todayKey: string): EmbedBuilder {
     const matches = getSortedMatchDisplays(events);
     const grouped = groupMatchesByDate(matches);
     const selectedDays: Array<{ dateKey: string, matches: MatchDisplay[] }> = [];
@@ -353,9 +442,7 @@ function buildWorldCupEmbed(events: EspnEvent[], todayKey: string, endDateKey: s
 
     const embed = new EmbedBuilder()
         .setColor('#1d428a')
-        .setTitle('FIFA World Cup Matches')
-        .setDescription('Upcoming matches and completed scores. Times are Eastern.')
-        .setTimestamp(new Date());
+        .setTitle('FIFA World Cup Matches');
 
     for (const day of selectedDays) {
         const value = day.matches.length === 0
@@ -367,15 +454,6 @@ function buildWorldCupEmbed(events: EspnEvent[], todayKey: string, endDateKey: s
             value,
         });
     }
-
-    const omittedMatchCount = matches.length - selectedMatchCount;
-    const footer = omittedMatchCount > 0
-        ? `Showing ${selectedMatchCount} of ${matches.length} matches through ${endDateKey}`
-        : `Schedule through ${endDateKey}`;
-
-    embed.setFooter({
-        text: footer,
-    });
 
     return embed;
 }
@@ -394,7 +472,7 @@ export async function handleWorldCup(msg: Message): Promise<void> {
 
         await msg.reply({
             embeds: [
-                buildWorldCupEmbed(events, todayKey, endDateKey),
+                buildWorldCupEmbed(events, todayKey),
             ],
         });
     } catch (err) {
