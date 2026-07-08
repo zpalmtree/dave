@@ -54,9 +54,35 @@ import { userChannelRestrictions } from './UserChannelRestrictions.js';
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
 
 const MAGIC_EDEN_SOL_SLUGS_STATS_URL = 'https://api-mainnet.magiceden.dev/rpc/getCollectionEscrowStats/sol_slugs';
+const TENSOR_SOL_SLUGS_STATS_URL = 'https://api.mainnet.tensordev.io/api/v1/collections?sortBy=statsV2.volumeAll:desc&limit=1&slugDisplays=sol_slugs';
 
 function unwrapMagicEdenStats(magicEdenData: any): any {
     return magicEdenData?.results ?? magicEdenData;
+}
+
+async function fetchTensorSolSlugsStats(): Promise<any> {
+    if (!process.env.TENSOR_API_KEY) {
+        throw new Error('TENSOR_API_KEY is not configured.');
+    }
+
+    const res = await fetch(TENSOR_SOL_SLUGS_STATS_URL, {
+        headers: {
+            'x-tensor-api-key': process.env.TENSOR_API_KEY,
+        },
+    });
+
+    if (!res.ok) {
+        throw new Error(`Failed to fetch Tensor stats: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const stats = data?.collections?.[0]?.stats;
+
+    if (!stats) {
+        throw new Error('Tensor response is missing collection stats.');
+    }
+
+    return stats;
 }
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
@@ -262,15 +288,14 @@ async function handleFloorPriceChannel(client: Client, magicEdenData: any) {
     }
 };
 
-async function handleTotalVolumeChannel(client: Client, magicEdenData: any) {
+async function handleTotalVolumeChannel(client: Client, tensorStats: any) {
     try {
         const myChannel = client.channels.cache.get(config.volumeChannel) as GuildChannel;
         if (myChannel) {
-            const stats = unwrapMagicEdenStats(magicEdenData);
-            const volumeAllLamports = Number(stats?.volumeAll);
+            const volumeAllLamports = Number(tensorStats?.volumeAll);
 
             if (!Number.isFinite(volumeAllLamports)) {
-                console.log('Skipping total volume channel update: Magic Eden response is missing volumeAll.');
+                console.log('Skipping total volume channel update: Tensor response is missing volumeAll.');
                 return;
             }
 
@@ -285,9 +310,14 @@ async function handleTotalVolumeChannel(client: Client, magicEdenData: any) {
 async function magicEdenStatUpdater(client: Client) {
     try {
         const magicEdenData = await handleGetFromME(MAGIC_EDEN_SOL_SLUGS_STATS_URL);
-
         await handleFloorPriceChannel(client, magicEdenData);
-        await handleTotalVolumeChannel(client, magicEdenData);
+    } catch (err) {
+        console.log(err);
+    }
+
+    try {
+        const tensorStats = await fetchTensorSolSlugsStats();
+        await handleTotalVolumeChannel(client, tensorStats);
     } catch (err) {
         console.log(err);
     }
