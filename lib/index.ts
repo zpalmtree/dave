@@ -53,6 +53,12 @@ import { handleAutoTranscribe } from './OpenAI.js';
 import { userChannelRestrictions } from './UserChannelRestrictions.js';
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
 
+const MAGIC_EDEN_SOL_SLUGS_STATS_URL = 'https://api-mainnet.magiceden.dev/rpc/getCollectionEscrowStats/sol_slugs';
+
+function unwrapMagicEdenStats(magicEdenData: any): any {
+    return magicEdenData?.results ?? magicEdenData;
+}
+
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
     if (!msg.reference?.messageId) {
         return false;
@@ -240,7 +246,15 @@ async function handleFloorPriceChannel(client: Client, magicEdenData: any) {
         const myChannel = client.channels.cache.get(config.priceChannel) as GuildChannel;
 
         if (myChannel) {
-            const price = Number(magicEdenData.floorPrice) / LAMPORTS_PER_SOL;
+            const stats = unwrapMagicEdenStats(magicEdenData);
+            const floorPriceLamports = Number(stats?.floorPrice);
+
+            if (!Number.isFinite(floorPriceLamports)) {
+                console.log('Skipping floor price channel update: Magic Eden response is missing floorPrice.');
+                return;
+            }
+
+            const price = floorPriceLamports / LAMPORTS_PER_SOL;
             await myChannel.setName(`Floor Price: ◎${price}`);
         }
     } catch (error) {
@@ -252,7 +266,15 @@ async function handleTotalVolumeChannel(client: Client, magicEdenData: any) {
     try {
         const myChannel = client.channels.cache.get(config.volumeChannel) as GuildChannel;
         if (myChannel) {
-            const volume = numberWithCommas((Math.round(magicEdenData.volumeAll / LAMPORTS_PER_SOL)).toString());
+            const stats = unwrapMagicEdenStats(magicEdenData);
+            const volumeAllLamports = Number(stats?.volumeAll);
+
+            if (!Number.isFinite(volumeAllLamports)) {
+                console.log('Skipping total volume channel update: Magic Eden response is missing volumeAll.');
+                return;
+            }
+
+            const volume = numberWithCommas((Math.round(volumeAllLamports / LAMPORTS_PER_SOL)).toString());
             await myChannel.setName(`Total Volume: ◎${volume}`);
         }
     } catch (error) {
@@ -262,10 +284,10 @@ async function handleTotalVolumeChannel(client: Client, magicEdenData: any) {
 
 async function magicEdenStatUpdater(client: Client) {
     try {
-        const magicEdenData = await handleGetFromME("https://api-mainnet.magiceden.dev/v2/collections/sol_slugs/stats");
+        const magicEdenData = await handleGetFromME(MAGIC_EDEN_SOL_SLUGS_STATS_URL);
 
-        handleFloorPriceChannel(client, magicEdenData);
-        handleTotalVolumeChannel(client, magicEdenData);
+        await handleFloorPriceChannel(client, magicEdenData);
+        await handleTotalVolumeChannel(client, magicEdenData);
     } catch (err) {
         console.log(err);
     }
