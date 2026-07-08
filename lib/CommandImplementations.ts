@@ -840,24 +840,18 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-export async function handleTime(msg: Message, args: string) {
-    let offset: string | number = 0;
+function formatCurrentDiscordTimestamp(style: 't' | 'D'): string {
+    const timestamp = Math.floor(Date.now() / 1000);
 
-    if (args.length > 0) {
-        offset = args;
-    }
-
-    await msg.reply(`The current time is ${moment.utc().utcOffset(offset).format('HH:mm Z')}`);
+    return `<t:${timestamp}:${style}>`;
 }
 
-export async function handleDate(msg: Message, args: string) {
-    let offset: string | number = 0;
+export async function handleTime(msg: Message) {
+    await msg.reply(`The current time is ${formatCurrentDiscordTimestamp('t')}`);
+}
 
-    if (args.length > 0) {
-        offset = args;
-    }
-
-    await msg.reply(`The current date is ${moment.utc().utcOffset(offset).format('dddd, MMMM Do YYYY')}`);
+export async function handleDate(msg: Message) {
+    await msg.reply(`The current date is ${formatCurrentDiscordTimestamp('D')}`);
 }
 
 export async function handleCountdown(
