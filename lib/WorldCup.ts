@@ -12,6 +12,16 @@ const BRACKET_LOOKBACK_DAYS = 14;
 const MAX_MATCHES = 10;
 const ESPN_WORLD_CUP_SCOREBOARD =
     'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
+const STAGE_LABELS: { [slug: string]: string } = {
+    'group-stage': 'Group Stage',
+    'round-of-32': 'Round of 32',
+    'round-of-16': 'Round of 16',
+    quarterfinals: 'Quarterfinals',
+    semifinals: 'Semifinals',
+    '3rd-place-match': 'Third Place',
+    'third-place': 'Third Place',
+    final: 'Final',
+};
 const TEAM_FLAGS: { [abbreviation: string]: string } = {
     ALG: '🇩🇿',
     ARG: '🇦🇷',
@@ -216,6 +226,30 @@ function formatDateHeading(dateKey: string, todayKey: string): string {
     }
 
     return dateLabel;
+}
+
+function titleCaseSlug(slug: string): string {
+    return slug
+        .split('-')
+        .filter((part) => part !== '')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function getStageLabel(event: EspnEvent): string | undefined {
+    const stageSlug = event.season?.slug;
+
+    if (!stageSlug) {
+        return undefined;
+    }
+
+    return STAGE_LABELS[stageSlug] || titleCaseSlug(stageSlug);
+}
+
+function addStageLabel(event: EspnEvent, line: string): string {
+    const stageLabel = getStageLabel(event);
+
+    return stageLabel ? `${stageLabel} - ${line}` : line;
 }
 
 function getCompetition(event: EspnEvent): EspnCompetition | undefined {
@@ -447,25 +481,34 @@ function formatMatchLine(
     const hasValidDate = eventDate !== undefined && !Number.isNaN(eventDate.getTime());
 
     if (statusType?.completed || statusType?.state === 'post') {
-        return formatCompletedScore(event, placeholderResolver);
+        return addStageLabel(event, formatCompletedScore(event, placeholderResolver));
     }
 
     if (statusType?.state === 'in') {
-        return `${getLiveLabel(status)} - ${formatScore(event, placeholderResolver)}`;
+        return addStageLabel(
+            event,
+            `${getLiveLabel(status)} - ${formatScore(event, placeholderResolver)}`,
+        );
     }
 
     if (statusType?.state === 'pre') {
-        return `${hasValidDate ? getDiscordTimestamp(eventDate!) : 'TBD'} - ${formatMatchup(event, placeholderResolver)}`;
+        return addStageLabel(
+            event,
+            `${hasValidDate ? getDiscordTimestamp(eventDate!) : 'TBD'} - ${formatMatchup(event, placeholderResolver)}`,
+        );
     }
 
     if (statusType?.shortDetail && statusType.shortDetail !== 'Scheduled') {
         const display = statusType.completed
             ? formatCompletedScore(event, placeholderResolver)
             : formatMatchup(event, placeholderResolver);
-        return `${statusType.shortDetail} - ${display}`;
+        return addStageLabel(event, `${statusType.shortDetail} - ${display}`);
     }
 
-    return `${hasValidDate ? getDiscordTimestamp(eventDate!) : 'TBD'} - ${formatMatchup(event, placeholderResolver)}`;
+    return addStageLabel(
+        event,
+        `${hasValidDate ? getDiscordTimestamp(eventDate!) : 'TBD'} - ${formatMatchup(event, placeholderResolver)}`,
+    );
 }
 
 async function fetchWorldCupMatches(startDateKey: string, endDateKey: string): Promise<EspnEvent[]> {
