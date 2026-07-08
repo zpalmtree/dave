@@ -417,16 +417,10 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleTime,
-            description: 'Get the current time in a specific UTC offset',
+            description: 'Get the current time in your Discord locale',
             examples: [
                 {
                     value: 'time',
-                },
-                {
-                    value: 'time +01:00',
-                },
-                {
-                    value: 'time -06:00',
                 },
             ],
         },
@@ -439,16 +433,10 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleDate,
-            description: 'Get the current date in a specific UTC offset',
+            description: 'Get the current date in your Discord locale',
             examples: [
                 {
                     value: 'date',
-                },
-                {
-                    value: 'date +01:00',
-                },
-                {
-                    value: 'date -06:00',
                 },
             ],
         },
@@ -981,16 +969,10 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleTime,
-            description: 'Get the current time in a specific UTC offset',
+            description: 'Get the current time in your Discord locale',
             examples: [
                 {
                     value: 'time',
-                },
-                {
-                    value: 'time +01:00',
-                },
-                {
-                    value: 'time -06:00',
                 },
             ],
         },
@@ -1003,16 +985,10 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleDate,
-            description: 'Get the current date in a specific UTC offset',
+            description: 'Get the current date in your Discord locale',
             examples: [
                 {
                     value: 'date',
-                },
-                {
-                    value: 'date +01:00',
-                },
-                {
-                    value: 'date -06:00',
                 },
             ],
         },
