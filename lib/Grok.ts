@@ -9,8 +9,8 @@ import {
 import { formatProviderApiError } from './ApiErrors.js';
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
-const XAI_TEXT_MODEL = 'grok-4.3';
-const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
+const XAI_TEXT_MODEL = 'grok-4.5-latest';
+const XAI_IMAGE_MODEL = 'grok-imagine-image-quality-latest';
 const MAX_GROK_IMAGE_EDIT_SOURCES = 3;
 
 const DEFAULT_SETTINGS = {
@@ -312,7 +312,7 @@ function createSystemPrompt(prompt: string, username: string): string {
 }
 
 function getDefaultSystemPrompt(): string {
-    return `You are Grok 4.3 built by xAI.
+    return `You are Grok 4.5 built by xAI.
 Your X handle is @grok and your task is to respond to user's posts that tag you on X.
 
 ## Tools
