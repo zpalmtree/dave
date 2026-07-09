@@ -10,7 +10,7 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-opus-4-8',
+    model: 'claude-fable-5',
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
 };

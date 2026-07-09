@@ -1271,7 +1271,7 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleCImage,
-            description: 'Generate an image using GPT Image 1',
+            description: 'Generate an image using GPT Image',
         },
         relatedCommands: [
             'gimage',
@@ -1286,7 +1286,7 @@ export const Commands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleRemoveBg,
-            description: 'Remove the background from an image using GPT Image 1',
+            description: 'Remove the background from an image using GPT Image',
             examples: [
                 {
                     value: 'removebg',
