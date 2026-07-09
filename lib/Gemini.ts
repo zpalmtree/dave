@@ -77,7 +77,7 @@ function checkImageRateLimit(userId: string): { allowed: boolean; retryAfterMs: 
 // Initialize the Gemini API client
 const genAI = new GoogleGenAI({
     apiKey: config.geminiApiKey,
-    // v1alpha is needed for preview Gemini 3 image/text models
+    // v1alpha is needed for Gemini 3 image/text models.
     apiVersion: 'v1alpha',
 });
 
@@ -108,8 +108,8 @@ const ART_STYLES = [
     'biomechanical',
 ];
 
-const TEXT_MODEL = "gemini-3.1-pro-preview";
-const IMAGE_MODEL = "gemini-3-pro-image-preview";
+const TEXT_MODEL = "gemini-3.5-flash";
+const IMAGE_MODEL = "gemini-3-pro-image";
 
 const SAFETY_SETTINGS: SafetySetting[] = [
     {

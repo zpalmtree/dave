@@ -57,7 +57,7 @@ const DEFAULT_SETTINGS = {
     temperature: 0.7,
     maxTokens: 100_000,
     maxCompletionTokens: 100_000,
-    model: 'gpt-5.2',
+    model: 'gpt-5.5',
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
 };
@@ -1045,7 +1045,7 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
             const audioFile = await fetchUrlAsFile(url);
             const transcription = await openai.audio.transcriptions.create({
                 file: audioFile,
-                model: 'whisper-1',
+                model: 'gpt-4o-transcribe',
             });
 
             const rawTranscript = transcription.text.trim();
@@ -1320,7 +1320,7 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
 
         try {
             const requestPayload: ResponsesCreateParams = {
-                model: 'gpt-5',
+                model: 'gpt-5.5',
                 instructions: createSystemPrompt(
                     'You are an expert photo editor. Always respond by calling the image_generation tool to remove backgrounds from provided images. Keep the subject identical, output a transparent PNG cutout (alpha background), crop tightly to the subject to avoid empty space, and avoid adding new elements.',
                     username,
@@ -1487,7 +1487,6 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
 
 const TRANSPARENCY_KEYWORDS = [
     'transparent',
-    'png',
     'alpha',
     'isolate',
     'isolated',
@@ -1497,6 +1496,10 @@ const TRANSPARENCY_KEYWORDS = [
     'remove background',
     'without background',
 ];
+
+function wantsPngOutput(prompt: string): boolean {
+    return /\bpng\b/i.test(prompt);
+}
 
 function wantsTransparentOutput(prompt: string): boolean {
     const lower = prompt.toLowerCase();
@@ -1701,26 +1704,29 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
         };
 
         const buildImageGenerationTool = (
-            usePng: boolean,
-            allowTransparentBackground: boolean,
-        ): CImageGenerationTool => (
-            usePng
-                ? {
+            outputFormat: 'png' | 'jpeg',
+            transparentBackground: boolean,
+        ): CImageGenerationTool => {
+            if (transparentBackground) {
+                return {
                     type: 'image_generation',
                     model: 'gpt-image-1',
                     moderation: 'low',
                     output_format: 'png',
-                    ...(allowTransparentBackground ? { background: 'transparent' as const } : {}),
+                    background: 'transparent',
                     partial_images: MAX_STREAM_PARTIALS,
-                }
-                : {
-                    type: 'image_generation',
-                    model: 'gpt-image-2',
-                    moderation: 'low',
-                    output_format: 'jpeg',
-                    output_compression: 50,
-                }
-        );
+                };
+            }
+
+            return {
+                type: 'image_generation',
+                model: 'gpt-image-2',
+                moderation: 'low',
+                output_format: outputFormat,
+                ...(outputFormat === 'jpeg' ? { output_compression: 50 } : {}),
+                partial_images: MAX_STREAM_PARTIALS,
+            };
+        };
 
         const runImageGeneration = async (
             imageGenerationTool: CImageGenerationTool,
@@ -1866,18 +1872,19 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
         };
 
         try {
-            const usePng = wantsTransparentOutput(prompt);
+            const transparentBackground = wantsTransparentOutput(prompt);
+            const outputFormat = wantsPngOutput(prompt) || transparentBackground ? 'png' : 'jpeg';
             const result = await runImageGeneration(
-                buildImageGenerationTool(usePng, true),
+                buildImageGenerationTool(outputFormat, transparentBackground),
             );
 
             if (result.completed) {
                 return;
             }
 
-            if (usePng && isUnsupportedTransparentBackgroundError(result.errorText)) {
+            if (transparentBackground && isUnsupportedTransparentBackgroundError(result.errorText)) {
                 const fallbackResult = await runImageGeneration(
-                    buildImageGenerationTool(usePng, false),
+                    buildImageGenerationTool(outputFormat, false),
                 );
 
                 if (fallbackResult.completed) {
