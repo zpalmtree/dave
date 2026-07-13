@@ -1,7 +1,7 @@
 export interface UserChannelRestriction {
     userId: string;
-    allowedChannels: string[];
-    allowedGuilds?: string[];
+    allowedChannels: readonly string[];
+    allowedGuilds?: readonly string[];
 }
 
 export function isAllowedByUserChannelRestriction(
@@ -13,22 +13,28 @@ export function isAllowedByUserChannelRestriction(
         || (guildId !== null && restriction.allowedGuilds?.includes(guildId) === true);
 }
 
-export const userChannelRestrictions: UserChannelRestriction[] = [
-    {
-        userId: '1307359331724824744',
-        allowedChannels: ['1234575197114204202', '1073613902706909214'],
-    },
-    {
-        userId: '673794444579045386',
-        allowedChannels: ['1234575197114204202', '1073613902706909214'],
-        allowedGuilds: ['1516420657984831668'],
-    },
-    {
-        userId: '1232469668548055061',
-        allowedChannels: ['1234575197114204202', '1073613902706909214'],
-    },
-    {
-        userId: '1259332105188671509',
-        allowedChannels: ['1234575197114204202', '1073613902706909214'],
-    },
-];
+// These IDs are alternate accounts belonging to the same person. Keep their
+// access policy centralized so every account receives identical handling.
+export const restrictedUserAccountIds = [
+    '1307359331724824744',
+    '673794444579045386',
+    '1232469668548055061',
+    '1259332105188671509',
+] as const;
+
+const restrictedUserAllowedChannels = [
+    '1234575197114204202',
+    '1073613902706909214',
+] as const;
+
+const restrictedUserAllowedGuilds = [
+    '1516420657984831668',
+] as const;
+
+export const userChannelRestrictions: UserChannelRestriction[] = restrictedUserAccountIds.map(
+    (userId) => ({
+        userId,
+        allowedChannels: restrictedUserAllowedChannels,
+        allowedGuilds: restrictedUserAllowedGuilds,
+    })
+);
