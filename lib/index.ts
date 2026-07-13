@@ -48,7 +48,10 @@ import { cacheMessageForSummarization } from './Summarize.js';
 import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 import { convertPumpFunLinks } from './ConvertPumpFunLinks.js';
 import { handleAutoTranscribe } from './OpenAI.js';
-import { userChannelRestrictions } from './UserChannelRestrictions.js';
+import {
+    isAllowedByUserChannelRestriction,
+    userChannelRestrictions,
+} from './UserChannelRestrictions.js';
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
@@ -80,7 +83,11 @@ async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> 
                 ({ userId }) => userId === referencedMessage.author.id
             );
 
-            if (userChannelRestriction?.allowedChannels.includes(msg.channel.id)) {
+            if (userChannelRestriction && isAllowedByUserChannelRestriction(
+                userChannelRestriction,
+                msg.channel.id,
+                msg.guild?.id ?? null
+            )) {
                 continue;
             }
 
@@ -112,7 +119,11 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         ({ userId }) => userId === msg.author.id
     );
 
-    if (userChannelRestriction && !userChannelRestriction.allowedChannels.includes(msg.channel.id)) {
+    if (userChannelRestriction && !isAllowedByUserChannelRestriction(
+        userChannelRestriction,
+        msg.channel.id,
+        msg.guild?.id ?? null
+    )) {
         return;
     }
 
