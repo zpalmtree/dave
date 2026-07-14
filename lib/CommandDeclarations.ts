@@ -141,63 +141,8 @@ import { handleWorldCup } from './WorldCup.js';
 
 import { config } from './Config.js';
 
-export const Commands: Command[] = [
-    {
-        aliases: ['gen3', 'gen3count', 'gen3supply'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGen3Count,
-            description: 'Displays the current Generation 3 slug supply',
-        }
-    },
-    {
-        aliases: ['gen3legacy'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGen3CountLegacy,
-            description: 'Displays the historical Generation 3 eligiblity',
-        }
-    },
-    {
-        aliases: ['gen4', 'gen4count', 'gen4supply'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGen4Count,
-            description: 'Displays the current Generation 4 slug supply',
-        }
-    },
-    {
-        aliases: ['gen4leaderboard', 'leaderboard'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleGen4Leaderboard,
-            description: 'Display users getting the most gen4 slugs',
-        },
-    },
-    {
-        aliases: ['gen5', 'gen5count', 'gen5supply'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGen5Count,
-            description: 'Displays the current Generation 5 slug supply',
-        }
-    },
-    {
-        aliases: ['gen5leaderboard', 'leaderboard'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleGen5Leaderboard,
-            description: 'Display users getting the most gen5 slugs',
-        },
-    },
-    {
-        aliases: ['burnt', 'burned'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleBurnt,
-            description: 'Displays the current number of slugs burnt by the incinerator',
-        }
-    },
+/* Keep shared command order synchronized across deployment tracks. */
+const sharedCommands: Command[] = [
     {
         aliases: ['roll', 'reroll'],
         primaryCommand: {
@@ -221,6 +166,53 @@ export const Commands: Command[] = [
         }
     },
     {
+        aliases: ['quote'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleQuote,
+            description: 'Gets a random quote',
+            needDb: true,
+        },
+        relatedCommands: [
+            'addquote',
+            'quotes',
+        ],
+    },
+    {
+        aliases: ['addquote', 'suggest', 'suggestquote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleSuggest,
+            description: 'Suggest a new quote',
+            needDb: true,
+            examples: [
+                {
+                    value: 'suggest "im a prancing lala boy" - you',
+                },
+            ],
+        },
+        relatedCommands: [
+            'quote',
+            'quotes',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['quotes'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleQuotes,
+            description: 'View all quotes',
+            needDb: true,
+        },
+        relatedCommands: [
+            'addquote',
+            'quote',
+        ],
+    },
+    {
         aliases: ['fortune'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
@@ -235,6 +227,148 @@ export const Commands: Command[] = [
                 },
             ],
         },
+    },
+    {
+        aliases: ['math'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMath,
+            description: 'Perform math or conversions',
+            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
+            examples: [
+                {
+                    value: 'math 123 * 456',
+                },
+                {
+                    value: 'math 100 fahrenheit to celsius',
+                }
+            ],
+        },
+    },
+    {
+        aliases: ['groundhog', 'woodchuck', 'hog'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGroundhog,
+            description: 'Make the groundhog say something',
+            examples: [
+                {
+                    value: 'groundhog Slorg',
+                },
+                {
+                    value: 'groundhog @Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['dance', 'groove'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGroove,
+            description: 'Dance for me',
+            examples: [
+                {
+                    value: 'groove Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['kek', 'lmao'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKek,
+            description: 'Kek slug say thing',
+            examples: [
+                {
+                    value: 'kek Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['nut', 'nutnut'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleNut,
+            description: 'Nut slug say thing',
+            examples: [
+                {
+                    value: 'nut Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['money', 'cash'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMoney,
+            description: 'money man say thing',
+            examples: [
+                {
+                    value: 'money Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['viper'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleViper,
+            description: 'viper say thing',
+            examples: [
+                {
+                    value: 'viper Slorg',
+                },
+            ],
+        },
+    },
+    {
+        aliases: ['doggo', 'dog', 'doggy'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleDoggo,
+            description: 'Get a random dog picture',
+            examples: [
+                {
+                    value: 'doggo',
+                },
+                {
+                    value: 'doggo corgi',
+                },
+                {
+                    value: 'doggo golden retriever',
+                },
+            ],
+        },
+        relatedCommands: [
+            'kitty',
+        ],
+    },
+    {
+        aliases: ['kitty', 'cat'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKitty,
+            description: 'Get a random cat picture',
+            examples: [
+                {
+                    value: 'kitty',
+                },
+                {
+                    value: 'kitty persian',
+                },
+                {
+                    value: 'kitty european burmese',
+                },
+            ],
+        },
+        relatedCommands: [
+            'doggo',
+        ],
     },
     {
         aliases: ['price'],
@@ -563,53 +697,6 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['quote'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleQuote,
-            description: 'Gets a random quote',
-            needDb: true,
-        },
-        relatedCommands: [
-            'addquote',
-            'quotes',
-        ],
-    },
-    {
-        aliases: ['addquote', 'suggest', 'suggestquote'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleSuggest,
-            description: 'Suggest a new quote',
-            needDb: true,
-            examples: [
-                {
-                    value: 'suggest "im a prancing lala boy" - you',
-                },
-            ],
-        },
-        relatedCommands: [
-            'quote',
-            'quotes',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['quotes'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleQuotes,
-            description: 'View all quotes',
-            needDb: true,
-        },
-        relatedCommands: [
-            'addquote',
-            'quote',
-        ],
-    },
-    {
         aliases: ['poll', 'vote'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -643,252 +730,6 @@ export const Commands: Command[] = [
         relatedCommands: [
             'poll',
         ],
-    },
-    {
-        aliases: ['math'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMath,
-            description: 'Perform math or conversions',
-            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
-            examples: [
-                {
-                    value: 'math 123 * 456',
-                },
-                {
-                    value: 'math 100 fahrenheit to celsius',
-                }
-            ],
-        },
-    },
-    {
-        aliases: ['groundhog', 'woodchuck', 'hog'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGroundhog,
-            description: 'Make the groundhog say something',
-            examples: [
-                {
-                    value: 'groundhog Slorg',
-                },
-                {
-                    value: 'groundhog @Slorg',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['dance', 'groove'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGroove,
-            description: 'Dance for me',
-            examples: [
-                {
-                    value: 'groove Slorg',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['kek', 'lmao'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleKek,
-            description: 'Kek slug say thing',
-            examples: [
-                {
-                    value: 'kek Slorg',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['nut', 'nutnut'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleNut,
-            description: 'Nut slug say thing',
-            examples: [
-                {
-                    value: 'nut Slorg',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['money', 'cash'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMoney,
-            description: 'money man say thing',
-            examples: [
-                {
-                    value: 'money Slorg',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['viper'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleViper,
-            description: 'viper say thing',
-            examples: [
-                {
-                    value: 'viper Slorg',
-                },
-            ],
-        },
-    },
-    {
-        aliases: ['cock', 'downbad', 'stepbro'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleCock,
-            description: 'get a compliment',
-        },
-    },
-    {
-        aliases: ['burn'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleBurn,
-            description: `Explain why you might burn a slug`,
-        },
-    },
-    {
-        aliases: ['utility', 'whybuy'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleUtility,
-            description: `Explain why you might buy a slug`,
-        },
-    },
-    {
-        aliases: ['doggo', 'dog', 'doggy'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleDoggo,
-            description: 'Get a random dog picture',
-            examples: [
-                {
-                    value: 'doggo',
-                },
-                {
-                    value: 'doggo corgi',
-                },
-                {
-                    value: 'doggo golden retriever',
-                },
-            ],
-        },
-        relatedCommands: [
-            'kitty',
-        ],
-    },
-    {
-        aliases: ['kitty', 'cat'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleKitty,
-            description: 'Get a random cat picture',
-            examples: [
-                {
-                    value: 'kitty',
-                },
-                {
-                    value: 'kitty persian',
-                },
-                {
-                    value: 'kitty european burmese',
-                },
-            ],
-        },
-        relatedCommands: [
-            'doggo',
-        ],
-    },
-    {
-        aliases: ['3dslugs', '3d'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handle3d,
-            description: 'Get info on 3d slugs',
-        },
-    },
-    {
-        aliases: ['gen2', 'generation2'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleGen2,
-            description: 'Get info on gen 2',
-        },
-    },
-    {
-        aliases: ['buy', 'market'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleBuy,
-            description: 'Get a link to markets',
-        },
-    },
-    {
-        aliases: ['verify'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleVerify,
-            description: 'Get a verify link',
-        },
-    },
-    {
-        aliases: ['incinerator'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleIncinerator,
-            description: 'Get incinerator link',
-        },
-    },
-    {
-        aliases: ['trending'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleTrending,
-            description: 'Get info on using the trending bot',
-        },
-    },
-    {
-        aliases: ['sign', 'tapthesign', 'tapsign', 'chill'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSign,
-            description: 'Tap the sign',
-        },
-    },
-    {
-        aliases: ['ai', 'gpt3', 'prompt'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDavinci,
-            description: 'Provide a prompt to the funny AI and get a completion',
-        },
-        relatedCommands: [
-            'chatgpt',
-            'glados',
-            'drunk',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['clowns', 'sendintheclowns'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: (msg: Message) => msg.reply('https://www.youtube.com/watch?v=ZG15oP7q4fI'),
-            description: 'Send in the clowns',
-        },
     },
     {
         aliases: ['stats'],
@@ -929,20 +770,16 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['frozen', 'freeze'],
+        aliases: ['timers'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
-            implementation: handleFrozen,
-            description: 'Get info on frozen tokens',
+            implementation: handleTimers,
+            description: 'View the status of running timers',
+            needDb: true,
         },
-    },
-    {
-        aliases: ['incin', 'incinFAQ', 'tokens'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleIncineratorFAQ,
-            description: 'Frequently asked questions about the incinerator',
-        },
+        relatedCommands: [
+            'timer',
+        ],
     },
     {
         aliases: ['ready'],
@@ -975,113 +812,6 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['countdown'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleCountdown.bind(undefined, "Let's jam!"),
-            description: 'Perform a countdown',
-            examples: [
-                {
-                    value: 'countdown',
-                },
-                {
-                    value: 'countdown 5',
-                },
-            ],
-        },
-        relatedCommands: [
-            'ready',
-            'pause',
-        ],
-    },
-    {
-        aliases: ['pause'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleCountdown.bind(undefined, 'pause'),
-            description: 'Perform a pause',
-            examples: [
-                {
-                    value: 'pause',
-                },
-                {
-                    value: 'pause 5',
-                },
-            ],
-        },
-        relatedCommands: [
-            'countdown',
-            'ready',
-        ],
-    },
-    {
-        aliases: ['timers'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleTimers,
-            description: 'View the status of running timers',
-            needDb: true,
-        },
-        relatedCommands: [
-            'timer',
-        ],
-    },
-    {
-        aliases: ['timer', 'reminder'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleTimer,
-            description: 'Set a timer to remind you of something',
-            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `mm` (month), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
-            needDb: true,
-            examples: [
-                {
-                    name: 'Set a timer with a description',
-                    value: 'timer 5m coffee',
-                },
-                {
-                    name: 'Set a timer',
-                    value: 'timer 2h5m',
-                },
-                {
-                    name: 'Set a super long timer',
-                    value: 'timer 1y2w3d4h5m6s',
-                },
-            ],
-        },
-        subCommands: [
-            {
-                argsFormat: Args.DontNeed,
-                implementation: handleTimers,
-                description: 'View running timers',
-                aliases: ['list'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'View running timers',
-                        value: 'timer list',
-                    },
-                ],
-            },
-            {
-                argsFormat: Args.Split,
-                implementation: deleteTimer,
-                description: 'Delete a timer by ID',
-                aliases: ['delete'],
-                needDb: true,
-                examples: [
-                    {
-                        name: 'Delete a timer by ID',
-                        value: 'timer delete 1',
-                    },
-                ],
-            },
-        ],
-        relatedCommands: [
-            'timers',
-        ],
-    },
-    {
         aliases: ['weather', 'forecast'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -1110,19 +840,27 @@ export const Commands: Command[] = [
         },
     },
     {
+        aliases: ['ai', 'gpt3', 'prompt'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDavinci,
+            description: 'Provide a prompt to the funny AI and get a completion',
+        },
+        relatedCommands: [
+            'chatgpt',
+            'glados',
+            'drunk',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
         aliases: ['over', 'itsover'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleItsOver,
             description: 'Post it\'s over meme',
-        },
-    },
-    {
-        aliases: ['slime'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSlime,
-            description: 'Get a link to slime',
         },
     },
     {
@@ -1138,54 +876,6 @@ export const Commands: Command[] = [
                 },
             ],
         },
-    },
-    {
-        aliases: ['info', 'gitbook'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleGitbook,
-            description: 'Get a link to the slugs gitbook',
-        },
-    },
-    {
-        aliases: ['howtoai', 'aiinfo', 'aitut'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleAIInfo,
-            description: 'Get info on using the AI image bot',
-        },
-    },
-    {
-        aliases: ['time'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleTime,
-            description: 'Get the current time in your Discord locale',
-            examples: [
-                {
-                    value: 'time',
-                },
-            ],
-        },
-        relatedCommands: [
-            'date',
-        ],
-    },
-    {
-        aliases: ['date'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDate,
-            description: 'Get the current date in your Discord locale',
-            examples: [
-                {
-                    value: 'date',
-                },
-            ],
-        },
-        relatedCommands: [
-            'time',
-        ],
     },
     {
         aliases: ['chatgpt', 'chatgtp', 'chat-gpt'],
@@ -1375,46 +1065,11 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['qi'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleQi,
-            description: 'Deranged torus bot',
-        },
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
         aliases: ['milton'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleMilton,
             description: 'Track milton',
-        },
-    },
-    {
-        aliases: ['floor'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSlugFloor,
-            description: 'Get sol slugs floor price',
-        },
-    },
-    {
-        aliases: ['slugpride'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSlugPride,
-            description: 'Get slug pride video',
-        },
-    },
-    {
-        aliases: ['supply'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleSupply,
-            description: 'Get current sol slugs supply',
         },
     },
     {
@@ -1524,6 +1179,361 @@ export const Commands: Command[] = [
             slugUserGate,
         ],
     },
+];
+
+/* Track-specific commands and legacy duplicate declarations. */
+const trackCommands: Command[] = [
+    {
+        aliases: ['gen3', 'gen3count', 'gen3supply'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen3Count,
+            description: 'Displays the current Generation 3 slug supply',
+        }
+    },
+    {
+        aliases: ['gen3legacy'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen3CountLegacy,
+            description: 'Displays the historical Generation 3 eligiblity',
+        }
+    },
+    {
+        aliases: ['gen4', 'gen4count', 'gen4supply'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen4Count,
+            description: 'Displays the current Generation 4 slug supply',
+        }
+    },
+    {
+        aliases: ['gen4leaderboard', 'leaderboard'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen4Leaderboard,
+            description: 'Display users getting the most gen4 slugs',
+        },
+    },
+    {
+        aliases: ['gen5', 'gen5count', 'gen5supply'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleGen5Count,
+            description: 'Displays the current Generation 5 slug supply',
+        }
+    },
+    {
+        aliases: ['gen5leaderboard', 'leaderboard'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen5Leaderboard,
+            description: 'Display users getting the most gen5 slugs',
+        },
+    },
+    {
+        aliases: ['burnt', 'burned'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleBurnt,
+            description: 'Displays the current number of slugs burnt by the incinerator',
+        }
+    },
+    {
+        aliases: ['cock', 'downbad', 'stepbro'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleCock,
+            description: 'get a compliment',
+        },
+    },
+    {
+        aliases: ['burn'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleBurn,
+            description: `Explain why you might burn a slug`,
+        },
+    },
+    {
+        aliases: ['utility', 'whybuy'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleUtility,
+            description: `Explain why you might buy a slug`,
+        },
+    },
+    {
+        aliases: ['3dslugs', '3d'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handle3d,
+            description: 'Get info on 3d slugs',
+        },
+    },
+    {
+        aliases: ['gen2', 'generation2'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGen2,
+            description: 'Get info on gen 2',
+        },
+    },
+    {
+        aliases: ['buy', 'market'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleBuy,
+            description: 'Get a link to markets',
+        },
+    },
+    {
+        aliases: ['verify'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleVerify,
+            description: 'Get a verify link',
+        },
+    },
+    {
+        aliases: ['incinerator'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleIncinerator,
+            description: 'Get incinerator link',
+        },
+    },
+    {
+        aliases: ['trending'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleTrending,
+            description: 'Get info on using the trending bot',
+        },
+    },
+    {
+        aliases: ['sign', 'tapthesign', 'tapsign', 'chill'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSign,
+            description: 'Tap the sign',
+        },
+    },
+    {
+        aliases: ['clowns', 'sendintheclowns'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: (msg: Message) => msg.reply('https://www.youtube.com/watch?v=ZG15oP7q4fI'),
+            description: 'Send in the clowns',
+        },
+    },
+    {
+        aliases: ['frozen', 'freeze'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleFrozen,
+            description: 'Get info on frozen tokens',
+        },
+    },
+    {
+        aliases: ['incin', 'incinFAQ', 'tokens'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleIncineratorFAQ,
+            description: 'Frequently asked questions about the incinerator',
+        },
+    },
+    {
+        aliases: ['countdown'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCountdown.bind(undefined, "Let's jam!"),
+            description: 'Perform a countdown',
+            examples: [
+                {
+                    value: 'countdown',
+                },
+                {
+                    value: 'countdown 5',
+                },
+            ],
+        },
+        relatedCommands: [
+            'ready',
+            'pause',
+        ],
+    },
+    {
+        aliases: ['pause'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleCountdown.bind(undefined, 'pause'),
+            description: 'Perform a pause',
+            examples: [
+                {
+                    value: 'pause',
+                },
+                {
+                    value: 'pause 5',
+                },
+            ],
+        },
+        relatedCommands: [
+            'countdown',
+            'ready',
+        ],
+    },
+    {
+        aliases: ['timer', 'reminder'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTimer,
+            description: 'Set a timer to remind you of something',
+            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `mm` (month), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
+            needDb: true,
+            examples: [
+                {
+                    name: 'Set a timer with a description',
+                    value: 'timer 5m coffee',
+                },
+                {
+                    name: 'Set a timer',
+                    value: 'timer 2h5m',
+                },
+                {
+                    name: 'Set a super long timer',
+                    value: 'timer 1y2w3d4h5m6s',
+                },
+            ],
+        },
+        subCommands: [
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleTimers,
+                description: 'View running timers',
+                aliases: ['list'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'View running timers',
+                        value: 'timer list',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.Split,
+                implementation: deleteTimer,
+                description: 'Delete a timer by ID',
+                aliases: ['delete'],
+                needDb: true,
+                examples: [
+                    {
+                        name: 'Delete a timer by ID',
+                        value: 'timer delete 1',
+                    },
+                ],
+            },
+        ],
+        relatedCommands: [
+            'timers',
+        ],
+    },
+    {
+        aliases: ['slime'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSlime,
+            description: 'Get a link to slime',
+        },
+    },
+    {
+        aliases: ['info', 'gitbook'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGitbook,
+            description: 'Get a link to the slugs gitbook',
+        },
+    },
+    {
+        aliases: ['howtoai', 'aiinfo', 'aitut'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleAIInfo,
+            description: 'Get info on using the AI image bot',
+        },
+    },
+    {
+        aliases: ['time'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTime,
+            description: 'Get the current time in your Discord locale',
+            examples: [
+                {
+                    value: 'time',
+                },
+            ],
+        },
+        relatedCommands: [
+            'date',
+        ],
+    },
+    {
+        aliases: ['date'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDate,
+            description: 'Get the current date in your Discord locale',
+            examples: [
+                {
+                    value: 'date',
+                },
+            ],
+        },
+        relatedCommands: [
+            'time',
+        ],
+    },
+    {
+        aliases: ['qi'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleQi,
+            description: 'Deranged torus bot',
+        },
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
+        aliases: ['floor'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSlugFloor,
+            description: 'Get sol slugs floor price',
+        },
+    },
+    {
+        aliases: ['slugpride'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSlugPride,
+            description: 'Get slug pride video',
+        },
+    },
+    {
+        aliases: ['supply'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleSupply,
+            description: 'Get current sol slugs supply',
+        },
+    },
+];
+
+export const Commands: Command[] = [
+    ...sharedCommands,
+    ...trackCommands,
 ];
 
 export function handleHelp(msg: Message, args: string): void {
