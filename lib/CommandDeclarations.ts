@@ -526,6 +526,26 @@ export const Commands: Command[] = [
         },
     },
     {
+        aliases: ['image', 'img'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleImage,
+            description: 'Search images with Google Custom Search',
+            examples: [
+                {
+                    value: 'image sunset',
+                },
+            ],
+        },
+        relatedCommands: [
+            'query',
+            'youtube',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+    {
         aliases: ['youtube', 'video', 'yt'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -923,26 +943,6 @@ export const Commands: Command[] = [
             implementation: handleIncineratorFAQ,
             description: 'Frequently asked questions about the incinerator',
         },
-    },
-    {
-        aliases: ['image', 'img'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleImage,
-            description: 'Search images with Google Custom Search',
-            examples: [
-                {
-                    value: 'image sunset',
-                },
-            ],
-        },
-        relatedCommands: [
-            'query',
-            'youtube',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
     },
     {
         aliases: ['ready'],
