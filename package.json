@@ -45,5 +45,6 @@
   },
   "resolutions": {
     "canvas": "npm:@napi-rs/canvas@^0.1.82"
-  }
+  },
+  "packageManager": "yarn@1.22.22"
 }
