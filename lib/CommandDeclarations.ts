@@ -664,7 +664,7 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['youtube', 'video'],
+        aliases: ['youtube', 'video', 'yt'],
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleYoutube,
