@@ -1454,13 +1454,29 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
 }
 
 export async function handleYoutubeApi(msg: Message, args: string): Promise<undefined | any[]> {
-    if (args.trim() === '') {
+    let query = args.trim();
+    const replyMessageId = msg.reference?.messageId;
+
+    if (replyMessageId) {
+        try {
+            const repliedMessage = await msg.channel.messages.fetch(replyMessageId);
+            const repliedText = repliedMessage.content.trim();
+
+            if (repliedText) {
+                query = query ? `${repliedText}\n${query}` : repliedText;
+            }
+        } catch (err) {
+            console.error(`Failed to fetch replied message for YouTube context:`, err);
+        }
+    }
+
+    if (query === '') {
         await msg.reply('No query given');
         return;
     }
 
     const params = {
-        q: args,
+        q: query,
         part: 'snippet',
         key: config.youtubeApiKey,
         maxResults: 50,
