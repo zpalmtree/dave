@@ -115,7 +115,8 @@ import { handleWorldCup } from './WorldCup.js';
 
 import { config } from './Config.js';
 
-export const Commands: Command[] = [
+/* Keep shared command order synchronized across deployment tracks. */
+const sharedCommands: Command[] = [
     {
         aliases: ['roll', 'reroll'],
         primaryCommand: {
@@ -299,7 +300,6 @@ export const Commands: Command[] = [
             ],
         },
     },
-
     {
         aliases: ['doggo', 'dog', 'doggy'],
         primaryCommand: {
@@ -635,15 +635,6 @@ export const Commands: Command[] = [
         },
     },
     {
-        aliases: ['nikocado', 'orlin', 'niko', 'avocado'],
-        hidden: true,
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleNikocado,
-            description: 'Get a random nikocado',
-        },
-    },
-    {
         aliases: ['image', 'img'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -716,67 +707,6 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['math'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMath,
-            description: 'Perform math or conversions',
-            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
-            examples: [
-                {
-                    value: 'math 123 * 456',
-                },
-                {
-                    value: 'math 100 fahrenheit to celsius',
-                }
-            ],
-        },
-    },
-    {
-        aliases: ['doggo', 'dog', 'doggy'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleDoggo,
-            description: 'Get a random dog picture',
-            examples: [
-                {
-                    value: 'doggo',
-                },
-                {
-                    value: 'doggo corgi',
-                },
-                {
-                    value: 'doggo golden retriever',
-                },
-            ],
-        },
-        relatedCommands: [
-            'kitty',
-        ],
-    },
-    {
-        aliases: ['kitty', 'cat'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleKitty,
-            description: 'Get a random cat picture',
-            examples: [
-                {
-                    value: 'kitty',
-                },
-                {
-                    value: 'kitty persian',
-                },
-                {
-                    value: 'kitty european burmese',
-                },
-            ],
-        },
-        relatedCommands: [
-            'doggo',
-        ],
-    },
-    {
         aliases: ['stats'],
         primaryCommand: {
             argsFormat: Args.Split,
@@ -813,21 +743,6 @@ export const Commands: Command[] = [
                 ],
             },
         ],
-    },
-    {
-        aliases: ['stock', 'stonk'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleStock,
-            description: 'Check a stock price',
-            examples: [
-                {
-                    name: 'Check Stock Price',
-                    value: 'stock IBM'
-                }
-            ],
-            needDb: false,
-        }
     },
     {
         aliases: ['timers'],
@@ -869,41 +784,6 @@ export const Commands: Command[] = [
         relatedCommands: [
             'countdown',
             'pause',
-        ],
-    },
-    {
-        aliases: ['poll', 'vote'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handlePoll,
-            description: 'Propose a yes/no query and let users vote',
-            examples: [
-                {
-                    value: 'poll Do you like peanut butter?',
-                },
-            ],
-        },
-        relatedCommands: [
-            'multipoll',
-        ],
-    },
-    {
-        aliases: ['multipoll', 'multivote'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMultiPoll,
-            description: 'Create a query with multiple options and let users vote',
-            helpDescription: 'Create a query with multiple options and let users vote. ' +
-                'Multipoll should start with the query, then be followed by a forward slash (`/`). ' +
-                'Then, enter the poll options, each one again separated by a forward slash.',
-            examples: [
-                {
-                    value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
-                },
-            ],
-        },
-        relatedCommands: [
-            'poll',
         ],
     },
     {
@@ -963,38 +843,6 @@ export const Commands: Command[] = [
                 },
             ],
         },
-    },
-    {
-        aliases: ['time'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleTime,
-            description: 'Get the current time in your Discord locale',
-            examples: [
-                {
-                    value: 'time',
-                },
-            ],
-        },
-        relatedCommands: [
-            'date',
-        ],
-    },
-    {
-        aliases: ['date'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDate,
-            description: 'Get the current date in your Discord locale',
-            examples: [
-                {
-                    value: 'date',
-                },
-            ],
-        },
-        relatedCommands: [
-            'time',
-        ],
     },
     {
         aliases: ['chatgpt', 'chatgtp'],
@@ -1152,23 +1000,6 @@ export const Commands: Command[] = [
         ],
     },
     {
-        aliases: ['buggles'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleBuggles,
-            description: 'Generate autism quote',
-        },
-        relatedCommands: [
-            'ai',
-            'chatgpt',
-            'glados',
-            'drunk',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
         aliases: ['claude'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -1315,6 +1146,184 @@ export const Commands: Command[] = [
             slugUserGate,
         ],
     },
+];
+
+/* Track-specific commands and legacy duplicate declarations. */
+const trackCommands: Command[] = [
+    {
+        aliases: ['nikocado', 'orlin', 'niko', 'avocado'],
+        hidden: true,
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleNikocado,
+            description: 'Get a random nikocado',
+        },
+    },
+    {
+        aliases: ['math'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMath,
+            description: 'Perform math or conversions',
+            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
+            examples: [
+                {
+                    value: 'math 123 * 456',
+                },
+                {
+                    value: 'math 100 fahrenheit to celsius',
+                }
+            ],
+        },
+    },
+    {
+        aliases: ['doggo', 'dog', 'doggy'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleDoggo,
+            description: 'Get a random dog picture',
+            examples: [
+                {
+                    value: 'doggo',
+                },
+                {
+                    value: 'doggo corgi',
+                },
+                {
+                    value: 'doggo golden retriever',
+                },
+            ],
+        },
+        relatedCommands: [
+            'kitty',
+        ],
+    },
+    {
+        aliases: ['kitty', 'cat'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleKitty,
+            description: 'Get a random cat picture',
+            examples: [
+                {
+                    value: 'kitty',
+                },
+                {
+                    value: 'kitty persian',
+                },
+                {
+                    value: 'kitty european burmese',
+                },
+            ],
+        },
+        relatedCommands: [
+            'doggo',
+        ],
+    },
+    {
+        aliases: ['stock', 'stonk'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleStock,
+            description: 'Check a stock price',
+            examples: [
+                {
+                    name: 'Check Stock Price',
+                    value: 'stock IBM'
+                }
+            ],
+            needDb: false,
+        }
+    },
+    {
+        aliases: ['poll', 'vote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handlePoll,
+            description: 'Propose a yes/no query and let users vote',
+            examples: [
+                {
+                    value: 'poll Do you like peanut butter?',
+                },
+            ],
+        },
+        relatedCommands: [
+            'multipoll',
+        ],
+    },
+    {
+        aliases: ['multipoll', 'multivote'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMultiPoll,
+            description: 'Create a query with multiple options and let users vote',
+            helpDescription: 'Create a query with multiple options and let users vote. ' +
+                'Multipoll should start with the query, then be followed by a forward slash (`/`). ' +
+                'Then, enter the poll options, each one again separated by a forward slash.',
+            examples: [
+                {
+                    value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
+                },
+            ],
+        },
+        relatedCommands: [
+            'poll',
+        ],
+    },
+    {
+        aliases: ['time'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleTime,
+            description: 'Get the current time in your Discord locale',
+            examples: [
+                {
+                    value: 'time',
+                },
+            ],
+        },
+        relatedCommands: [
+            'date',
+        ],
+    },
+    {
+        aliases: ['date'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleDate,
+            description: 'Get the current date in your Discord locale',
+            examples: [
+                {
+                    value: 'date',
+                },
+            ],
+        },
+        relatedCommands: [
+            'time',
+        ],
+    },
+    {
+        aliases: ['buggles'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleBuggles,
+            description: 'Generate autism quote',
+        },
+        relatedCommands: [
+            'ai',
+            'chatgpt',
+            'glados',
+            'drunk',
+        ],
+        commandGates: [
+            slugUserGate,
+        ],
+    },
+];
+
+export const Commands: Command[] = [
+    ...sharedCommands,
+    ...trackCommands,
 ];
 
 export function handleHelp(msg: Message, args: string): void {
