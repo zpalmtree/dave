@@ -1,4 +1,4 @@
-import { Message, AttachmentBuilder } from 'discord.js';
+import { Message, AttachmentBuilder, MessageFlags } from 'discord.js';
 import { config } from './Config.js';
 import {
     truncateResponse,
@@ -522,7 +522,10 @@ export async function handleGrok(msg: Message, args: string): Promise<void> {
     });
 
     if (response.result) {
-        const reply = await msg.reply(truncateResponse(response.result));
+        const reply = await msg.reply({
+            content: truncateResponse(response.result),
+            flags: MessageFlags.SuppressEmbeds,
+        });
         if (response.messages) {
             chatHistoryCache.set(reply.id, response.messages);
         }
