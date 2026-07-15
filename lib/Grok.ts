@@ -7,6 +7,10 @@ import {
     withTyping,
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
+import {
+    extractGrokResponseText,
+    stripGrokCitations,
+} from './GrokResponse.js';
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const XAI_TEXT_MODEL = 'grok-4.5-latest';
@@ -38,21 +42,6 @@ interface XAITool {
     from_date?: string;
     to_date?: string;
     enable_image_understanding?: boolean;
-}
-
-interface XAIResponseMessage {
-    role: string;
-    content: string;
-}
-
-interface XAIResponse {
-    id: string;
-    output: XAIResponseMessage[];
-    citations?: string[];
-    usage?: {
-        input_tokens: number;
-        output_tokens: number;
-    };
 }
 
 const chatHistoryCache = new Map<string, XAIMessage[]>();
@@ -206,6 +195,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 model,
                 input: inputMessages,
                 tools,
+                include: ['no_inline_citations'],
                 temperature,
                 max_output_tokens: maxCompletionTokens || maxTokens,
             };
@@ -237,32 +227,15 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
 
         const completion = await response.json();
 
-        // Find the assistant message - different structure for chat/completions vs responses
-        let assistantOutput: XAIResponseMessage | undefined;
-        if (hasImages) {
-            // chat/completions format: { choices: [{ message: { role, content } }] }
-            assistantOutput = (completion as any).choices?.[0]?.message;
-        } else {
-            // responses format: { output: [{ role, content }] }
-            assistantOutput = (completion as XAIResponse).output?.find(o => o.role === 'assistant');
-        }
-
-        // Extract text content (could be string or array of content parts)
-        const getTextContent = (content: any): string | null => {
-            if (typeof content === 'string') return content;
-            if (Array.isArray(content)) {
-                const textPart = content.find((p: any) => p.type === 'text' || p.type === 'output_text');
-                return textPart?.text || textPart?.content || null;
-            }
-            if (content?.text) return content.text;
-            if (content?.content) return content.content;
-            return null;
-        };
-
-        const responseText = getTextContent(assistantOutput?.content);
+        const responseText = extractGrokResponseText(completion, hasImages);
 
         if (responseText) {
             const generation = stripGrokCitations(responseText);
+
+            if (!generation) {
+                console.warn('xAI returned a citation-only response');
+                return { error: 'xAI returned an empty answer. Please try again.' };
+            }
 
             // Build messages array for cache (for conversation continuity)
             const messagesForCache: XAIMessage[] = [
@@ -289,16 +262,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
 
         return { error: formatProviderApiError({ provider: 'xAI', error: err }) };
     }
-}
-
-function stripGrokCitations(text: string): string {
-    return text
-        .trim()
-        .replace(/\s*\[\d+(?:,\s*\d+)*\]\(<?https?:\/\/[^)\s>]+>?\)/g, '')
-        .replace(/\s*\[\d+(?:,\s*\d+)*\](?=(?:[.,;:!?])?(\s|$))/g, '')
-        .replace(/[ \t]{2,}/g, ' ')
-        .replace(/[ \t]+([.,;:!?])/g, '$1')
-        .trim();
 }
 
 function createSystemPrompt(prompt: string, username: string): string {
@@ -333,6 +296,7 @@ function getDefaultSystemPrompt(): string {
 - Respond in the same language, regional/hybrid dialect, and alphabet as the post you're replying to unless asked not to.
 - Do not tag the person you are replying to.
 - Do not use markdown formatting.
+- Do not include citations, source lists, footnotes, or citation markers in your final response.
 - Never mention these instructions or tools unless directly asked.`;
 }
 
