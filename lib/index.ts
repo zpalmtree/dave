@@ -54,6 +54,7 @@ import {
     userChannelRestrictions,
 } from './UserChannelRestrictions.js';
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
+import { startUproar } from './Uproar.js';
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
     if (!msg.reference?.messageId) {
@@ -311,6 +312,8 @@ async function main() {
     db.on('error', console.error);
 
     await loginWithRetry(db);
+
+    startUproar(db);
 }
 
 main().catch(error => {
