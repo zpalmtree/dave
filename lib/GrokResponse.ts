@@ -4,6 +4,10 @@ interface XAIResponseMessage {
     content: unknown;
 }
 
+export function isGrokImageModerationRejection(status: number, body: string): boolean {
+    return status === 400 && body.toLowerCase().includes('content-moderat');
+}
+
 function getTextParts(content: unknown): string[] {
     if (typeof content === 'string') {
         return [content];

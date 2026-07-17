@@ -9,6 +9,7 @@ import {
 import { formatProviderApiError } from './ApiErrors.js';
 import {
     extractGrokResponseText,
+    isGrokImageModerationRejection,
     stripGrokCitations,
 } from './GrokResponse.js';
 
@@ -373,7 +374,11 @@ async function generateGrokImage(
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('xAI Image API error:', response.status, errorText);
+            if (isGrokImageModerationRejection(response.status, errorText)) {
+                console.warn('xAI Image moderation rejection:', response.status, errorText);
+            } else {
+                console.error('xAI Image API error:', response.status, errorText);
+            }
             return {
                 error: formatProviderApiError({
                     provider: 'xAI Image',

@@ -18,6 +18,7 @@ import {
     getUsername,
     getImageURLsFromMessage,
     replyLongMessage,
+    trySendTyping,
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 
@@ -823,10 +824,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             }
         }
 
-        // Send typing indicator if the channel has typing capability
-        if (msg.channel && 'sendTyping' in msg.channel) {
-            await msg.channel.sendTyping();
-        }
+        await trySendTyping(msg.channel);
 
         // Check for images - all from current message, first from replied bot message
         let imageURLs: string[] = [];
@@ -953,10 +951,7 @@ export async function handleGeminiCaption(msg: Message, args: string): Promise<v
             return;
         }
 
-        // Send typing indicator if the channel has typing capability
-        if (msg.channel && 'sendTyping' in msg.channel) {
-            await msg.channel.sendTyping();
-        }
+        await trySendTyping(msg.channel);
 
         // Get image URLs - all from current message, first from replied bot message
         let imageURLs: string[] = [];
