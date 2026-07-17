@@ -3,6 +3,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
 import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTyping, replyLongMessage } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
+import {
+    extractClaudeResponseText,
+    getClaudeNoTextError,
+    shouldRetryClaudeNoText,
+    summarizeClaudeResponse,
+} from './ClaudeResponse.js';
 import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
@@ -16,6 +22,8 @@ const DEFAULT_SETTINGS = {
 };
 
 const chatHistoryCache = new Map<string, Anthropic.MessageParam[]>();
+const MAX_PAUSE_TURN_CONTINUATIONS = 2;
+const MAX_EMPTY_RESPONSE_RETRIES = 1;
 
 interface ClaudeHandlerOptions {
     msg: Message;
@@ -240,36 +248,57 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
             ];
         }
 
-        // Make API call with web search enabled
-        const completion = await anthropic.messages.create(completionOptions);
+        let requestMessages = messages;
+        let emptyResponseRetries = 0;
+        let pauseTurnContinuations = 0;
 
-        // Process the response from Claude
-        if (completion.content && completion.content.length > 0) {
-            // Combine all text blocks into a single response
-            let fullResponse = '';
-            let hasServerToolUse = false;
+        while (true) {
+            const completion = await anthropic.messages.create({
+                ...completionOptions,
+                messages: requestMessages,
+            });
+            const generation = extractClaudeResponseText(completion.content);
 
-            for (const block of completion.content) {
-                if (block.type === 'text') {
-                    fullResponse += block.text;
-                } else if (block.type === 'server_tool_use') {
-                    hasServerToolUse = true;
-                    // Server is handling the tool use, we don't need to do anything
+            if (completion.stop_reason === 'pause_turn') {
+                const diagnostic = JSON.stringify(summarizeClaudeResponse(completion));
+                console.warn(`[Claude] Paused response: ${diagnostic}`);
+
+                if (pauseTurnContinuations >= MAX_PAUSE_TURN_CONTINUATIONS) {
+                    return { error: getClaudeNoTextError(completion.stop_reason) };
                 }
+
+                requestMessages = [
+                    ...messages,
+                    {
+                        role: 'assistant',
+                        content: completion.content as Anthropic.MessageParam['content'],
+                    },
+                ];
+                pauseTurnContinuations += 1;
+                continue;
             }
 
-            // Trim the response
-            const generation = fullResponse.trim();
-            
-            if (generation === '') {
-                return { error: 'Got empty response from Claude. Try with a different prompt.' };
+            if (generation) {
+                messages.push({ role: 'assistant' as const, content: generation });
+                return { result: generation, messages };
             }
-            
-            messages.push({ role: 'assistant' as const, content: generation });
-            return { result: generation, messages };
+
+            const diagnostic = JSON.stringify(summarizeClaudeResponse(completion));
+
+            if (shouldRetryClaudeNoText(
+                completion.stop_reason,
+                emptyResponseRetries,
+                MAX_EMPTY_RESPONSE_RETRIES,
+            )) {
+                emptyResponseRetries += 1;
+                requestMessages = messages;
+                console.warn(`[Claude] Retrying response with no text: ${diagnostic}`);
+                continue;
+            }
+
+            console.warn(`[Claude] Response contained no text: ${diagnostic}`);
+            return { error: getClaudeNoTextError(completion.stop_reason) };
         }
-
-        return { error: 'Unexpected response from API' };
     } catch (err) {
         console.error('Claude API Error:', err);
         return { error: formatProviderApiError({ provider: 'Claude', error: err }) };
