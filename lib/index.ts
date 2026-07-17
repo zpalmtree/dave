@@ -18,6 +18,7 @@ import {
     tryReactMessage,
     numberWithCommas
 } from './Utilities.js';
+import { getDiscordLoginRetryDelay } from './DiscordRetry.js';
 
 import {
     insertQuery,
@@ -245,14 +246,7 @@ async function dispatchCommand(
     }
 }
 
-async function main() {
-    const db: sqlite3.Database = new sqlite3.Database(config.dbFile);
-
-    await deleteTablesIfNeeded(db);
-    await createTablesIfNeeded(db);
-
-    db.on('error', console.error);
-
+function createDiscordClient(db: sqlite3.Database): Client {
     const client = new Client({
         intents: [
             GatewayIntentBits.Guilds,
@@ -286,11 +280,40 @@ async function main() {
         console.log(`Error stack trace: ${err.stack}`);
     });
 
-    client.login(config.token)
-          .catch((err) => {
-              console.error(err);
-              main();
-    });
+    return client;
 }
 
-main();
+async function loginWithRetry(db: sqlite3.Database): Promise<void> {
+    let attempt = 0;
+
+    while (true) {
+        const client = createDiscordClient(db);
+
+        try {
+            await client.login(config.token);
+            return;
+        } catch (error) {
+            const retryDelay = getDiscordLoginRetryDelay(attempt);
+            const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+            console.error(`[Discord] Login failed (${detail}); retrying in ${retryDelay / 1000}s.`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            attempt += 1;
+        }
+    }
+}
+
+async function main() {
+    const db: sqlite3.Database = new sqlite3.Database(config.dbFile);
+
+    await deleteTablesIfNeeded(db);
+    await createTablesIfNeeded(db);
+
+    db.on('error', console.error);
+
+    await loginWithRetry(db);
+}
+
+main().catch(error => {
+    console.error('Fatal startup error:', error);
+    process.exitCode = 1;
+});
