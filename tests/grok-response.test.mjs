@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     extractGrokResponseText,
+    isGrokImageModerationRejection,
     stripGrokCitations,
 } from '../dist/GrokResponse.js';
 
@@ -45,4 +46,13 @@ test('collects every assistant output_text block from a Responses API payload', 
     };
 
     assert.equal(extractGrokResponseText(completion, false), 'First part.\n\nSecond part.');
+});
+
+test('recognizes xAI image moderation rejections', () => {
+    assert.equal(isGrokImageModerationRejection(
+        400,
+        '{"code":"imagine:content-moderated","error":"Generated image rejected by content moderation."}',
+    ), true);
+    assert.equal(isGrokImageModerationRejection(500, 'content-moderated'), false);
+    assert.equal(isGrokImageModerationRejection(400, 'invalid image'), false);
 });

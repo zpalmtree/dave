@@ -7,6 +7,8 @@ import {
     escapeMarkdown,
 } from 'discord.js';
 
+export { trySendTyping, withTyping } from './Typing.js';
+
 import moment from 'moment';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
@@ -575,36 +577,4 @@ export function getImageURLsFromMessage(
     }
 
     return Array.from(urlSet);
-}
-
-// Type guard for sendable channels
-export function isSendableChannel(channel: import('discord.js').TextBasedChannel): channel is import('discord.js').TextBasedChannel & { send: TextChannel['send']; sendTyping: TextChannel['sendTyping'] } {
-    return 'send' in channel && typeof (channel as any).send === 'function';
-}
-
-// helper ­– put in a shared util file
-export function withTyping<T>(
-  channel: import('discord.js').TextBasedChannel,
-  fn: () => Promise<T>,
-) {
-  let keepAlive: NodeJS.Timeout | undefined;
-
-  const start = async () => {
-    if (!isSendableChannel(channel)) return;
-    await channel.sendTyping();               // immediately
-    keepAlive = setInterval(
-      () => (channel as any).sendTyping?.().catch(() => {}), // refresh every 8 s
-      8_000,
-    );
-  };
-  const stop = () => keepAlive && clearInterval(keepAlive);
-
-  return (async () => {
-    await start();
-    try {
-      return await fn();
-    } finally {
-      stop();
-    }
-  })();
 }
