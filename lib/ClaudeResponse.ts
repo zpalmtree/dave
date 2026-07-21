@@ -21,9 +21,9 @@ export function extractClaudeResponseText(content: ClaudeContentBlockLike[]): st
         .filter((block): block is ClaudeContentBlockLike & { text: string } => (
             block.type === 'text' && typeof block.text === 'string'
         ))
-        .map(block => block.text.trim())
-        .filter(Boolean)
-        .join('\n\n');
+        .map(block => block.text)
+        .join('')
+        .trim();
 }
 
 export function shouldRetryClaudeNoText(
