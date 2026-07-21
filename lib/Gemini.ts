@@ -21,6 +21,28 @@ import {
     trySendTyping,
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
+import { recordTokenSpend } from './TokenSpend.js';
+
+function recordGeminiUsage(
+    model: string,
+    usageMetadata: GenerateContentResponse['usageMetadata'],
+    images: number = 0,
+): void {
+    if (!usageMetadata && images === 0) {
+        return;
+    }
+
+    const cachedTokens = usageMetadata?.cachedContentTokenCount ?? 0;
+
+    recordTokenSpend({
+        model,
+        inputTokens: (usageMetadata?.promptTokenCount ?? 0) - cachedTokens,
+        outputTokens: (usageMetadata?.candidatesTokenCount ?? 0)
+            + (usageMetadata?.thoughtsTokenCount ?? 0),
+        cacheReadTokens: cachedTokens,
+        images,
+    });
+}
 
 // Define interfaces for our handler
 interface GeminiOptions {
@@ -522,6 +544,8 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
 
         const response = await chat.sendMessage({ message: contentParts });
 
+        recordGeminiUsage(TEXT_MODEL, response.usageMetadata);
+
         // Check for safety finish reasons directly in candidates
         if (response.candidates && response.candidates.length > 0) {
             for (const candidate of response.candidates) {
@@ -791,6 +815,9 @@ async function generateSingleImage(
         });
 
         const imagePaths = await processResponseImages(response);
+
+        recordGeminiUsage(IMAGE_MODEL, response.usageMetadata, imagePaths.length);
+
         if (imagePaths.length > 0) {
             return imagePaths;
         }

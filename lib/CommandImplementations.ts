@@ -1453,6 +1453,222 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
     await pages.sendMessage();
 }
 
+function formatTokenSpend(row: any): string {
+    const cost = `$${Number(row.cost || 0).toFixed(4)}`;
+    const tokens = numberWithCommas(Number(row.tokens || 0).toString());
+
+    return `${cost}\n${tokens} tokens, ${row.calls} calls`;
+}
+
+const TOKEN_SPEND_SELECT = `
+    SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens,
+    SUM(cost) AS cost,
+    COUNT(*) AS calls`;
+
+async function handleUserTokens(msg: Message, db: Database, user: string): Promise<void> {
+    const username = await getUsername(user, msg.guild);
+
+    const commands = await selectQuery(
+        `SELECT
+            command AS command,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            guild_id = ?
+            AND user_id = ?
+        GROUP BY
+            command
+        ORDER BY
+            cost DESC`,
+        db,
+        [ msg.guild?.id, user ]
+    );
+
+    if (commands.length === 0) {
+        await msg.reply('User has not used any AI commands!');
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`${username}'s token spend`)
+        .setDescription('Estimated AI token spend by command');
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (command: any) => {
+            return {
+                name: command.command,
+                value: formatTokenSpend(command),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: commands,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+export async function handleUsersTokens(msg: Message, db: Database): Promise<void> {
+    const users = await selectQuery(
+        `SELECT
+            user_id AS user,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            guild_id = ?
+        GROUP BY
+            user_id
+        ORDER BY
+            cost DESC`,
+        db,
+        [ msg.guild?.id ]
+    );
+
+    if (users.length === 0) {
+        await msg.reply('No token usage has been recorded yet!');
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle('Token spend by user')
+        .setDescription('Estimated AI token spend per user');
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: async (user: any) => {
+            return {
+                name: await getUsername(user.user, msg.guild),
+                value: formatTokenSpend(user),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: users,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+async function handleCommandTokens(msg: Message, db: Database, command: string): Promise<void> {
+    const users = await selectQuery(
+        `SELECT
+            user_id AS user,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            guild_id = ?
+            AND command = ?
+        GROUP BY
+            user_id
+        ORDER BY
+            cost DESC`,
+        db,
+        [ msg.guild?.id, command ]
+    );
+
+    if (users.length === 0) {
+        await msg.reply(`No token usage has been recorded for \`${config.prefix}${command}\`!`);
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`Token spend on ${config.prefix}${command}`)
+        .setDescription(`Estimated AI token spend on \`${config.prefix}${command}\` per user`);
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: async (user: any) => {
+            return {
+                name: await getUsername(user.user, msg.guild),
+                value: formatTokenSpend(user),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: users,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+export async function handleTokens(msg: Message, args: string[], db: Database): Promise<void> {
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    /* Get token spend of a specific user, broken down by command */
+    if (mentionedUsers.length > 0) {
+        await handleUserTokens(msg, db, mentionedUsers[0].id);
+        return;
+    }
+
+    /* Get token spend on a specific command, broken down by user */
+    if (args.length > 0) {
+        for (const command of Commands) {
+            if (command.aliases.includes(args[0])) {
+                await handleCommandTokens(msg, db, command.aliases[0]);
+                return;
+            }
+        }
+
+        /* Not a real command, but usage may be recorded under it, e.g.
+         * autotranscribe */
+        await handleCommandTokens(msg, db, args[0]);
+        return;
+    }
+
+    /* Get overall token spend, broken down by command */
+    const commands = await selectQuery(
+        `SELECT
+            command AS command,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            guild_id = ?
+        GROUP BY
+            command
+        ORDER BY
+            cost DESC`,
+        db,
+        [ msg.guild?.id ]
+    );
+
+    if (commands.length === 0) {
+        await msg.reply('No token usage has been recorded yet!');
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle('Token spend by command')
+        .setDescription('Estimated AI token spend per command');
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (command: any) => {
+            return {
+                name: command.command,
+                value: formatTokenSpend(command),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: commands,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
 export async function handleYoutubeApi(msg: Message, args: string): Promise<undefined | any[]> {
     let query = args.trim();
     const replyMessageId = msg.reference?.messageId;

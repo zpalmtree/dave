@@ -21,6 +21,7 @@ import {
     replyLongMessage,
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
+import { recordTokenSpend } from './TokenSpend.js';
 
 // Polyfill File for environments running on Node < 20 so OpenAI uploads work.
 void (async () => {
@@ -260,12 +261,32 @@ function extractErrorMessage(result: ResponsesPayload): string | undefined {
   return undefined;
 }
 
+function recordResponsesUsage(result: ResponsesPayload, images: number = 0): void {
+  const usage = result.usage;
+
+  if (!usage && images === 0) {
+    return;
+  }
+
+  const cachedTokens = usage?.input_tokens_details?.cached_tokens ?? 0;
+
+  recordTokenSpend({
+    model: result.model,
+    inputTokens: (usage?.input_tokens ?? 0) - cachedTokens,
+    outputTokens: usage?.output_tokens,
+    cacheReadTokens: cachedTokens,
+    images,
+  });
+}
+
 function buildOpenAIResponseFromResult(
   result: ResponsesPayload,
   elapsedSeconds: string,
   convo: UniversalMessage[],
 ): OpenAIResponse {
   const images = extractImagesFromResponse(result);
+
+  recordResponsesUsage(result, images.length);
   const reasoningItem = result.output.find(isReasoningItem);
 
   let thinkingData: string | undefined;
@@ -445,6 +466,9 @@ async function formatTranscriptionText(rawTranscript: string, userId: string): P
         stream: false,
     });
     const result = toNonStreamingResponse(rawResult);
+
+    recordResponsesUsage(result);
+
     const formatted = stripSurroundingCodeFence(extractAssistantOutputText(result));
 
     if (formatted.length === 0) {
@@ -620,6 +644,17 @@ async function masterOpenAIHandler(
             maxRetries: 0,
           },
         );
+
+        if (completion.usage) {
+          const cachedTokens = completion.usage.prompt_tokens_details?.cached_tokens ?? 0;
+
+          recordTokenSpend({
+            model: completion.model,
+            inputTokens: (completion.usage.prompt_tokens ?? 0) - cachedTokens,
+            outputTokens: completion.usage.completion_tokens,
+            cacheReadTokens: cachedTokens,
+          });
+        }
 
         if (!completion.choices?.length) {
           return { error: 'Unexpected response from API.' };
@@ -1047,6 +1082,16 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
                 file: audioFile,
                 model: 'gpt-4o-transcribe',
             });
+
+            const transcriptionUsage = (transcription as any).usage;
+
+            if (transcriptionUsage?.input_tokens || transcriptionUsage?.output_tokens) {
+                recordTokenSpend({
+                    model: 'gpt-4o-transcribe',
+                    inputTokens: transcriptionUsage.input_tokens,
+                    outputTokens: transcriptionUsage.output_tokens,
+                });
+            }
 
             const rawTranscript = transcription.text.trim();
             if (rawTranscript.length === 0) {
