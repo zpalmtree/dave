@@ -1460,6 +1460,14 @@ function formatTokenSpend(row: any): string {
     return `${cost}\n${tokens} tokens, ${row.calls} calls`;
 }
 
+function formatTokenSpendTotal(rows: any[]): string {
+    const cost = rows.reduce((sum, row) => sum + Number(row.cost || 0), 0);
+    const tokens = rows.reduce((sum, row) => sum + Number(row.tokens || 0), 0);
+    const calls = rows.reduce((sum, row) => sum + Number(row.calls || 0), 0);
+
+    return `**Total: $${cost.toFixed(4)}, ${numberWithCommas(tokens.toString())} tokens, ${calls} calls**`;
+}
+
 const TOKEN_SPEND_SELECT = `
     SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens,
     SUM(cost) AS cost,
@@ -1492,7 +1500,7 @@ async function handleUserTokens(msg: Message, db: Database, user: string): Promi
 
     const embed = new EmbedBuilder()
         .setTitle(`${username}'s token spend`)
-        .setDescription('Estimated AI token spend by command');
+        .setDescription(`Estimated AI token spend by command\n\n${formatTokenSpendTotal(commands)}`);
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1536,7 +1544,7 @@ export async function handleUsersTokens(msg: Message, db: Database): Promise<voi
 
     const embed = new EmbedBuilder()
         .setTitle('Token spend by user')
-        .setDescription('Estimated AI token spend per user');
+        .setDescription(`Estimated AI token spend per user\n\n${formatTokenSpendTotal(users)}`);
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1581,7 +1589,7 @@ async function handleCommandTokens(msg: Message, db: Database, command: string):
 
     const embed = new EmbedBuilder()
         .setTitle(`Token spend on ${config.prefix}${command}`)
-        .setDescription(`Estimated AI token spend on \`${config.prefix}${command}\` per user`);
+        .setDescription(`Estimated AI token spend on \`${config.prefix}${command}\` per user\n\n${formatTokenSpendTotal(users)}`);
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1649,7 +1657,7 @@ export async function handleTokens(msg: Message, args: string[], db: Database): 
 
     const embed = new EmbedBuilder()
         .setTitle('Token spend by command')
-        .setDescription('Estimated AI token spend per command');
+        .setDescription(`Estimated AI token spend per command\n\n${formatTokenSpendTotal(commands)}`);
 
     const pages = new Paginate({
         sourceMessage: msg,
