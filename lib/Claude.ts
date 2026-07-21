@@ -9,6 +9,7 @@ import {
     shouldRetryClaudeNoText,
     summarizeClaudeResponse,
 } from './ClaudeResponse.js';
+import { recordTokenSpend } from './TokenSpend.js';
 import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
@@ -257,6 +258,16 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
                 ...completionOptions,
                 messages: requestMessages,
             });
+
+            recordTokenSpend({
+                model: completion.model,
+                inputTokens: completion.usage?.input_tokens,
+                outputTokens: completion.usage?.output_tokens,
+                cacheReadTokens: (completion.usage as any)?.cache_read_input_tokens,
+                cacheWriteTokens: (completion.usage as any)?.cache_creation_input_tokens,
+                webSearches: (completion.usage as any)?.server_tool_use?.web_search_requests,
+            });
+
             const generation = extractClaudeResponseText(completion.content);
 
             if (completion.stop_reason === 'pause_turn') {

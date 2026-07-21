@@ -12,6 +12,27 @@ import {
     isGrokImageModerationRejection,
     stripGrokCitations,
 } from './GrokResponse.js';
+import { recordTokenSpend } from './TokenSpend.js';
+
+/* Handles both xAI usage shapes - the responses endpoint reports
+ * input_tokens/output_tokens, chat/completions reports
+ * prompt_tokens/completion_tokens. */
+function recordGrokUsage(model: string, usage: any): void {
+    if (!usage) {
+        return;
+    }
+
+    const cachedTokens = usage.input_tokens_details?.cached_tokens
+        ?? usage.prompt_tokens_details?.cached_tokens
+        ?? 0;
+
+    recordTokenSpend({
+        model,
+        inputTokens: (usage.input_tokens ?? usage.prompt_tokens ?? 0) - cachedTokens,
+        outputTokens: usage.output_tokens ?? usage.completion_tokens,
+        cacheReadTokens: cachedTokens,
+    });
+}
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const XAI_TEXT_MODEL = 'grok-4.5-latest';
@@ -228,6 +249,8 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
 
         const completion = await response.json();
 
+        recordGrokUsage(model, completion.usage);
+
         const responseText = extractGrokResponseText(completion, hasImages);
 
         if (responseText) {
@@ -390,6 +413,12 @@ async function generateGrokImage(
         }
 
         const result = await response.json();
+
+        recordTokenSpend({
+            model: XAI_IMAGE_MODEL,
+            images: result.data?.length || 1,
+        });
+
         const imageData = result.data?.[0];
 
         if (imageData?.url) {
@@ -564,6 +593,9 @@ Keep your summary under 1900 characters. Jump directly into the summary without 
         }
 
         const completion = await response.json();
+
+        recordGrokUsage(XAI_TEXT_MODEL, completion.usage);
+
         const result = completion.choices?.[0]?.message?.content;
 
         if (result) {

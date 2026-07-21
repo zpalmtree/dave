@@ -196,6 +196,24 @@ export async function createTablesIfNeeded(db: Database) {
         notifications BOOLEAN NOT NULL DEFAULT 1,
         perk INTEGER NOT NULL
     )`, db);
+
+    /* This table stores the token usage and estimated cost of every AI API
+     * call, so spend can be broken down by command and by user */
+    await executeQuery(`CREATE TABLE IF NOT EXISTS token_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id VARCHAR(255) NOT NULL,
+        channel_id VARCHAR(255) NOT NULL,
+        guild_id VARCHAR(255),
+        command VARCHAR(255) NOT NULL,
+        model VARCHAR(255) NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        images INTEGER NOT NULL DEFAULT 0,
+        cost REAL NOT NULL DEFAULT 0,
+        timestamp TIMESTAMP NOT NULL
+    )`, db);
 }
 
 export async function deleteTablesIfNeeded(db: Database) {
