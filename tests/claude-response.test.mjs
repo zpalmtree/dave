@@ -11,10 +11,21 @@ import {
 test('extracts Claude text while ignoring thinking and server-tool blocks', () => {
     assert.equal(extractClaudeResponseText([
         { type: 'thinking', thinking: 'hidden' },
-        { type: 'text', text: 'First answer.' },
+        { type: 'text', text: 'First answer.\n\n' },
         { type: 'server_tool_use', name: 'web_search' },
         { type: 'text', text: 'Second answer.' },
     ]), 'First answer.\n\nSecond answer.');
+});
+
+test('preserves inline spacing across cited Claude text blocks', () => {
+    assert.equal(extractClaudeResponseText([
+        { type: 'text', text: 'They pledged over half their fortunes' },
+        { type: 'text', text: ', and ' },
+        { type: 'text', text: 'Altman pledged alongside his partner' },
+        { type: 'text', text: '. In their letter, ' },
+        { type: 'text', text: 'they described their intended focus' },
+        { type: 'text', text: '.' },
+    ]), 'They pledged over half their fortunes, and Altman pledged alongside his partner. In their letter, they described their intended focus.');
 });
 
 test('retries ordinary no-text responses only within the configured limit', () => {
