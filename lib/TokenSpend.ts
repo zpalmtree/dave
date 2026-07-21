@@ -24,6 +24,9 @@ export interface TokenSpendUsage {
     cacheWriteTokens?: number;
     images?: number;
     webSearches?: number;
+    /* Exact USD cost reported by the provider. Takes precedence over the
+     * pricing table estimate when present. */
+    costOverride?: number;
 }
 
 /* USD prices. Token prices are per million tokens, images and web searches
@@ -123,6 +126,10 @@ export function resolveModelPricing(model: string): ModelPricing | undefined {
 }
 
 export function estimateTokenSpendCost(usage: TokenSpendUsage): number {
+    if (usage.costOverride !== undefined) {
+        return usage.costOverride;
+    }
+
     const pricing = resolveModelPricing(usage.model);
 
     if (!pricing) {

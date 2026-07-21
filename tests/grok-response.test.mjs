@@ -2,10 +2,33 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    extractGrokCostUsd,
     extractGrokResponseText,
     isGrokImageModerationRejection,
     stripGrokCitations,
 } from '../dist/GrokResponse.js';
+
+test('converts xAI usd ticks to dollars', () => {
+    assert.equal(extractGrokCostUsd({ usage: { cost_in_usd_ticks: 700000000 } }), 0.07);
+});
+
+test('extracts billed cost from moderation rejection payloads', () => {
+    const rejection = {
+        code: 'imagine:content-moderated',
+        error: 'Generated image rejected by content moderation.',
+        usage: { cost_in_usd_ticks: 700000000 },
+    };
+
+    assert.equal(extractGrokCostUsd(rejection), 0.07);
+});
+
+test('returns undefined cost when usage is missing or malformed', () => {
+    assert.equal(extractGrokCostUsd(undefined), undefined);
+    assert.equal(extractGrokCostUsd({}), undefined);
+    assert.equal(extractGrokCostUsd({ usage: {} }), undefined);
+    assert.equal(extractGrokCostUsd({ usage: { cost_in_usd_ticks: 'lots' } }), undefined);
+    assert.equal(extractGrokCostUsd({ usage: { cost_in_usd_ticks: -5 } }), undefined);
+});
 
 test('strips current xAI inline citations while preserving the answer', () => {
     const response = '50 MW can power roughly 40,000 homes.[[1]](https://example.com/one)[[2]](https://example.com/two)';

@@ -8,6 +8,7 @@ import {
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 import {
+    extractGrokCostUsd,
     extractGrokResponseText,
     isGrokImageModerationRejection,
     stripGrokCitations,
@@ -402,6 +403,26 @@ async function generateGrokImage(
             } else {
                 console.error('xAI Image API error:', response.status, errorText);
             }
+
+            let errorPayload: unknown;
+
+            try {
+                errorPayload = JSON.parse(errorText);
+            } catch {
+                errorPayload = undefined;
+            }
+
+            /* Moderation-rejected generations are still billed - xAI reports
+             * the cost on the error payload */
+            const billedCost = extractGrokCostUsd(errorPayload);
+
+            if (billedCost !== undefined) {
+                recordTokenSpend({
+                    model: XAI_IMAGE_MODEL,
+                    costOverride: billedCost,
+                });
+            }
+
             return {
                 error: formatProviderApiError({
                     provider: 'xAI Image',
@@ -417,6 +438,7 @@ async function generateGrokImage(
         recordTokenSpend({
             model: XAI_IMAGE_MODEL,
             images: result.data?.length || 1,
+            costOverride: extractGrokCostUsd(result),
         });
 
         const imageData = result.data?.[0];

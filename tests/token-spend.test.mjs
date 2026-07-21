@@ -68,3 +68,17 @@ test('unknown models cost zero but do not throw', () => {
 test('missing token counts are treated as zero', () => {
     assert.equal(estimateTokenSpendCost({ model: 'claude-fable-5' }), 0);
 });
+
+test('provider reported cost overrides the pricing table estimate', () => {
+    const cost = estimateTokenSpendCost({
+        model: 'grok-imagine-image-quality-latest',
+        images: 1,
+        costOverride: 0.09,
+    });
+
+    assert.equal(cost, 0.09);
+});
+
+test('cost override applies even for unknown models', () => {
+    assert.equal(estimateTokenSpendCost({ model: 'some-new-model', costOverride: 0.5 }), 0.5);
+});
