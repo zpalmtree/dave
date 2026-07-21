@@ -1473,7 +1473,7 @@ const TOKEN_SPEND_SELECT = `
     SUM(cost) AS cost,
     COUNT(*) AS calls`;
 
-async function handleUserTokens(msg: Message, db: Database, user: string): Promise<void> {
+async function handleUserTokens(msg: Message, db: Database, user: string, global: boolean = false): Promise<void> {
     const username = await getUsername(user, msg.guild);
 
     const commands = await selectQuery(
@@ -1483,14 +1483,16 @@ async function handleUserTokens(msg: Message, db: Database, user: string): Promi
         FROM
             token_usage
         WHERE
-            guild_id = ?
-            AND user_id = ?
+            user_id = ?
+            ${global ? '' : 'AND guild_id = ?'}
         GROUP BY
             command
         ORDER BY
             cost DESC`,
         db,
-        [ msg.guild?.id, user ]
+        global
+            ? [ user ]
+            : [ user, msg.guild?.id ]
     );
 
     if (commands.length === 0) {
@@ -1499,8 +1501,8 @@ async function handleUserTokens(msg: Message, db: Database, user: string): Promi
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`${username}'s token spend`)
-        .setDescription(`Estimated AI token spend by command\n\n${formatTokenSpendTotal(commands)}`);
+        .setTitle(`${username}'s ${global ? 'global ' : ''}token spend`)
+        .setDescription(`Estimated AI token spend by command${global ? ', across all servers' : ''}\n\n${formatTokenSpendTotal(commands)}`);
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1520,21 +1522,22 @@ async function handleUserTokens(msg: Message, db: Database, user: string): Promi
     await pages.sendMessage();
 }
 
-export async function handleUsersTokens(msg: Message, db: Database): Promise<void> {
+export async function handleUsersTokens(msg: Message, db: Database, global: boolean = false): Promise<void> {
     const users = await selectQuery(
         `SELECT
             user_id AS user,
             ${TOKEN_SPEND_SELECT}
         FROM
             token_usage
-        WHERE
-            guild_id = ?
+        ${global ? '' : 'WHERE guild_id = ?'}
         GROUP BY
             user_id
         ORDER BY
             cost DESC`,
         db,
-        [ msg.guild?.id ]
+        global
+            ? []
+            : [ msg.guild?.id ]
     );
 
     if (users.length === 0) {
@@ -1543,8 +1546,8 @@ export async function handleUsersTokens(msg: Message, db: Database): Promise<voi
     }
 
     const embed = new EmbedBuilder()
-        .setTitle('Token spend by user')
-        .setDescription(`Estimated AI token spend per user\n\n${formatTokenSpendTotal(users)}`);
+        .setTitle(`${global ? 'Global token' : 'Token'} spend by user`)
+        .setDescription(`Estimated AI token spend per user${global ? ', across all servers' : ''}\n\n${formatTokenSpendTotal(users)}`);
 
     const pages = new Paginate({
         sourceMessage: msg,
@@ -1562,6 +1565,23 @@ export async function handleUsersTokens(msg: Message, db: Database): Promise<voi
     });
 
     await pages.sendMessage();
+}
+
+export async function handleGlobalTokens(msg: Message, args: string[], db: Database): Promise<void> {
+    if (!canAccessCommand(msg, true)) {
+        return;
+    }
+
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    /* Get global token spend of a specific user, broken down by command */
+    if (mentionedUsers.length > 0) {
+        await handleUserTokens(msg, db, mentionedUsers[0].id, true);
+        return;
+    }
+
+    /* Get global token spend, broken down by user */
+    await handleUsersTokens(msg, db, true);
 }
 
 async function handleCommandTokens(msg: Message, db: Database, command: string): Promise<void> {
