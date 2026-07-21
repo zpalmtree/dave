@@ -48,6 +48,7 @@ import {
     handleUsersStats,
     handleTokens,
     handleUsersTokens,
+    handleGlobalTokens,
     handleReady,
     handlePoll,
     handleMultiPoll,
@@ -785,6 +786,23 @@ const sharedCommands: Command[] = [
                     {
                         name: `View token spend by user`,
                         value: 'tokens users',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.Split,
+                implementation: handleGlobalTokens,
+                description: 'View global AI token spend by user, across all servers (bot admin only)',
+                aliases: ['global'],
+                needDb: true,
+                examples: [
+                    {
+                        name: `View global token spend by user`,
+                        value: 'tokens global',
+                    },
+                    {
+                        name: `View a user's global token spend, by command`,
+                        value: 'tokens global @bob',
                     },
                 ],
             },
