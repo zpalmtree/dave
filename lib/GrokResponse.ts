@@ -8,6 +8,22 @@ export function isGrokImageModerationRejection(status: number, body: string): bo
     return status === 400 && body.toLowerCase().includes('content-moderat');
 }
 
+/* xAI reports exact costs in 'usd ticks', where 1 USD = 10^10 ticks. Both
+ * success and moderation rejection payloads carry usage.cost_in_usd_ticks -
+ * rejected generations are still billed. */
+const USD_TICKS_PER_USD = 10_000_000_000;
+
+export function extractGrokCostUsd(payload: unknown): number | undefined {
+    const ticks = (payload as { usage?: { cost_in_usd_ticks?: unknown } })
+        ?.usage?.cost_in_usd_ticks;
+
+    if (typeof ticks !== 'number' || !Number.isFinite(ticks) || ticks < 0) {
+        return undefined;
+    }
+
+    return ticks / USD_TICKS_PER_USD;
+}
+
 function getTextParts(content: unknown): string[] {
     if (typeof content === 'string') {
         return [content];
