@@ -1569,6 +1569,11 @@ export async function handleTokens(msg: Message, args: string[], db: Database): 
         return;
     }
 
+    /* Get overall token spend, broken down by user */
+    await handleUsersTokens(msg, db);
+}
+
+export async function handleCommandsTokens(msg: Message, db: Database): Promise<void> {
     /* Get overall token spend, broken down by command */
     const commands = await selectQuery(
         `SELECT

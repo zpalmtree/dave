@@ -48,6 +48,7 @@ import {
     handleUsersStats,
     handleTokens,
     handleUsersTokens,
+    handleCommandsTokens,
     handleGlobalTokens,
     handleReady,
     handlePoll,
@@ -762,7 +763,7 @@ const sharedCommands: Command[] = [
             needDb: true,
             examples: [
                 {
-                    name: `View token spend by command`,
+                    name: `View token spend by user`,
                     value: 'tokens',
                 },
                 {
@@ -786,6 +787,19 @@ const sharedCommands: Command[] = [
                     {
                         name: `View token spend by user`,
                         value: 'tokens users',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleCommandsTokens,
+                description: 'View AI token spend by command',
+                aliases: ['commands', 'command'],
+                needDb: true,
+                examples: [
+                    {
+                        name: `View token spend by command`,
+                        value: 'tokens commands',
                     },
                 ],
             },
