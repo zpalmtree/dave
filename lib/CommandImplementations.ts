@@ -1390,7 +1390,7 @@ const TOKEN_SPEND_SELECT = `
     COUNT(*) AS calls`;
 
 async function handleUserTokens(msg: Message, db: Database, user: string, global: boolean = false): Promise<void> {
-    const username = await getUsername(user, msg.guild);
+    const username = await getUsername(user, msg.guild, msg.client);
 
     const commands = await selectQuery(
         `SELECT
@@ -1470,7 +1470,7 @@ export async function handleUsersTokens(msg: Message, db: Database, global: bool
         itemsPerPage: 9,
         displayFunction: async (user: any) => {
             return {
-                name: await getUsername(user.user, msg.guild),
+                name: await getUsername(user.user, msg.guild, msg.client),
                 value: formatTokenSpend(user),
                 inline: true,
             };

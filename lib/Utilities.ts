@@ -1,4 +1,5 @@
 import {
+    Client,
     Guild,
     Message,
     MessageReaction,
@@ -165,24 +166,36 @@ export function canAccessCommand(msg: Message, react: boolean): boolean {
     return false;
 }
 
-export async function getUsername(id: string, guild: Guild | null | undefined): Promise<string> {
-    const ping = `<@${id}>`;
- 
-    if (!guild) {
-        return ping;
-    }
+export async function getUsername(id: string, guild: Guild | null | undefined, client?: Client): Promise<string> {
+    if (guild) {
+        try {
+            const member = await guild.members.fetch(id);
 
-    try {
-        const user = await guild.members.fetch(id);
-
-        if (!user) {
-            return ping;
+            if (member) {
+                return member.displayName;
+            }
+        } catch (err) {
+            /* Not a member of this guild, fall through to global lookup */
         }
-
-        return user.displayName;
-    } catch (err) {
-        return ping;
     }
+
+    /* Fetch the user globally - works even if they don't share a server
+     * with the bot. Pings don't resolve in embeds, so this is preferable. */
+    try {
+        const discordClient = guild?.client ?? client;
+
+        if (discordClient) {
+            const user = await discordClient.users.fetch(id);
+
+            if (user) {
+                return user.displayName;
+            }
+        }
+    } catch (err) {
+        /* Unknown user, fall back to a ping */
+    }
+
+    return `<@${id}>`;
 }
 
 export function roundToNPlaces(num: number, places: number) {
