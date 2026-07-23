@@ -58,9 +58,12 @@ export function extractGrokResponseText(completion: unknown, hasImages: boolean)
         choices?: Array<{ message?: XAIResponseMessage }>;
         output?: XAIResponseMessage[];
     };
+    /* Agentic Responses API runs emit interim assistant messages narrating
+     * progress ("Looking up...") between tool calls - only the last assistant
+     * message is the actual answer. */
     const assistantMessages = hasImages
         ? data.choices?.slice(0, 1).map(choice => choice.message).filter((message): message is XAIResponseMessage => Boolean(message)) || []
-        : data.output?.filter(item => item.role === 'assistant') || [];
+        : data.output?.filter(item => item.role === 'assistant').slice(-1) || [];
     const text = assistantMessages
         .flatMap(message => getTextParts(message.content))
         .map(part => part.trim())
