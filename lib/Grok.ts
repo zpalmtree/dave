@@ -220,7 +220,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 tools,
                 include: ['no_inline_citations'],
                 temperature,
-                max_output_tokens: maxCompletionTokens || maxTokens,
+                max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
             };
 
         const response = await fetch(endpoint, {
@@ -251,6 +251,15 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         const completion = await response.json();
 
         recordGrokUsage(model, completion.usage);
+
+        /* Responses API runs that hit max_output_tokens mid-search come back
+         * with status 'incomplete' and only interim narration in the output -
+         * never post that as if it were the answer. */
+        if (completion.status && completion.status !== 'completed') {
+            const reason = completion.incomplete_details?.reason ?? completion.status;
+            console.warn('xAI returned an unfinished response:', reason);
+            return { error: `xAI did not finish generating an answer (${reason}). Please try again.` };
+        }
 
         const responseText = extractGrokResponseText(completion, hasImages);
 

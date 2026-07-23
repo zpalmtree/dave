@@ -48,27 +48,44 @@ test('continues to strip the previous single-bracket citation format', () => {
     assert.equal(stripGrokCitations(response), 'Useful answer');
 });
 
-test('collects every assistant output_text block from a Responses API payload', () => {
+test('extracts only the final assistant message from a Responses API payload', () => {
     const completion = {
         output: [
             { type: 'web_search_call', role: 'tool', content: 'ignored' },
             {
                 type: 'message',
                 role: 'assistant',
-                content: [{ type: 'output_text', text: 'First part.' }],
+                content: [{ type: 'output_text', text: 'Looking up the vote and bill details.' }],
             },
             {
                 type: 'message',
                 role: 'assistant',
                 content: [
                     { type: 'reasoning', text: 'ignored' },
-                    { type: 'output_text', text: 'Second part.' },
+                    { type: 'output_text', text: 'The bill passed 218-210.' },
                 ],
             },
         ],
     };
 
-    assert.equal(extractGrokResponseText(completion, false), 'First part.\n\nSecond part.');
+    assert.equal(extractGrokResponseText(completion, false), 'The bill passed 218-210.');
+});
+
+test('joins multiple output_text parts within the final assistant message', () => {
+    const completion = {
+        output: [
+            {
+                type: 'message',
+                role: 'assistant',
+                content: [
+                    { type: 'output_text', text: 'First paragraph.' },
+                    { type: 'output_text', text: 'Second paragraph.' },
+                ],
+            },
+        ],
+    };
+
+    assert.equal(extractGrokResponseText(completion, false), 'First paragraph.\n\nSecond paragraph.');
 });
 
 test('recognizes xAI image moderation rejections', () => {
