@@ -32,6 +32,10 @@ class Config {
 
     public claudeApiKey: string = 'enter claude api key here';
 
+    public geminiApiKey: string = 'enter gemini api key here';
+
+    public grokApiKey: string = 'enter grok/xai api key here';
+
     public gabApiKey: string = 'enter gab ai api key here';
 
     public gabModel: string = 'arya';
@@ -50,6 +54,15 @@ class Config {
 
     /* coingecko coin ids to monitor e.g. [{id: 'bitcoin', label: 'bitcoin' }], see coingecko api docs for details */
     public coins: string[] = [];
+
+    /* Uproar (uproar.chat) integration. Leave the id/token blank to disable it;
+     * the bot then runs on Discord only. Get the id + token from Uproar when you
+     * create the bot (Settings > Bots). */
+    public uproarBaseUrl: string = 'https://uproar.chat';
+
+    public uproarBotId: string = '';
+
+    public uproarBotToken: string = '';
 }
 
 export let config = new Config();
