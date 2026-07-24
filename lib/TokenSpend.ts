@@ -50,6 +50,14 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         cacheWrite: 12.5,
         perWebSearch: 0.01,
     },
+    /* refusal-fallback model for claude-fable-5 */
+    'claude-opus-4-8': {
+        input: 5,
+        output: 25,
+        cacheRead: 0.5,
+        cacheWrite: 6.25,
+        perWebSearch: 0.01,
+    },
     'gpt-5.5': {
         input: 1.25,
         output: 10,
