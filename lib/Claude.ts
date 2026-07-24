@@ -18,9 +18,12 @@ const anthropic = new Anthropic({
 
 const DEFAULT_SETTINGS = {
     model: 'claude-fable-5',
+    refusalFallbackModel: 'claude-opus-4-8',
     maxTokens: 1024,
     bannedUsers: ['663270358161293343'],
 };
+
+const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-06-01';
 
 const chatHistoryCache = new Map<string, Anthropic.MessageParam[]>();
 const MAX_PAUSE_TURN_CONTINUATIONS = 2;
@@ -254,10 +257,21 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         let pauseTurnContinuations = 0;
 
         while (true) {
-            const completion = await anthropic.messages.create({
-                ...completionOptions,
-                messages: requestMessages,
-            });
+            // If Fable's safety classifiers decline the request, the API reruns
+            // it on the fallback model in the same call. The fallbacks param is
+            // not yet typed in SDK 0.41, hence the cast.
+            const completion = await anthropic.messages.create(
+                {
+                    ...completionOptions,
+                    messages: requestMessages,
+                    fallbacks: [{ model: DEFAULT_SETTINGS.refusalFallbackModel }],
+                } as Anthropic.MessageCreateParamsNonStreaming,
+                { headers: { 'anthropic-beta': REFUSAL_FALLBACK_BETA } },
+            );
+
+            if (completion.model && !completion.model.startsWith(DEFAULT_SETTINGS.model)) {
+                console.warn(`[Claude] ${DEFAULT_SETTINGS.model} declined the request; served by ${completion.model}`);
+            }
 
             recordTokenSpend({
                 model: completion.model,
