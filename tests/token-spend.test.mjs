@@ -5,6 +5,7 @@ import {
     estimateTokenSpendCost,
     resolveModelPricing,
 } from '../dist/TokenSpend.js';
+import { formatCompactNumber, formatUsdCost, pluralize } from '../dist/Utilities.js';
 
 test('resolves pricing for exact model ids', () => {
     const pricing = resolveModelPricing('claude-fable-5');
@@ -81,4 +82,29 @@ test('provider reported cost overrides the pricing table estimate', () => {
 
 test('cost override applies even for unknown models', () => {
     assert.equal(estimateTokenSpendCost({ model: 'some-new-model', costOverride: 0.5 }), 0.5);
+});
+
+test('shortens token counts for embed display', () => {
+    assert.equal(formatCompactNumber(2885599), '2.89M');
+    assert.equal(formatCompactNumber(1510382), '1.51M');
+    assert.equal(formatCompactNumber(449262), '449K');
+    assert.equal(formatCompactNumber(55150), '55.2K');
+    assert.equal(formatCompactNumber(3214), '3.21K');
+    assert.equal(formatCompactNumber(947), '947');
+    assert.equal(formatCompactNumber(0), '0');
+});
+
+test('formats spend to two places with a sub-cent floor', () => {
+    assert.equal(formatUsdCost(13.8898), '$13.89');
+    assert.equal(formatUsdCost(6.3444), '$6.34');
+    assert.equal(formatUsdCost(0.2746), '$0.27');
+    assert.equal(formatUsdCost(0.01), '$0.01');
+    assert.equal(formatUsdCost(0.004), '<$0.01');
+    assert.equal(formatUsdCost(0), '$0.00');
+});
+
+test('pluralizes call counts', () => {
+    assert.equal(pluralize(1, 'call'), 'call');
+    assert.equal(pluralize(0, 'call'), 'calls');
+    assert.equal(pluralize(75, 'call'), 'calls');
 });
