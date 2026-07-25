@@ -5,6 +5,7 @@ import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTy
 import { formatProviderApiError } from './ApiErrors.js';
 import {
     extractClaudeResponseText,
+    getClaudeMaxTokensRetryBudget,
     getClaudeNoTextError,
     shouldRetryClaudeNoText,
     summarizeClaudeResponse,
@@ -19,7 +20,9 @@ const anthropic = new Anthropic({
 const DEFAULT_SETTINGS = {
     model: 'claude-fable-5',
     refusalFallbackModel: 'claude-opus-4-8',
-    maxTokens: 1024,
+    // Fable always thinks, and thinking shares this budget with the answer.
+    maxTokens: 4096,
+    effort: 'medium',
     bannedUsers: ['663270358161293343'],
 };
 
@@ -28,6 +31,7 @@ const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-06-01';
 const chatHistoryCache = new Map<string, Anthropic.MessageParam[]>();
 const MAX_PAUSE_TURN_CONTINUATIONS = 2;
 const MAX_EMPTY_RESPONSE_RETRIES = 1;
+const MAX_TOKENS_CEILING = 8192;
 
 interface ClaudeHandlerOptions {
     msg: Message;
@@ -253,17 +257,20 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         }
 
         let requestMessages = messages;
+        let requestMaxTokens = maxTokens;
         let emptyResponseRetries = 0;
         let pauseTurnContinuations = 0;
 
         while (true) {
             // If Fable's safety classifiers decline the request, the API reruns
-            // it on the fallback model in the same call. The fallbacks param is
-            // not yet typed in SDK 0.41, hence the cast.
+            // it on the fallback model in the same call. Neither fallbacks nor
+            // output_config are typed in SDK 0.41, hence the cast.
             const completion = await anthropic.messages.create(
                 {
                     ...completionOptions,
+                    max_tokens: requestMaxTokens,
                     messages: requestMessages,
+                    output_config: { effort: DEFAULT_SETTINGS.effort },
                     fallbacks: [{ model: DEFAULT_SETTINGS.refusalFallbackModel }],
                 } as Anthropic.MessageCreateParamsNonStreaming,
                 { headers: { 'anthropic-beta': REFUSAL_FALLBACK_BETA } },
@@ -309,6 +316,19 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
             }
 
             const diagnostic = JSON.stringify(summarizeClaudeResponse(completion));
+
+            const retryMaxTokens = getClaudeMaxTokensRetryBudget(
+                completion.stop_reason,
+                requestMaxTokens,
+                MAX_TOKENS_CEILING,
+            );
+
+            if (retryMaxTokens !== null) {
+                console.warn(`[Claude] Thinking used the whole token budget; retrying with ${retryMaxTokens}: ${diagnostic}`);
+                requestMaxTokens = retryMaxTokens;
+                requestMessages = messages;
+                continue;
+            }
 
             if (shouldRetryClaudeNoText(
                 completion.stop_reason,

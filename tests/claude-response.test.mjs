@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     extractClaudeResponseText,
+    getClaudeMaxTokensRetryBudget,
     getClaudeNoTextError,
     shouldRetryClaudeNoText,
     summarizeClaudeResponse,
@@ -33,6 +34,14 @@ test('retries ordinary no-text responses only within the configured limit', () =
     assert.equal(shouldRetryClaudeNoText('end_turn', 1, 1), false);
     assert.equal(shouldRetryClaudeNoText('refusal', 0, 1), false);
     assert.equal(shouldRetryClaudeNoText('pause_turn', 0, 1), false);
+});
+
+test('escalates the token budget when thinking exhausted it', () => {
+    assert.equal(getClaudeMaxTokensRetryBudget('max_tokens', 4096, 8192), 8192);
+    assert.equal(getClaudeMaxTokensRetryBudget('max_tokens', 6144, 8192), 8192);
+    assert.equal(getClaudeMaxTokensRetryBudget('max_tokens', 8192, 8192), null);
+    assert.equal(getClaudeMaxTokensRetryBudget('end_turn', 4096, 8192), null);
+    assert.equal(getClaudeMaxTokensRetryBudget('refusal', 4096, 8192), null);
 });
 
 test('returns specific errors for actionable Claude stop reasons', () => {
