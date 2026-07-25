@@ -46,6 +46,9 @@ import {
     getUsername,
     shuffleArray,
     formatLargeNumber,
+    formatCompactNumber,
+    formatUsdCost,
+    pluralize,
     roundToNPlaces,
     numberWithCommas,
     tryDeleteMessage,
@@ -1454,10 +1457,11 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
 }
 
 function formatTokenSpend(row: any): string {
-    const cost = `$${Number(row.cost || 0).toFixed(4)}`;
-    const tokens = numberWithCommas(Number(row.tokens || 0).toString());
+    const cost = formatUsdCost(Number(row.cost || 0));
+    const tokens = formatCompactNumber(Number(row.tokens || 0));
+    const calls = Number(row.calls || 0);
 
-    return `${cost}\n${tokens} tokens, ${row.calls} calls`;
+    return `${cost}\n${tokens} tokens, ${calls} ${pluralize(calls, 'call')}`;
 }
 
 function formatTokenSpendTotal(rows: any[]): string {
@@ -1465,7 +1469,7 @@ function formatTokenSpendTotal(rows: any[]): string {
     const tokens = rows.reduce((sum, row) => sum + Number(row.tokens || 0), 0);
     const calls = rows.reduce((sum, row) => sum + Number(row.calls || 0), 0);
 
-    return `**Total: $${cost.toFixed(4)}, ${numberWithCommas(tokens.toString())} tokens, ${calls} calls**`;
+    return `**Total: ${formatUsdCost(cost)}, ${formatCompactNumber(tokens)} tokens, ${calls} ${pluralize(calls, 'call')}**`;
 }
 
 const TOKEN_SPEND_SELECT = `

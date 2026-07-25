@@ -79,6 +79,40 @@ export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
 }
 
+const compactNumberFormat = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumSignificantDigits: 3,
+});
+
+/* Shortens counts for embeds, e.g. 2885599 -> 2.89M, 449262 -> 449K. Values
+ * below 1000 are unchanged. Unlike formatLargeNumber, this abbreviates
+ * thousands and uses suffixes rather than words. */
+export function formatCompactNumber(value: number): string {
+    if (!Number.isFinite(value)) {
+        return '0';
+    }
+
+    return compactNumberFormat.format(value);
+}
+
+export function pluralize(count: number, singular: string, plural: string = `${singular}s`): string {
+    return count === 1 ? singular : plural;
+}
+
+/* Two decimal places, with a floor so sub-cent spend doesn't display as
+ * $0.00. */
+export function formatUsdCost(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+        return '$0.00';
+    }
+
+    if (value < 0.01) {
+        return '<$0.01';
+    }
+
+    return `$${value.toFixed(2)}`;
+}
+
 export function isValidSolAddress(address: string) {
     try {
         const pubkey = new PublicKey(address);
