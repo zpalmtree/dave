@@ -3,11 +3,11 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { EventEmitter } from 'events';
 import { Database } from 'sqlite3';
+import { Message } from 'discord.js';
 
 import { config } from './Config.js';
-import { canAccessCommand } from './Utilities.js';
-import { Args, Command, CommandFunc } from './Types.js';
-import { Commands, handleHelp } from './CommandDeclarations.js';
+import { dispatchPrefixedCommand } from './CommandDispatcher.js';
+import { restoreTimersForPlatform } from './Timer.js';
 
 /* Uproar (uproar.chat) integration.
  *
@@ -56,7 +56,35 @@ interface UploadedAttachment {
     thumb_url?: string;
 }
 
-type SendPayload = string | { content?: string; embeds?: any[]; files?: any[] };
+interface UproarConfig {
+    uproarBaseUrl?: string;
+    uproarBotId?: string;
+    uproarBotToken?: string;
+}
+
+interface NormalizedSendPayload {
+    content: string;
+    embeds?: any[];
+    files?: any[];
+    attachments?: any[];
+}
+
+type SendPayload = string | {
+    content?: string;
+    embeds?: any[];
+    files?: any[];
+    attachments?: any[];
+};
+
+function getUproarConfig(): Required<UproarConfig> {
+    const uproarConfig = config as typeof config & UproarConfig;
+
+    return {
+        uproarBaseUrl: uproarConfig.uproarBaseUrl ?? 'https://uproar.chat',
+        uproarBotId: uproarConfig.uproarBotId ?? '',
+        uproarBotToken: uproarConfig.uproarBotToken ?? '',
+    };
+}
 
 function toUproarEmbeds(embeds?: any[]): any[] | undefined {
     if (!embeds || embeds.length === 0) {
@@ -65,7 +93,7 @@ function toUproarEmbeds(embeds?: any[]): any[] | undefined {
     return embeds.map((e) => (e && typeof e.toJSON === 'function' ? e.toJSON() : e));
 }
 
-function normalizeSend(payload: SendPayload): { content: string; embeds?: any[]; files?: any[] } {
+function normalizeSend(payload: SendPayload): NormalizedSendPayload {
     if (typeof payload === 'string') {
         return { content: payload };
     }
@@ -73,6 +101,7 @@ function normalizeSend(payload: SendPayload): { content: string; embeds?: any[];
         content: payload.content ?? '',
         embeds: toUproarEmbeds(payload.embeds),
         files: Array.isArray(payload.files) ? payload.files : undefined,
+        attachments: Array.isArray(payload.attachments) ? payload.attachments : undefined,
     };
 }
 
@@ -140,9 +169,10 @@ export class UproarClient {
     private memberCache = new Map<string, Promise<any[]>>();
 
     constructor(db: Database) {
-        this.baseUrl = config.uproarBaseUrl.replace(/\/$/, '');
-        this.botId = config.uproarBotId;
-        this.token = config.uproarBotToken;
+        const uproarConfig = getUproarConfig();
+        this.baseUrl = uproarConfig.uproarBaseUrl.replace(/\/$/, '');
+        this.botId = uproarConfig.uproarBotId;
+        this.token = uproarConfig.uproarBotToken;
         this.db = db;
     }
 
@@ -405,11 +435,11 @@ export class UproarClient {
 
         const msg = new UproarMessage(this, data);
 
-        const [tmp, ...args] = data.content.trim().split(/\s+/);
+        const [tmp] = data.content.trim().split(/\s+/);
         const command = tmp.substring(tmp.indexOf(config.prefix) + 1).toLowerCase();
 
         try {
-            await dispatchByCommand(msg, command, args, this.db);
+            await dispatchPrefixedCommand(msg as unknown as Message, this.db);
         } catch (err) {
             console.error(`[Uproar] Command '${command}' threw: ${(err as any)?.stack ?? err}`);
             try {
@@ -419,69 +449,6 @@ export class UproarClient {
                 /* best effort */
             }
         }
-    }
-}
-
-async function dispatchByCommand(
-    msg: UproarMessage,
-    command: string,
-    args: string[],
-    db: Database,
-): Promise<void> {
-    for (const c of Commands as Command[]) {
-        if (!c.aliases.includes(command)) {
-            continue;
-        }
-
-        if (c.hidden && !canAccessCommand(msg as any, true)) {
-            return;
-        }
-
-        if (args.length === 1 && args[0] === 'help') {
-            handleHelp(msg as any, c.aliases[0]);
-            return;
-        }
-
-        if (c.commandGates) {
-            for (const gate of c.commandGates) {
-                const { canAccess, error } = gate(msg as any);
-                if (!canAccess) {
-                    await msg.reply(error!);
-                    return;
-                }
-            }
-        }
-
-        if (args.length > 0 && c.subCommands && c.subCommands.length > 0) {
-            for (const subCommand of c.subCommands) {
-                if (subCommand.aliases && subCommand.aliases.includes(args[0])) {
-                    if (!subCommand.disabled) {
-                        await runCommand(subCommand, msg, db, args.slice(1));
-                    }
-                    return;
-                }
-            }
-        }
-
-        if (!c.primaryCommand.disabled) {
-            await runCommand(c.primaryCommand, msg, db, args);
-        }
-        return;
-    }
-}
-
-async function runCommand(command: CommandFunc, msg: UproarMessage, db: Database, args: string[]): Promise<void> {
-    const impl = command.implementation as any;
-    switch (command.argsFormat) {
-        case Args.DontNeed:
-            await (command.needDb ? impl(msg, db) : impl(msg));
-            break;
-        case Args.Split:
-            await (command.needDb ? impl(msg, args, db) : impl(msg, args));
-            break;
-        case Args.Combined:
-            await (command.needDb ? impl(msg, args.join(' '), db) : impl(msg, args.join(' ')));
-            break;
     }
 }
 
@@ -513,6 +480,7 @@ async function resolveFileData(file: any): Promise<{ data: Buffer; name: string 
 /* --- message shims --- */
 
 export class UproarMessage {
+    public readonly platform = 'uproar';
     public readonly id: string;
     public readonly content: string;
     public readonly author: UproarUser;
@@ -561,6 +529,7 @@ export class UproarMessage {
 /* A message read back from the API (reply context, purge history): read fields
  * plus delete/react so the deletion + image-extraction paths work on it. */
 export class UproarFetchedMessage {
+    public readonly platform = 'uproar';
     public readonly id: string;
     public readonly content: string;
     public readonly author: UproarUser;
@@ -618,8 +587,15 @@ export class UproarChannel {
         await this.bot.exec({ action: 'typing', channel_id: this.id });
     }
 
+    /* Uproar performs permission checks at the API boundary. This compatibility
+     * surface lets commands that preflight Discord channel permissions proceed
+     * and receive the authoritative result from the execute endpoint. */
+    public permissionsFor(_member: unknown): { has: () => boolean } {
+        return { has: () => true };
+    }
+
     public async sendInternal(payload: SendPayload, replyTo: string | null): Promise<UproarSentMessage> {
-        const { content, embeds, files } = normalizeSend(payload);
+        const { content, embeds, files, attachments: retainedAttachments } = normalizeSend(payload);
 
         const body: Record<string, unknown> = { action: 'send', channel_id: this.id, content };
         if (embeds) {
@@ -637,6 +613,8 @@ export class UproarChannel {
             } catch (err) {
                 console.error(`[Uproar] Attachment upload failed: ${(err as any)?.message ?? err}`);
             }
+        } else if (retainedAttachments) {
+            body.attachments = retainedAttachments;
         }
 
         const created = await this.bot.exec(body);
@@ -648,10 +626,16 @@ export class UproarSentMessage {
     constructor(private readonly bot: UproarClient, public readonly id: string, public readonly channelId: string) {}
 
     public async edit(payload: SendPayload): Promise<UproarSentMessage> {
-        const { content, embeds } = normalizeSend(payload);
+        const { content, embeds, files, attachments } = normalizeSend(payload);
         const body: Record<string, unknown> = { action: 'edit', message_id: this.id, content };
         if (embeds) {
             body.embeds = embeds;
+        }
+        if (files && files.length > 0) {
+            const uploaded = await this.bot.uploadFiles(this.channelId, files);
+            body.attachments = uploaded;
+        } else if (attachments) {
+            body.attachments = attachments;
         }
         await this.bot.exec(body);
         return this;
@@ -724,10 +708,23 @@ export class UproarReactionCollector extends EventEmitter {
 }
 
 export function startUproar(db: Database): void {
-    if (!config.uproarBotId || !config.uproarBotToken) {
+    const uproarConfig = getUproarConfig();
+    if (!uproarConfig.uproarBotId || !uproarConfig.uproarBotToken) {
         console.log('[Uproar] Not configured; skipping');
         return;
     }
     const client = new UproarClient(db);
-    client.connect();
+    try {
+        client.connect();
+    } catch (err) {
+        console.error(`[Uproar] Failed to start stream: ${(err as any)?.stack ?? err}`);
+        return;
+    }
+    restoreTimersForPlatform(
+        db,
+        'uproar',
+        async (channelId) => new UproarChannel(client, channelId),
+    ).catch((err) => {
+        console.error(`[Uproar] Failed to restore timers: ${(err as any)?.stack ?? err}`);
+    });
 }
