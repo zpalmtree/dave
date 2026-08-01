@@ -1,4 +1,5 @@
 import {
+    Client,
     Guild,
     Message,
     MessageReaction,
@@ -75,6 +76,40 @@ export function slugUserGate(message: Message): { canAccess: boolean, error?: st
 
 export function numberWithCommas(s: string) {
     return s.replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ",");
+}
+
+const compactNumberFormat = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumSignificantDigits: 3,
+});
+
+/* Shortens counts for embeds, e.g. 2885599 -> 2.89M, 449262 -> 449K. Values
+ * below 1000 are unchanged. Unlike formatLargeNumber, this abbreviates
+ * thousands and uses suffixes rather than words. */
+export function formatCompactNumber(value: number): string {
+    if (!Number.isFinite(value)) {
+        return '0';
+    }
+
+    return compactNumberFormat.format(value);
+}
+
+export function pluralize(count: number, singular: string, plural: string = `${singular}s`): string {
+    return count === 1 ? singular : plural;
+}
+
+/* Two decimal places, with a floor so sub-cent spend doesn't display as
+ * $0.00. */
+export function formatUsdCost(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+        return '$0.00';
+    }
+
+    if (value < 0.01) {
+        return '<$0.01';
+    }
+
+    return `$${value.toFixed(2)}`;
 }
 
 export function isValidSolAddress(address: string) {
@@ -165,24 +200,36 @@ export function canAccessCommand(msg: Message, react: boolean): boolean {
     return false;
 }
 
-export async function getUsername(id: string, guild: Guild | null | undefined): Promise<string> {
-    const ping = `<@${id}>`;
- 
-    if (!guild) {
-        return ping;
-    }
+export async function getUsername(id: string, guild: Guild | null | undefined, client?: Client): Promise<string> {
+    if (guild) {
+        try {
+            const member = await guild.members.fetch(id);
 
-    try {
-        const user = await guild.members.fetch(id);
-
-        if (!user) {
-            return ping;
+            if (member) {
+                return member.displayName;
+            }
+        } catch (err) {
+            /* Not a member of this guild, fall through to global lookup */
         }
-
-        return user.displayName;
-    } catch (err) {
-        return ping;
     }
+
+    /* Fetch the user globally - works even if they don't share a server
+     * with the bot. Pings don't resolve in embeds, so this is preferable. */
+    try {
+        const discordClient = guild?.client ?? client;
+
+        if (discordClient) {
+            const user = await discordClient.users.fetch(id);
+
+            if (user) {
+                return user.displayName;
+            }
+        }
+    } catch (err) {
+        /* Unknown user, fall back to a ping */
+    }
+
+    return `<@${id}>`;
 }
 
 export function roundToNPlaces(num: number, places: number) {

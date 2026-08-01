@@ -2,10 +2,33 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    extractGrokCostUsd,
     extractGrokResponseText,
     isGrokImageModerationRejection,
     stripGrokCitations,
 } from '../dist/GrokResponse.js';
+
+test('converts xAI usd ticks to dollars', () => {
+    assert.equal(extractGrokCostUsd({ usage: { cost_in_usd_ticks: 700000000 } }), 0.07);
+});
+
+test('extracts billed cost from moderation rejection payloads', () => {
+    const rejection = {
+        code: 'imagine:content-moderated',
+        error: 'Generated image rejected by content moderation.',
+        usage: { cost_in_usd_ticks: 700000000 },
+    };
+
+    assert.equal(extractGrokCostUsd(rejection), 0.07);
+});
+
+test('returns undefined cost when usage is missing or malformed', () => {
+    assert.equal(extractGrokCostUsd(undefined), undefined);
+    assert.equal(extractGrokCostUsd({}), undefined);
+    assert.equal(extractGrokCostUsd({ usage: {} }), undefined);
+    assert.equal(extractGrokCostUsd({ usage: { cost_in_usd_ticks: 'lots' } }), undefined);
+    assert.equal(extractGrokCostUsd({ usage: { cost_in_usd_ticks: -5 } }), undefined);
+});
 
 test('strips current xAI inline citations while preserving the answer', () => {
     const response = '50 MW can power roughly 40,000 homes.[[1]](https://example.com/one)[[2]](https://example.com/two)';
@@ -25,27 +48,44 @@ test('continues to strip the previous single-bracket citation format', () => {
     assert.equal(stripGrokCitations(response), 'Useful answer');
 });
 
-test('collects every assistant output_text block from a Responses API payload', () => {
+test('extracts only the final assistant message from a Responses API payload', () => {
     const completion = {
         output: [
             { type: 'web_search_call', role: 'tool', content: 'ignored' },
             {
                 type: 'message',
                 role: 'assistant',
-                content: [{ type: 'output_text', text: 'First part.' }],
+                content: [{ type: 'output_text', text: 'Looking up the vote and bill details.' }],
             },
             {
                 type: 'message',
                 role: 'assistant',
                 content: [
                     { type: 'reasoning', text: 'ignored' },
-                    { type: 'output_text', text: 'Second part.' },
+                    { type: 'output_text', text: 'The bill passed 218-210.' },
                 ],
             },
         ],
     };
 
-    assert.equal(extractGrokResponseText(completion, false), 'First part.\n\nSecond part.');
+    assert.equal(extractGrokResponseText(completion, false), 'The bill passed 218-210.');
+});
+
+test('joins multiple output_text parts within the final assistant message', () => {
+    const completion = {
+        output: [
+            {
+                type: 'message',
+                role: 'assistant',
+                content: [
+                    { type: 'output_text', text: 'First paragraph.' },
+                    { type: 'output_text', text: 'Second paragraph.' },
+                ],
+            },
+        ],
+    };
+
+    assert.equal(extractGrokResponseText(completion, false), 'First paragraph.\n\nSecond paragraph.');
 });
 
 test('recognizes xAI image moderation rejections', () => {

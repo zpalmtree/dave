@@ -8,10 +8,32 @@ import {
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 import {
+    extractGrokCostUsd,
     extractGrokResponseText,
     isGrokImageModerationRejection,
     stripGrokCitations,
 } from './GrokResponse.js';
+import { recordTokenSpend } from './TokenSpend.js';
+
+/* Handles both xAI usage shapes - the responses endpoint reports
+ * input_tokens/output_tokens, chat/completions reports
+ * prompt_tokens/completion_tokens. */
+function recordGrokUsage(model: string, usage: any): void {
+    if (!usage) {
+        return;
+    }
+
+    const cachedTokens = usage.input_tokens_details?.cached_tokens
+        ?? usage.prompt_tokens_details?.cached_tokens
+        ?? 0;
+
+    recordTokenSpend({
+        model,
+        inputTokens: (usage.input_tokens ?? usage.prompt_tokens ?? 0) - cachedTokens,
+        outputTokens: usage.output_tokens ?? usage.completion_tokens,
+        cacheReadTokens: cachedTokens,
+    });
+}
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const XAI_TEXT_MODEL = 'grok-4.5-latest';
@@ -198,7 +220,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 tools,
                 include: ['no_inline_citations'],
                 temperature,
-                max_output_tokens: maxCompletionTokens || maxTokens,
+                max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
             };
 
         const response = await fetch(endpoint, {
@@ -227,6 +249,17 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         }
 
         const completion = await response.json();
+
+        recordGrokUsage(model, completion.usage);
+
+        /* Responses API runs that hit max_output_tokens mid-search come back
+         * with status 'incomplete' and only interim narration in the output -
+         * never post that as if it were the answer. */
+        if (completion.status && completion.status !== 'completed') {
+            const reason = completion.incomplete_details?.reason ?? completion.status;
+            console.warn('xAI returned an unfinished response:', reason);
+            return { error: `xAI did not finish generating an answer (${reason}). Please try again.` };
+        }
 
         const responseText = extractGrokResponseText(completion, hasImages);
 
@@ -379,6 +412,26 @@ async function generateGrokImage(
             } else {
                 console.error('xAI Image API error:', response.status, errorText);
             }
+
+            let errorPayload: unknown;
+
+            try {
+                errorPayload = JSON.parse(errorText);
+            } catch {
+                errorPayload = undefined;
+            }
+
+            /* Moderation-rejected generations are still billed - xAI reports
+             * the cost on the error payload */
+            const billedCost = extractGrokCostUsd(errorPayload);
+
+            if (billedCost !== undefined) {
+                recordTokenSpend({
+                    model: XAI_IMAGE_MODEL,
+                    costOverride: billedCost,
+                });
+            }
+
             return {
                 error: formatProviderApiError({
                     provider: 'xAI Image',
@@ -390,6 +443,13 @@ async function generateGrokImage(
         }
 
         const result = await response.json();
+
+        recordTokenSpend({
+            model: XAI_IMAGE_MODEL,
+            images: result.data?.length || 1,
+            costOverride: extractGrokCostUsd(result),
+        });
+
         const imageData = result.data?.[0];
 
         if (imageData?.url) {
@@ -564,6 +624,9 @@ Keep your summary under 1900 characters. Jump directly into the summary without 
         }
 
         const completion = await response.json();
+
+        recordGrokUsage(XAI_TEXT_MODEL, completion.usage);
+
         const result = completion.choices?.[0]?.message?.content;
 
         if (result) {

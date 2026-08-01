@@ -50,6 +50,10 @@ import { convertTwitterLinks } from './ConvertTwitterLinks.js';
 import { convertPumpFunLinks } from './ConvertPumpFunLinks.js';
 import { handleAutoTranscribe } from './OpenAI.js';
 import {
+    initTokenSpend,
+    runWithTokenSpendContext,
+} from './TokenSpend.js';
+import {
     isAllowedByUserChannelRestriction,
     userChannelRestrictions,
 } from './UserChannelRestrictions.js';
@@ -136,7 +140,7 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
 
         convertTwitterLinks(msg);
         convertPumpFunLinks(msg);
-        handleAutoTranscribe(msg);
+        runWithTokenSpendContext(msg, 'autotranscribe', () => handleAutoTranscribe(msg));
 
         return;
     }
@@ -193,7 +197,8 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
                 for (const subCommand of c.subCommands) {
                     if (subCommand.aliases && subCommand.aliases.includes(args[0])) {
                         if (!subCommand.disabled) {
-                            await dispatchCommand(subCommand, msg, db, args.slice(1));
+                            await runWithTokenSpendContext(msg, c.aliases[0], () =>
+                                dispatchCommand(subCommand, msg, db, args.slice(1)));
                         }
 
                         return;
@@ -202,7 +207,8 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
             }
 
             if (!c.primaryCommand.disabled) {
-                await dispatchCommand(c.primaryCommand, msg, db, args);
+                await runWithTokenSpendContext(msg, c.aliases[0], () =>
+                    dispatchCommand(c.primaryCommand, msg, db, args));
             }
 
             return;
@@ -308,6 +314,8 @@ async function main() {
 
     await deleteTablesIfNeeded(db);
     await createTablesIfNeeded(db);
+
+    initTokenSpend(db);
 
     db.on('error', console.error);
 

@@ -46,6 +46,10 @@ import {
     handleYoutube,
     handleStats,
     handleUsersStats,
+    handleTokens,
+    handleUsersTokens,
+    handleCommandsTokens,
+    handleGlobalTokens,
     handleReady,
     handlePoll,
     handleMultiPoll,
@@ -742,6 +746,83 @@ const sharedCommands: Command[] = [
                     },
                 ],
             },
+        ],
+        relatedCommands: [
+            'tokens',
+        ],
+    },
+    {
+        aliases: ['tokens', 'tokenspend', 'spend'],
+        primaryCommand: {
+            argsFormat: Args.Split,
+            implementation: handleTokens,
+            description: 'View AI token spend statistics',
+            helpDescription: 'View the estimated token spend of AI commands, ' +
+                'broken down by command or by user. Costs are estimates based ' +
+                'on provider pricing and may not exactly match your bill.',
+            needDb: true,
+            examples: [
+                {
+                    name: `View token spend by user`,
+                    value: 'tokens',
+                },
+                {
+                    name: `View who spent the most on a specific command`,
+                    value: 'tokens claude',
+                },
+                {
+                    name: 'View token spend of a user, by command',
+                    value: 'tokens @bob',
+                },
+            ],
+        },
+        subCommands: [
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleUsersTokens,
+                description: 'View AI token spend by user',
+                aliases: ['users', 'user'],
+                needDb: true,
+                examples: [
+                    {
+                        name: `View token spend by user`,
+                        value: 'tokens users',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.DontNeed,
+                implementation: handleCommandsTokens,
+                description: 'View AI token spend by command',
+                aliases: ['commands', 'command'],
+                needDb: true,
+                examples: [
+                    {
+                        name: `View token spend by command`,
+                        value: 'tokens commands',
+                    },
+                ],
+            },
+            {
+                argsFormat: Args.Split,
+                implementation: handleGlobalTokens,
+                description: 'View global AI token spend by user, across all servers (bot admin only)',
+                aliases: ['global'],
+                needDb: true,
+                examples: [
+                    {
+                        name: `View global token spend by user`,
+                        value: 'tokens global',
+                    },
+                    {
+                        name: `View a user's global token spend, by command`,
+                        value: 'tokens global @bob',
+                    },
+                ],
+            },
+        ],
+        relatedCommands: [
+            'stats',
         ],
     },
     {

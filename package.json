@@ -16,7 +16,6 @@
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@types/bad-words": "^3.0.1",
-    "@types/fabric": "^4.2.2",
     "@types/imagemin": "^8.0.0",
     "@types/mathjs": "^6.0.0",
     "@types/node": "^16.6.1",
@@ -31,7 +30,6 @@
     "@solana/web3.js": "^1.91.3",
     "canvas": "npm:@napi-rs/canvas@^0.1.82",
     "discord.js": "^14.13.0",
-    "fabric": "^4.3.1",
     "form-data": "^4.0.4",
     "groq-sdk": "^0.9.1",
     "imagemin": "^8.0.1",
@@ -45,7 +43,10 @@
     "xml-js": "^1.6.11"
   },
   "resolutions": {
-    "canvas": "npm:@napi-rs/canvas@^0.1.82"
+    "canvas": "npm:@napi-rs/canvas@^0.1.82",
+    "tar": "^7.5.20",
+    "jpeg-js": "^0.4.4",
+    "**/request/form-data": "^2.5.6"
   },
   "packageManager": "yarn@1.22.22"
 }

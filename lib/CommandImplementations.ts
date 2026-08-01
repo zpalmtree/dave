@@ -47,6 +47,9 @@ import {
     getUsername,
     shuffleArray,
     formatLargeNumber,
+    formatCompactNumber,
+    formatUsdCost,
+    pluralize,
     roundToNPlaces,
     numberWithCommas,
     tryDeleteMessage,
@@ -1358,6 +1361,256 @@ export async function handleStats(msg: Message, args: string[], db: Database): P
             return {
                 name: command.command,
                 value: command.usage.toString(),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: commands,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+function formatTokenSpend(row: any): string {
+    const cost = formatUsdCost(Number(row.cost || 0));
+    const tokens = formatCompactNumber(Number(row.tokens || 0));
+    const calls = Number(row.calls || 0);
+
+    return `${cost}\n${tokens} tokens, ${calls} ${pluralize(calls, 'call')}`;
+}
+
+function formatTokenSpendTotal(rows: any[]): string {
+    const cost = rows.reduce((sum, row) => sum + Number(row.cost || 0), 0);
+    const tokens = rows.reduce((sum, row) => sum + Number(row.tokens || 0), 0);
+    const calls = rows.reduce((sum, row) => sum + Number(row.calls || 0), 0);
+
+    return `**Total: ${formatUsdCost(cost)}, ${formatCompactNumber(tokens)} tokens, ${calls} ${pluralize(calls, 'call')}**`;
+}
+
+const TOKEN_SPEND_SELECT = `
+    SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens,
+    SUM(cost) AS cost,
+    COUNT(*) AS calls`;
+
+async function handleUserTokens(msg: Message, db: Database, user: string, global: boolean = false): Promise<void> {
+    const username = await getUsername(user, msg.guild, msg.client);
+
+    const commands = await selectQuery(
+        `SELECT
+            command AS command,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            user_id = ?
+            ${global ? '' : 'AND guild_id = ?'}
+        GROUP BY
+            command
+        ORDER BY
+            cost DESC`,
+        db,
+        global
+            ? [ user ]
+            : [ user, msg.guild?.id ]
+    );
+
+    if (commands.length === 0) {
+        await msg.reply('User has not used any AI commands!');
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`${username}'s ${global ? 'global ' : ''}token spend`)
+        .setDescription(`Estimated AI token spend by command${global ? ', across all servers' : ''}\n\n${formatTokenSpendTotal(commands)}`);
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (command: any) => {
+            return {
+                name: command.command,
+                value: formatTokenSpend(command),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: commands,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+export async function handleUsersTokens(msg: Message, db: Database, global: boolean = false): Promise<void> {
+    const users = await selectQuery(
+        `SELECT
+            user_id AS user,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        ${global ? '' : 'WHERE guild_id = ?'}
+        GROUP BY
+            user_id
+        ORDER BY
+            cost DESC`,
+        db,
+        global
+            ? []
+            : [ msg.guild?.id ]
+    );
+
+    if (users.length === 0) {
+        await msg.reply('No token usage has been recorded yet!');
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`${global ? 'Global token' : 'Token'} spend by user`)
+        .setDescription(`Estimated AI token spend per user${global ? ', across all servers' : ''}\n\n${formatTokenSpendTotal(users)}`);
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: async (user: any) => {
+            return {
+                name: await getUsername(user.user, msg.guild, msg.client),
+                value: formatTokenSpend(user),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: users,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+export async function handleGlobalTokens(msg: Message, args: string[], db: Database): Promise<void> {
+    if (!canAccessCommand(msg, true)) {
+        return;
+    }
+
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    /* Get global token spend of a specific user, broken down by command */
+    if (mentionedUsers.length > 0) {
+        await handleUserTokens(msg, db, mentionedUsers[0].id, true);
+        return;
+    }
+
+    /* Get global token spend, broken down by user */
+    await handleUsersTokens(msg, db, true);
+}
+
+async function handleCommandTokens(msg: Message, db: Database, command: string): Promise<void> {
+    const users = await selectQuery(
+        `SELECT
+            user_id AS user,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            guild_id = ?
+            AND command = ?
+        GROUP BY
+            user_id
+        ORDER BY
+            cost DESC`,
+        db,
+        [ msg.guild?.id, command ]
+    );
+
+    if (users.length === 0) {
+        await msg.reply(`No token usage has been recorded for \`${config.prefix}${command}\`!`);
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`Token spend on ${config.prefix}${command}`)
+        .setDescription(`Estimated AI token spend on \`${config.prefix}${command}\` per user\n\n${formatTokenSpendTotal(users)}`);
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: async (user: any) => {
+            return {
+                name: await getUsername(user.user, msg.guild),
+                value: formatTokenSpend(user),
+                inline: true,
+            };
+        },
+        displayType: DisplayType.EmbedFieldData,
+        data: users,
+        embed,
+    });
+
+    await pages.sendMessage();
+}
+
+export async function handleTokens(msg: Message, args: string[], db: Database): Promise<void> {
+    const mentionedUsers = [...msg.mentions.users.values()];
+
+    /* Get token spend of a specific user, broken down by command */
+    if (mentionedUsers.length > 0) {
+        await handleUserTokens(msg, db, mentionedUsers[0].id);
+        return;
+    }
+
+    /* Get token spend on a specific command, broken down by user */
+    if (args.length > 0) {
+        for (const command of Commands) {
+            if (command.aliases.includes(args[0])) {
+                await handleCommandTokens(msg, db, command.aliases[0]);
+                return;
+            }
+        }
+
+        /* Not a real command, but usage may be recorded under it, e.g.
+         * autotranscribe */
+        await handleCommandTokens(msg, db, args[0]);
+        return;
+    }
+
+    /* Get overall token spend, broken down by user */
+    await handleUsersTokens(msg, db);
+}
+
+export async function handleCommandsTokens(msg: Message, db: Database): Promise<void> {
+    /* Get overall token spend, broken down by command */
+    const commands = await selectQuery(
+        `SELECT
+            command AS command,
+            ${TOKEN_SPEND_SELECT}
+        FROM
+            token_usage
+        WHERE
+            guild_id = ?
+        GROUP BY
+            command
+        ORDER BY
+            cost DESC`,
+        db,
+        [ msg.guild?.id ]
+    );
+
+    if (commands.length === 0) {
+        await msg.reply('No token usage has been recorded yet!');
+        return;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle('Token spend by command')
+        .setDescription(`Estimated AI token spend per command\n\n${formatTokenSpendTotal(commands)}`);
+
+    const pages = new Paginate({
+        sourceMessage: msg,
+        itemsPerPage: 9,
+        displayFunction: (command: any) => {
+            return {
+                name: command.command,
+                value: formatTokenSpend(command),
                 inline: true,
             };
         },
