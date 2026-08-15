@@ -15,7 +15,7 @@ import { restoreTimersForPlatform } from './Timer.js';
  *   - receive: a dial-out WebSocket at GET /api/bots/{id}/stream delivers
  *     message_create + reaction events in realtime (mirrors the Discord gateway).
  *   - act:     POST /api/bots/{id}/{token} with {action, ...} to send/edit/
- *     delete/react/typing.
+ *     delete/react.
  *   - upload:  multipart POST /api/bots/{id}/attachments?channel_id=… (bearer),
  *     then reference the returned /uploads/ url(s) in a send action's attachments.
  *   - read:    GET /api/bots/{id}/{messages|members|…} with Authorization: Bearer.
@@ -599,10 +599,6 @@ export class UproarChannel {
 
     public send(payload: SendPayload): Promise<UproarSentMessage> {
         return this.sendInternal(payload, null);
-    }
-
-    public async sendTyping(): Promise<void> {
-        await this.bot.exec({ action: 'typing', channel_id: this.id });
     }
 
     /* Uproar performs permission checks at the API boundary. This compatibility

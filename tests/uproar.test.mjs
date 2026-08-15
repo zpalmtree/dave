@@ -29,6 +29,7 @@ import {
     initTokenSpend,
     recordTokenSpend,
 } from '../dist/TokenSpend.js';
+import { trySendTyping } from '../dist/Typing.js';
 
 function closeDatabase(db) {
     return new Promise((resolve, reject) => {
@@ -76,6 +77,19 @@ test('Uproar message edits upload files and preserve attachment clearing', async
 test('Uproar channel exposes the permission preflight used by GIF commands', () => {
     const channel = new UproarChannel({}, 'channel-1');
     assert.equal(channel.permissionsFor(null).has(), true);
+});
+
+test('Uproar channels skip unsupported typing requests', async () => {
+    let executions = 0;
+    const channel = new UproarChannel({
+        exec: async () => {
+            executions += 1;
+        },
+    }, 'channel-1');
+
+    assert.equal('sendTyping' in channel, false);
+    await trySendTyping(channel);
+    assert.equal(executions, 0);
 });
 
 test('Uproar reaction add and remove events both act as button presses', () => {
