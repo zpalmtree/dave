@@ -7,10 +7,6 @@ interface Rates {
 }
 
 export class Exchange {
-    public constructor() {
-        this.init();
-    }
-
     public getCurrencies(): string[] {
         return Object.keys(this.rates);
     }
@@ -61,10 +57,16 @@ export class Exchange {
     private rates: Rates = {};
     private mapping: { [index: string]: string } = {};
     private initialized: boolean = false;
+    private started: boolean = false;
 
-    private async init() {
-        this.fetchCurrencyMapping();
-        this.fetchRates();
+    public start(): void {
+        if (this.started) {
+            return;
+        }
+
+        this.started = true;
+        void this.fetchCurrencyMapping();
+        void this.fetchRates();
     }
 
     private async fetchCurrencyMapping() {

@@ -27,6 +27,20 @@ import {
 
 import { config } from './Config.js';
 
+export type TimerPlatform = 'discord' | 'uproar';
+
+interface TimerChannel {
+    send: (payload: any) => unknown;
+}
+
+type TimerChannelResolver = (channelId: string) => Promise<TimerChannel | null>;
+
+export function getMessagePlatform(msg: Message): TimerPlatform {
+    return (msg as Message & { platform?: string }).platform === 'uproar'
+        ? 'uproar'
+        : 'discord';
+}
+
 export async function deleteTimer(msg: Message, args: string[], db: Database) {
     if (args.length === 0) {
         msg.reply('No timer ID given');
@@ -53,9 +67,10 @@ export async function deleteTimer(msg: Message, args: string[], db: Database) {
         WHERE
             id = ?
             AND channel_id = ?
-            AND user_id = ?`,
+            AND user_id = ?
+            AND platform = ?`,
         db,
-        [ args[0], msg.channel.id, msg.author.id ]
+        [ args[0], msg.channel.id, msg.author.id, getMessagePlatform(msg) ]
     );
 
     if (changes === 1) {
@@ -111,11 +126,17 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
 
     const timerID = await insertQuery(
         `INSERT INTO timer
-            (user_id, channel_id, message, expire_time)
+            (user_id, channel_id, platform, message, expire_time)
         VALUES
-            (?, ?, ?, ?)`,
+            (?, ?, ?, ?, ?)`,
         db,
-        [ msg.author.id, msg.channel.id, description, time.format('YYYY-MM-DD HH:mm:ss') ],
+        [
+            msg.author.id,
+            msg.channel.id,
+            getMessagePlatform(msg),
+            description,
+            time.format('YYYY-MM-DD HH:mm:ss'),
+        ],
     );
 
     sendTimer(
@@ -142,11 +163,12 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
             timer
         WHERE
             channel_id = ?
+            AND platform = ?
             AND expire_time >= STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
         ORDER BY
             expire_time ASC` ,
         db,
-        [ msg.channel.id ]
+        [ msg.channel.id, getMessagePlatform(msg) ]
     );
 
     if (!timers || timers.length === 0) {
@@ -199,43 +221,41 @@ function formatDiscordTimestamp(time: moment.Moment): string {
 }
 
 export async function restoreTimers(db: Database, client: Client) {
-    const timers = await selectQuery(
-        `SELECT
-            id,
-            user_id,
-            channel_id,
-            message,
-            expire_time
-        FROM
-            timer
-        WHERE
-            expire_time > STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
-        ORDER BY
-            expire_time ASC`,
+    await restoreTimersForPlatform(
         db,
+        'discord',
+        async (channelId) => await client.channels.fetch(channelId) as TextChannel | null,
     );
+}
 
-    if (!timers || timers.length === 0) {
+export async function restoreTimersForPlatform(
+    db: Database,
+    platform: TimerPlatform,
+    resolveChannel: TimerChannelResolver,
+): Promise<void> {
+    const timers = await getActiveTimersForPlatform(db, platform);
+
+    if (timers.length === 0) {
         return;
     }
 
-    const channels = new Map<string, TextChannel>();
+    const channels = new Map<string, TimerChannel>();
 
     for (const timer of timers) {
         let channel = channels.get(timer.channel_id);
 
         if (channel === undefined) {
             try {
-                channel = await client.channels.fetch(timer.channel_id) as TextChannel;
+                channel = await resolveChannel(timer.channel_id) ?? undefined;
 
                 if (!channel) {
-                    console.log(`Failed to get channel ${timer.channel_id}`);
+                    console.log(`Failed to get ${platform} channel ${timer.channel_id}`);
                     continue;
                 }
 
                 channels.set(timer.channel_id, channel);
             } catch (err) {
-                console.log(`Failed to get channel ${timer.channel_id}`);
+                console.log(`Failed to get ${platform} channel ${timer.channel_id}`);
                 continue;
             }
         }
@@ -256,8 +276,31 @@ export async function restoreTimers(db: Database, client: Client) {
     }
 }
 
+export async function getActiveTimersForPlatform(
+    db: Database,
+    platform: TimerPlatform,
+): Promise<any[]> {
+    return selectQuery(
+        `SELECT
+            id,
+            user_id,
+            channel_id,
+            message,
+            expire_time
+        FROM
+            timer
+        WHERE
+            expire_time > STRFTIME('%Y-%m-%d %H:%M:%S', 'NOW')
+            AND platform = ?
+        ORDER BY
+            expire_time ASC`,
+        db,
+        [ platform ],
+    );
+}
+
 export function sendTimer(
-    channel: TextChannel,
+    channel: TimerChannel,
     milliseconds: number,
     timerID: number,
     userID: string,
@@ -277,11 +320,14 @@ export function sendTimer(
     const mention = `<@${userID}>,`;
 
     const timeoutID = setTimeout(() => {
-        if (description) {
-            channel.send(`${mention} Your ${description} timer has elapsed.`);
-        } else {
-            channel.send(`${mention} Your timer has elapsed.`);
-        }
+        const content = description
+            ? `${mention} Your ${description} timer has elapsed.`
+            : `${mention} Your timer has elapsed.`;
+
+        Promise.resolve(channel.send(content)).catch((err) => {
+            console.error(`Failed to send timer #${timerID}: ${(err as any)?.stack ?? err}`);
+        });
+        runningTimers.delete(timerID);
     }, milliseconds);
 
     runningTimers.set(timerID, timeoutID);
