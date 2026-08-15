@@ -154,9 +154,21 @@ export async function createTablesIfNeeded(db: Database) {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id VARCHAR(255) NOT NULL,
         channel_id VARCHAR(255) NOT NULL,
+        platform VARCHAR(16) NOT NULL DEFAULT 'discord',
         message VARCHAR(2000),
         expire_time TIMESTAMP
     )`, db);
+
+    /* Existing private databases predate multi-platform timers. SQLite does
+     * not apply new columns from CREATE TABLE IF NOT EXISTS, so migrate them
+     * in place and treat all existing rows as Discord timers. */
+    const timerColumns = await selectQuery(`PRAGMA table_info(timer)`, db);
+    if (!timerColumns.some((column) => column.name === 'platform')) {
+        await executeQuery(
+            `ALTER TABLE timer ADD COLUMN platform VARCHAR(16) NOT NULL DEFAULT 'discord'`,
+            db,
+        );
+    }
 
     /* This table stores every time a command is called for statistics and 
      * logging purposes */
