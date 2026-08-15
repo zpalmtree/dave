@@ -62,6 +62,11 @@ interface UproarConfig {
     uproarBotToken?: string;
 }
 
+interface MemberCacheEntry {
+    expiresAt: number;
+    members: Promise<any[]>;
+}
+
 interface NormalizedSendPayload {
     content: string;
     embeds?: any[];
@@ -156,6 +161,8 @@ function makeAuthor(baseUrl: string, data: UproarMessageData): UproarUser {
 }
 
 export class UproarClient {
+    private static readonly memberCacheTtlMs = 5 * 60 * 1000;
+
     private readonly baseUrl: string;
     private readonly botId: string;
     private readonly token: string;
@@ -166,7 +173,7 @@ export class UproarClient {
     private botUserId: string | null = null;
 
     private reactionCollectors = new Map<string, Set<UproarReactionCollector>>();
-    private memberCache = new Map<string, Promise<any[]>>();
+    private memberCache = new Map<string, MemberCacheEntry>();
 
     constructor(db: Database) {
         const uproarConfig = getUproarConfig();
@@ -317,14 +324,25 @@ export class UproarClient {
     /* --- members / guild resolution --- */
 
     private serverMembers(serverId: string): Promise<any[]> {
-        let cached = this.memberCache.get(serverId);
-        if (!cached) {
-            cached = this.readGet(`/members?server_id=${encodeURIComponent(serverId)}`)
-                .then((m) => (Array.isArray(m) ? m : []))
-                .catch(() => []);
-            this.memberCache.set(serverId, cached);
+        const cached = this.memberCache.get(serverId);
+        if (cached && cached.expiresAt > Date.now()) {
+            return cached.members;
         }
-        return cached;
+
+        const members = this.readGet(`/members?server_id=${encodeURIComponent(serverId)}`)
+            .then((m) => (Array.isArray(m) ? m : []))
+            .catch(() => {
+                if (this.memberCache.get(serverId)?.members === members) {
+                    this.memberCache.delete(serverId);
+                }
+                return [];
+            });
+
+        this.memberCache.set(serverId, {
+            expiresAt: Date.now() + UproarClient.memberCacheTtlMs,
+            members,
+        });
+        return members;
     }
 
     public async fetchMember(serverId: string, userId: string): Promise<any | undefined> {
@@ -688,10 +706,16 @@ export class UproarReactionCollector extends EventEmitter {
     }
 
     public handleRemove(reaction: any, user: any): void {
-        if (this.ended || !this.options?.dispose) {
+        if (this.ended) {
             return;
         }
-        this.emit('remove', reaction, user);
+
+        /* Uproar bots cannot remove another user's reaction, so reactions act
+         * as toggle buttons: adding and removing the same reaction must both
+         * trigger the command. This preserves repeated pagination and poll
+         * interactions without requiring Discord's remove-user-reaction API. */
+        this.collected.delete(`${reaction.emoji.name}:${user.id}`);
+        this.handleAdd(reaction, user);
     }
 
     public stop(reason: string = 'user'): void {

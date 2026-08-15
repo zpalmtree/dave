@@ -37,6 +37,7 @@ import {
 } from './UserChannelRestrictions.js';
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
 import { startUproar } from './Uproar.js';
+import { exchangeService } from './Exchange.js';
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
     if (!msg.reference?.messageId) {
@@ -177,6 +178,7 @@ async function main() {
     await createTablesIfNeeded(db);
 
     initTokenSpend(db);
+    exchangeService.start();
 
     db.on('error', console.error);
 

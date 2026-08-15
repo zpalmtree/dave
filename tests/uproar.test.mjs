@@ -19,6 +19,8 @@ import {
 } from '../dist/Timer.js';
 import {
     UproarChannel,
+    UproarClient,
+    UproarReactionCollector,
     UproarSentMessage,
 } from '../dist/Uproar.js';
 import { Commands } from '../dist/CommandDeclarations.js';
@@ -74,6 +76,58 @@ test('Uproar message edits upload files and preserve attachment clearing', async
 test('Uproar channel exposes the permission preflight used by GIF commands', () => {
     const channel = new UproarChannel({}, 'channel-1');
     assert.equal(channel.permissionsFor(null).has(), true);
+});
+
+test('Uproar reaction add and remove events both act as button presses', () => {
+    const bot = {
+        unregisterCollector: () => {},
+    };
+    const collector = new UproarReactionCollector(bot, 'message-1', {
+        filter: (reaction, user) => reaction.emoji.name === '➡️' && !user.bot,
+        dispose: true,
+    });
+    const reactions = [];
+    let removeEvents = 0;
+    const reaction = { emoji: { name: '➡️' } };
+    const user = { id: 'user-1', bot: false };
+
+    collector.on('collect', (collectedReaction, collectedUser) => {
+        reactions.push(`${collectedReaction.emoji.name}:${collectedUser.id}`);
+    });
+    collector.on('remove', () => {
+        removeEvents += 1;
+    });
+
+    collector.handleAdd(reaction, user);
+    collector.handleRemove(reaction, user);
+    collector.stop();
+
+    assert.deepEqual(reactions, ['➡️:user-1', '➡️:user-1']);
+    assert.equal(removeEvents, 0);
+});
+
+test('Uproar member lookup retries after a transient read failure', async () => {
+    const client = new UproarClient({});
+    let attempts = 0;
+
+    client.readGet = async () => {
+        attempts += 1;
+        if (attempts === 1) {
+            throw new Error('temporary failure');
+        }
+        return [{
+            user_id: 'user-1',
+            display_name: 'Fresh Member',
+            avatar_url: '/avatars/user-1.png',
+        }];
+    };
+
+    assert.equal(await client.fetchMember('server-1', 'user-1'), undefined);
+    const member = await client.fetchMember('server-1', 'user-1');
+
+    assert.equal(attempts, 2);
+    assert.equal(member.displayName, 'Fresh Member');
+    assert.equal(member.displayAvatarURL(), 'https://uproar.chat/avatars/user-1.png');
 });
 
 test('shared message policy applies development and user restrictions', () => {
