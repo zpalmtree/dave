@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
+import { EmbedBuilder } from 'discord.js';
 import sqlite3 from 'sqlite3';
 
 import { config } from '../dist/Config.js';
@@ -24,6 +26,7 @@ import {
     UproarSentMessage,
 } from '../dist/Uproar.js';
 import { Commands } from '../dist/CommandDeclarations.js';
+import { DisplayType, Paginate } from '../dist/Paginate.js';
 import { Args } from '../dist/Types.js';
 import {
     initTokenSpend,
@@ -90,6 +93,60 @@ test('Uproar channels skip unsupported typing requests', async () => {
     assert.equal('sendTyping' in channel, false);
     await trySendTyping(channel);
     assert.equal(executions, 0);
+});
+
+test('Uproar pagination uses live-updating content and stably ordered controls', async () => {
+    const collector = new EventEmitter();
+    const reactions = [];
+    const edits = [];
+    let sentPayload;
+    const sentMessage = {
+        id: 'message-1',
+        createReactionCollector: () => collector,
+        react: async (emoji) => {
+            reactions.push(emoji);
+        },
+        edit: async (payload) => {
+            edits.push(payload);
+        },
+    };
+    const sourceMessage = {
+        platform: 'uproar',
+        channel: {
+            send: async (payload) => {
+                sentPayload = payload;
+                return sentMessage;
+            },
+        },
+    };
+    const pages = new Paginate({
+        sourceMessage,
+        itemsPerPage: 1,
+        displayType: DisplayType.EmbedFieldData,
+        displayFunction: (field) => field,
+        data: [
+            { name: 'First', value: 'Alpha' },
+            { name: 'Second', value: 'Beta' },
+        ],
+        embed: new EmbedBuilder().setTitle('Uproar pages'),
+    });
+
+    await pages.sendMessage();
+
+    assert.equal('embeds' in sentPayload, false);
+    assert.match(sentPayload.content, /\*\*Uproar pages\*\*/);
+    assert.match(sentPayload.content, /Page 1 of 2/);
+    assert.deepEqual(reactions, ['◀️', '➡️', '🔒', '🗑️']);
+
+    collector.emit('collect', {
+        emoji: { name: '➡️' },
+        users: { remove: async () => {} },
+    }, { id: 'user-1', bot: false });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(edits.length, 1);
+    assert.match(edits[0].content, /\*\*Second\*\*\nBeta/);
+    assert.match(edits[0].content, /Page 2 of 2/);
 });
 
 test('Uproar reaction add and remove events both act as button presses', () => {

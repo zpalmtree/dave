@@ -89,6 +89,41 @@ export class Paginate<T> {
 
     private permittedUsers: string[] | undefined;
 
+    private isUproar(): boolean {
+        return (this.sourceMessage as Message & { platform?: string }).platform === 'uproar';
+    }
+
+    private getUproarEmbedContent(): string {
+        const embed = this.embed!.toJSON();
+        const parts: string[] = [];
+
+        if (embed.author?.name) {
+            parts.push(`**${embed.author.name}**`);
+        }
+
+        if (embed.title) {
+            parts.push(embed.url ? `**[${embed.title}](${embed.url})**` : `**${embed.title}**`);
+        }
+
+        if (embed.description) {
+            parts.push(embed.description);
+        }
+
+        for (const field of embed.fields || []) {
+            parts.push(`**${field.name}**\n${field.value}`);
+        }
+
+        if (embed.image?.url) {
+            parts.push(embed.image.url);
+        }
+
+        if (embed.footer?.text) {
+            parts.push(`_${embed.footer.text}_`);
+        }
+
+        return parts.join('\n\n');
+    }
+
     public constructor(options: any) {
         const {
             sourceMessage,
@@ -201,9 +236,9 @@ export class Paginate<T> {
                     }
                 }
 
-                return {
-                    embeds: [this.embed!],
-                };
+                return this.isUproar()
+                    ? { content: this.getUproarEmbedContent() }
+                    : { embeds: [this.embed!] };
             }
             case DisplayType.EmbedData: {
                 for (const item of items) {
@@ -211,9 +246,9 @@ export class Paginate<T> {
                     await f(item, this.embed!);
                 }
 
-                return {
-                    embeds: [this.embed!],
-                };
+                return this.isUproar()
+                    ? { content: this.getUproarEmbedContent() }
+                    : { embeds: [this.embed!] };
             }
             case DisplayType.MessageData: {
                 const f = this.displayFunction.bind(this);
@@ -230,16 +265,19 @@ export class Paginate<T> {
 
     public async sendMessage(): Promise<Message> {
         const shouldPaginate = this.data.length > this.itemsPerPage;
+        const controls = this.isUproar()
+            ? { remove: '🗑️', previous: '◀️', next: '➡️', lock: '🔒' }
+            : { remove: '❌', previous: '⬅️', next: '➡️', lock: '🔒' };
 
         this.sentMessage = await (this.sourceMessage.channel as TextChannel).send({
             ...await this.getPageContent(),
         });
 
-        let reactions = ['❌'].concat(this.customReactions || []);
+        let reactions = [controls.remove].concat(this.customReactions || []);
 
         /* Only enable pagination and locking if we need multiple pages. */
         if (shouldPaginate) {
-            reactions = reactions.concat(['⬅️', '➡️', '🔒']);
+            reactions = reactions.concat([controls.previous, controls.next, controls.lock]);
         }
 
         this.collector = this.sentMessage!.createReactionCollector({
@@ -264,19 +302,19 @@ export class Paginate<T> {
             }
 
             switch (reaction.emoji.name) {
-                case '⬅️': {
+                case controls.previous: {
                     this.changePage(-1, reaction, user);
                     break;
                 }
-                case '➡️': {
+                case controls.next: {
                     this.changePage(1, reaction, user);
                     break;
                 }
-                case '🔒': {
+                case controls.lock: {
                     this.lockEmbed(reaction, user);
                     break;
                 }
-                case '❌': {
+                case controls.remove: {
                     this.removeEmbed(reaction, user);
                     break;
                 }
@@ -298,7 +336,7 @@ export class Paginate<T> {
             }
 
             switch (reaction.emoji.name) {
-                case '🔒': {
+                case controls.lock: {
                     this.lockEmbed(reaction, user);
                     break;
                 }
@@ -313,14 +351,12 @@ export class Paginate<T> {
         }
 
         if (shouldPaginate) {
-            await tryReactMessage(this.sentMessage!, '⬅️');
-            await tryReactMessage(this.sentMessage!, '➡️');
-
-            /* Not essential to be ordered or to block execution, lets do these non async */
-            tryReactMessage(this.sentMessage!, '🔒');
+            await tryReactMessage(this.sentMessage!, controls.previous);
+            await tryReactMessage(this.sentMessage!, controls.next);
+            await tryReactMessage(this.sentMessage!, controls.lock);
         }
 
-        tryReactMessage(this.sentMessage!, '❌');
+        await tryReactMessage(this.sentMessage!, controls.remove);
 
         return this.sentMessage!;
     }
