@@ -587,6 +587,7 @@ export function monthDurationToSeconds(months: string): number {
 export function getImageURLsFromMessage(
     msg: Message,
     repliedMessage?: Message,
+    options: { includeEmbeds?: boolean } = {},
 ): string[] {
     const urlSet = new Set<string>();
     const supportedExtensions = ['png', 'gif', 'jpg', 'jpeg', 'webp'];
@@ -605,11 +606,14 @@ export function getImageURLsFromMessage(
             }
         });
 
-        // Check embeds
-        message.embeds.forEach((embed) => {
-            if (embed.image) urlSet.add(embed.image.url);
-            if (embed.thumbnail) urlSet.add(embed.thumbnail.url);
-        });
+        // Link previews are useful for image-only commands, but callers that
+        // need browsing should not mistake their artwork for an attached image.
+        if (options.includeEmbeds !== false) {
+            message.embeds.forEach((embed) => {
+                if (embed.image) urlSet.add(embed.image.url);
+                if (embed.thumbnail) urlSet.add(embed.thumbnail.url);
+            });
+        }
 
         // Extract URLs from content
         const { validURLs } = extractURLsAndValidateExtensions(
