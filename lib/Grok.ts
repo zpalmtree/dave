@@ -145,7 +145,13 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             }
         }
 
-        imageURLs = getImageURLsFromMessage(msg, repliedMessage);
+        /* Discord turns links such as X posts into embeds with poster images.
+         * Treating those previews as user-provided images switches xAI to the
+         * non-agentic chat endpoint and prevents the model from searching the
+         * linked post. Explicit attachments and direct image URLs still work. */
+        imageURLs = getImageURLsFromMessage(msg, repliedMessage, {
+            includeEmbeds: false,
+        });
     }
 
     // Build conversation context from previous messages
