@@ -31,7 +31,11 @@ test('detects the downloaded image format instead of trusting the URL extension'
     const image = await downloadImageForUpload(
         'https://images.example/result.jpg?width=1280',
         100,
-        async () => response(webp),
+        async (_url, options) => {
+            assert.doesNotMatch(options.headers.Accept, /avif/);
+            assert.match(options.headers.Accept, /webp/);
+            return response(webp);
+        },
     );
 
     assert.equal(image?.extension, 'webp');
