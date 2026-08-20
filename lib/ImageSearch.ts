@@ -228,11 +228,32 @@ export async function downloadSearchResultImage(
         return original;
     }
 
+    const proxiedUrl = getImageProxyUrl(result.link);
+    if (proxiedUrl) {
+        const proxied = await downloadImageForUpload(proxiedUrl, undefined, fetchImage);
+        if (proxied) {
+            return proxied;
+        }
+    }
+
     if (result.thumbnailLink && result.thumbnailLink !== result.link) {
         return downloadImageForUpload(result.thumbnailLink, undefined, fetchImage);
     }
 
     return undefined;
+}
+
+function getImageProxyUrl(originalUrl: string): string | undefined {
+    if (!isSafeRemoteImageUrl(originalUrl)) {
+        return undefined;
+    }
+
+    const hostname = new URL(originalUrl).hostname.toLowerCase();
+    if (hostname === 'wsrv.nl' || hostname.endsWith('.weserv.nl')) {
+        return undefined;
+    }
+
+    return `https://wsrv.nl/?url=${encodeURIComponent(originalUrl)}&output=webp`;
 }
 
 export function isUsableImageResult(item: any): boolean {
