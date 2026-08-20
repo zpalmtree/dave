@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    createPublicImageLookup,
     downloadImageForUpload,
     downloadSearchResultImage,
     isUsableImageResult,
@@ -60,6 +61,23 @@ test('refuses private image hosts without making a request', async () => {
 
     assert.equal(image, undefined);
     assert.equal(requested, false);
+});
+
+test('returns the lookup shape requested by Node HTTP clients', async () => {
+    const addresses = [
+        { address: '8.8.8.8', family: 4 },
+        { address: '2001:4860:4860::8888', family: 6 },
+    ];
+    const lookup = createPublicImageLookup((_hostname, options, callback) => {
+        assert.equal(options.all, true);
+        callback(null, addresses);
+    });
+    const invoke = (options) => new Promise((resolve) => {
+        lookup('images.example', options, (...args) => resolve(args));
+    });
+
+    assert.deepEqual(await invoke({ all: false }), [null, '8.8.8.8', 4]);
+    assert.deepEqual(await invoke({ all: true }), [null, addresses]);
 });
 
 test('falls back to the Google thumbnail when the original cannot be downloaded', async () => {
