@@ -1040,7 +1040,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleSummarize,
-            description: 'Get a summary of the last 24 hours in this channel',
+            description: 'Get a summary of recent conversation in this channel',
         },
         commandGates: [
             slugUserGate,
