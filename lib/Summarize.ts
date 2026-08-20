@@ -23,6 +23,8 @@ const LONG_SUMMARY_MESSAGE_COUNT = 1500;
 /* 16k context length */
 const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(16385 * 0.75);
 
+const EXCLUDED_SUMMARY_AUTHOR_ID = '446154284514541579';
+
 const cachedMessages = new Map<string, CachedMessage[]>();
 const fetchedHistoryLimits = new Map<string, number>();
 
@@ -80,7 +82,7 @@ export async function fetchRecentMessagesForSummarization(
     return fetchedMessages
         .filter((storedMessage) =>
             storedMessage.author.id !== msg.client.user?.id
-            && storedMessage.author.id !== config.clientId
+            && storedMessage.author.id !== EXCLUDED_SUMMARY_AUTHOR_ID
             && !storedMessage.content.startsWith(config.prefix)
         )
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
