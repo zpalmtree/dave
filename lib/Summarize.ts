@@ -17,7 +17,7 @@ export interface CachedMessage {
     reply?: string;
 }
 
-export const SUMMARY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const SUMMARY_WINDOW_MS = 12 * 60 * 60 * 1000;
 export const SUMMARY_OUTPUT_MAX_LENGTH = 1900;
 
 const MAX_SUMMARIZE_MESSAGE_COUNT = 5000;
@@ -266,7 +266,7 @@ export async function summarizeMessages(
 }
 
 export async function handleSummarize(msg: Message): Promise<void> {
-    const statusMessage = await msg.reply(`Generating a summary of the last 24 hours, please wait...`);
+    const statusMessage = await msg.reply(`Generating summary, please wait...`);
 
     const { error, result } = await summarizeMessages(
         msg,

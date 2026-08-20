@@ -47,7 +47,7 @@ function successfulGrokResponse(content) {
     };
 }
 
-test('fetches messages back to the 24-hour cutoff and returns chronological history', async () => {
+test('fetches messages back to the 12-hour cutoff and returns chronological history', async () => {
     const commandTimestamp = 2 * SUMMARY_WINDOW_MS;
     const windowStartTimestamp = commandTimestamp - SUMMARY_WINDOW_MS;
     const batches = [
@@ -180,7 +180,7 @@ test('hard-limits summaries to one Discord message at a readable boundary', () =
     assert.ok(!fitted.endsWith(' …'));
 });
 
-test('summarizes fetched history from the preceding 24 hours when the cache is cold', async () => {
+test('summarizes fetched history from the preceding 12 hours when the cache is cold', async () => {
     const commandTimestamp = 2 * SUMMARY_WINDOW_MS;
     const history = [makeMessage({
         id: '10',
@@ -217,7 +217,8 @@ test('summarizes fetched history from the preceding 24 hours when the cache is c
 
         assert.deepEqual(response, { result: 'summary result' });
         assert.match(requestBody.messages[1].content, /UTC.*<@person>: historical chat/);
-        assert.match(requestBody.messages[0].content, /preceding 24 hours/);
+        assert.doesNotMatch(requestBody.messages[0].content, /\b(?:12|24)[ -]?hours?\b/i);
+        assert.match(requestBody.messages[0].content, /Do not mention or refer to the duration/);
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -313,7 +314,7 @@ test('edits the progress reply into one final Discord message', async () => {
     try {
         await handleSummarize(msg);
 
-        assert.deepEqual(replies, ['Generating a summary of the last 24 hours, please wait...']);
+        assert.deepEqual(replies, ['Generating summary, please wait...']);
         assert.deepEqual(edits, ['concise final summary']);
     } finally {
         globalThis.fetch = originalFetch;
