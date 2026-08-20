@@ -108,7 +108,6 @@ import {
 
 import {
     handleSummarize,
-    handleLongSummarize,
 } from './Summarize.js';
 
 import { exchangeService } from './Exchange.js';
@@ -1037,11 +1036,11 @@ const sharedCommands: Command[] = [
         },
     },
     {
-        aliases: ['summary', 'summarize', 'longsummary'],
+        aliases: ['summary'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
-            implementation: handleLongSummarize,
-            description: 'Get a summary of recent conversation in this channel',
+            implementation: handleSummarize,
+            description: 'Get a summary of the last 24 hours in this channel',
         },
         commandGates: [
             slugUserGate,
