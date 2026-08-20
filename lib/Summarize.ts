@@ -1,5 +1,6 @@
 import { Message, Guild } from 'discord.js';
 
+import { config } from './Config.js';
 import { grokSummarize } from './Grok.js';
 import { getUsername, splitMessage } from './Utilities.js';
 
@@ -23,6 +24,69 @@ const LONG_SUMMARY_MESSAGE_COUNT = 1500;
 const LONG_SUMMARY_MAX_INPUT_LENGTH = Math.floor(16385 * 0.75);
 
 const cachedMessages = new Map<string, CachedMessage[]>();
+const fetchedHistoryLimits = new Map<string, number>();
+
+function toCachedMessage(msg: Message): CachedMessage | undefined {
+    let content = msg.content.trim();
+
+    if (msg.attachments.size) {
+        content += '\n' + [...msg.attachments.values()].map((a) => a.url).join(' ');
+    }
+
+    if (content === '') {
+        return undefined;
+    }
+
+    return {
+        content,
+        author: msg.author.id,
+        id: msg.id,
+        reply: msg.reference?.messageId || undefined,
+    };
+}
+
+export async function fetchRecentMessagesForSummarization(
+    msg: Message,
+    messageCount: number,
+): Promise<CachedMessage[]> {
+    const fetchedMessages: Message[] = [];
+    let before = msg.id;
+
+    while (fetchedMessages.length < messageCount) {
+        const limit = Math.min(100, messageCount - fetchedMessages.length);
+        const batch = await msg.channel.messages.fetch({
+            before,
+            cache: false,
+            limit,
+        });
+
+        if (batch.size === 0) {
+            break;
+        }
+
+        const batchMessages = [...batch.values()];
+        fetchedMessages.push(...batchMessages);
+
+        const oldestMessage = batchMessages.reduce((oldest, candidate) =>
+            candidate.createdTimestamp < oldest.createdTimestamp ? candidate : oldest
+        );
+        before = oldestMessage.id;
+
+        if (batch.size < limit) {
+            break;
+        }
+    }
+
+    return fetchedMessages
+        .filter((storedMessage) =>
+            storedMessage.author.id !== msg.client.user?.id
+            && storedMessage.author.id !== config.clientId
+            && !storedMessage.content.startsWith(config.prefix)
+        )
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+        .map(toCachedMessage)
+        .filter((storedMessage): storedMessage is CachedMessage => storedMessage !== undefined);
+}
 
 export async function summarizeMessages(
     msg: Message,
@@ -32,13 +96,23 @@ export async function summarizeMessages(
     messageCount: number,
     maxLength: number) {
 
-    const previousMessages = cachedMessages.get(channel) || [];
+    let previousMessages = cachedMessages.get(channel) || [];
+
+    if ((fetchedHistoryLimits.get(channel) || 0) < messageCount) {
+        try {
+            previousMessages = await fetchRecentMessagesForSummarization(msg, messageCount);
+            cachedMessages.set(channel, previousMessages);
+            fetchedHistoryLimits.set(channel, messageCount);
+        } catch (err) {
+            console.error(`Failed to fetch message history for summary in ${channel}:`, err);
+        }
+    }
 
     if (previousMessages.length === 0) {
         return {
-            error: `No messages cached for this channel. Bot may have recently restarted.`,
+            error: `No recent messages could be loaded for this channel.`,
             result: undefined,
-        }
+        };
     }
 
     /* Get the messageCount newest messages */
@@ -148,27 +222,17 @@ export async function cacheMessageForSummarization(msg: Message): Promise<void> 
     const channel = msg.channel.id;
 
     const existingMessages = cachedMessages.get(channel) || [];
+    const storedMessage = toCachedMessage(msg);
 
-    if (existingMessages.length > MAX_SUMMARIZE_MESSAGE_COUNT) {
-        existingMessages.shift();
-    }
-
-    let content = msg.content.trim();
-
-    if (msg.attachments.size) {
-        content += '\n' + [...msg.attachments.values()].map((a) => a.url).join(' ');
-    }
-
-    if (content === '') {
+    if (!storedMessage) {
         return;
     }
 
-    existingMessages.push({
-        content,
-        author: msg.author.id,
-        id: msg.id,
-        reply: msg?.reference?.messageId || undefined,
-    });
+    existingMessages.push(storedMessage);
+
+    while (existingMessages.length > MAX_SUMMARIZE_MESSAGE_COUNT) {
+        existingMessages.shift();
+    }
 
     cachedMessages.set(channel, existingMessages);
 }
