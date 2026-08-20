@@ -81,6 +81,11 @@ import {
 } from './Paginate.js';
 
 import {
+    downloadSearchResultImage,
+    isUsableImageResult,
+} from './ImageSearch.js';
+
+import {
     Commands,
 } from './CommandDeclarations.js';
 
@@ -1128,10 +1133,24 @@ export async function handleImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
-    const displayImage = (googleItem: any, embed: EmbedBuilder) => {
+    const displayImage = async (googleItem: any, embed: EmbedBuilder) => {
         embed.setTitle(googleItem.title);
-        embed.setImage(googleItem.link);
+        embed.setURL(googleItem.url);
         embed.setDescription(googleItem.displayLink);
+
+        const image = await downloadSearchResultImage(googleItem);
+        if (!image) {
+            embed.setImage(googleItem.thumbnailLink);
+            return { attachments: [] };
+        }
+
+        const filename = `image-search.${image.extension}`;
+        embed.setImage(`attachment://${filename}`);
+
+        return {
+            attachments: [],
+            files: [new AttachmentBuilder(image.data, { name: filename })],
+        };
     };
 
     const embed = new EmbedBuilder();
@@ -1239,36 +1258,18 @@ async function getGoogleImageResults(query: string): Promise<any[]> {
         return [];
     }
 
-    // Filter for valid image URLs and HTTPS
+    // Keep Google's thumbnail as a fast fallback when the source blocks hotlinks.
     return data.items
-        .filter((item: any) => {
-            try {
-                const url = new URL(item.link);
-                return url.protocol === 'https:' && isValidImageUrl(item.link);
-            } catch {
-                return false;
-            }
-        })
+        .filter(isUsableImageResult)
         .map((item: any) => ({
             title: item.title,
             link: item.link,
             image: item.link,
             url: item.image?.contextLink || item.link,
             displayLink: item.displayLink,
+            thumbnailLink: item.image.thumbnailLink,
+            byteSize: item.image.byteSize,
         }));
-}
-
-// Helper function to validate image URLs
-function isValidImageUrl(url: string): boolean {
-    const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
-    const urlObj = new URL(url);
-    const pathname = urlObj.pathname.toLowerCase();
-    
-    return validExtensions.some(ext => 
-        pathname.endsWith(`.${ext}`) || 
-        pathname.includes(`.${ext}?`) ||
-        pathname.includes(`.${ext}#`)
-    ) || url.includes('googleusercontent.com') || url.includes('imgur.com');
 }
 
 async function handleUserStats(msg: Message, db: Database, user: string): Promise<void> {
