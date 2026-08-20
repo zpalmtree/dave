@@ -113,7 +113,7 @@ export class Paginate<T> {
             parts.push(`**${field.name}**\n${field.value}`);
         }
 
-        if (embed.image?.url) {
+        if (embed.image?.url && !embed.image.url.startsWith('attachment://')) {
             parts.push(embed.image.url);
         }
 
@@ -241,14 +241,20 @@ export class Paginate<T> {
                     : { embeds: [this.embed!] };
             }
             case DisplayType.EmbedData: {
+                let extraPayload: Record<string, unknown> = {};
+
                 for (const item of items) {
                     const f = this.displayFunction.bind(this);
-                    await f(item, this.embed!);
+                    const displayResult = await f(item, this.embed!);
+
+                    if (displayResult && typeof displayResult === 'object') {
+                        extraPayload = { ...extraPayload, ...displayResult };
+                    }
                 }
 
                 return this.isUproar()
-                    ? { content: this.getUproarEmbedContent() }
-                    : { embeds: [this.embed!] };
+                    ? { content: this.getUproarEmbedContent(), ...extraPayload }
+                    : { embeds: [this.embed!], ...extraPayload };
             }
             case DisplayType.MessageData: {
                 const f = this.displayFunction.bind(this);
