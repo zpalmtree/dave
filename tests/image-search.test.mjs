@@ -84,7 +84,7 @@ test('returns the lookup shape requested by Node HTTP clients', async () => {
     assert.deepEqual(await invoke({ all: true }), [null, addresses]);
 });
 
-test('falls back to the Google thumbnail when the original cannot be downloaded', async () => {
+test('uses the full-size image proxy before the Google thumbnail', async () => {
     const requested = [];
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
     const image = await downloadSearchResultImage({
@@ -95,15 +95,35 @@ test('falls back to the Google thumbnail when the original cannot be downloaded'
         thumbnailLink: 'https://encrypted-tbn0.gstatic.com/thumbnail',
     }, async (url) => {
         requested.push(url);
-        return url.includes('blocked')
-            ? response(Buffer.from('denied'))
-            : response(jpeg, { url });
+        return url.startsWith('https://wsrv.nl/')
+            ? response(jpeg, { url })
+            : response(Buffer.from('denied'));
     });
 
-    assert.deepEqual(requested, [
-        'https://images.example/blocked.jpg',
-        'https://encrypted-tbn0.gstatic.com/thumbnail',
-    ]);
+    assert.equal(requested[0], 'https://images.example/blocked.jpg');
+    assert.match(requested[1], /^https:\/\/wsrv\.nl\/\?url=/);
+    assert.equal(requested.length, 2);
+    assert.equal(image?.extension, 'jpg');
+});
+
+test('uses the Google thumbnail when both full-size sources fail', async () => {
+    const requested = [];
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+    const image = await downloadSearchResultImage({
+        title: 'Result',
+        link: 'https://images.example/blocked.jpg',
+        url: 'https://example.com/page',
+        displayLink: 'example.com',
+        thumbnailLink: 'https://encrypted-tbn0.gstatic.com/thumbnail',
+    }, async (url) => {
+        requested.push(url);
+        return url.includes('gstatic.com')
+            ? response(jpeg, { url })
+            : response(Buffer.from('denied'));
+    });
+
+    assert.equal(requested.length, 3);
+    assert.equal(requested[2], 'https://encrypted-tbn0.gstatic.com/thumbnail');
     assert.equal(image?.extension, 'jpg');
 });
 
