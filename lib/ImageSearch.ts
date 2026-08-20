@@ -155,7 +155,7 @@ async function fetchWithSafeRedirects(
         const response = await fetchImage(currentUrl, {
             agent: publicImageAgent,
             headers: {
-                Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                Accept: 'image/webp,image/png,image/jpeg,image/gif,image/bmp;q=0.9,*/*;q=0.1',
                 'User-Agent': 'Mozilla/5.0',
             },
             redirect: 'manual',
