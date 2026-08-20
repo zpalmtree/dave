@@ -8,9 +8,11 @@ const IMAGE_FETCH_TIMEOUT_MS = 3000;
 
 type FetchImage = (url: string, options: any) => Promise<any>;
 
-const publicImageAgent = new https.Agent({
-    lookup: ((hostname: string, _options: unknown, callback: (...args: any[]) => void) => {
-        dns.lookup(hostname, { all: true, verbatim: true }, (err, addresses) => {
+export function createPublicImageLookup(lookupAll: any = dns.lookup): any {
+    return (hostname: string, options: any, callback: (...args: any[]) => void) => {
+        const lookupOptions = typeof options === 'number' ? { family: options } : (options || {});
+
+        lookupAll(hostname, { ...lookupOptions, all: true, verbatim: true }, (err: Error | null, addresses: dns.LookupAddress[]) => {
             if (err) {
                 callback(err);
                 return;
@@ -22,9 +24,17 @@ const publicImageAgent = new https.Agent({
                 return;
             }
 
-            callback(null, address.address, address.family);
+            if (lookupOptions.all) {
+                callback(null, addresses.filter((candidate) => isPublicIpAddress(candidate.address)));
+            } else {
+                callback(null, address.address, address.family);
+            }
         });
-    }) as any,
+    };
+}
+
+const publicImageAgent = new https.Agent({
+    lookup: createPublicImageLookup(),
 });
 
 export interface ImageSearchResult {
