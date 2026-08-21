@@ -15,6 +15,8 @@ export const AI_MODELS = {
 } as const;
 
 export const AI_REQUEST_TIMEOUTS = {
+    // xAI recommends a six-minute client timeout for reasoning models.
+    grokText: 6 * 60 * 1000,
     // Grok Imagine 2.0 can need longer than one minute to render.
     grokImage: 3 * 60 * 1000,
 } as const;
