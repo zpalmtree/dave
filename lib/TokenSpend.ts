@@ -83,6 +83,11 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         output: 6,
         cacheRead: 0.5,
     },
+    'grok-4.5': {
+        input: 2,
+        output: 6,
+        cacheRead: 0.3,
+    },
     'grok-imagine-image-2.0': {
         input: 0,
         output: 0,
