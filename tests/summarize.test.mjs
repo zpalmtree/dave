@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    buildFinalSummaryPrompt,
+} from '../dist/Grok.js';
+import {
     SUMMARY_OUTPUT_MAX_LENGTH,
     SUMMARY_WINDOW_MS,
     chunkSummaryInput,
@@ -10,6 +13,16 @@ import {
     handleSummarize,
     summarizeMessages,
 } from '../dist/Summarize.js';
+
+test('requires sassy commentary throughout final summaries', () => {
+    const prompt = buildFinalSummaryPrompt('Alice');
+
+    assert.match(prompt, /never a neutral meeting summary/);
+    assert.match(prompt, /Thread dry, sassy commentary throughout/);
+    assert.match(prompt, /turn at least two into concise jokes/);
+    assert.match(prompt, /End with a punchline/);
+    assert.doesNotMatch(prompt, /if the material warrants it/);
+});
 
 function makeMessage({
     id,
