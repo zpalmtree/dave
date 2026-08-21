@@ -3,9 +3,10 @@ import { OpenAI } from 'openai';
 import { config } from './Config.js';
 import { replyLongMessage, withTyping } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
+import { AI_MODELS } from './AIModels.js';
 
 const GAB_BASE_URL = 'https://gab.ai/v1';
-const DEFAULT_MODEL = 'arya';
+const DEFAULT_MODEL = AI_MODELS.gabChat;
 
 const DEFAULT_SETTINGS = {
     temperature: 0.7,

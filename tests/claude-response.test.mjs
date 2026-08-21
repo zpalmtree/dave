@@ -53,13 +53,13 @@ test('returns specific errors for actionable Claude stop reasons', () => {
 test('summarizes Claude responses without logging their content', () => {
     assert.deepEqual(summarizeClaudeResponse({
         id: 'msg_test',
-        model: 'claude-fable-5',
+        model: 'claude-opus-5',
         stop_reason: 'end_turn',
         content: [{ type: 'text', text: 'private answer' }],
         usage: { input_tokens: 12, output_tokens: 3 },
     }), {
         id: 'msg_test',
-        model: 'claude-fable-5',
+        model: 'claude-opus-5',
         stopReason: 'end_turn',
         contentTypes: ['text'],
         inputTokens: 12,

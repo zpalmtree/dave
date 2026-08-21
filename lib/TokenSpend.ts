@@ -24,15 +24,15 @@ export interface TokenSpendUsage {
     cacheWriteTokens?: number;
     images?: number;
     webSearches?: number;
+    audioSeconds?: number;
     /* Exact USD cost reported by the provider. Takes precedence over the
      * pricing table estimate when present. */
     costOverride?: number;
 }
 
-/* USD prices. Token prices are per million tokens, images and web searches
- * are priced per unit. Claude prices are current as of July 2026; the other
- * providers are estimates - update them when pricing changes. Models missing
- * from this table still have their tokens recorded, with a cost of 0. */
+/* USD prices. Token prices are per million tokens; images, web searches, and
+ * audio minutes are priced per unit. Prices are current as of August 2026.
+ * Models missing from this table still have their usage recorded at $0. */
 export interface ModelPricing {
     input: number;
     output: number;
@@ -40,9 +40,18 @@ export interface ModelPricing {
     cacheWrite?: number;
     perImage?: number;
     perWebSearch?: number;
+    perAudioMinute?: number;
 }
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
+    'claude-opus-5': {
+        input: 5,
+        output: 25,
+        cacheRead: 0.5,
+        cacheWrite: 6.25,
+        perWebSearch: 0.01,
+    },
+    /* Retained for historical/default fallback responses. */
     'claude-fable-5': {
         input: 10,
         output: 50,
@@ -50,7 +59,6 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         cacheWrite: 12.5,
         perWebSearch: 0.01,
     },
-    /* refusal-fallback model for claude-fable-5 */
     'claude-opus-4-8': {
         input: 5,
         output: 25,
@@ -58,30 +66,33 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         cacheWrite: 6.25,
         perWebSearch: 0.01,
     },
-    'gpt-5.5': {
-        input: 1.25,
-        output: 10,
-        cacheRead: 0.125,
+    'gpt-5.6-sol': {
+        input: 5,
+        output: 30,
+        cacheRead: 0.5,
         /* image_generation tool output, medium quality estimate */
         perImage: 0.04,
     },
-    'gpt-4o-transcribe': {
-        input: 6,
-        output: 10,
-    },
-    'grok-4.5': {
-        input: 3,
-        output: 15,
-        cacheRead: 0.75,
-    },
-    'grok-imagine-image': {
+    'gpt-transcribe': {
         input: 0,
         output: 0,
-        perImage: 0.07,
+        perAudioMinute: 0.0045,
     },
-    'gemini-3.5-flash': {
-        input: 0.3,
-        output: 2.5,
+    'grok-4.6': {
+        input: 2,
+        output: 6,
+        cacheRead: 0.5,
+    },
+    'grok-imagine-image-2.0': {
+        input: 0,
+        output: 0,
+        /* 1K medium quality */
+        perImage: 0.06,
+    },
+    'gemini-3.7-flash': {
+        /* Introductory pricing through December 31, 2026. */
+        input: 0.75,
+        output: 3.75,
         cacheRead: 0.075,
     },
     'gemini-3-pro-image': {
@@ -117,7 +128,7 @@ export async function runWithTokenSpendContext<T>(
 }
 
 /* API responses report resolved model ids that may carry a version suffix,
- * e.g. 'grok-4.5-latest' or a dated snapshot. Match on the longest pricing
+ * e.g. 'grok-4.6-2026-08-01' or another dated snapshot. Match on the longest pricing
  * key the reported model starts with. */
 export function resolveModelPricing(model: string): ModelPricing | undefined {
     let bestKey: string | undefined;
@@ -150,8 +161,9 @@ export function estimateTokenSpendCost(usage: TokenSpendUsage): number {
     const cacheWriteCost = (usage.cacheWriteTokens ?? 0) * (pricing.cacheWrite ?? pricing.input) / ONE_MILLION;
     const imageCost = (usage.images ?? 0) * (pricing.perImage ?? 0);
     const webSearchCost = (usage.webSearches ?? 0) * (pricing.perWebSearch ?? 0);
+    const audioCost = (usage.audioSeconds ?? 0) / 60 * (pricing.perAudioMinute ?? 0);
 
-    return inputCost + outputCost + cacheReadCost + cacheWriteCost + imageCost + webSearchCost;
+    return inputCost + outputCost + cacheReadCost + cacheWriteCost + imageCost + webSearchCost + audioCost;
 }
 
 /* Record the token usage of a single AI API call. Attribution (user, channel,

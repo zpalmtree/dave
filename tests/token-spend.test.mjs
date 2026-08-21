@@ -8,16 +8,16 @@ import {
 import { formatCompactNumber, formatUsdCost, pluralize } from '../dist/Utilities.js';
 
 test('resolves pricing for exact model ids', () => {
-    const pricing = resolveModelPricing('claude-fable-5');
+    const pricing = resolveModelPricing('claude-opus-5');
     assert.ok(pricing);
-    assert.equal(pricing.input, 10);
-    assert.equal(pricing.output, 50);
+    assert.equal(pricing.input, 5);
+    assert.equal(pricing.output, 25);
 });
 
 test('resolves pricing for versioned model ids by longest prefix', () => {
-    assert.ok(resolveModelPricing('grok-4.5-latest'));
-    assert.ok(resolveModelPricing('grok-imagine-image-quality-latest'));
-    assert.ok(resolveModelPricing('gpt-5.5-2026-01-01'));
+    assert.ok(resolveModelPricing('grok-4.6-2026-08-01'));
+    assert.ok(resolveModelPricing('grok-imagine-image-2.0'));
+    assert.ok(resolveModelPricing('gpt-5.6-sol-2026-08-01'));
 });
 
 test('returns undefined pricing for unknown models', () => {
@@ -26,17 +26,17 @@ test('returns undefined pricing for unknown models', () => {
 
 test('estimates claude cost from input and output tokens', () => {
     const cost = estimateTokenSpendCost({
-        model: 'claude-fable-5',
+        model: 'claude-opus-5',
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
     });
 
-    assert.equal(cost, 60);
+    assert.equal(cost, 30);
 });
 
 test('includes cache reads, cache writes and web searches in claude cost', () => {
     const cost = estimateTokenSpendCost({
-        model: 'claude-fable-5',
+        model: 'claude-opus-5',
         inputTokens: 0,
         outputTokens: 0,
         cacheReadTokens: 1_000_000,
@@ -44,16 +44,25 @@ test('includes cache reads, cache writes and web searches in claude cost', () =>
         webSearches: 2,
     });
 
-    assert.equal(cost, 1 + 12.5 + 0.02);
+    assert.equal(cost, 0.5 + 6.25 + 0.02);
 });
 
 test('prices images per unit', () => {
     const cost = estimateTokenSpendCost({
-        model: 'grok-imagine-image-quality-latest',
+        model: 'grok-imagine-image-2.0',
         images: 2,
     });
 
-    assert.ok(Math.abs(cost - 0.14) < 1e-9);
+    assert.ok(Math.abs(cost - 0.12) < 1e-9);
+});
+
+test('prices transcription audio by duration', () => {
+    const cost = estimateTokenSpendCost({
+        model: 'gpt-transcribe',
+        audioSeconds: 120,
+    });
+
+    assert.equal(cost, 0.009);
 });
 
 test('unknown models cost zero but do not throw', () => {
@@ -67,12 +76,12 @@ test('unknown models cost zero but do not throw', () => {
 });
 
 test('missing token counts are treated as zero', () => {
-    assert.equal(estimateTokenSpendCost({ model: 'claude-fable-5' }), 0);
+    assert.equal(estimateTokenSpendCost({ model: 'claude-opus-5' }), 0);
 });
 
 test('provider reported cost overrides the pricing table estimate', () => {
     const cost = estimateTokenSpendCost({
-        model: 'grok-imagine-image-quality-latest',
+        model: 'grok-imagine-image-2.0',
         images: 1,
         costOverride: 0.09,
     });
