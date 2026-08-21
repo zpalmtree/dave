@@ -22,7 +22,8 @@ test('uses the audited production model for each provider capability', () => {
     });
 });
 
-test('allows Grok Image 2.0 enough time to finish rendering', () => {
+test('uses provider-appropriate Grok request timeouts', () => {
+    assert.equal(AI_REQUEST_TIMEOUTS.grokText, 360_000);
     assert.equal(AI_REQUEST_TIMEOUTS.grokImage, 180_000);
 });
 

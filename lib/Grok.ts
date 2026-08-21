@@ -45,9 +45,10 @@ const MAX_GROK_IMAGE_EDIT_SOURCES = 3;
 const DEFAULT_SETTINGS = {
     model: XAI_TEXT_MODEL,
     temperature: 0.7,
+    reasoningEffort: 'low' as const,
     maxTokens: 4096,
     maxCompletionTokens: 25000,
-    timeout: 180000, // 3 minutes for agentic tool calls
+    timeout: AI_REQUEST_TIMEOUTS.grokText,
     bannedUsers: ['663270358161293343'],
 };
 
@@ -76,6 +77,7 @@ interface GrokHandlerOptions {
     args: string;
     systemPrompt?: string;
     temperature?: number;
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     model?: string;
     includeSystemPrompt?: boolean;
     files?: string[];
@@ -96,6 +98,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         args,
         systemPrompt,
         temperature = DEFAULT_SETTINGS.temperature,
+        reasoningEffort = DEFAULT_SETTINGS.reasoningEffort,
         model = DEFAULT_SETTINGS.model,
         includeSystemPrompt = true,
         files = [],
@@ -220,6 +223,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 model,
                 messages: inputMessages as XAIMessage[],
                 temperature,
+                reasoning_effort: reasoningEffort,
                 max_tokens: maxCompletionTokens || maxTokens,
             }
             : {
@@ -228,6 +232,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 tools,
                 include: ['no_inline_citations'],
                 temperature,
+                reasoning: { effort: reasoningEffort },
                 max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
             };
 
