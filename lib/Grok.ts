@@ -14,7 +14,7 @@ import {
     stripGrokCitations,
 } from './GrokResponse.js';
 import { recordTokenSpend } from './TokenSpend.js';
-import { AI_MODELS } from './AIModels.js';
+import { AI_MODELS, AI_REQUEST_TIMEOUTS } from './AIModels.js';
 
 /* Handles both xAI usage shapes - the responses endpoint reports
  * input_tokens/output_tokens, chat/completions reports
@@ -368,7 +368,10 @@ async function generateGrokImage(
 ): Promise<GrokImageResponse> {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const timeoutId = setTimeout(
+            () => controller.abort(),
+            AI_REQUEST_TIMEOUTS.grokImage,
+        );
         const isImageEdit = sourceImageURLs.length > 0;
         const endpoint = isImageEdit
             ? `${XAI_BASE_URL}/images/edits`

@@ -12,6 +12,11 @@ export const AI_MODELS = {
     gabChat: 'arya',
 } as const;
 
+export const AI_REQUEST_TIMEOUTS = {
+    // Grok Imagine 2.0 can need longer than one minute to render.
+    grokImage: 3 * 60 * 1000,
+} as const;
+
 export const OPENAI_FINE_TUNED_MODELS = {
     davinciV4: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
     fitQuoteV19: 'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v19:8NYAVNzk',
