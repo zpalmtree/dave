@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    buildChunkSummaryPrompt,
     buildFinalSummaryPrompt,
+    buildSummarySynthesisPrompt,
 } from '../dist/Grok.js';
 import {
     SUMMARY_OUTPUT_MAX_LENGTH,
@@ -14,14 +16,32 @@ import {
     summarizeMessages,
 } from '../dist/Summarize.js';
 
-test('requires sassy commentary throughout final summaries', () => {
+test('uses the original conditional-humor style for final summaries', () => {
     const prompt = buildFinalSummaryPrompt('Alice');
 
-    assert.match(prompt, /never a neutral meeting summary/);
-    assert.match(prompt, /Thread dry, sassy commentary throughout/);
-    assert.match(prompt, /turn at least two into concise jokes/);
-    assert.match(prompt, /End with a punchline/);
-    assert.doesNotMatch(prompt, /if the material warrants it/);
+    assert.match(prompt, /Use dry humor and gentle roasts where appropriate/);
+    assert.match(prompt, /End with a zinger or amusing observation if the material warrants it/);
+    assert.doesNotMatch(prompt, /at least two/);
+    assert.doesNotMatch(prompt, /never a neutral meeting summary/);
+});
+
+test('extracts flavor-preserving source notes instead of neutral prose', () => {
+    const prompt = buildChunkSummaryPrompt(1, 3);
+
+    assert.match(prompt, /do not write a polished summary/);
+    assert.match(prompt, /short verbatim phrases/);
+    assert.match(prompt, /callbacks, and running jokes/);
+    assert.match(prompt, /one distinct conversational beat per bullet/);
+    assert.match(prompt, /Do not invent jokes/);
+});
+
+test('synthesis selects coherent beats without forcing every note together', () => {
+    const prompt = buildSummarySynthesisPrompt('Alice');
+
+    assert.match(prompt, /Choose the strongest beats and through-lines/);
+    assert.match(prompt, /one clear thought per sentence/);
+    assert.match(prompt, /Do not copy the notes' bullet structure/);
+    assert.match(prompt, /combine unrelated beats into one sentence/);
 });
 
 function makeMessage({
@@ -229,6 +249,7 @@ test('summarizes fetched history from the preceding 12 hours when the cache is c
         );
 
         assert.deepEqual(response, { result: 'summary result' });
+        assert.equal(requestBody.model, 'grok-4.5-latest');
         assert.match(requestBody.messages[1].content, /UTC.*<@person>: historical chat/);
         assert.doesNotMatch(requestBody.messages[0].content, /\b(?:12|24)[ -]?hours?\b/i);
         assert.match(requestBody.messages[0].content, /Do not mention or refer to the duration/);
@@ -263,7 +284,7 @@ test('summarizes oversized days in chunks before producing one final synthesis',
         const body = JSON.parse(options.body);
         requestBodies.push(body);
 
-        if (body.messages[0].content.startsWith('Create dense')) {
+        if (body.messages[0].content.startsWith('Extract flavor-preserving')) {
             return successfulGrokResponse(`intermediate ${requestBodies.length}`);
         }
 
@@ -280,7 +301,11 @@ test('summarizes oversized days in chunks before producing one final synthesis',
 
         assert.deepEqual(response, { result: 'final synthesis' });
         assert.equal(requestBodies.length, 3);
-        assert.match(requestBodies[2].messages[0].content, /one seamless account/);
+        assert.ok(requestBodies.every(({ model }) => model === 'grok-4.5-latest'));
+        assert.equal(requestBodies[0].temperature, 0.3);
+        assert.equal(requestBodies[1].temperature, 0.3);
+        assert.equal(requestBodies[2].temperature, 0.8);
+        assert.match(requestBodies[2].messages[0].content, /Choose the strongest beats/);
         assert.match(requestBodies[2].messages[1].content, /intermediate 1/);
         assert.match(requestBodies[2].messages[1].content, /intermediate 2/);
     } finally {

@@ -16,6 +16,7 @@ test('uses the audited production model for each provider capability', () => {
         geminiChat: 'gemini-3.7-flash',
         geminiImage: 'gemini-3-pro-image',
         grokChat: 'grok-4.6',
+        grokSummary: 'grok-4.5-latest',
         grokImage: 'grok-imagine-image-2.0',
         gabChat: 'arya',
     });
