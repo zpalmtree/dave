@@ -22,6 +22,10 @@ import {
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 import { recordTokenSpend } from './TokenSpend.js';
+import {
+    buildCImageGenerationTool,
+    type CImageGenerationTool,
+} from './CImageGeneration.js';
 
 // Polyfill File for environments running on Node < 20 so OpenAI uploads work.
 void (async () => {
@@ -1555,16 +1559,6 @@ function isUnsupportedTransparentBackgroundError(errorText?: string): boolean {
     return /transparent background is not supported/i.test(errorText ?? '');
 }
 
-type CImageGenerationTool = {
-    type: 'image_generation';
-    model?: string;
-    moderation: 'low';
-    output_format: 'png' | 'jpeg';
-    output_compression?: number;
-    background?: 'transparent';
-    partial_images?: number;
-};
-
 export async function handleCImage(msg: Message, args: string): Promise<void> {
     const userArgs = args.trim();
     const MAX_STREAM_PARTIALS = 3;
@@ -1748,31 +1742,6 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             }
         };
 
-        const buildImageGenerationTool = (
-            outputFormat: 'png' | 'jpeg',
-            transparentBackground: boolean,
-        ): CImageGenerationTool => {
-            if (transparentBackground) {
-                return {
-                    type: 'image_generation',
-                    model: 'gpt-image-1',
-                    moderation: 'low',
-                    output_format: 'png',
-                    background: 'transparent',
-                    partial_images: MAX_STREAM_PARTIALS,
-                };
-            }
-
-            return {
-                type: 'image_generation',
-                model: 'gpt-image-2',
-                moderation: 'low',
-                output_format: outputFormat,
-                ...(outputFormat === 'jpeg' ? { output_compression: 50 } : {}),
-                partial_images: MAX_STREAM_PARTIALS,
-            };
-        };
-
         const runImageGeneration = async (
             imageGenerationTool: CImageGenerationTool,
         ): Promise<{ completed: true } | { completed: false; errorText: string }> => {
@@ -1920,7 +1889,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             const transparentBackground = wantsTransparentOutput(prompt);
             const outputFormat = wantsPngOutput(prompt) || transparentBackground ? 'png' : 'jpeg';
             const result = await runImageGeneration(
-                buildImageGenerationTool(outputFormat, transparentBackground),
+                buildCImageGenerationTool(outputFormat, transparentBackground, MAX_STREAM_PARTIALS),
             );
 
             if (result.completed) {
@@ -1929,7 +1898,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
 
             if (transparentBackground && isUnsupportedTransparentBackgroundError(result.errorText)) {
                 const fallbackResult = await runImageGeneration(
-                    buildImageGenerationTool(outputFormat, false),
+                    buildCImageGenerationTool(outputFormat, false, MAX_STREAM_PARTIALS),
                 );
 
                 if (fallbackResult.completed) {
