@@ -35,7 +35,7 @@ export function shouldRetryClaudeNoText(
         && (stopReason === null || stopReason === 'end_turn' || stopReason === 'stop_sequence');
 }
 
-// Fable's thinking blocks share the max_tokens budget with the answer, so a
+// Claude's thinking blocks share the max_tokens budget with the answer, so a
 // small budget can be spent entirely on thinking. Retry with a larger one
 // instead of erroring, up to the ceiling.
 export function getClaudeMaxTokensRetryBudget(

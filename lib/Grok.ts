@@ -14,6 +14,7 @@ import {
     stripGrokCitations,
 } from './GrokResponse.js';
 import { recordTokenSpend } from './TokenSpend.js';
+import { AI_MODELS } from './AIModels.js';
 
 /* Handles both xAI usage shapes - the responses endpoint reports
  * input_tokens/output_tokens, chat/completions reports
@@ -36,8 +37,8 @@ function recordGrokUsage(model: string, usage: any): void {
 }
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
-const XAI_TEXT_MODEL = 'grok-4.5-latest';
-const XAI_IMAGE_MODEL = 'grok-imagine-image-quality-latest';
+const XAI_TEXT_MODEL = AI_MODELS.grokChat;
+const XAI_IMAGE_MODEL = AI_MODELS.grokImage;
 const MAX_GROK_IMAGE_EDIT_SOURCES = 3;
 
 const DEFAULT_SETTINGS = {
@@ -315,7 +316,7 @@ function createSystemPrompt(prompt: string, username: string): string {
 }
 
 function getDefaultSystemPrompt(): string {
-    return `You are @grok, a version of Grok 4.5 built by xAI.
+    return `You are @grok, a version of Grok 4.6 built by xAI.
 
 - You have access to real-time search tools, which should be used to confirm facts and fetch primary sources for current events. Parallel search should be used to find diverse viewpoints. Use your X tools to get context on the current thread. Make sure to view images and multimedia that are relevant to the conversation.
 - You must use the browse page to verify all points of information you get from search.
@@ -375,6 +376,7 @@ async function generateGrokImage(
         const commonBody = {
             model: XAI_IMAGE_MODEL,
             prompt,
+            quality: 'medium',
         };
 
         const requestBody = isImageEdit

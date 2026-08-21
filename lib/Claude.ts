@@ -11,6 +11,7 @@ import {
     summarizeClaudeResponse,
 } from './ClaudeResponse.js';
 import { recordTokenSpend } from './TokenSpend.js';
+import { AI_MODELS } from './AIModels.js';
 import fetch from 'node-fetch';
 
 const anthropic = new Anthropic({
@@ -18,15 +19,14 @@ const anthropic = new Anthropic({
 });
 
 const DEFAULT_SETTINGS = {
-    model: 'claude-fable-5',
-    refusalFallbackModel: 'claude-opus-4-8',
-    // Fable always thinks, and thinking shares this budget with the answer.
+    model: AI_MODELS.claudeChat,
+    // Claude 5 thinking shares this budget with the answer.
     maxTokens: 4096,
     effort: 'medium',
     bannedUsers: ['663270358161293343'],
 };
 
-const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-06-01';
+const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
 const chatHistoryCache = new Map<string, Anthropic.MessageParam[]>();
 const MAX_PAUSE_TURN_CONTINUATIONS = 2;
@@ -262,16 +262,17 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         let pauseTurnContinuations = 0;
 
         while (true) {
-            // If Fable's safety classifiers decline the request, the API reruns
-            // it on the fallback model in the same call. Neither fallbacks nor
-            // output_config are typed in SDK 0.41, hence the cast.
+            // If Claude's safety classifiers decline the request, the API reruns
+            // it on Anthropic's current default fallback in the same call.
+            // Neither fallbacks nor output_config are typed in SDK 0.41, hence
+            // the cast.
             const completion = await anthropic.messages.create(
                 {
                     ...completionOptions,
                     max_tokens: requestMaxTokens,
                     messages: requestMessages,
                     output_config: { effort: DEFAULT_SETTINGS.effort },
-                    fallbacks: [{ model: DEFAULT_SETTINGS.refusalFallbackModel }],
+                    fallbacks: 'default',
                 } as Anthropic.MessageCreateParamsNonStreaming,
                 { headers: { 'anthropic-beta': REFUSAL_FALLBACK_BETA } },
             );

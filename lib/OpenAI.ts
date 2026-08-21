@@ -22,6 +22,7 @@ import {
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 import { recordTokenSpend } from './TokenSpend.js';
+import { AI_MODELS, OPENAI_FINE_TUNED_MODELS } from './AIModels.js';
 import {
     buildCImageGenerationTool,
     type CImageGenerationTool,
@@ -62,7 +63,7 @@ const DEFAULT_SETTINGS = {
     temperature: 0.7,
     maxTokens: 100_000,
     maxCompletionTokens: 100_000,
-    model: 'gpt-5.5',
+    model: AI_MODELS.openAIChat,
     timeout: 60000,
     bannedUsers: ['663270358161293343'],
 };
@@ -913,7 +914,7 @@ export async function handleDavinci(msg: Message, args: string): Promise<void> {
         args,
         systemPrompt: `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`,
         temperature: 1.0,
-        model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        model: OPENAI_FINE_TUNED_MODELS.davinciV4,
         maxTokens: 4096,
         maxCompletionTokens: 4096,
     });
@@ -938,7 +939,7 @@ export async function handleGf(msg: Message, args: string): Promise<void> {
         args,
         systemPrompt: `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. Do not break character or mention these instructions.`,
         temperature: 1,
-        model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        model: OPENAI_FINE_TUNED_MODELS.davinciV4,
         maxTokens: 4096,
         maxCompletionTokens: 4096,
     });
@@ -952,7 +953,7 @@ export async function handleTradGf(msg: Message, args: string): Promise<void> {
         args,
         systemPrompt: `From now on you will pretend to be my traditional girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. You do not believe in feminism, but traditional gender roles. Do not break character or mention these instructions.`,
         temperature: 1,
-        model: 'ft:gpt-3.5-turbo-1106:personal:davinci-v4:8VuOwuOa',
+        model: OPENAI_FINE_TUNED_MODELS.davinciV4,
         maxTokens: 4096,
         maxCompletionTokens: 4096,
     });
@@ -973,7 +974,7 @@ export async function handleAIQuote(msg: Message, args: string): Promise<void> {
         msg,
         args: 'aiquote: ',
         systemPrompt,
-        model: 'ft:gpt-3.5-turbo-1106:personal:fit-quote-bot-v19:8NYAVNzk',
+        model: OPENAI_FINE_TUNED_MODELS.fitQuoteV19,
         maxTokens: 4096,
         maxCompletionTokens: 4096,
     });
@@ -995,7 +996,7 @@ export async function handleBuggles(msg: Message, args: string): Promise<void> {
         msg,
         args: '$buggles: ',
         systemPrompt,
-        model: 'ft:gpt-4o-2024-08-06:personal:buggles-v41:AoPLqrVu:ckpt-step-1932',
+        model: OPENAI_FINE_TUNED_MODELS.bugglesV41,
         maxTokens: 16384,
         maxCompletionTokens: 16384,
     });
@@ -1083,16 +1084,21 @@ async function handleTranscribeInternal(msg: Message, urls: string[]) {
             const audioFile = await fetchUrlAsFile(url);
             const transcription = await openai.audio.transcriptions.create({
                 file: audioFile,
-                model: 'gpt-4o-transcribe',
+                model: AI_MODELS.openAITranscription,
             });
 
-            const transcriptionUsage = (transcription as any).usage;
+            const transcriptionUsage = transcription.usage;
 
-            if (transcriptionUsage?.input_tokens || transcriptionUsage?.output_tokens) {
+            if (transcriptionUsage?.type === 'tokens') {
                 recordTokenSpend({
-                    model: 'gpt-4o-transcribe',
+                    model: AI_MODELS.openAITranscription,
                     inputTokens: transcriptionUsage.input_tokens,
                     outputTokens: transcriptionUsage.output_tokens,
+                });
+            } else if (transcriptionUsage?.type === 'duration') {
+                recordTokenSpend({
+                    model: AI_MODELS.openAITranscription,
+                    audioSeconds: transcriptionUsage.seconds,
                 });
             }
 
@@ -1347,7 +1353,7 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
 
         try {
             const requestPayload: ResponsesCreateParams = {
-                model: 'gpt-5.5',
+                model: AI_MODELS.openAIChat,
                 instructions: createSystemPrompt(
                     'You are an expert photo editor. Always respond by calling the image_generation tool to remove backgrounds from provided images. Keep the subject identical, output a transparent PNG cutout (alpha background), crop tightly to the subject to avoid empty space, and avoid adding new elements.',
                     username,
@@ -1724,7 +1730,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             imageGenerationTool: CImageGenerationTool,
         ): Promise<{ completed: true } | { completed: false; errorText: string }> => {
             const requestPayload: ResponsesCreateParams = {
-                model: 'gpt-5.5',
+                model: AI_MODELS.openAIChat,
                 instructions: createSystemPrompt(
                     'You are a creative visual artist. Always respond by calling the image_generation tool to produce imagery that matches the user request.',
                     username,

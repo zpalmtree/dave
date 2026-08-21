@@ -22,6 +22,7 @@ import {
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 import { recordTokenSpend } from './TokenSpend.js';
+import { AI_MODELS } from './AIModels.js';
 
 function recordGeminiUsage(
     model: string,
@@ -131,8 +132,8 @@ const ART_STYLES = [
     'biomechanical',
 ];
 
-const TEXT_MODEL = "gemini-3.5-flash";
-const IMAGE_MODEL = "gemini-3-pro-image";
+const TEXT_MODEL = AI_MODELS.geminiChat;
+const IMAGE_MODEL = AI_MODELS.geminiImage;
 
 const SAFETY_SETTINGS: SafetySetting[] = [
     {
@@ -408,7 +409,6 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
     try {
         const {
             systemPrompt = "You are Gemini, a helpful and versatile AI. You can provide both text responses and generate images. Keep responses concise and informative.",
-            temperature = 1,
             maxOutputTokens = 1024,
             imageOnly = false // When true, prioritize image output with minimal text
         } = options;
@@ -531,9 +531,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
         const chat = genAI.chats.create({
             model: TEXT_MODEL,
             config: {
-                temperature,
                 maxOutputTokens,
-                topP: 0.95,
                 safetySettings: SAFETY_SETTINGS,
             },
             history: history.length > 0 ? history : [{

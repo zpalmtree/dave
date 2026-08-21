@@ -1,8 +1,10 @@
+import { AI_MODELS } from './AIModels.js';
+
 export type CImageOutputFormat = 'png' | 'jpeg';
 
 export type CImageGenerationTool = {
     type: 'image_generation';
-    model: 'gpt-image-2';
+    model: typeof AI_MODELS.openAIImage;
     moderation: 'low';
     output_format: CImageOutputFormat;
     output_compression?: number;
@@ -19,7 +21,7 @@ export function buildCImageGenerationTool(
 
     return {
         type: 'image_generation',
-        model: 'gpt-image-2',
+        model: AI_MODELS.openAIImage,
         moderation: 'low',
         output_format: effectiveOutputFormat,
         ...(effectiveOutputFormat === 'jpeg' ? { output_compression: 50 } : {}),
