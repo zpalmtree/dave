@@ -89,7 +89,7 @@ export const VIDEO_PLAN_SCHEMA = {
     },
 } as const;
 
-const PLANNER_INSTRUCTIONS = `You are the quality-first screenplay planner for a local generative-video pipeline. A render costs 5-30 minutes, so preserve intent and make the plan physically coherent before rendering.
+export const VIDEO_PLANNER_INSTRUCTIONS = `You are the quality-first screenplay planner for a local generative-video pipeline. A render costs 5-30 minutes, so preserve intent and make the plan physically coherent before rendering.
 
 Treat every content-bearing word in the request as material. Preserve every explicitly named game, franchise, work, person, place, product, style, count, time range, modifier, and quoted line. A request shaped like "X, but replace Y with Z" preserves X's name, defining presentation, camera language, world, rules, props, and actions, and replaces only Y. Do not generalize a named reference into a generic scene. Infer enough visible participants for a group concept to read clearly, but do not infer an exhaustive roster unless explicitly requested.
 
@@ -98,6 +98,8 @@ Choose the shortest natural finished duration that makes the idea legible, cappe
 Recommend a generated keyframe when faces, identity, recurring subjects, exact wardrobe or props, product geometry, or deliberate composition benefit from a stable anchor. Avoid it for transformations, fluid motion, explosions, or chaotic abstract motion unless identity dominates. The keyframe prompt is the exact still at 0.00 seconds, not a sequence.
 
 Design the keyframe and first shot together. Define the dominant subject's orientation, gaze, travel vector and screen direction, camera side/angle/distance, and exact first-second action. Leave visual lead room in the direction of gaze or travel. The first shot must continue those facts without turning around, reversing, snapping gaze, teleporting, crossing the camera axis, or unexplained reframing. For a chase view, the vehicle must already point away/down-track with the camera behind it. For an approach, it must already face and travel toward the camera.
+
+For forward-moving subjects, the physical front or vehicle nose, visible road/path ahead, track vanishing direction, gaze, and declared travel vector must all agree. Never compose a vehicle with its nose toward the camera while the visible track continues behind it. When identity or faces matter during lateral travel, prefer a true side-profile tracking view or a rear three-quarter view that still reveals profile faces; do not put the camera ahead merely to show faces. If the request replaces a named franchise's original cast, the keyframe prompt must state that the replacement cast is closed and must exclude every original character, mascot, costume, silhouette, and character logo while retaining the franchise's world, presentation, rules, props, and camera language.
 
 Make all requested evidence visibly verifiable in the actual shot visual and camera fields, not only in intent or continuity prose. Do not rely on titles, captions, logos, or on-screen text unless the request or named presentation requires them.`;
 
@@ -136,7 +138,7 @@ export async function createFrontierVideoPlan(
             body: JSON.stringify({
                 model: VIDEO_PLANNER_MODEL,
                 reasoning: { effort: 'high' },
-                instructions: PLANNER_INSTRUCTIONS,
+                instructions: VIDEO_PLANNER_INSTRUCTIONS,
                 input: [{
                     role: 'user',
                     content: [{
