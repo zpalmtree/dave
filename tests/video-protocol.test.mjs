@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Commands } from '../dist/CommandDeclarations.js';
-import { formatVideoJob } from '../dist/VideoGeneration.js';
+import { formatVideoJob, videoSourceImageFromMessage } from '../dist/VideoGeneration.js';
 import { parsePauseDuration } from '../dist/VideoProtocol.js';
 import {
     VIDEO_PLAN_SCHEMA,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
 } from '../dist/VideoFrontierPlanner.js';
+import { buildVideoKeyframePrompt, VIDEO_KEYFRAME_MODEL } from '../dist/VideoKeyframeProvider.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
     assert.equal(parsePauseDuration(undefined), 6 * 60 * 60);
@@ -48,6 +49,7 @@ test('offline queue messages omit fake ETAs', () => {
         error: null,
         result_path: null,
         result_bytes: null,
+        has_source_image: false,
         created_at: 1,
         updated_at: 1,
         started_at: null,
@@ -68,10 +70,60 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /positive-only diffusion prompt/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /at most three identity-critical people/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /user-supplied start image/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
         if (value.type === 'object') assert.equal(value.additionalProperties, false);
         for (const child of Object.values(value)) visit(child);
     };
     visit(VIDEO_PLAN_SCHEMA);
+});
+
+test('video commands accept exactly one supported attached start frame', () => {
+    const attachment = {
+        url: 'https://cdn.discordapp.com/attachments/1/2/frame.png',
+        contentType: 'image/png',
+        name: 'frame.png',
+        size: 1234,
+    };
+    const selected = videoSourceImageFromMessage({ attachments: new Map([['one', attachment]]) });
+    assert.deepEqual(selected, {
+        url: attachment.url,
+        mime_type: 'image/png',
+        bytes: 1234,
+        name: 'frame.png',
+    });
+    assert.throws(
+        () => videoSourceImageFromMessage({ attachments: new Map([
+            ['one', attachment],
+            ['two', { ...attachment, url: `${attachment.url}?second=1` }],
+        ]) }),
+        /one starting image/,
+    );
+    assert.throws(
+        () => videoSourceImageFromMessage({
+            attachments: new Map([['gif', { ...attachment, contentType: 'image/gif', name: 'frame.gif' }]]),
+        }),
+        /PNG, JPEG, or WebP/,
+    );
+});
+
+test('frontier keyframe prompt binds frame-zero motion geometry', () => {
+    assert.equal(VIDEO_KEYFRAME_MODEL, 'gemini-3-pro-image');
+    const prompt = buildVideoKeyframePrompt({
+        keyframe: {
+            prompt: 'Three named drivers race through a colorful arcade circuit.',
+            motion_contract: {
+                subject_orientation: 'karts point toward upper right',
+                gaze_direction: 'drivers look down-track',
+                travel_direction: 'left to right',
+                camera_relation: 'rear three-quarter chase view',
+                first_second_action: 'accelerate forward without turning',
+            },
+        },
+    });
+    assert.match(prompt, /exactly frame 0\.00/);
+    assert.match(prompt, /karts point toward upper right/);
+    assert.match(prompt, /accelerate forward without turning/);
+    assert.match(prompt, /requires no turn, reversal/);
 });

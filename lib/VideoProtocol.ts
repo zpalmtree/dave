@@ -3,6 +3,8 @@ export const VIDEO_PROMPT_MAX_LENGTH = 1800;
 export const VIDEO_MAX_USER_JOBS = 3;
 export const VIDEO_MAX_GLOBAL_JOBS = 20;
 export const VIDEO_RESULT_MAX_BYTES = 10 * 1024 * 1024;
+export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
 export type VideoModelId = 'ltx' | 'minimax';
 
@@ -88,6 +90,7 @@ export interface VideoJobView {
     error: string | null;
     result_path: string | null;
     result_bytes: number | null;
+    has_source_image: boolean;
     created_at: number;
     updated_at: number;
     started_at: number | null;

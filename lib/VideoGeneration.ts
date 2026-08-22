@@ -6,6 +6,8 @@ import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
     VIDEO_MODELS,
     VIDEO_PROMPT_MAX_LENGTH,
+    VIDEO_SOURCE_IMAGE_MAX_BYTES,
+    VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VideoJobView,
     VideoModelId,
     parsePauseDuration,
@@ -41,6 +43,48 @@ function truncatePrompt(prompt: string, length = 180): string {
     return prompt.length <= length ? prompt : `${prompt.slice(0, length - 1)}…`;
 }
 
+export interface SubmittedVideoSourceImage {
+    url: string;
+    mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
+    bytes: number;
+    name: string;
+}
+
+function inferredImageMime(name: string | null | undefined): string | null {
+    const extension = name?.split('.').pop()?.toLowerCase();
+    if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+    if (extension === 'png') return 'image/png';
+    if (extension === 'webp') return 'image/webp';
+    if (extension === 'gif') return 'image/gif';
+    return null;
+}
+
+export function videoSourceImageFromMessage(msg: Message): SubmittedVideoSourceImage | null {
+    const candidates = [...msg.attachments.values()].filter(attachment => {
+        const mime = attachment.contentType?.split(';')[0].toLowerCase();
+        return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
+    });
+    if (candidates.length > 1) {
+        throw new Error('LTX and MiniMax accept one starting image. Attach exactly one image.');
+    }
+    if (!candidates.length) return null;
+    const attachment = candidates[0];
+    const mime = attachment.contentType?.split(';')[0].toLowerCase()
+        || inferredImageMime(attachment.name);
+    if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mime as any)) {
+        throw new Error('The starting image must be a PNG, JPEG, or WebP file.');
+    }
+    if (!attachment.size || attachment.size > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+        throw new Error(`The starting image must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.`);
+    }
+    return {
+        url: attachment.url,
+        mime_type: mime as SubmittedVideoSourceImage['mime_type'],
+        bytes: attachment.size,
+        name: attachment.name || 'start-frame',
+    };
+}
+
 function percentage(value: number | null): string {
     if (value === null) return '';
     return ` (${Math.round(Math.max(0, Math.min(1, value)) * 100)}%)`;
@@ -56,7 +100,7 @@ function sentence(value: string): string {
 
 export function formatVideoJob(job: VideoJobView): string {
     const name = VIDEO_MODELS[job.model].displayName;
-    const head = `**${name} · ${shortJobId(job.id)}**`;
+    const head = `**${name} · ${shortJobId(job.id)}**${job.has_source_image ? ' · user start frame' : ''}`;
     if (job.status === 'queued') {
         const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)}`;
@@ -177,11 +221,11 @@ export function startVideoGenerationService(client: Client): void {
     service.start();
 }
 
-async function brokerRequest<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+async function brokerRequest<T = any>(path: string, init: RequestInit = {}, timeoutMs = 10_000): Promise<T> {
     const settings = loadVideoSettings();
     if (!settings.botToken) throw new BrokerError('Video generation is not configured on this bot.', 503);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
     try {
         response = await fetch(`${settings.brokerUrl}${path}`, {
@@ -231,6 +275,13 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
         await msg.reply(`Video prompts are limited to ${VIDEO_PROMPT_MAX_LENGTH} characters.`);
         return;
     }
+    let sourceImage: SubmittedVideoSourceImage | null;
+    try {
+        sourceImage = videoSourceImageFromMessage(msg);
+    } catch (error) {
+        await msg.reply(error instanceof Error ? error.message : String(error));
+        return;
+    }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
     const pending = await msg.reply(`Submitting a maximum-quality ${VIDEO_MODELS[model].displayName} video…`);
@@ -246,8 +297,9 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
                 guild_id: msg.guild?.id || null,
                 command_message_id: msg.id,
                 status_message_id: pending.id,
+                source_image: sourceImage,
             }),
-        });
+        }, 45_000);
         await pending.edit({ content: `${formatVideoJob(response.job)}\n> ${truncatePrompt(prompt)}` });
         await services.get(msg.client.user.id)?.refresh();
     } catch (error) {

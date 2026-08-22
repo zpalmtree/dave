@@ -161,7 +161,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleLtxVideo,
-            description: 'Generate a maximum-quality local LTX 2.5 video',
+            description: 'Generate a maximum-quality local LTX 2.5 video; attach one image to use it as frame 0',
             examples: [{ value: 'ltx a chihuahua crusade through a medieval castle' }],
         },
         relatedCommands: ['minimax', 'videoqueue'],
@@ -173,7 +173,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxVideo,
-            description: 'Generate a maximum-quality local MiniMax H3 video',
+            description: 'Generate a maximum-quality local MiniMax H3 video; attach one image to use it as frame 0',
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
         relatedCommands: ['ltx', 'videoqueue'],
