@@ -49,9 +49,12 @@ Copy `video_gen/video_worker.json.example` to `video_gen/video_worker.json`, set
 the tailnet-only `wss://.../v1/worker` URL and matching worker token, then run
 `video_worker.cmd`. The worker journals its active job, reconnects after network
 loss, sends a heartbeat every 15 seconds, and retries transient render failures
-at most twice. It generates a semantic screenplay, optionally anchors the video
-with a generated first frame, and reports model stages and percentages when
-ComfyUI exposes them.
+at most twice. The server asks `gpt-5.6-sol` at high reasoning effort for a strict
+structured screenplay only after the job reaches the desktop. The API key never
+leaves the server, successful plans are cached per job, and the local Qwen planner
+is the automatic offline fallback. The worker optionally anchors the video with a
+generated first frame and reports model stages and percentages when ComfyUI
+exposes them.
 
 Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
 24 hours; complete desktop generation directories expire after seven days.
