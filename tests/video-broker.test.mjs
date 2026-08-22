@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -192,6 +192,192 @@ test('broker preserves an interrupted job at the front while paused', async () =
             value => value.body.jobs[0].status === 'failed',
         );
         assert.equal(finished.body.jobs[0].status, 'failed');
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('broker serves a cached frontier frame and gives a user attachment precedence', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-keyframe-'));
+    const generatedBytes = Buffer.from('generated-keyframe');
+    const attachedBytes = Buffer.from('attached-keyframe');
+    let keyframeCalls = 0;
+    const plannerSawSource = [];
+    const plan = {
+        intent: 'test',
+        continuity_bible: 'test continuity',
+        keyframe: {
+            recommended: true,
+            reason: 'identity anchor',
+            prompt: 'three racers',
+            motion_contract: {
+                subject_orientation: 'right',
+                gaze_direction: 'right',
+                travel_direction: 'right',
+                camera_relation: 'rear three-quarter',
+                first_second_action: 'accelerate right',
+            },
+        },
+        segments: [],
+    };
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+        frontierPlanner: async (_prompt, _model, _requester, sourceImage) => {
+            plannerSawSource.push(Boolean(sourceImage));
+            return plan;
+        },
+        keyframeGenerator: async () => {
+            keyframeCalls += 1;
+            return {
+                bytes: generatedBytes,
+                mimeType: 'image/png',
+                provider: 'test-provider',
+                model: 'test-image-model',
+            };
+        },
+        sourceImageDownloader: async (_descriptor, targetDirectory) => {
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'source.png');
+            writeFileSync(path, attachedBytes);
+            return { path, mimeType: 'image/png', bytes: attachedBytes.length };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: {
+                authorization: 'Bearer bot-secret',
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    const workerFetch = (path, init = {}) => fetch(base + path, {
+        method: 'POST',
+        ...init,
+        headers: {
+            authorization: 'Bearer worker-secret',
+            'content-type': 'application/json',
+            ...(init.headers || {}),
+        },
+    });
+
+    let socket;
+    try {
+        const first = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'ltx',
+                prompt: 'A generated-frame test',
+                requester_id: 'user-1',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'message-1',
+                status_message_id: 'status-1',
+            }),
+        });
+        assert.equal(first.status, 201);
+        assert.equal(first.body.job.has_source_image, false);
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello',
+            protocol: 1,
+            worker_id: 'test-worker',
+            capabilities: ['ltx', 'minimax'],
+            current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const firstLease = await take(value => value.type === 'job');
+        assert.equal(firstLease.job.id, first.body.job.id);
+
+        const firstPlan = await workerFetch(`/v1/worker/jobs/${first.body.job.id}/plan`);
+        assert.equal(firstPlan.status, 200);
+        const firstFrame = await workerFetch(`/v1/worker/jobs/${first.body.job.id}/keyframe`);
+        assert.equal(firstFrame.status, 200);
+        assert.equal(firstFrame.headers.get('x-video-keyframe-provider'), 'test-provider');
+        assert.deepEqual(Buffer.from(await firstFrame.arrayBuffer()), generatedBytes);
+        const cachedFrame = await workerFetch(`/v1/worker/jobs/${first.body.job.id}/keyframe`);
+        assert.equal(cachedFrame.status, 200);
+        assert.deepEqual(Buffer.from(await cachedFrame.arrayBuffer()), generatedBytes);
+        assert.equal(keyframeCalls, 1);
+
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'failed',
+            job_id: first.body.job.id,
+            error: 'finish first test',
+            retryable: false,
+        }));
+        socket.send(JSON.stringify({ type: 'ready' }));
+        await eventually(
+            () => botFetch('/v1/users/user-1/jobs'),
+            value => value.body.jobs[0].status === 'failed',
+        );
+
+        const second = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimax',
+                prompt: 'Animate my supplied frame',
+                requester_id: 'user-2',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'message-2',
+                status_message_id: 'status-2',
+                source_image: {
+                    url: 'https://cdn.discordapp.com/attachments/1/2/frame.png',
+                    mime_type: 'image/png',
+                    bytes: attachedBytes.length,
+                    name: 'frame.png',
+                },
+            }),
+        });
+        assert.equal(second.status, 201);
+        assert.equal(second.body.job.has_source_image, true);
+        const secondLease = await take(value => value.type === 'job');
+        assert.equal(secondLease.job.id, second.body.job.id);
+        const secondPlan = await workerFetch(`/v1/worker/jobs/${second.body.job.id}/plan`);
+        assert.equal(secondPlan.status, 200);
+        const suppliedFrame = await workerFetch(`/v1/worker/jobs/${second.body.job.id}/keyframe`);
+        assert.equal(suppliedFrame.status, 200);
+        assert.equal(suppliedFrame.headers.get('x-video-keyframe-provider'), 'user-attachment');
+        assert.deepEqual(Buffer.from(await suppliedFrame.arrayBuffer()), attachedBytes);
+        assert.deepEqual(plannerSawSource, [false, true]);
+        assert.equal(keyframeCalls, 1);
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'failed',
+            job_id: second.body.job.id,
+            error: 'finish second test',
+            retryable: false,
+        }));
+        socket.send(JSON.stringify({ type: 'ready' }));
+        await eventually(
+            () => botFetch('/v1/users/user-2/jobs'),
+            value => value.body.jobs[0].status === 'failed',
+        );
+        const closed = new Promise(resolve => socket.once('close', resolve));
+        socket.close();
+        await closed;
+        socket = null;
     } finally {
         if (socket) socket.close();
         await broker.stop();

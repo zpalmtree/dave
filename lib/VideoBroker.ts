@@ -1,10 +1,11 @@
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { createWriteStream, mkdirSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { pathToFileURL } from 'url';
+import fetch from 'node-fetch';
 import sqlite3 from 'sqlite3';
 import { WebSocket, WebSocketServer } from 'ws';
 
@@ -17,6 +18,8 @@ import {
     VIDEO_PROMPT_MAX_LENGTH,
     VIDEO_PROTOCOL_VERSION,
     VIDEO_RESULT_MAX_BYTES,
+    VIDEO_SOURCE_IMAGE_MAX_BYTES,
+    VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VideoJobStatus,
     VideoJobView,
     VideoModelId,
@@ -24,10 +27,32 @@ import {
     isVideoModel,
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
-import { VIDEO_PLANNER_MODEL, createFrontierVideoPlan } from './VideoFrontierPlanner.js';
+import {
+    VIDEO_PLANNER_MODEL,
+    VideoPlanSourceImage,
+    createFrontierVideoPlan,
+} from './VideoFrontierPlanner.js';
+import {
+    VIDEO_KEYFRAME_MAX_BYTES,
+    VideoKeyframeResult,
+    createFrontierVideoKeyframe,
+} from './VideoKeyframeProvider.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
+
+interface VideoSourceImageDescriptor {
+    url: string;
+    mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
+    bytes: number;
+    name: string;
+}
+
+interface StoredVideoSourceImage {
+    path: string;
+    mimeType: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
+    bytes: number;
+}
 
 interface BrokerOptions {
     host: string;
@@ -37,6 +62,12 @@ interface BrokerOptions {
     botToken: string;
     workerToken: string;
     heartbeatTimeoutMs?: number;
+    frontierPlanner?: typeof createFrontierVideoPlan;
+    keyframeGenerator?: (plan: Record<string, any>) => Promise<VideoKeyframeResult>;
+    sourceImageDownloader?: (
+        descriptor: VideoSourceImageDescriptor,
+        directory: string,
+    ) => Promise<StoredVideoSourceImage>;
 }
 
 interface WorkerConnection {
@@ -80,6 +111,13 @@ interface JobRow {
     notified_at: number | null;
     planner_json: string | null;
     planner_model: string | null;
+    source_image_path: string | null;
+    source_image_mime: string | null;
+    source_image_bytes: number | null;
+    keyframe_path: string | null;
+    keyframe_mime: string | null;
+    keyframe_provider: string | null;
+    keyframe_model: string | null;
 }
 
 function nowSeconds(): number {
@@ -126,6 +164,109 @@ async function readJson(req: IncomingMessage, maxBytes = 256 * 1024): Promise<an
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+function imageExtension(mimeType: string): string {
+    if (mimeType === 'image/jpeg') return 'jpg';
+    if (mimeType === 'image/webp') return 'webp';
+    return 'png';
+}
+
+function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
+    if (value === null || value === undefined) return null;
+    if (!value || typeof value !== 'object') throw new Error('Invalid starting-image metadata.');
+    const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
+    const bytes = Number(value.bytes || 0);
+    if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) {
+        throw new Error('The starting image must be PNG, JPEG, or WebP.');
+    }
+    if (!Number.isInteger(bytes) || bytes <= 0 || bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+        throw new Error('The starting image is empty or exceeds the 20 MiB limit.');
+    }
+    return {
+        url: String(value.url || ''),
+        mime_type: mimeType as VideoSourceImageDescriptor['mime_type'],
+        bytes,
+        name: String(value.name || 'start-frame').slice(0, 255),
+    };
+}
+
+function isDiscordAttachmentUrl(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'https:'
+            && (url.hostname === 'cdn.discordapp.com' || url.hostname === 'media.discordapp.net');
+    } catch {
+        return false;
+    }
+}
+
+async function downloadDiscordSourceImage(
+    descriptor: VideoSourceImageDescriptor,
+    directory: string,
+): Promise<StoredVideoSourceImage> {
+    if (!isDiscordAttachmentUrl(descriptor.url)) {
+        throw new Error('The starting image is not a Discord attachment.');
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    mkdirSync(directory, { recursive: true });
+    const temporary = join(directory, 'source.part');
+    rmSync(temporary, { force: true });
+    try {
+        const response = await fetch(descriptor.url, {
+            signal: controller.signal,
+            redirect: 'follow',
+        });
+        if (!response.ok || !response.body || !isDiscordAttachmentUrl(response.url)) {
+            throw new Error(`Discord returned HTTP ${response.status} for the starting image.`);
+        }
+        const mimeType = String(response.headers.get('content-type') || descriptor.mime_type)
+            .split(';')[0]
+            .toLowerCase();
+        if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) {
+            throw new Error(`Discord returned unsupported image type ${mimeType || 'unknown'}.`);
+        }
+        const declaredLength = Number(response.headers.get('content-length') || 0);
+        if (declaredLength > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+            throw new Error('The starting image exceeds the 20 MiB limit.');
+        }
+        let bytes = 0;
+        const meter = new Transform({
+            transform(chunk, _encoding, callback) {
+                bytes += chunk.length;
+                if (bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+                    callback(new Error('The starting image exceeds the 20 MiB limit.'));
+                    return;
+                }
+                callback(null, chunk);
+            },
+        });
+        await pipeline(response.body, meter, createWriteStream(temporary, { flags: 'wx' }));
+        if (!bytes) throw new Error('The starting image is empty.');
+        const destination = join(directory, `source.${imageExtension(mimeType)}`);
+        rmSync(destination, { force: true });
+        renameSync(temporary, destination);
+        return {
+            path: destination,
+            mimeType: mimeType as StoredVideoSourceImage['mimeType'],
+            bytes,
+        };
+    } finally {
+        clearTimeout(timeout);
+        rmSync(temporary, { force: true });
+    }
+}
+
+function writeImage(res: ServerResponse, path: string, mimeType: string, headers: Record<string, string>): void {
+    const size = statSync(path).size;
+    res.writeHead(200, {
+        'content-type': mimeType,
+        'content-length': size,
+        'cache-control': 'no-store',
+        ...headers,
+    });
+    createReadStream(path).pipe(res);
+}
+
 export class VideoBroker {
     private readonly options: BrokerOptions;
     private readonly db: sqlite3.Database;
@@ -133,6 +274,7 @@ export class VideoBroker {
     private readonly wsServer = new WebSocketServer({ noServer: true });
     private worker: WorkerConnection | null = null;
     private writeChain: Promise<unknown> = Promise.resolve();
+    private readonly keyframeInFlight = new Map<string, Promise<void>>();
     private heartbeatTimer: NodeJS.Timeout | null = null;
     private cleanupTimer: NodeJS.Timeout | null = null;
 
@@ -213,7 +355,14 @@ export class VideoBroker {
             delivered_at INTEGER,
             notified_at INTEGER,
             planner_json TEXT,
-            planner_model TEXT
+            planner_model TEXT,
+            source_image_path TEXT,
+            source_image_mime TEXT,
+            source_image_bytes INTEGER,
+            keyframe_path TEXT,
+            keyframe_mime TEXT,
+            keyframe_provider TEXT,
+            keyframe_model TEXT
         )`);
         const jobColumns = await this.all<{ name: string }>('PRAGMA table_info(video_jobs)');
         const columnNames = new Set(jobColumns.map(column => column.name));
@@ -222,6 +371,19 @@ export class VideoBroker {
         }
         if (!columnNames.has('planner_model')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN planner_model TEXT');
+        }
+        for (const [name, definition] of [
+            ['source_image_path', 'TEXT'],
+            ['source_image_mime', 'TEXT'],
+            ['source_image_bytes', 'INTEGER'],
+            ['keyframe_path', 'TEXT'],
+            ['keyframe_mime', 'TEXT'],
+            ['keyframe_provider', 'TEXT'],
+            ['keyframe_model', 'TEXT'],
+        ] as const) {
+            if (!columnNames.has(name)) {
+                await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
+            }
         }
         await this.run(`CREATE INDEX IF NOT EXISTS video_jobs_queue_idx
             ON video_jobs(status, id)`);
@@ -406,6 +568,12 @@ export class VideoBroker {
         if (required.some(key => !String(body[key] || '').trim())) {
             return { status: 400, body: { error: 'Missing Discord job identity.' } };
         }
+        let sourceDescriptor: VideoSourceImageDescriptor | null;
+        try {
+            sourceDescriptor = sourceImageDescriptor(body.source_image);
+        } catch (error) {
+            return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
+        }
         return this.withWriteLock(async () => {
             const existing = await this.get<JobRow>(
                 'SELECT * FROM video_jobs WHERE idempotency_key = ?',
@@ -430,30 +598,55 @@ export class VideoBroker {
             const estimate = await this.runtimeEstimate(body.model as VideoModelId);
             const publicId = randomUUID();
             const now = nowSeconds();
-            await this.run(
-                `INSERT INTO video_jobs(
-                    public_id, idempotency_key, model, prompt, requester_id, origin_bot_id,
-                    channel_id, guild_id, command_message_id, status_message_id, status,
-                    estimate_low_seconds, estimate_high_seconds, created_at, updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                [
-                    publicId,
-                    String(body.command_message_id),
-                    body.model,
-                    prompt,
-                    String(body.requester_id),
-                    String(body.origin_bot_id),
-                    String(body.channel_id),
-                    body.guild_id ? String(body.guild_id) : null,
-                    String(body.command_message_id),
-                    String(body.status_message_id),
-                    'queued',
-                    estimate.low,
-                    estimate.high,
-                    now,
-                    now,
-                ],
-            );
+            const directory = resolve(this.options.resultsDir, publicId);
+            let sourceImage: StoredVideoSourceImage | null = null;
+            if (sourceDescriptor) {
+                try {
+                    sourceImage = await (this.options.sourceImageDownloader || downloadDiscordSourceImage)(
+                        sourceDescriptor,
+                        directory,
+                    );
+                } catch (error) {
+                    rmSync(directory, { recursive: true, force: true });
+                    return {
+                        status: 400,
+                        body: { error: `Could not use the attached starting image: ${error instanceof Error ? error.message : String(error)}` },
+                    };
+                }
+            }
+            try {
+                await this.run(
+                    `INSERT INTO video_jobs(
+                        public_id, idempotency_key, model, prompt, requester_id, origin_bot_id,
+                        channel_id, guild_id, command_message_id, status_message_id, status,
+                        estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
+                        source_image_path, source_image_mime, source_image_bytes
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    [
+                        publicId,
+                        String(body.command_message_id),
+                        body.model,
+                        prompt,
+                        String(body.requester_id),
+                        String(body.origin_bot_id),
+                        String(body.channel_id),
+                        body.guild_id ? String(body.guild_id) : null,
+                        String(body.command_message_id),
+                        String(body.status_message_id),
+                        'queued',
+                        estimate.low,
+                        estimate.high,
+                        now,
+                        now,
+                        sourceImage?.path || null,
+                        sourceImage?.mimeType || null,
+                        sourceImage?.bytes || null,
+                    ],
+                );
+            } catch (error) {
+                if (sourceImage) rmSync(directory, { recursive: true, force: true });
+                throw error;
+            }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
             await this.dispatchNext();
             return { status: 201, body: { job: (await this.views([row!]))[0], duplicate: false } };
@@ -591,6 +784,7 @@ export class VideoBroker {
                 error: row.error,
                 result_path: row.result_path,
                 result_bytes: row.result_bytes,
+                has_source_image: Boolean(row.source_image_path),
                 created_at: row.created_at,
                 updated_at: row.updated_at,
                 started_at: row.started_at,
@@ -916,7 +1110,22 @@ export class VideoBroker {
                 return;
             }
             try {
-                const plan = await createFrontierVideoPlan(job.prompt, job.model, job.requester_id);
+                let sourceImage: VideoPlanSourceImage | undefined;
+                if (job.source_image_path && job.source_image_mime
+                    && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_mime as any)
+                    && existsSync(job.source_image_path)
+                    && statSync(job.source_image_path).isFile()) {
+                    sourceImage = {
+                        mimeType: job.source_image_mime as VideoPlanSourceImage['mimeType'],
+                        data: readFileSync(job.source_image_path),
+                    };
+                }
+                const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
+                    job.prompt,
+                    job.model,
+                    job.requester_id,
+                    sourceImage,
+                );
                 await this.run(
                     `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
                      WHERE public_id = ?`,
@@ -925,6 +1134,93 @@ export class VideoBroker {
                 writeJson(res, 200, { plan, planner_model: VIDEO_PLANNER_MODEL, cached: false });
             } catch (error) {
                 console.warn(`Frontier planning failed for ${job.public_id}`, error);
+                writeJson(res, 502, {
+                    error: error instanceof Error ? error.message : String(error),
+                    fallback: 'local',
+                });
+            }
+            return;
+        }
+        const keyframe = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/keyframe$/.exec(url.pathname);
+        if (keyframe && req.method === 'POST') {
+            let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
+            if (!job || job.worker_id !== this.worker?.id || keyframe[1] !== this.worker.currentJob) {
+                writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+                return;
+            }
+            if (job.source_image_path && job.source_image_mime && existsSync(job.source_image_path)) {
+                writeImage(res, job.source_image_path, job.source_image_mime, {
+                    'x-video-keyframe-provider': 'user-attachment',
+                    'x-video-keyframe-model': 'none',
+                });
+                return;
+            }
+            if (!job.planner_json) {
+                writeJson(res, 409, { error: 'A screenplay is required before generating a first frame.', fallback: 'local' });
+                return;
+            }
+            const plan = JSON.parse(job.planner_json);
+            if (plan?.keyframe?.recommended !== true) {
+                res.writeHead(204, { 'cache-control': 'no-store' });
+                res.end();
+                return;
+            }
+            try {
+                if (!job.keyframe_path || !job.keyframe_mime) {
+                    let generation = this.keyframeInFlight.get(job.public_id);
+                    if (!generation) {
+                        generation = (async () => {
+                            const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(plan);
+                            if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
+                                throw new Error('Generated first frame is empty or too large.');
+                            }
+                            const directory = resolve(this.options.resultsDir, job!.public_id);
+                            mkdirSync(directory, { recursive: true });
+                            const extension = imageExtension(result.mimeType);
+                            const temporary = join(directory, `keyframe.${extension}.part`);
+                            const destination = join(directory, `keyframe.${extension}`);
+                            rmSync(temporary, { force: true });
+                            const stream = createWriteStream(temporary, { flags: 'wx' });
+                            await new Promise<void>((resolvePromise, reject) => {
+                                stream.once('finish', resolvePromise);
+                                stream.once('error', reject);
+                                stream.end(result.bytes);
+                            });
+                            rmSync(destination, { force: true });
+                            renameSync(temporary, destination);
+                            await this.run(
+                                `UPDATE video_jobs SET keyframe_path = ?, keyframe_mime = ?,
+                                 keyframe_provider = ?, keyframe_model = ?, updated_at = ? WHERE public_id = ?`,
+                                [
+                                    destination,
+                                    result.mimeType,
+                                    result.provider,
+                                    result.model,
+                                    nowSeconds(),
+                                    job!.public_id,
+                                ],
+                            );
+                        })();
+                        this.keyframeInFlight.set(job.public_id, generation);
+                    }
+                    try {
+                        await generation;
+                    } finally {
+                        if (this.keyframeInFlight.get(job.public_id) === generation) {
+                            this.keyframeInFlight.delete(job.public_id);
+                        }
+                    }
+                    job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
+                }
+                if (!job?.keyframe_path || !job.keyframe_mime) {
+                    throw new Error('First-frame generation completed without an image.');
+                }
+                writeImage(res, job.keyframe_path, job.keyframe_mime, {
+                    'x-video-keyframe-provider': job.keyframe_provider || 'frontier-image',
+                    'x-video-keyframe-model': job.keyframe_model || 'unknown',
+                });
+            } catch (error) {
+                console.warn(`Frontier first-frame generation failed for ${keyframe[1]}`, error);
                 writeJson(res, 502, {
                     error: error instanceof Error ? error.message : String(error),
                     fallback: 'local',
@@ -994,18 +1290,22 @@ export class VideoBroker {
             `SELECT * FROM video_jobs
              WHERE status IN ('ready','delivered','failed','cancelled')
              AND COALESCE(delivered_at, completed_at, updated_at) < ?
-             AND result_path IS NOT NULL`,
+             AND (result_path IS NOT NULL OR source_image_path IS NOT NULL OR keyframe_path IS NOT NULL)`,
             [cutoff],
         );
         for (const row of rows) {
             try {
-                if (row.result_path && statSync(row.result_path).isFile()) rmSync(resolve(row.result_path), { force: true });
-                if (row.result_path) rmSync(dirname(resolve(row.result_path)), { recursive: true, force: true });
+                const storedPath = row.result_path || row.source_image_path || row.keyframe_path;
+                if (storedPath) rmSync(dirname(resolve(storedPath)), { recursive: true, force: true });
             } catch (error) {
                 console.warn(`Could not clean video result ${row.public_id}`, error);
                 continue;
             }
-            await this.run('UPDATE video_jobs SET result_path = NULL, updated_at = ? WHERE public_id = ?', [nowSeconds(), row.public_id]);
+            await this.run(
+                `UPDATE video_jobs SET result_path = NULL, source_image_path = NULL, keyframe_path = NULL,
+                 updated_at = ? WHERE public_id = ?`,
+                [nowSeconds(), row.public_id],
+            );
         }
     }
 }
