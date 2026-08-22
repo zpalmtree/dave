@@ -65,7 +65,9 @@ test('offline queue messages omit fake ETAs', () => {
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
     assert.equal(VIDEO_PLANNER_MODEL, 'gpt-5.6-sol');
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /vehicle nose, visible road\/path ahead/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /replacement cast is closed/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /positive-only diffusion prompt/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /at most three identity-critical people/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
         if (value.type === 'object') assert.equal(value.additionalProperties, false);
