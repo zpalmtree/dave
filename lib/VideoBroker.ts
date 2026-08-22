@@ -932,12 +932,18 @@ export class VideoBroker {
             const event = String(message.event || '');
             if (event === 'plan') {
                 await this.run(
-                    `UPDATE video_jobs SET status = 'planning', stage = ?, estimate_low_seconds = ?,
-                     estimate_high_seconds = ?, updated_at = ? WHERE public_id = ?`,
+                    `UPDATE video_jobs SET status = 'planning', stage = ?,
+                     estimate_low_seconds = COALESCE(?, estimate_low_seconds),
+                     estimate_high_seconds = COALESCE(?, estimate_high_seconds),
+                     updated_at = ? WHERE public_id = ?`,
                     [
                         String(message.stage || 'Planning').slice(0, 255),
-                        Math.max(1, Number(message.estimate_low_seconds) || 1),
-                        Math.max(1, Number(message.estimate_high_seconds) || 1),
+                        Number(message.estimate_low_seconds) > 0
+                            ? Math.max(1, Number(message.estimate_low_seconds))
+                            : null,
+                        Number(message.estimate_high_seconds) > 0
+                            ? Math.max(1, Number(message.estimate_high_seconds))
+                            : null,
                         nowSeconds(),
                         jobId,
                     ],

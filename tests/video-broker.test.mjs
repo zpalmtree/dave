@@ -111,6 +111,19 @@ test('broker preserves an interrupted job at the front while paused', async () =
         const firstLease = await take(value => value.type === 'job');
         assert.equal(firstLease.job.id, jobId);
 
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'plan',
+            job_id: jobId,
+            stage: 'Planning screenplay',
+        }));
+        const planning = await eventually(
+            () => botFetch('/v1/users/user-1/jobs'),
+            value => value.body.jobs[0].status === 'planning',
+        );
+        assert.equal(planning.body.jobs[0].estimate_low_seconds, 600);
+        assert.equal(planning.body.jobs[0].estimate_high_seconds, 1800);
+
         const paused = await botFetch('/v1/control/pause', {
             method: 'POST',
             body: JSON.stringify({ seconds: 60, actor_id: 'owner' }),
