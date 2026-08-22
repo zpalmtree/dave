@@ -4,7 +4,11 @@ import test from 'node:test';
 import { Commands } from '../dist/CommandDeclarations.js';
 import { formatVideoJob } from '../dist/VideoGeneration.js';
 import { parsePauseDuration } from '../dist/VideoProtocol.js';
-import { VIDEO_PLAN_SCHEMA, VIDEO_PLANNER_MODEL } from '../dist/VideoFrontierPlanner.js';
+import {
+    VIDEO_PLAN_SCHEMA,
+    VIDEO_PLANNER_INSTRUCTIONS,
+    VIDEO_PLANNER_MODEL,
+} from '../dist/VideoFrontierPlanner.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
     assert.equal(parsePauseDuration(undefined), 6 * 60 * 60);
@@ -60,6 +64,8 @@ test('offline queue messages omit fake ETAs', () => {
 
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
     assert.equal(VIDEO_PLANNER_MODEL, 'gpt-5.6-sol');
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /vehicle nose, visible road\/path ahead/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /replacement cast is closed/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
         if (value.type === 'object') assert.equal(value.additionalProperties, false);
