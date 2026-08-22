@@ -993,7 +993,9 @@ async function main(): Promise<void> {
     process.once('SIGTERM', () => void stop());
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// PM2's fork container remains argv[1], so pm_id is the reliable entrypoint signal there.
+if (process.env.pm_id !== undefined
+    || (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)) {
     main().catch(error => {
         console.error(error);
         process.exitCode = 1;
