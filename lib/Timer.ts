@@ -26,6 +26,7 @@ import {
 } from './Utilities.js';
 
 import { config } from './Config.js';
+import { formatDiscordDateAndRelative } from './DiscordTime.js';
 
 export type TimerPlatform = 'discord' | 'uproar';
 
@@ -215,9 +216,7 @@ export async function handleTimers(msg: Message, db: Database): Promise<void> {
 }
 
 function formatDiscordTimestamp(time: moment.Moment): string {
-    const timestamp = time.unix();
-
-    return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
+    return formatDiscordDateAndRelative(time.unix());
 }
 
 export async function restoreTimers(db: Database, client: Client) {

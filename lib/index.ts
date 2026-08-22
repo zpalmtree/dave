@@ -38,6 +38,7 @@ import {
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
 import { startUproar } from './Uproar.js';
 import { exchangeService } from './Exchange.js';
+import { startVideoGenerationService } from './VideoGeneration.js';
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
     if (!msg.reference?.messageId) {
@@ -129,6 +130,7 @@ function createDiscordClient(db: sqlite3.Database): Client {
         console.log('Logged in');
 
         restoreTimers(db, client);
+        startVideoGenerationService(client);
 
     });
 

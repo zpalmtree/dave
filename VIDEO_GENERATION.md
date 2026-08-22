@@ -1,0 +1,66 @@
+# Local video generation
+
+Dave and Slug Bot share one durable video queue. The bots talk to a loopback-only
+broker on the server; the Windows desktop worker makes an outbound WSS connection
+to that broker through Tailscale Serve. ComfyUI remains bound to
+`127.0.0.1:8188` on the desktop and is never exposed to the tailnet or Internet.
+
+## Discord commands
+
+- `$ltx <prompt>` queues an automatic-length, maximum-quality LTX 2.5 video.
+- `$minimax <prompt>` queues an automatic-length, maximum-quality MiniMax H3 video.
+- `$videoqueue` shows the caller's unfinished jobs, positions, progress, and ETA.
+- `$videoqueue cancel <short-id>` cancels one of the caller's jobs.
+- `$videogen status` is owner-only.
+- `$videogen pause [duration]` pauses dispatch for six hours by default. Durations
+  may be `30m`, `6h`, or `1d`, from one minute through seven days. An active job is
+  interrupted, its VRAM is released, and it returns to the front of the queue.
+- `$videogen resume` resumes dispatch.
+- `$videogen cancel <short-id>` cancels any job as the owner.
+
+Jobs can be submitted while the desktop is offline or generation is paused. In
+those states Dave deliberately omits ETA. The queue accepts at most three
+unfinished jobs per user and twenty globally.
+
+## Server configuration
+
+The default configuration file is `~/.config/dave-video.json` and must be mode
+`0600`:
+
+```json
+{
+  "brokerUrl": "http://127.0.0.1:8765",
+  "botToken": "random bot bearer token",
+  "workerToken": "different random worker bearer token",
+  "brokerHost": "127.0.0.1",
+  "brokerPort": 8765,
+  "brokerDb": "/home/beach/.local/state/dave-video/queue.sqlite3",
+  "resultsDir": "/home/beach/.local/state/dave-video/results"
+}
+```
+
+`scripts/deploy-bots.sh` builds both branches and starts or restarts the
+`video-broker`, `dave`, and `slug-bot` PM2 processes. Tailscale Serve proxies
+private HTTPS/WSS traffic to the broker's loopback port.
+
+## Desktop worker
+
+Copy `video_gen/video_worker.json.example` to `video_gen/video_worker.json`, set
+the tailnet-only `wss://.../v1/worker` URL and matching worker token, then run
+`video_worker.cmd`. The worker journals its active job, reconnects after network
+loss, sends a heartbeat every 15 seconds, and retries transient render failures
+at most twice. It generates a semantic screenplay, optionally anchors the video
+with a generated first frame, and reports model stages and percentages when
+ComfyUI exposes them.
+
+Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
+24 hours; complete desktop generation directories expire after seven days.
+
+## First-frame continuity
+
+Adaptive first frames are planned with a motion contract shared by the image and
+video prompts: subject orientation, gaze, travel vector, camera relationship, and
+the exact first-second action. The opening video shot must continue those values
+without a turnaround, reversal, gaze snap, camera-axis crossing, teleport, or
+unexplained reframe. This is what keeps, for example, a rear chase-view kart
+pointed down-track when animation begins.
