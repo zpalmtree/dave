@@ -9,7 +9,13 @@ import {
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
 } from '../dist/VideoFrontierPlanner.js';
-import { buildVideoKeyframePrompt, VIDEO_KEYFRAME_MODEL } from '../dist/VideoKeyframeProvider.js';
+import {
+    buildVideoKeyframePrompt,
+    buildVideoKeyframeReviewPrompt,
+    VIDEO_KEYFRAME_FALLBACK_MODEL,
+    VIDEO_KEYFRAME_MODEL,
+    VIDEO_KEYFRAME_REVIEW_MODEL,
+} from '../dist/VideoKeyframeProvider.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
     assert.equal(parsePauseDuration(undefined), 6 * 60 * 60);
@@ -110,6 +116,8 @@ test('video commands accept exactly one supported attached start frame', () => {
 
 test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.equal(VIDEO_KEYFRAME_MODEL, 'gemini-3-pro-image');
+    assert.equal(VIDEO_KEYFRAME_FALLBACK_MODEL, 'gpt-image-2');
+    assert.equal(VIDEO_KEYFRAME_REVIEW_MODEL, 'gpt-5.6-sol');
     const prompt = buildVideoKeyframePrompt({
         keyframe: {
             prompt: 'Three named drivers race through a colorful arcade circuit.',
@@ -126,4 +134,20 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(prompt, /karts point toward upper right/);
     assert.match(prompt, /accelerate forward without turning/);
     assert.match(prompt, /requires no turn, reversal/);
+    const review = buildVideoKeyframeReviewPrompt({
+        intent: 'The three drivers accelerate down-track.',
+        keyframe: {
+            prompt: 'Exactly three profile-visible drivers.',
+            motion_contract: {
+                travel_direction: 'toward the upper-right vanishing point',
+            },
+        },
+        segments: [{ shots: [{
+            visual: 'The three karts accelerate down-track.',
+            camera: 'Rear three-quarter tracking shot.',
+        }] }],
+    });
+    assert.match(review, /physical front\/nose/);
+    assert.match(review, /visible road or path ahead/);
+    assert.match(review, /positive-only description/);
 });
