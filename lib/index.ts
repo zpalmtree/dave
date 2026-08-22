@@ -43,6 +43,7 @@ import {
 import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js';
 import { startUproar } from './Uproar.js';
 import { exchangeService } from './Exchange.js';
+import { startVideoGenerationService } from './VideoGeneration.js';
 
 const MAGIC_EDEN_SOL_SLUGS_STATS_URL = 'https://api-mainnet.magiceden.dev/rpc/getCollectionEscrowStats/sol_slugs';
 const TENSOR_SOL_SLUGS_STATS_URL = 'https://api.mainnet.tensordev.io/api/v1/collections?sortBy=statsV2.volumeAll:desc&limit=1&slugDisplays=sol_slugs';
@@ -224,6 +225,7 @@ function createDiscordClient(db: sqlite3.Database): Client {
 
         magicEdenStatUpdater(client);
         restoreTimers(db, client);
+        startVideoGenerationService(client);
 
         /* Backfill guild_id for existing log rows */
         const rows = await selectQuery(

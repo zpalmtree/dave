@@ -86,6 +86,9 @@ export interface Command {
     /* Is this a private command */
     hidden?: boolean;
 
+    /* Whether this command is intentionally unavailable on the Uproar shim. */
+    discordOnly?: boolean;
+
     /* Other 'sub commands', e.g. $watch addlink. */
     subCommands?: CommandFunc[];
 
@@ -94,7 +97,7 @@ export interface Command {
 
     /* Ways to gate the command to a certain user, channel, etc. Gate must return
      * true to let the user run this command */
-    commandGates?: [(m: Message) => { canAccess: boolean, error?: string }];
+    commandGates?: Array<(m: Message) => { canAccess: boolean, error?: string }>;
 }
 
 export enum Args {

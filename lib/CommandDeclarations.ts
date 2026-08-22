@@ -144,8 +144,73 @@ import { handleWorldCup } from './WorldCup.js';
 
 import { config } from './Config.js';
 
+import {
+    discordOnlyGate,
+    handleLtxVideo,
+    handleMinimaxVideo,
+    handleVideoAdmin,
+    handleVideoQueue,
+    ownerOnlyVideoGate,
+} from './VideoGeneration.js';
+
 /* Keep shared command order synchronized across deployment tracks. */
 const sharedCommands: Command[] = [
+    {
+        aliases: ['ltx'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleLtxVideo,
+            description: 'Generate a maximum-quality local LTX 2.5 video',
+            examples: [{ value: 'ltx a chihuahua crusade through a medieval castle' }],
+        },
+        relatedCommands: ['minimax', 'videoqueue'],
+        commandGates: [discordOnlyGate],
+    },
+    {
+        aliases: ['minimax'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMinimaxVideo,
+            description: 'Generate a maximum-quality local MiniMax H3 video',
+            examples: [{ value: 'minimax an arcade kart race between historical figures' }],
+        },
+        relatedCommands: ['ltx', 'videoqueue'],
+        commandGates: [discordOnlyGate],
+    },
+    {
+        aliases: ['videoqueue', 'vq'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleVideoQueue,
+            description: 'Show or cancel your queued local video jobs',
+            examples: [
+                { value: 'videoqueue' },
+                { value: 'videoqueue cancel 12ab34cd' },
+            ],
+        },
+        relatedCommands: ['ltx', 'minimax'],
+        commandGates: [discordOnlyGate],
+    },
+    {
+        aliases: ['videogen'],
+        hidden: true,
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleVideoAdmin,
+            description: 'Control the local video worker',
+            examples: [
+                { value: 'videogen status' },
+                { value: 'videogen pause' },
+                { value: 'videogen pause 90m' },
+                { value: 'videogen resume' },
+            ],
+        },
+        commandGates: [discordOnlyGate, ownerOnlyVideoGate],
+    },
     {
         aliases: ['roll', 'reroll'],
         primaryCommand: {
@@ -1618,6 +1683,10 @@ export const Commands: Command[] = [
 
 export function handleHelp(msg: Message, args: string): void {
     const availableCommands = Commands.filter((c) => {
+        if (c.discordOnly && (msg as any).platform === 'uproar') {
+            return false;
+        }
+
         if (c.primaryCommand.disabled) {
             return false;
         }

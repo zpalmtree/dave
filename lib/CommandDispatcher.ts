@@ -51,6 +51,10 @@ export async function dispatchPrefixedCommand(msg: Message, db: Database): Promi
             continue;
         }
 
+        if (c.discordOnly && (msg as any).platform === 'uproar') {
+            return;
+        }
+
         if (c.hidden && !canAccessCommand(msg, true)) {
             return;
         }

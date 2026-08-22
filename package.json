@@ -21,7 +21,7 @@
     "@types/node": "^16.6.1",
     "@types/node-fetch": "^2.5.7",
     "@types/sqlite3": "^3.1.6",
-    "@types/ws": "^7.2.2",
+    "@types/ws": "^8.18.1",
     "typescript": "5.2.2"
   },
   "dependencies": {
@@ -40,6 +40,7 @@
     "openai": "6.7.0",
     "sqlite3": "^5.0.0",
     "text-on-gif": "^2.0.7",
+    "ws": "^8.21.3",
     "xml-js": "^1.6.11"
   },
   "resolutions": {

@@ -104,10 +104,24 @@ restart_app() {
     pm2 restart "$app" --update-env
 }
 
+restart_video_broker() {
+    echo "Starting/restarting PM2 app video-broker"
+    if pm2 describe video-broker >/dev/null 2>&1; then
+        pm2 restart video-broker --update-env
+    else
+        pm2 start "$REMOTE_MASTER_DIR/dist/VideoBroker.js" \
+            --name video-broker \
+            --cwd "$REMOTE_MASTER_DIR" \
+            --time
+    fi
+}
+
 load_node
 deploy_repo "$REMOTE_MASTER_DIR" master
 deploy_repo "$REMOTE_SLUGS_DIR" slugs
+restart_video_broker
 restart_app dave
 restart_app slug-bot
+pm2 save
 pm2 list
 REMOTE
