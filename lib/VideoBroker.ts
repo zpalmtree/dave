@@ -24,6 +24,7 @@ import {
     isVideoModel,
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
+import { VIDEO_PLANNER_MODEL, createFrontierVideoPlan } from './VideoFrontierPlanner.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
@@ -77,6 +78,8 @@ interface JobRow {
     completed_at: number | null;
     delivered_at: number | null;
     notified_at: number | null;
+    planner_json: string | null;
+    planner_model: string | null;
 }
 
 function nowSeconds(): number {
@@ -208,8 +211,18 @@ export class VideoBroker {
             started_at INTEGER,
             completed_at INTEGER,
             delivered_at INTEGER,
-            notified_at INTEGER
+            notified_at INTEGER,
+            planner_json TEXT,
+            planner_model TEXT
         )`);
+        const jobColumns = await this.all<{ name: string }>('PRAGMA table_info(video_jobs)');
+        const columnNames = new Set(jobColumns.map(column => column.name));
+        if (!columnNames.has('planner_json')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN planner_json TEXT');
+        }
+        if (!columnNames.has('planner_model')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN planner_model TEXT');
+        }
         await this.run(`CREATE INDEX IF NOT EXISTS video_jobs_queue_idx
             ON video_jobs(status, id)`);
         await this.run(`CREATE INDEX IF NOT EXISTS video_jobs_origin_idx
@@ -887,6 +900,38 @@ export class VideoBroker {
     }
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+        const planning = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/plan$/.exec(url.pathname);
+        if (planning && req.method === 'POST') {
+            const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [planning[1]]);
+            if (!job || job.worker_id !== this.worker?.id || planning[1] !== this.worker.currentJob) {
+                writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+                return;
+            }
+            if (job.planner_json) {
+                writeJson(res, 200, {
+                    plan: JSON.parse(job.planner_json),
+                    planner_model: job.planner_model || VIDEO_PLANNER_MODEL,
+                    cached: true,
+                });
+                return;
+            }
+            try {
+                const plan = await createFrontierVideoPlan(job.prompt, job.model, job.requester_id);
+                await this.run(
+                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
+                     WHERE public_id = ?`,
+                    [JSON.stringify(plan), VIDEO_PLANNER_MODEL, nowSeconds(), job.public_id],
+                );
+                writeJson(res, 200, { plan, planner_model: VIDEO_PLANNER_MODEL, cached: false });
+            } catch (error) {
+                console.warn(`Frontier planning failed for ${job.public_id}`, error);
+                writeJson(res, 502, {
+                    error: error instanceof Error ? error.message : String(error),
+                    fallback: 'local',
+                });
+            }
+            return;
+        }
         const upload = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/result$/.exec(url.pathname);
         if (!upload || req.method !== 'PUT') {
             writeJson(res, 404, { error: 'Not found.' });
