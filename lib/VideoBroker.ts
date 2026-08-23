@@ -178,6 +178,18 @@ function generatorModel(value: unknown): VideoGeneratorModelId | null {
     return value === 'ltx' || value === 'h3' ? value : null;
 }
 
+function plannedIntent(row: JobRow): string | null {
+    if (!row.planner_json) return null;
+    try {
+        const intent = JSON.parse(row.planner_json)?.intent;
+        return typeof intent === 'string' && intent.trim()
+            ? sanitizeVideoWorkerText(intent, '', 1000).trim() || null
+            : null;
+    } catch {
+        return null;
+    }
+}
+
 function nowSeconds(): number {
     return Math.floor(Date.now() / 1000);
 }
@@ -1538,6 +1550,7 @@ export class VideoBroker {
                 id: row.public_id,
                 model: row.model,
                 prompt: row.prompt,
+                planned_intent: plannedIntent(row),
                 requester_id: row.requester_id,
                 origin_bot_id: row.origin_bot_id,
                 channel_id: row.channel_id,

@@ -6,12 +6,15 @@ import {
     formatVideoJob,
     formatVideoRuntime,
     completedVideoPost,
+    failedVideoPost,
     singleVideoResponderGate,
     videoPromptFromMessages,
+    videoJobDirection,
     videoSourceImageFromMessage,
     videoSourceImageFromMessages,
 } from '../dist/VideoGeneration.js';
 import {
+    VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MODELS,
     isVideoModel,
     parsePauseDuration,
@@ -80,6 +83,19 @@ test('video runtime is formatted for the delivered post', () => {
         runtime_seconds: 65.6,
         prompt: 'An anime family battle',
     }), /a1869ead.*completed in \*\*1m 6s\*\*/);
+});
+
+test('failed video post is a standalone sanitized reply', () => {
+    const text = failedVideoPost({
+        id: '09cfe948-165f-43d6-80bf-1f66dd26ee98',
+        model: 'minimaxfast',
+        runtime_seconds: null,
+        prompt: 'baboons at a zoo',
+        error: 'Failed at D:\\AI\\private\\video.plan.json',
+    });
+    assert.match(text, /MiniMax H3 Turbo video \*\*09cfe948\*\* failed/);
+    assert.match(text, /> baboons at a zoo/);
+    assert.doesNotMatch(text, /D:\\|private|video\.plan/);
 });
 
 test('worker progress never exposes local filesystem paths', () => {
@@ -170,6 +186,10 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /meme with captions/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /social-media or application screenshot/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /flat rigid artifact/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Visible text is immutable source content/);
     assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /Never invent dialogue/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
@@ -177,6 +197,21 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
         for (const child of Object.values(value)) visit(child);
     };
     visit(VIDEO_PLAN_SCHEMA);
+});
+
+test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {
+    assert.equal(videoJobDirection({
+        prompt: VIDEO_IMAGE_ONLY_AUTO_PROMPT,
+        planned_intent: null,
+    }), 'Auto-directing the attached image.');
+    assert.equal(videoJobDirection({
+        prompt: VIDEO_IMAGE_ONLY_AUTO_PROMPT,
+        planned_intent: 'A meme remains readable while its pictured dog blinks.',
+    }), 'Auto-direction: A meme remains readable while its pictured dog blinks.');
+    assert.equal(videoJobDirection({
+        prompt: 'Make the dog run.',
+        planned_intent: 'Ignored for explicit prompts.',
+    }), 'Make the dog run.');
 });
 
 test('frontier planner distinguishes requested dialogue from silent action', () => {

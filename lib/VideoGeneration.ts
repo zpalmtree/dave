@@ -4,6 +4,7 @@ import { Client, Message } from 'discord.js';
 
 import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
+    VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MODELS,
     VIDEO_PROMPT_MAX_LENGTH,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
@@ -111,11 +112,24 @@ export function formatVideoRuntime(seconds: number | null | undefined): string |
     return parts.join(' ');
 }
 
+export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_intent'>): string {
+    if (job.prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT) return job.prompt;
+    const intent = sanitizeVideoWorkerText(job.planned_intent, '', 1000).trim();
+    return intent ? `Auto-direction: ${intent}` : 'Auto-directing the attached image.';
+}
+
 export function completedVideoPost(job: VideoJobView): string {
     const runtime = formatVideoRuntime(job.runtime_seconds);
     return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
         runtime ? ` — completed in **${runtime}**` : ''
-    }.\n> ${truncatePrompt(job.prompt)}`;
+    }.\n> ${truncatePrompt(videoJobDirection(job))}`;
+}
+
+export function failedVideoPost(job: VideoJobView): string {
+    const error = sanitizeVideoWorkerText(job.error, 'Unknown worker error.', 1500);
+    return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** failed.\n${error}\n> ${
+        truncatePrompt(videoJobDirection(job))
+    }`;
 }
 
 export interface SubmittedVideoSourceImage {
@@ -202,7 +216,10 @@ function sentence(value: string): string {
 
 export function formatVideoJob(job: VideoJobView): string {
     const name = VIDEO_MODELS[job.model].displayName;
-    const head = `**${name} · ${shortJobId(job.id)}**${job.has_source_image ? ' · user start frame' : ''}`;
+    const imageLabel = job.has_source_image
+        ? (job.prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT ? ' · auto-directed image' : ' · user start frame')
+        : '';
+    const head = `**${name} · ${shortJobId(job.id)}**${imageLabel}`;
     if (job.status === 'queued') {
         const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)}`;
@@ -281,6 +298,19 @@ class VideoGenerationService {
         }
     }
 
+    private async existingFailure(job: VideoJobView, channel: any): Promise<any | null> {
+        try {
+            const recent = await channel.messages.fetch({ limit: 100 });
+            const marker = `video **${shortJobId(job.id)}** failed`;
+            return recent.find((candidate: any) => candidate.id !== job.status_message_id
+                && candidate.author?.id === this.client.user?.id
+                && candidate.content?.includes(marker)) || null;
+        } catch (error) {
+            console.warn(`[Video] Could not check for an existing failure notice for ${job.id}: ${String(error)}`);
+            return null;
+        }
+    }
+
     private async postDelivery(job: VideoJobView, statusMessage: any): Promise<any> {
         const channel = statusMessage.channel;
         const payload = {
@@ -299,10 +329,27 @@ class VideoGenerationService {
         }
     }
 
+    private async postFailure(job: VideoJobView, statusMessage: any): Promise<any> {
+        const channel = statusMessage.channel;
+        const payload = {
+            content: failedVideoPost(job),
+            allowedMentions: { repliedUser: true },
+        };
+        const existing = await this.existingFailure(job, channel);
+        if (existing) return existing;
+        try {
+            const commandMessage = await channel.messages.fetch(job.command_message_id);
+            return await commandMessage.reply(payload);
+        } catch (error) {
+            console.warn(`[Video] Could not reply with failure for ${job.id}; posting in channel: ${String(error)}`);
+            return channel.send(payload);
+        }
+    }
+
     private async updateJob(job: VideoJobView): Promise<void> {
         const message = await this.statusMessage(job);
         if (!message) return;
-        const content = `${formatVideoJob(job)}\n> ${truncatePrompt(job.prompt)}`;
+        const content = `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job))}`;
         if (job.status === 'ready') {
             if (!job.result_path || !existsSync(job.result_path)) {
                 console.warn(`[Video] Result is not readable for ${job.id}: ${job.result_path}`);
@@ -319,11 +366,21 @@ class VideoGenerationService {
             this.rendered.delete(job.id);
             return;
         }
+        if (job.status === 'failed') {
+            const failure = await this.postFailure(job, message);
+            await message.edit({
+                content: `**${VIDEO_MODELS[job.model].displayName} · ${shortJobId(job.id)}**\nFailed. See ${failure.url}.`,
+                attachments: [],
+            });
+            await this.acknowledge(job, 'notified');
+            this.rendered.delete(job.id);
+            return;
+        }
         if (this.rendered.get(job.id) !== content) {
             await message.edit({ content });
             this.rendered.set(job.id, content);
         }
-        if (job.status === 'failed' || job.status === 'cancelled') {
+        if (job.status === 'cancelled') {
             await this.acknowledge(job, 'notified');
             this.rendered.delete(job.id);
         }
@@ -420,7 +477,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     }
     prompt = videoPromptFromMessages(prompt, referencedMessage);
     if (!prompt && sourceImage) {
-        prompt = 'Animate the supplied starting image with coherent, natural motion that fits the visible scene.';
+        prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
     }
     if (!prompt) {
         await msg.reply(`Usage: \`${config.prefix}${VIDEO_MODELS[model].command} <prompt>\` (or reply to a message containing a prompt or image).`);
@@ -462,7 +519,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
         } catch (error) {
             console.warn(`[Video] Could not prepare the first ETA for ${job.id}: ${String(error)}`);
         }
-        await pending.edit({ content: `${formatVideoJob(job)}\n> ${truncatePrompt(prompt)}` });
+        await pending.edit({ content: `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job))}` });
         await services.get(msg.client.user.id)?.refresh();
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
@@ -514,7 +571,7 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         await msg.reply(`You have no unfinished video jobs.${pauseText(response.state.paused_until)}`);
         return;
     }
-    await msg.reply(unfinished.map(job => `${formatVideoJob(job)}\n> ${truncatePrompt(job.prompt, 100)}`).join('\n\n'));
+    await msg.reply(unfinished.map(job => `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job), 100)}`).join('\n\n'));
 }
 
 export async function handleVideoAdmin(msg: Message, args: string): Promise<void> {
