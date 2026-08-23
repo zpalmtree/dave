@@ -7,9 +7,10 @@ REMOTE_SLUGS_DIR="${REMOTE_SLUGS_DIR:-/home/beach/slug-bot}"
 NODE_VERSION="${NODE_VERSION:-22}"
 INSTALL_DEPS="${INSTALL_DEPS:-0}"
 ALLOW_DIRTY_YARN_LOCK="${ALLOW_DIRTY_YARN_LOCK:-1}"
+VIDEO_DRAIN_TIMEOUT_SECONDS="${VIDEO_DRAIN_TIMEOUT_SECONDS:-3600}"
 
 ssh "$REMOTE_HOST" \
-    "REMOTE_MASTER_DIR='$REMOTE_MASTER_DIR' REMOTE_SLUGS_DIR='$REMOTE_SLUGS_DIR' NODE_VERSION='$NODE_VERSION' INSTALL_DEPS='$INSTALL_DEPS' ALLOW_DIRTY_YARN_LOCK='$ALLOW_DIRTY_YARN_LOCK' bash -s" <<'REMOTE'
+    "REMOTE_MASTER_DIR='$REMOTE_MASTER_DIR' REMOTE_SLUGS_DIR='$REMOTE_SLUGS_DIR' NODE_VERSION='$NODE_VERSION' INSTALL_DEPS='$INSTALL_DEPS' ALLOW_DIRTY_YARN_LOCK='$ALLOW_DIRTY_YARN_LOCK' VIDEO_DRAIN_TIMEOUT_SECONDS='$VIDEO_DRAIN_TIMEOUT_SECONDS' bash -s" <<'REMOTE'
 set -euo pipefail
 
 load_node() {
@@ -116,12 +117,86 @@ restart_video_broker() {
     fi
 }
 
+video_control() {
+    local endpoint="$1"
+    VIDEO_CONTROL_ENDPOINT="$endpoint" node --input-type=module <<'NODE'
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const configPath = process.env.VIDEO_CONFIG_FILE || join(homedir(), '.config', 'dave-video.json');
+const file = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : {};
+const base = (process.env.VIDEO_BROKER_URL || file.brokerUrl || 'http://127.0.0.1:8765').replace(/\/$/, '');
+const token = process.env.VIDEO_BROKER_BOT_TOKEN || file.botToken || '';
+const endpoint = process.env.VIDEO_CONTROL_ENDPOINT;
+if (!token || !endpoint) throw new Error('Video broker control is not configured.');
+const isRead = endpoint === '/v1/control';
+const response = await fetch(base + endpoint, {
+    method: isRead ? 'GET' : 'POST',
+    headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+    },
+    ...(isRead ? {} : { body: JSON.stringify({ actor_id: 'deploy-bots.sh' }) }),
+});
+if (response.status === 404) {
+    console.log('unsupported');
+    process.exit(0);
+}
+const body = await response.json().catch(() => ({}));
+if (!response.ok) throw new Error(body.error || `Video broker returned HTTP ${response.status}.`);
+const state = body.state || body;
+if (isRead) {
+    const idle = Number(state.active_jobs || 0) === 0
+        && !state.worker_busy
+        && !state.preparation_busy;
+    console.log(idle ? 'idle' : 'busy');
+} else {
+    console.log('supported');
+}
+NODE
+}
+
+VIDEO_DISPATCH_DRAINED=0
+
+resume_video_dispatch() {
+    if [ "$VIDEO_DISPATCH_DRAINED" != "1" ]; then
+        return
+    fi
+    echo "Resuming video dispatch."
+    video_control /v1/control/resume-dispatch >/dev/null || true
+    VIDEO_DISPATCH_DRAINED=0
+}
+
+drain_video_dispatch() {
+    local result
+    result="$(video_control /v1/control/drain)"
+    if [ "$result" = "unsupported" ]; then
+        echo "Running broker predates dispatch drain; deploy caller must verify it is idle."
+        return
+    fi
+    VIDEO_DISPATCH_DRAINED=1
+    echo "Video dispatch drained; waiting for active rendering and preparation to finish."
+    local deadline=$((SECONDS + VIDEO_DRAIN_TIMEOUT_SECONDS))
+    while [ "$(video_control /v1/control)" != "idle" ]; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out waiting for the video pipeline to become idle." >&2
+            exit 1
+        fi
+        sleep 5
+    done
+    echo "Video pipeline is idle."
+}
+
 load_node
+trap resume_video_dispatch EXIT
+drain_video_dispatch
 deploy_repo "$REMOTE_MASTER_DIR" master
 deploy_repo "$REMOTE_SLUGS_DIR" slugs
 restart_video_broker
 restart_app dave
 restart_app slug-bot
+resume_video_dispatch
 pm2 save
 pm2 list
 REMOTE

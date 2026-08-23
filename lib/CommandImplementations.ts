@@ -90,6 +90,7 @@ import {
 import {
     Commands,
 } from './CommandDeclarations.js';
+import { syncVideoUsageForBot } from './VideoGeneration.js';
 
 const timeUnits: TimeUnits = {
     Y: 31536000,
@@ -1463,20 +1464,38 @@ function formatTokenSpend(row: any): string {
     const cost = formatUsdCost(Number(row.cost || 0));
     const tokens = formatCompactNumber(Number(row.tokens || 0));
     const calls = Number(row.calls || 0);
+    const images = Number(row.images || 0);
+    const searches = Number(row.web_searches || 0);
+    const units = [
+        `${tokens} tokens`,
+        ...(images ? [`${images} ${pluralize(images, 'image')}`] : []),
+        ...(searches ? [`${searches} web ${pluralize(searches, 'search', 'searches')}`] : []),
+        `${calls} ${pluralize(calls, 'call')}`,
+    ];
 
-    return `${cost}\n${tokens} tokens, ${calls} ${pluralize(calls, 'call')}`;
+    return `${cost}\n${units.join(', ')}`;
 }
 
 function formatTokenSpendTotal(rows: any[]): string {
     const cost = rows.reduce((sum, row) => sum + Number(row.cost || 0), 0);
     const tokens = rows.reduce((sum, row) => sum + Number(row.tokens || 0), 0);
     const calls = rows.reduce((sum, row) => sum + Number(row.calls || 0), 0);
+    const images = rows.reduce((sum, row) => sum + Number(row.images || 0), 0);
+    const searches = rows.reduce((sum, row) => sum + Number(row.web_searches || 0), 0);
+    const extras = [
+        ...(images ? [`${images} ${pluralize(images, 'image')}`] : []),
+        ...(searches ? [`${searches} web ${pluralize(searches, 'search', 'searches')}`] : []),
+    ];
 
-    return `**Total: ${formatUsdCost(cost)}, ${formatCompactNumber(tokens)} tokens, ${calls} ${pluralize(calls, 'call')}**`;
+    return `**Total: ${formatUsdCost(cost)}, ${formatCompactNumber(tokens)} tokens${
+        extras.length ? `, ${extras.join(', ')}` : ''
+    }, ${calls} ${pluralize(calls, 'call')}**`;
 }
 
 const TOKEN_SPEND_SELECT = `
     SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens,
+    SUM(images) AS images,
+    SUM(web_searches) AS web_searches,
     SUM(cost) AS cost,
     COUNT(*) AS calls`;
 
@@ -1530,6 +1549,7 @@ async function handleUserTokens(msg: Message, db: Database, user: string, global
 }
 
 export async function handleUsersTokens(msg: Message, db: Database, global: boolean = false): Promise<void> {
+    if (msg.client.user) await syncVideoUsageForBot(msg.client.user.id);
     const users = await selectQuery(
         `SELECT
             user_id AS user,
@@ -1578,6 +1598,7 @@ export async function handleGlobalTokens(msg: Message, args: string[], db: Datab
     if (!canAccessCommand(msg, true)) {
         return;
     }
+    if (msg.client.user) await syncVideoUsageForBot(msg.client.user.id);
 
     const mentionedUsers = [...msg.mentions.users.values()];
 
@@ -1637,6 +1658,7 @@ async function handleCommandTokens(msg: Message, db: Database, command: string):
 }
 
 export async function handleTokens(msg: Message, args: string[], db: Database): Promise<void> {
+    if (msg.client.user) await syncVideoUsageForBot(msg.client.user.id);
     const mentionedUsers = [...msg.mentions.users.values()];
 
     /* Get token spend of a specific user, broken down by command */
@@ -1665,6 +1687,7 @@ export async function handleTokens(msg: Message, args: string[], db: Database): 
 }
 
 export async function handleCommandsTokens(msg: Message, db: Database): Promise<void> {
+    if (msg.client.user) await syncVideoUsageForBot(msg.client.user.id);
     /* Get overall token spend, broken down by command */
     const commands = await selectQuery(
         `SELECT

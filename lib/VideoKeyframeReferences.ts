@@ -4,6 +4,7 @@ import { join } from 'path';
 import fetch from 'node-fetch';
 
 import { config } from './Config.js';
+import { VideoProviderHooks, VideoUsagePersistenceError } from './VideoUsage.js';
 import {
     ImageSearchResult,
     downloadSearchResultImage,
@@ -48,6 +49,12 @@ interface ReferenceManifest {
 
 type SearchImages = (query: string) => Promise<ImageSearchResult[]>;
 type DownloadImage = typeof downloadSearchResultImage;
+
+function transientReferenceSearchFailure(error: unknown): boolean {
+    return /timed out|timeout|aborted|fetch|network|socket|econn|HTTP (408|409|429|5\d\d)/i.test(
+        error instanceof Error ? error.message : String(error),
+    );
+}
 
 function boundedText(value: unknown, maximum: number): string {
     if (typeof value !== 'string') return '';
@@ -153,6 +160,7 @@ export async function resolveVideoKeyframeReferences(
     jobDirectory: string,
     searchImages: SearchImages = searchVideoKeyframeReferenceImages,
     downloadImage: DownloadImage = downloadSearchResultImage,
+    hooks: VideoProviderHooks = {},
 ): Promise<VideoKeyframeReference[]> {
     if (plan?.keyframe?.recommended !== true) return [];
     const requirements = referenceRequirements(plan);
@@ -166,9 +174,47 @@ export async function resolveVideoKeyframeReferences(
     mkdirSync(directory, { recursive: true });
     const references: VideoKeyframeReference[] = [];
     const manifestReferences: CachedReference[] = [];
-    const resolved = await Promise.all(requirements.map(async (requirement) => {
+    const resolved = await Promise.all(requirements.map(async (requirement, requirementIndex) => {
         try {
-            const results = await searchImages(requirement.searchQuery);
+            let results: ImageSearchResult[] | null = null;
+            let lastSearchError: unknown;
+            for (let retry = 0; retry < 2; retry += 1) {
+                const searchStarted = Date.now();
+                let searchOutcome: 'success' | 'error' = 'error';
+                let searchDetail: string | undefined;
+                const attempt = requirementIndex * 2 + retry + 1;
+                try {
+                    results = await searchImages(requirement.searchQuery);
+                    searchOutcome = 'success';
+                } catch (error) {
+                    lastSearchError = error;
+                    searchDetail = error instanceof Error ? error.message : String(error);
+                } finally {
+                    await hooks.onUsage?.({
+                        stage: 'keyframe_reference_search',
+                        attempt,
+                        outcome: searchOutcome,
+                        provider: 'google',
+                        model: 'google-custom-search',
+                        serviceTier: 'default',
+                        webSearches: 1,
+                        costOverride: 0.005,
+                    });
+                    await hooks.onAttempt?.({
+                        stage: 'keyframe_reference_search',
+                        attempt,
+                        outcome: searchOutcome,
+                        provider: 'google',
+                        model: 'google-custom-search',
+                        serviceTier: 'default',
+                        durationSeconds: (Date.now() - searchStarted) / 1000,
+                        detail: searchDetail,
+                    });
+                }
+                if (results) break;
+                if (!transientReferenceSearchFailure(lastSearchError)) break;
+            }
+            if (!results) throw lastSearchError || new Error('Reference search failed.');
             let selected: { result: ImageSearchResult; image: Awaited<ReturnType<DownloadImage>> } | null = null;
             for (const result of results.slice(0, 5)) {
                 const image = await downloadImage(result);
@@ -183,6 +229,7 @@ export async function resolveVideoKeyframeReferences(
             }
             return { requirement, selected };
         } catch (error) {
+            if (error instanceof VideoUsagePersistenceError) throw error;
             console.warn(`Could not retrieve first-frame reference for ${requirement.label}.`, error);
             return null;
         }

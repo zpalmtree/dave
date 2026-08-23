@@ -38,6 +38,7 @@ import {
 } from './VideoFrontierPlanner.js';
 import {
     VIDEO_KEYFRAME_MAX_BYTES,
+    VideoKeyframeOptions,
     VideoKeyframeResult,
     createFrontierVideoKeyframe,
 } from './VideoKeyframeProvider.js';
@@ -46,6 +47,14 @@ import {
     countVideoKeyframeReferenceRequirements,
     resolveVideoKeyframeReferences,
 } from './VideoKeyframeReferences.js';
+import {
+    VideoFrontierCallOptions,
+    VideoProviderAttempt,
+    VideoProviderHooks,
+    VideoProviderUsage,
+    VideoUsagePersistenceError,
+    videoUsageCost,
+} from './VideoUsage.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
@@ -76,10 +85,12 @@ interface BrokerOptions {
     keyframeGenerator?: (
         plan: Record<string, any>,
         references?: VideoKeyframeReference[],
+        options?: VideoKeyframeOptions,
     ) => Promise<VideoKeyframeResult>;
     keyframeReferenceResolver?: (
         plan: Record<string, any>,
         jobDirectory: string,
+        hooks?: VideoProviderHooks,
     ) => Promise<VideoKeyframeReference[]>;
     sourceImageDownloader?: (
         descriptor: VideoSourceImageDescriptor,
@@ -708,12 +719,20 @@ export class VideoBroker {
         await this.run(`CREATE TABLE IF NOT EXISTS video_control (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             paused_until INTEGER,
+            dispatch_paused INTEGER NOT NULL DEFAULT 0,
             updated_by TEXT,
             updated_at INTEGER NOT NULL
         )`);
+        const controlColumns = new Set(
+            (await this.all<{ name: string }>('PRAGMA table_info(video_control)'))
+                .map(column => column.name),
+        );
+        if (!controlColumns.has('dispatch_paused')) {
+            await this.run('ALTER TABLE video_control ADD COLUMN dispatch_paused INTEGER NOT NULL DEFAULT 0');
+        }
         await this.run(
-            `INSERT OR IGNORE INTO video_control(id, paused_until, updated_by, updated_at)
-             VALUES(1, NULL, NULL, ?)`,
+            `INSERT OR IGNORE INTO video_control(id, paused_until, dispatch_paused, updated_by, updated_at)
+             VALUES(1, NULL, 0, NULL, ?)`,
             [nowSeconds()],
         );
         await this.run(`CREATE TABLE IF NOT EXISTS video_runtime_samples (
@@ -808,6 +827,48 @@ export class VideoBroker {
         )`);
         await this.run(`CREATE INDEX IF NOT EXISTS video_job_spans_job_idx
             ON video_job_spans(job_public_id)`);
+        await this.run(`CREATE TABLE IF NOT EXISTS video_provider_attempt_metrics (
+            job_public_id TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            outcome TEXT NOT NULL,
+            service_tier TEXT,
+            duration_seconds REAL NOT NULL,
+            detail TEXT,
+            recorded_at INTEGER NOT NULL,
+            PRIMARY KEY(job_public_id, stage, provider, model, attempt)
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS video_provider_attempt_metrics_job_idx
+            ON video_provider_attempt_metrics(job_public_id, recorded_at)`);
+        await this.run(`CREATE TABLE IF NOT EXISTS video_usage_events (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            job_public_id TEXT NOT NULL,
+            origin_bot_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            guild_id TEXT,
+            command TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            outcome TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            service_tier TEXT,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            images INTEGER NOT NULL DEFAULT 0,
+            web_searches INTEGER NOT NULL DEFAULT 0,
+            cost REAL NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            acked_at INTEGER
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS video_usage_events_delivery_idx
+            ON video_usage_events(origin_bot_id, acked_at, sequence)`);
     }
 
     async start(): Promise<void> {
@@ -838,9 +899,9 @@ export class VideoBroker {
         await new Promise<void>((resolvePromise, reject) => this.db.close(err => err ? reject(err) : resolvePromise()));
     }
 
-    private async control(): Promise<{ paused_until: number | null }> {
-        const row = await this.get<{ paused_until: number | null }>(
-            'SELECT paused_until FROM video_control WHERE id = 1',
+    private async control(): Promise<{ paused_until: number | null; dispatch_paused: boolean }> {
+        const row = await this.get<{ paused_until: number | null; dispatch_paused: number }>(
+            'SELECT paused_until, dispatch_paused FROM video_control WHERE id = 1',
         );
         const paused = row?.paused_until && row.paused_until > nowSeconds() ? row.paused_until : null;
         if (!paused && row?.paused_until) {
@@ -849,7 +910,7 @@ export class VideoBroker {
                 [nowSeconds()],
             );
         }
-        return { paused_until: paused };
+        return { paused_until: paused, dispatch_paused: Boolean(row?.dispatch_paused) };
     }
 
     private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -898,6 +959,41 @@ export class VideoBroker {
             writeJson(res, result.status, result.body);
             return;
         }
+        const usageEvents = /^\/v1\/bots\/([^/]+)\/usage-events$/.exec(url.pathname);
+        if (usageEvents && req.method === 'GET') {
+            const originBotId = decodeURIComponent(usageEvents[1]);
+            const limit = Math.max(1, Math.min(200, Math.round(Number(url.searchParams.get('limit')) || 100)));
+            const events = await this.all<any>(
+                `SELECT event_id, job_public_id AS job_id, user_id, channel_id, guild_id,
+                        command, stage, attempt, outcome, provider, model, service_tier,
+                        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                        images, web_searches, cost, created_at
+                 FROM video_usage_events
+                 WHERE origin_bot_id = ? AND acked_at IS NULL
+                 ORDER BY sequence ASC LIMIT ?`,
+                [originBotId, limit],
+            );
+            writeJson(res, 200, { events });
+            return;
+        }
+        const usageAck = /^\/v1\/bots\/([^/]+)\/usage-events\/ack$/.exec(url.pathname);
+        if (usageAck && req.method === 'POST') {
+            const originBotId = decodeURIComponent(usageAck[1]);
+            const body = await readJson(req);
+            const eventIds = Array.isArray(body.event_ids)
+                ? [...new Set(body.event_ids.map((value: unknown) => String(value)).filter(Boolean))].slice(0, 200)
+                : [];
+            if (eventIds.length) {
+                await this.run(
+                    `UPDATE video_usage_events SET acked_at = ?
+                     WHERE origin_bot_id = ? AND acked_at IS NULL
+                     AND event_id IN (${eventIds.map(() => '?').join(',')})`,
+                    [nowSeconds(), originBotId, ...eventIds],
+                );
+            }
+            writeJson(res, 200, { ok: true, acknowledged: eventIds.length });
+            return;
+        }
         const botJobs = /^\/v1\/bots\/([^/]+)\/jobs$/.exec(url.pathname);
         if (botJobs && req.method === 'GET') {
             const rows = await this.all<JobRow>(
@@ -919,11 +1015,19 @@ export class VideoBroker {
             return;
         }
         if (url.pathname === '/v1/queue' && req.method === 'GET') {
-            const rows = await this.all<JobRow>(
-                `SELECT * FROM video_jobs
-                 WHERE status IN (${ACTIVE_SQL}) OR status = 'ready'
-                 ORDER BY CASE WHEN status = 'queued' THEN 1 ELSE 0 END, id ASC`,
-            );
+            const guildId = url.searchParams.get('guild_id');
+            const rows = guildId === null
+                ? await this.all<JobRow>(
+                    `SELECT * FROM video_jobs
+                     WHERE status IN (${ACTIVE_SQL}) OR status = 'ready'
+                     ORDER BY CASE WHEN status = 'queued' THEN 1 ELSE 0 END, id ASC`,
+                )
+                : await this.all<JobRow>(
+                    `SELECT * FROM video_jobs
+                     WHERE guild_id = ? AND (status IN (${ACTIVE_SQL}) OR status = 'ready')
+                     ORDER BY CASE WHEN status = 'queued' THEN 1 ELSE 0 END, id ASC`,
+                    [guildId],
+                );
             writeJson(res, 200, { jobs: await this.views(rows), state: await this.brokerState() });
             return;
         }
@@ -995,9 +1099,27 @@ export class VideoBroker {
             writeJson(res, 200, { paused_until: until, state: await this.brokerState() });
             return;
         }
+        if (url.pathname === '/v1/control/drain' && req.method === 'POST') {
+            const body = await readJson(req);
+            await this.run(
+                'UPDATE video_control SET dispatch_paused = 1, updated_by = ?, updated_at = ? WHERE id = 1',
+                [String(body.actor_id || ''), nowSeconds()],
+            );
+            writeJson(res, 200, { state: await this.brokerState() });
+            return;
+        }
+        if (url.pathname === '/v1/control/resume-dispatch' && req.method === 'POST') {
+            await this.run(
+                'UPDATE video_control SET dispatch_paused = 0, updated_by = NULL, updated_at = ? WHERE id = 1',
+                [nowSeconds()],
+            );
+            await this.dispatchNext();
+            writeJson(res, 200, { state: await this.brokerState() });
+            return;
+        }
         if (url.pathname === '/v1/control/resume' && req.method === 'POST') {
             await this.run(
-                'UPDATE video_control SET paused_until = NULL, updated_by = NULL, updated_at = ? WHERE id = 1',
+                'UPDATE video_control SET paused_until = NULL, dispatch_paused = 0, updated_by = NULL, updated_at = ? WHERE id = 1',
                 [nowSeconds()],
             );
             await this.dispatchNext();
@@ -1108,7 +1230,7 @@ export class VideoBroker {
                 throw error;
             }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-            if (this.worker) this.schedulePreparation(publicId);
+            if (this.worker?.currentJob) this.schedulePreparation(publicId, false);
             await this.dispatchNext();
             return { status: 201, body: { job: (await this.views([row!]))[0], duplicate: false } };
         });
@@ -1206,7 +1328,7 @@ export class VideoBroker {
         if (!job) return null;
         if (ACTIVE_VIDEO_STATUSES.includes(job.status)) {
             try {
-                const { plan } = await this.ensurePlan(job);
+                const { plan } = await this.ensurePlan(job, true);
                 const estimate = await this.plannedRuntimeEstimate(job, plan);
                 await this.run(
                     `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?,
@@ -1493,7 +1615,111 @@ export class VideoBroker {
         };
     }
 
-    private async ensurePlan(job: JobRow): Promise<{ plan: Record<string, any>; plannerModel: string }> {
+    private providerHooks(job: JobRow): VideoProviderHooks {
+        return {
+            onUsage: async (usage: VideoProviderUsage) => {
+                const eventId = [
+                    job.public_id,
+                    usage.stage,
+                    usage.provider,
+                    usage.model,
+                    usage.attempt,
+                ].join(':');
+                const integer = (value: number | undefined) => Math.max(0, Math.round(Number(value) || 0));
+                await this.run(
+                    `INSERT OR IGNORE INTO video_usage_events(
+                        event_id, job_public_id, origin_bot_id, user_id, channel_id, guild_id,
+                        command, stage, attempt, outcome, provider, model, service_tier,
+                        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                        images, web_searches, cost, created_at
+                     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    [
+                        eventId,
+                        job.public_id,
+                        job.origin_bot_id,
+                        job.requester_id,
+                        job.channel_id,
+                        job.guild_id,
+                        VIDEO_MODELS[job.model].command,
+                        usage.stage,
+                        Math.max(1, Math.round(usage.attempt)),
+                        usage.outcome,
+                        usage.provider,
+                        usage.model,
+                        usage.serviceTier || null,
+                        integer(usage.inputTokens),
+                        integer(usage.outputTokens),
+                        integer(usage.cacheReadTokens),
+                        integer(usage.cacheWriteTokens),
+                        integer(usage.images),
+                        integer(usage.webSearches),
+                        videoUsageCost(usage),
+                        nowSeconds(),
+                    ],
+                ).catch((error) => {
+                    throw new VideoUsagePersistenceError(
+                        `Could not persist provider usage for ${job.public_id}.`,
+                        error,
+                    );
+                });
+            },
+            onAttempt: async (attempt: VideoProviderAttempt) => {
+                await this.run(
+                    `INSERT INTO video_provider_attempt_metrics(
+                        job_public_id, stage, provider, model, attempt, outcome,
+                        service_tier, duration_seconds, detail, recorded_at
+                     ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                     ON CONFLICT(job_public_id, stage, provider, model, attempt) DO UPDATE SET
+                        outcome = excluded.outcome,
+                        service_tier = excluded.service_tier,
+                        duration_seconds = excluded.duration_seconds,
+                        detail = excluded.detail,
+                        recorded_at = excluded.recorded_at`,
+                    [
+                        job.public_id,
+                        attempt.stage,
+                        attempt.provider,
+                        attempt.model,
+                        Math.max(1, Math.round(attempt.attempt)),
+                        attempt.outcome,
+                        attempt.serviceTier || null,
+                        Math.max(0, attempt.durationSeconds),
+                        attempt.detail ? sanitizeVideoWorkerText(attempt.detail, '', 1000) : null,
+                        nowSeconds(),
+                    ],
+                ).catch((error) => {
+                    console.warn(`Could not persist provider attempt timing for ${job.public_id}`, error);
+                    return { changes: 0, lastID: 0 };
+                });
+            },
+        };
+    }
+
+    private frontierOptions(job: JobRow, criticalPath: boolean): VideoFrontierCallOptions {
+        return {
+            serviceTier: criticalPath ? 'fast' : 'default',
+            ...this.providerHooks(job),
+        };
+    }
+
+    private keyframeStrategy(job: JobRow): 'serial-v1' | 'conditional-v2' {
+        const globalStrategy = process.env.VIDEO_KEYFRAME_STRATEGY;
+        if (globalStrategy === 'serial-v1' || globalStrategy === 'conditional-v2') {
+            return globalStrategy;
+        }
+        const canaryChannels = new Set(
+            (process.env.VIDEO_KEYFRAME_CANARY_CHANNELS || '483470443001413675')
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean),
+        );
+        return canaryChannels.has(job.channel_id) ? 'conditional-v2' : 'serial-v1';
+    }
+
+    private async ensurePlan(
+        job: JobRow,
+        criticalPath = false,
+    ): Promise<{ plan: Record<string, any>; plannerModel: string }> {
         if (job.planner_json) {
             return {
                 plan: JSON.parse(job.planner_json),
@@ -1521,6 +1747,7 @@ export class VideoBroker {
                         job.model,
                         job.requester_id,
                         sourceImage,
+                        this.frontierOptions(job, criticalPath),
                     );
                     const plannerMetrics = (plan as any).planner_metrics;
                     if (plannerMetrics && typeof plannerMetrics === 'object') {
@@ -1568,7 +1795,11 @@ export class VideoBroker {
         }
     }
 
-    private async ensureKeyframe(job: JobRow, plan: Record<string, any>): Promise<void> {
+    private async ensureKeyframe(
+        job: JobRow,
+        plan: Record<string, any>,
+        criticalPath = false,
+    ): Promise<void> {
         if (job.source_image_path || plan?.keyframe?.recommended !== true
             || (job.keyframe_path && job.keyframe_mime)) return;
         let generation = this.keyframeInFlight.get(job.public_id);
@@ -1584,9 +1815,16 @@ export class VideoBroker {
                     let referenceStatus: 'ok' | 'error' = 'ok';
                     let references: VideoKeyframeReference[] = [];
                     try {
-                        references = await (
-                            this.options.keyframeReferenceResolver || resolveVideoKeyframeReferences
-                        )(plan, directory);
+                        const hooks = this.providerHooks(job);
+                        references = this.options.keyframeReferenceResolver
+                            ? await this.options.keyframeReferenceResolver(plan, directory, hooks)
+                            : await resolveVideoKeyframeReferences(
+                                plan,
+                                directory,
+                                undefined,
+                                undefined,
+                                hooks,
+                            );
                     } catch (error) {
                         referenceStatus = 'error';
                         console.warn(`First-frame reference retrieval failed for ${job.public_id}; continuing without references.`, error);
@@ -1609,10 +1847,23 @@ export class VideoBroker {
                     const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
                         plan,
                         references,
+                        {
+                            ...this.frontierOptions(job, criticalPath),
+                            strategy: this.keyframeStrategy(job),
+                        },
                     );
                     if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
                         throw new Error('Generated first frame is empty or too large.');
                     }
+                    await this.providerHooks(job).onAttempt?.({
+                        stage: 'keyframe_review_decision',
+                        attempt: 1,
+                        outcome: result.reviewStatus === 'unreviewed' ? 'unreviewed' : 'accepted',
+                        provider: result.provider,
+                        model: result.model,
+                        serviceTier: criticalPath ? 'priority' : 'default',
+                        durationSeconds: 0,
+                    });
                     const current = await this.get<JobRow>(
                         'SELECT status FROM video_jobs WHERE public_id = ?',
                         [job.public_id],
@@ -1671,17 +1922,17 @@ export class VideoBroker {
         }
     }
 
-    private schedulePreparation(publicId: string): void {
+    private schedulePreparation(publicId: string, criticalPath = false): void {
         if (!this.options.preplanQueuedJobs || this.preparationQueued.has(publicId)) return;
         this.preparationQueued.add(publicId);
         const prepare = async () => {
             try {
                 const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
                 if (!job || !ACTIVE_VIDEO_STATUSES.includes(job.status)) return;
-                const { plan } = await this.ensurePlan(job);
+                const { plan } = await this.ensurePlan(job, criticalPath);
                 const refreshed = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
                 if (!refreshed || !ACTIVE_VIDEO_STATUSES.includes(refreshed.status)) return;
-                await this.ensureKeyframe(refreshed, plan);
+                await this.ensureKeyframe(refreshed, plan, criticalPath);
             } catch (error) {
                 console.warn(`Queued video preparation failed for ${publicId}; the worker will retry on demand.`, error);
             } finally {
@@ -1700,7 +1951,7 @@ export class VideoBroker {
              ORDER BY id ASC LIMIT 1`,
             this.worker.capabilities,
         );
-        if (row) this.schedulePreparation(row.public_id);
+        if (row) this.schedulePreparation(row.public_id, false);
     }
 
     private async cancelJob(id: string, requesterId: string, isAdmin: boolean): Promise<any> {
@@ -1739,13 +1990,21 @@ export class VideoBroker {
         const queued = await this.get<{ count: number }>(
             `SELECT COUNT(*) AS count FROM video_jobs WHERE status = 'queued'`,
         );
+        const active = await this.get<{ count: number }>(
+            `SELECT COUNT(*) AS count FROM video_jobs
+             WHERE status IN (${ACTIVE_SQL}) AND status != 'queued'`,
+        );
         return {
             worker_online: Boolean(this.worker),
             worker_busy: Boolean(this.worker?.currentJob),
             worker_id: this.worker?.id || null,
             current_job: this.worker?.currentJob || null,
             paused_until: control.paused_until,
+            dispatch_paused: control.dispatch_paused,
             queued: queued?.count || 0,
+            active_jobs: active?.count || 0,
+            preparation_busy: this.plannerInFlight.size > 0 || this.keyframeInFlight.size > 0
+                || this.preparationQueued.size > 0,
         };
     }
 
@@ -1757,7 +2016,7 @@ export class VideoBroker {
         );
         const control = await this.control();
         const online = Boolean(this.worker);
-        const canEstimate = online && !control.paused_until;
+        const canEstimate = online && !control.paused_until && !control.dispatch_paused;
         const busy = Boolean(this.worker?.currentJob);
         const now = nowSeconds();
         let cursor = Math.max(now, control.paused_until || now);
@@ -2124,7 +2383,7 @@ export class VideoBroker {
     private async dispatchNext(): Promise<void> {
         if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
         const control = await this.control();
-        if (control.paused_until) return;
+        if (control.paused_until || control.dispatch_paused) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
         if (!placeholders) return;
         const candidates = await this.all<JobRow>(
@@ -2146,7 +2405,7 @@ export class VideoBroker {
                 [nowSeconds(), oldest.public_id],
             );
         }
-        this.schedulePreparation(row.public_id);
+        this.schedulePreparation(row.public_id, true);
         const result = await this.run(
             `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
              started_at = COALESCE(started_at, ?), stage = 'Leased to desktop', updated_at = ?
@@ -2202,7 +2461,7 @@ export class VideoBroker {
             await this.markWorkerOffline();
         }
         const control = await this.control();
-        if (!control.paused_until) await this.dispatchNext();
+        if (!control.paused_until && !control.dispatch_paused) await this.dispatchNext();
     }
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
@@ -2222,7 +2481,7 @@ export class VideoBroker {
                 return;
             }
             try {
-                const prepared = await this.ensurePlan(job);
+                const prepared = await this.ensurePlan(job, true);
                 writeJson(res, 200, {
                     plan: prepared.plan,
                     planner_model: prepared.plannerModel,
@@ -2265,7 +2524,7 @@ export class VideoBroker {
             try {
                 const cached = Boolean(job.keyframe_path && job.keyframe_mime);
                 if (!job.keyframe_path || !job.keyframe_mime) {
-                    await this.ensureKeyframe(job, plan);
+                    await this.ensureKeyframe(job, plan, true);
                     job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
                 }
                 if (!job?.keyframe_path || !job.keyframe_mime) {

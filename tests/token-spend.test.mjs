@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import sqlite3 from 'sqlite3';
 
 import {
     estimateTokenSpendCost,
+    initTokenSpend,
+    recordExternalTokenSpend,
     resolveModelPricing,
 } from '../dist/TokenSpend.js';
+import { createTablesIfNeeded, selectQuery } from '../dist/Database.js';
 import { formatCompactNumber, formatUsdCost, pluralize } from '../dist/Utilities.js';
 
 test('resolves pricing for exact model ids', () => {
@@ -117,4 +124,37 @@ test('pluralizes call counts', () => {
     assert.equal(pluralize(1, 'call'), 'call');
     assert.equal(pluralize(0, 'call'), 'calls');
     assert.equal(pluralize(75, 'call'), 'calls');
+});
+
+test('imports external video usage idempotently with full attribution', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-token-spend-'));
+    const db = new sqlite3.Database(join(directory, 'tokens.sqlite3'));
+    try {
+        await createTablesIfNeeded(db);
+        initTokenSpend(db);
+        const context = {
+            userId: 'video-user', channelId: 'video-channel', guildId: 'video-guild', command: 'minimaxfast',
+        };
+        const usage = {
+            model: 'gpt-5.6-sol', inputTokens: 1200, outputTokens: 300,
+            images: 1, webSearches: 2, costOverride: 0.123,
+        };
+        const metadata = {
+            eventId: 'video-job:prompt-analysis:1', sourceJobId: 'video-job',
+            stage: 'prompt_analysis', attempt: 1, serviceTier: 'priority', outcome: 'success',
+        };
+        await recordExternalTokenSpend(context, usage, metadata);
+        await recordExternalTokenSpend(context, usage, metadata);
+        const rows = await selectQuery('SELECT * FROM token_usage', db);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].command, 'minimaxfast');
+        assert.equal(rows[0].user_id, 'video-user');
+        assert.equal(rows[0].images, 1);
+        assert.equal(rows[0].web_searches, 2);
+        assert.equal(rows[0].service_tier, 'priority');
+        assert.equal(rows[0].cost, 0.123);
+    } finally {
+        await new Promise(resolve => db.close(resolve));
+        rmSync(directory, { recursive: true, force: true });
+    }
 });

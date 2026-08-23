@@ -230,9 +230,36 @@ export async function createTablesIfNeeded(db: Database) {
         cache_read_tokens INTEGER NOT NULL DEFAULT 0,
         cache_write_tokens INTEGER NOT NULL DEFAULT 0,
         images INTEGER NOT NULL DEFAULT 0,
+        web_searches INTEGER NOT NULL DEFAULT 0,
         cost REAL NOT NULL DEFAULT 0,
+        external_event_id VARCHAR(255),
+        source_job_id VARCHAR(255),
+        stage VARCHAR(255),
+        attempt INTEGER,
+        service_tier VARCHAR(64),
+        outcome VARCHAR(64),
         timestamp TIMESTAMP NOT NULL
     )`, db);
+    const tokenUsageColumns = await selectQuery(`PRAGMA table_info(token_usage)`, db);
+    const tokenUsageColumnNames = new Set(tokenUsageColumns.map(column => column.name));
+    for (const [name, definition] of [
+        ['web_searches', 'INTEGER NOT NULL DEFAULT 0'],
+        ['external_event_id', 'VARCHAR(255)'],
+        ['source_job_id', 'VARCHAR(255)'],
+        ['stage', 'VARCHAR(255)'],
+        ['attempt', 'INTEGER'],
+        ['service_tier', 'VARCHAR(64)'],
+        ['outcome', 'VARCHAR(64)'],
+    ] as const) {
+        if (!tokenUsageColumnNames.has(name)) {
+            await executeQuery(`ALTER TABLE token_usage ADD COLUMN ${name} ${definition}`, db);
+        }
+    }
+    await executeQuery(
+        `CREATE UNIQUE INDEX IF NOT EXISTS token_usage_external_event_idx
+         ON token_usage(external_event_id) WHERE external_event_id IS NOT NULL`,
+        db,
+    );
 }
 
 export async function deleteTablesIfNeeded(db: Database) {

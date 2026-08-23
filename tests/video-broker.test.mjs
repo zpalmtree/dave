@@ -1075,3 +1075,155 @@ test('worker GPU-reset safety signal pauses dispatch and preserves failed-attemp
         rmSync(directory, { recursive: true, force: true });
     }
 });
+
+test('broker exposes attributed provider usage once and acknowledges it per origin bot', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-usage-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        frontierPlanner: async (prompt, _model, _requester, _source, options) => {
+            await options.onUsage({
+                stage: 'prompt_analysis',
+                attempt: 1,
+                outcome: 'success',
+                provider: 'openai',
+                model: 'gpt-5.6-sol',
+                serviceTier: 'priority',
+                inputTokens: 1000,
+                outputTokens: 100,
+            });
+            return {
+                intent: prompt,
+                continuity_bible: 'usage test',
+                keyframe: { recommended: false, reference_requirements: [] },
+                segments: [{ target_seconds: 5, shots: [] }],
+            };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: {
+                authorization: 'Bearer bot-secret',
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    try {
+        const submitted = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxfast',
+                prompt: 'Usage outbox test',
+                requester_id: 'usage-user',
+                origin_bot_id: 'bot-usage',
+                channel_id: 'usage-channel',
+                guild_id: 'usage-guild',
+                command_message_id: 'usage-message',
+                status_message_id: 'usage-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        const prepared = await botFetch(`/v1/jobs/${submitted.body.job.id}/prepare`, {
+            method: 'POST', body: '{}',
+        });
+        assert.equal(prepared.status, 200);
+        const otherGuild = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxfast', prompt: 'Other server job', requester_id: 'other-user',
+                origin_bot_id: 'bot-usage', channel_id: 'other-channel', guild_id: 'other-guild',
+                command_message_id: 'other-message', status_message_id: 'other-status',
+            }),
+        });
+        assert.equal(otherGuild.status, 201);
+        const scopedQueue = await botFetch('/v1/queue?guild_id=usage-guild');
+        assert.deepEqual(scopedQueue.body.jobs.map(job => job.id), [submitted.body.job.id]);
+        const isolated = await botFetch('/v1/bots/some-other-bot/usage-events');
+        assert.deepEqual(isolated.body.events, []);
+        const pending = await botFetch('/v1/bots/bot-usage/usage-events');
+        assert.equal(pending.body.events.length, 1);
+        assert.equal(pending.body.events[0].user_id, 'usage-user');
+        assert.equal(pending.body.events[0].command, 'minimaxfast');
+        assert.equal(pending.body.events[0].service_tier, 'priority');
+        assert.equal(pending.body.events[0].input_tokens, 1000);
+        assert.ok(pending.body.events[0].cost > 0);
+        const acknowledged = await botFetch('/v1/bots/bot-usage/usage-events/ack', {
+            method: 'POST',
+            body: JSON.stringify({ event_ids: [pending.body.events[0].event_id] }),
+        });
+        assert.equal(acknowledged.status, 200);
+        const empty = await botFetch('/v1/bots/bot-usage/usage-events');
+        assert.deepEqual(empty.body.events, []);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('dispatch drain leaves an active render running and blocks the next lease', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-drain-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        frontierPlanner: async prompt => ({
+            intent: prompt, continuity_bible: 'drain test',
+            keyframe: { recommended: false, reference_requirements: [] },
+            segments: [{ target_seconds: 5, shots: [] }],
+        }),
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    let socket;
+    try {
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'drain-worker',
+            capabilities: ['minimaxfast'], current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const submitted = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxfast', prompt: 'Active drain test', requester_id: 'drain-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1', guild_id: 'guild-1',
+                command_message_id: 'drain-message', status_message_id: 'drain-status',
+            }),
+        });
+        const lease = await take(value => value.type === 'job');
+        assert.equal(lease.job.id, submitted.body.job.id);
+        const drained = await botFetch('/v1/control/drain', {
+            method: 'POST', body: JSON.stringify({ actor_id: 'deploy-test' }),
+        });
+        assert.equal(drained.body.state.dispatch_paused, true);
+        assert.equal(drained.body.state.current_job, lease.job.id);
+        assert.equal(drained.body.state.worker_busy, true);
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});

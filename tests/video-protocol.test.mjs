@@ -28,6 +28,7 @@ import {
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
+    validateFrontierVideoPlanForKeyframe,
 } from '../dist/VideoFrontierPlanner.js';
 import {
     buildVideoKeyframePrompt,
@@ -262,6 +263,34 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     };
     visit(VIDEO_PLAN_SCHEMA);
     visit(VIDEO_PROMPT_ANALYSIS_SCHEMA);
+});
+
+test('broker-side frontier validation rejects plans the desktop would reject before making a keyframe', () => {
+    const plan = {
+        intent: 'A speaker delivers one line.',
+        continuity_bible: 'Same speaker and room.',
+        keyframe: {
+            recommended: true, reason: 'Identity anchor', prompt: 'Speaker facing camera.',
+            motion_contract: {
+                subject_orientation: 'front', gaze_direction: 'camera', travel_direction: 'stationary',
+                camera_relation: 'eye level', first_second_action: 'begins speaking without moving',
+            },
+        },
+        segments: [{
+            transition: 'start', target_seconds: 5,
+            shots: [{
+                duration_seconds: 5, visual: 'Speaker talks.', camera: 'Medium close-up.',
+                audio: 'The speaker says: hello world',
+                dialogue: [{ speaker_id: 'S1', language: 'English', delivery: 'natural', text: 'hello world' }],
+            }],
+        }],
+    };
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'),
+        /repeated dialogue in the non-speech audio field/,
+    );
+    plan.segments[0].shots[0].audio = 'Quiet room tone under the clear voice.';
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'));
 });
 
 test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {
