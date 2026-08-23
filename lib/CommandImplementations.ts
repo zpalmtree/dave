@@ -81,6 +81,8 @@ import {
     DisplayType,
 } from './Paginate.js';
 
+import { getPriceCoins } from './PriceCoins.js';
+
 import {
     downloadSearchResultImage,
     isUsableImageResult,
@@ -468,7 +470,7 @@ function formatPriceTrend(change: number | undefined): PriceTrend {
 }
 
 export async function handlePrice(msg: Message) {
-    const currencies = config.coins;
+    const currencies = getPriceCoins(config.coins);
     const toFetch = currencies.map((c) => c.id).join('%2C');
 
     const lookupMap = new Map(currencies.map(({ id, label }) => [id, label]));
