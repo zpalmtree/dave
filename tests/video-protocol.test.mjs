@@ -28,6 +28,7 @@ import {
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
+    createFrontierVideoPlan,
     validateFrontierVideoPlanForKeyframe,
 } from '../dist/VideoFrontierPlanner.js';
 import {
@@ -291,6 +292,133 @@ test('broker-side frontier validation rejects plans the desktop would reject bef
     );
     plan.segments[0].shots[0].audio = 'Quiet room tone under the clear voice.';
     assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'));
+});
+
+function frontierAnalysis(dialogueMode = 'none') {
+    return {
+        request_form: dialogueMode === 'none' ? 'visual_direction' : 'conversation_topic',
+        source_image_type: 'none',
+        source_image_strategy: 'none',
+        source_narrative_beats: [],
+        presentation: 'cinematic live action',
+        literalness: 'literal',
+        tone: ['playful'],
+        subjects: ['a dog'],
+        actions: ['runs'],
+        distinctive_details: [],
+        inferred_staging: ['a park'],
+        audio_requirements: ['park ambience'],
+        dialogue_contract: { mode: dialogueMode, lines: [] },
+        prohibited_substitutions: [],
+        resolved_intent: 'A dog runs through a park.',
+    };
+}
+
+function frontierPlan(dialogue = []) {
+    return {
+        intent: 'A dog runs through a park.',
+        continuity_bible: 'The same brown dog remains in the same sunny park.',
+        keyframe: {
+            recommended: true,
+            reason: 'Keep the dog stable.',
+            prompt: 'A brown dog poised to run through a sunny park.',
+            reference_requirements: [],
+            motion_contract: {
+                subject_orientation: 'The dog faces screen right.',
+                gaze_direction: 'The dog looks down the path.',
+                travel_direction: 'The dog travels screen right.',
+                camera_relation: 'Side profile at dog height.',
+                first_second_action: 'The dog begins running screen right.',
+            },
+        },
+        segments: [{
+            title: 'Run', transition: 'start', target_seconds: 5, music: 'N/A',
+            shots: [{
+                duration_seconds: 5,
+                visual: dialogue.length ? 'A cat and dog visibly speak about cheese.' : 'The dog runs through the park.',
+                camera: 'Side-profile tracking shot.',
+                audio: 'Paws strike the path beneath quiet park ambience.',
+                dialogue,
+            }],
+        }],
+    };
+}
+
+function jsonResponse(value) {
+    return new Response(JSON.stringify(value), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+    });
+}
+
+test('frontier planner retries incomplete structured output with a larger token budget', async () => {
+    const requests = [];
+    const replies = [
+        { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierAnalysis()), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return jsonResponse(replies.shift());
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.', 'minimaxfast', 'requester-1', undefined,
+        );
+        assert.equal(result.intent, 'A dog runs through a park.');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+    assert.equal(requests.length, 3);
+    assert.equal(requests[0].max_output_tokens, 8000);
+    assert.equal(requests[1].max_output_tokens, 16000);
+    assert.equal(requests[2].max_output_tokens, 16000);
+});
+
+test('frontier planner repairs a complete screenplay that violates its dialogue contract', async () => {
+    const requests = [];
+    const spoken = [{
+        speaker_id: 'dog', language: 'English', delivery: 'curious', text: 'Cheese is our future.',
+    }];
+    const replies = [
+        { status: 'completed', output_text: JSON.stringify(frontierAnalysis('generated')), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan(spoken)), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return jsonResponse(replies.shift());
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A cat and dog discuss cheese.', 'minimaxfast', 'requester-2', undefined,
+        );
+        assert.equal(result.planner_metrics.screenplay_attempts, 2);
+        assert.equal(result.segments[0].shots[0].dialogue[0].text, 'Cheese is our future.');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+    assert.equal(requests.length, 3);
+    assert.match(requests[2].input[1].content[0].text, /omitted dialogue required/);
+});
+
+test('broker validation catches long H3 dialogue and literal omissions before desktop dispatch', () => {
+    const plan = frontierPlan([{
+        speaker_id: 'dog', language: 'English', delivery: 'fast',
+        text: Array.from({ length: 50 }, (_, index) => `word${index}`).join(' '),
+    }]);
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'),
+        /needs .* dialogue, above the 15s model limit/,
+    );
+    const literalPlan = frontierPlan();
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(literalPlan, 'minimaxfast', 'Show 623996725509750785 saying "hello".'),
+        /omitted quoted wording/,
+    );
 });
 
 test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {

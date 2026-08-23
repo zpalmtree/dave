@@ -268,9 +268,62 @@ function planPreservesDialogueLine(plan: any, requiredLine: string): boolean {
     return Boolean(supplied && dialogue.includes(supplied));
 }
 
+const NUMBER_WORDS = [
+    'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
+    'eighteen', 'nineteen', 'twenty',
+];
+
+function videoPlanSchemaForMaximum(maximum: number): Record<string, unknown> {
+    const schema: any = JSON.parse(JSON.stringify(VIDEO_PLAN_SCHEMA));
+    schema.properties.segments.items.properties.target_seconds.maximum = maximum;
+    schema.properties.segments.items.properties.shots.items.properties.duration_seconds.maximum = maximum;
+    return schema;
+}
+
+function semanticPlanText(plan: any): string {
+    const parts = [String(plan?.intent || ''), String(plan?.continuity_bible || '')];
+    for (const segment of plan?.segments || []) {
+        parts.push(String(segment?.title || ''), String(segment?.music || ''));
+        for (const shot of segment?.shots || []) {
+            parts.push(String(shot?.visual || ''), String(shot?.camera || ''), String(shot?.audio || ''));
+            parts.push(...(shot?.dialogue || []).map((line: any) => String(line?.text || '')));
+        }
+    }
+    return parts.join('\n');
+}
+
+function quotedRequirements(prompt: string): string[] {
+    const found: Array<{ index: number; text: string }> = [];
+    for (const expression of [/"([^"\n]+)"/g, /“([^”\n]+)”/g, /(^|[^\p{L}\p{N}_])'([^'\n]+)'(?![\p{L}\p{N}_])/gu]) {
+        for (const match of prompt.matchAll(expression)) {
+            const text = String(match[2] ?? match[1] ?? '').trim();
+            const start = Number(match.index || 0) + (match[2] ? String(match[1] || '').length : 0);
+            const wrapper = start === 0 && (start + text.length + 2) === prompt.trim().length;
+            if (text && !wrapper) found.push({ index: start, text });
+        }
+    }
+    return found.sort((a, b) => a.index - b.index).map(candidate => candidate.text);
+}
+
+function dialogueFloorSeconds(segment: any): number {
+    const lines = (segment?.shots || []).flatMap((shot: any) =>
+        (shot?.dialogue || []).map((line: any) => String(line?.text || '')).filter(Boolean),
+    );
+    if (!lines.length) return 0;
+    const words = lines.reduce((total: number, line: string) =>
+        total + (line.match(/[\p{L}\p{N}_'-]+/gu) || []).length, 0);
+    const punctuationPause = lines.reduce((total: number, line: string) =>
+        total + (line.match(/[,;]/g) || []).length * 0.25
+        + (line.match(/[.!?]|\.{3}/g) || []).length * 0.45, 0);
+    const turnPause = Math.max(0, lines.length - 1) * 0.4;
+    return words / (140 / 60) + punctuationPause + turnPause + 1.25;
+}
+
 export function validateFrontierVideoPlanForKeyframe(
     plan: any,
     model: VideoModelId,
+    rawPrompt = '',
 ): void {
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
         throw new Error('GPT-5.6 Sol returned no screenplay segments.');
@@ -296,6 +349,9 @@ export function validateFrontierVideoPlanForKeyframe(
         }
     }
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
+    const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
+    let minimumTotal = 0;
+    let dialogueMinimumTotal = 0;
     for (const [segmentIndex, segment] of plan.segments.entries()) {
         if (!segment || typeof segment !== 'object'
             || !Array.isArray(segment.shots) || !segment.shots.length || segment.shots.length > 4) {
@@ -326,6 +382,40 @@ export function validateFrontierVideoPlanForKeyframe(
                 throw new Error(`GPT-5.6 Sol put speech direction in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
             }
         }
+        const dialogueFloor = dialogueFloorSeconds(segment);
+        const floor = Math.max(
+            minimum,
+            dialogueFloor,
+            Math.min(segment.shots.length * 1.5, maximum),
+        );
+        if (floor > maximum + 1e-6) {
+            throw new Error(
+                `GPT-5.6 Sol segment ${segmentIndex + 1} needs ${floor.toFixed(1)}s of dialogue, above the ${maximum}s model limit.`,
+            );
+        }
+        minimumTotal += floor;
+        dialogueMinimumTotal += dialogueFloor;
+    }
+    if (minimumTotal > 30 + 1e-6 && dialogueMinimumTotal <= 30 + 1e-6) {
+        throw new Error(
+            `GPT-5.6 Sol screenplay needs at least ${minimumTotal.toFixed(1)}s, above the 30s automatic limit.`,
+        );
+    }
+    if (rawPrompt) {
+        const semantic = semanticPlanText(plan);
+        const missingQuotes = quotedRequirements(rawPrompt).filter(quote => !semantic.includes(quote));
+        if (missingQuotes.length) {
+            throw new Error(`GPT-5.6 Sol omitted quoted wording: ${missingQuotes.join(' | ')}`);
+        }
+        const missingNumbers = [...new Set(rawPrompt.match(/\b\d+(?:\.\d+)?\b/g) || [])].filter(number => {
+            if (new RegExp(`(^|\\D)${number.replace('.', '\\.')}($|\\D)`).test(semantic)) return false;
+            const integer = Number(number);
+            return !Number.isInteger(integer) || integer < 0 || integer >= NUMBER_WORDS.length
+                || !new RegExp(`\\b${NUMBER_WORDS[integer]}\\b`, 'i').test(semantic);
+        });
+        if (missingNumbers.length) {
+            throw new Error(`GPT-5.6 Sol omitted explicit numbers: ${missingNumbers.join(', ')}`);
+        }
     }
 }
 
@@ -344,6 +434,9 @@ function extractOutputText(response: any): string {
             if (content?.type === 'output_text' && typeof content.text === 'string') {
                 return content.text.trim();
             }
+            if (content?.type === 'refusal') {
+                throw new Error(String(content.refusal || 'GPT-5.6 Sol declined the request.'));
+            }
         }
     }
     throw new Error(response?.error?.message || 'GPT-5.6 Sol returned no screenplay.');
@@ -361,6 +454,7 @@ async function requestSolResponse(
 ): Promise<any> {
     const requestedTier = requestedOpenAIServiceTier(options.serviceTier);
     let lastError: unknown;
+    let expandOutputBudget = false;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
         const started = Date.now();
         let outcome: 'success' | 'error' = 'error';
@@ -368,6 +462,10 @@ async function requestSolResponse(
         let detail: string | undefined;
         let retryable = true;
         try {
+            const baseMaximum = Number(payload.max_output_tokens || 0);
+            const attemptPayload = expandOutputBudget && baseMaximum > 0
+                ? { ...payload, max_output_tokens: Math.min(128_000, Math.max(12_000, baseMaximum * 2)) }
+                : payload;
             const response = await fetch('https://api.openai.com/v1/responses', {
                 method: 'POST',
                 signal,
@@ -376,19 +474,23 @@ async function requestSolResponse(
                     'content-type': 'application/json',
                 },
                 body: JSON.stringify({
-                    ...payload,
+                    ...attemptPayload,
                     ...(requestedTier ? { service_tier: requestedTier } : {}),
                 }),
             });
             const body: any = await response.json();
             serviceTier = resolvedOpenAIServiceTier(body, options.serviceTier);
+            const responseStatus = String(body?.status || 'completed');
+            const incomplete = response.ok && responseStatus === 'incomplete';
+            const unexpectedState = response.ok && responseStatus !== 'completed';
+            const logicalSuccess = response.ok && !unexpectedState;
             const usage = body?.usage;
             if (usage) {
                 const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
                 await options.onUsage?.({
                     stage,
                     attempt,
-                    outcome: response.ok ? 'success' : 'error',
+                    outcome: logicalSuccess ? 'success' : 'error',
                     provider: 'openai',
                     model: String(body.model || VIDEO_PLANNER_MODEL),
                     serviceTier,
@@ -402,6 +504,17 @@ async function requestSolResponse(
                 const error = new Error(detail);
                 lastError = error;
                 retryable = transientOpenAIStatus(response.status);
+                if (attempt < 2 && retryable) continue;
+                throw error;
+            }
+            if (unexpectedState) {
+                const reason = String(body?.incomplete_details?.reason || body?.error?.code || responseStatus);
+                detail = body?.error?.message
+                    || `GPT-5.6 Sol response was ${responseStatus}: ${reason}.`;
+                const error = new Error(detail);
+                lastError = error;
+                retryable = incomplete || /server|timeout|rate/i.test(reason);
+                expandOutputBudget = incomplete && reason === 'max_output_tokens';
                 if (attempt < 2 && retryable) continue;
                 throw error;
             }
@@ -470,7 +583,7 @@ async function analyzePromptWithSol(
                 schema: VIDEO_PROMPT_ANALYSIS_SCHEMA,
             },
         },
-        max_output_tokens: 5000,
+        max_output_tokens: 8000,
         safety_identifier: safetyIdentifier,
         store: false,
     }, signal, 'prompt_analysis', options);
@@ -523,7 +636,7 @@ export async function createFrontierVideoPlan(
                     : 'Aspect ratio: 16:9.',
                 `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                'Choose an automatic total duration no longer than 30 seconds.',
+                'Choose an automatic total duration no longer than 30 seconds, unless required speech physically needs a short overrun; never omit or rush required words to satisfy the cap.',
                 sourceImage
                     ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
                     : 'No user-supplied starting image is present.',
@@ -545,55 +658,93 @@ export async function createFrontierVideoPlan(
             });
         }
         const screenplayStarted = Date.now();
-        const body = await requestSolResponse({
-            model: VIDEO_PLANNER_MODEL,
-            reasoning: { effort: 'high' },
-            instructions: VIDEO_PLANNER_INSTRUCTIONS,
-            input: [{
+        let repairFailure = '';
+        let repairCandidate = '';
+        for (let screenplayAttempt = 1; screenplayAttempt <= 2; screenplayAttempt += 1) {
+            const repairInput = screenplayAttempt === 1 ? [] : [{
                 role: 'user',
-                content,
-            }],
-            text: {
-                verbosity: 'low',
-                format: {
-                    type: 'json_schema',
-                    name: 'local_video_screenplay',
-                    strict: true,
-                    schema: VIDEO_PLAN_SCHEMA,
+                content: [{
+                    type: 'input_text',
+                    text: [
+                        'Regenerate the complete screenplay JSON and correct the validation failure below.',
+                        `Validation failure: ${repairFailure}`,
+                        repairCandidate
+                            ? `Previous candidate (do not merely explain it):\n${repairCandidate.slice(0, 30_000)}`
+                            : 'The previous response was incomplete or malformed; regenerate it from the original request.',
+                        'Preserve the original intent, dialogue, numbers, source-image continuity, and quality. Return only the schema-conforming replacement.',
+                    ].join('\n\n'),
+                }],
+            }];
+            const stage = screenplayAttempt === 1 ? 'screenplay' : 'screenplay_repair';
+            const body = await requestSolResponse({
+                model: VIDEO_PLANNER_MODEL,
+                reasoning: { effort: 'high' },
+                instructions: VIDEO_PLANNER_INSTRUCTIONS,
+                input: [{
+                    role: 'user',
+                    content,
+                }, ...repairInput],
+                text: {
+                    verbosity: 'low',
+                    format: {
+                        type: 'json_schema',
+                        name: 'local_video_screenplay',
+                        strict: true,
+                        schema: videoPlanSchemaForMaximum(segmentMaximum),
+                    },
                 },
-            },
-            max_output_tokens: 8000,
-            safety_identifier: safetyIdentifier,
-            store: false,
-        }, controller.signal, 'screenplay', options);
-        const plan = JSON.parse(extractOutputText(body));
-        if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
-            throw new Error('GPT-5.6 Sol returned an invalid screenplay object.');
+                max_output_tokens: 16_000,
+                safety_identifier: safetyIdentifier,
+                store: false,
+            }, controller.signal, stage, options);
+            try {
+                repairCandidate = extractOutputText(body);
+                const plan = JSON.parse(repairCandidate);
+                if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
+                    throw new Error('GPT-5.6 Sol returned an invalid screenplay object.');
+                }
+                if (dialogueMode !== 'none' && !planHasDialogue(plan)) {
+                    throw new Error('GPT-5.6 Sol omitted dialogue required by its independent prompt analysis.');
+                }
+                const missingVerbatim = promptAnalysis.dialogue_contract.lines
+                    .filter((line: any) => line?.verbatim && String(line.text || '').trim())
+                    .map((line: any) => String(line.text).trim())
+                    .filter((line: string) => !planPreservesDialogueLine(plan, line));
+                if (missingVerbatim.length) {
+                    throw new Error('GPT-5.6 Sol rewrote or omitted dialogue protected by its independent prompt analysis.');
+                }
+                (plan as any).prompt_analysis = promptAnalysis;
+                validateFrontierVideoPlanForKeyframe(plan, model, prompt);
+                (plan as any).planner_metrics = {
+                    prompt_analysis_seconds: promptAnalysisSeconds,
+                    screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
+                    screenplay_attempts: screenplayAttempt,
+                };
+                const usage = body?.usage;
+                if (usage) {
+                    console.log(
+                        `[Video planner] ${VIDEO_PLANNER_MODEL}: ${Number(usage.input_tokens || 0)} input, `
+                        + `${Number(usage.output_tokens || 0)} output tokens`,
+                    );
+                }
+                return plan;
+            } catch (error) {
+                repairFailure = error instanceof Error ? error.message : String(error);
+                await options.onAttempt?.({
+                    stage: 'screenplay_validation',
+                    attempt: screenplayAttempt,
+                    outcome: 'rejected',
+                    provider: 'openai',
+                    model: VIDEO_PLANNER_MODEL,
+                    serviceTier: requestedOpenAIServiceTier(options.serviceTier) || 'default',
+                    durationSeconds: 0,
+                    detail: repairFailure,
+                });
+                if (screenplayAttempt >= 2) throw error;
+                console.warn(`Frontier screenplay validation failed; requesting one repair: ${repairFailure}`);
+            }
         }
-        if (dialogueMode !== 'none' && !planHasDialogue(plan)) {
-            throw new Error('GPT-5.6 Sol omitted dialogue required by its independent prompt analysis.');
-        }
-        const missingVerbatim = promptAnalysis.dialogue_contract.lines
-            .filter((line: any) => line?.verbatim && String(line.text || '').trim())
-            .map((line: any) => String(line.text).trim())
-            .filter((line: string) => !planPreservesDialogueLine(plan, line));
-        if (missingVerbatim.length) {
-            throw new Error('GPT-5.6 Sol rewrote or omitted dialogue protected by its independent prompt analysis.');
-        }
-        (plan as any).prompt_analysis = promptAnalysis;
-        (plan as any).planner_metrics = {
-            prompt_analysis_seconds: promptAnalysisSeconds,
-            screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
-        };
-        const usage = body?.usage;
-        if (usage) {
-            console.log(
-                `[Video planner] ${VIDEO_PLANNER_MODEL}: ${Number(usage.input_tokens || 0)} input, `
-                + `${Number(usage.output_tokens || 0)} output tokens`,
-            );
-        }
-        validateFrontierVideoPlanForKeyframe(plan, model);
-        return plan;
+        throw new Error(repairFailure || 'GPT-5.6 Sol could not produce a valid screenplay.');
     } finally {
         clearTimeout(timeout);
     }
