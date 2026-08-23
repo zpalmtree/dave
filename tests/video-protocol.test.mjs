@@ -302,9 +302,11 @@ test('frontier prompt analysis classifies intent independently before screenplay
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /generic reinterpretations/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative affordances/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative_montage/);
-    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /translate each meaningful stage into a concrete visible action/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /concrete event with an activity and consequence/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /small but legible logos, uniforms, tools/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not default every meme or screenshot/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not merely pan across panels or make all pictured subjects bob/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /mini-event with a setup, physical action, and visible consequence/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /accessory adjustment, or panel pan is not sufficient/);
 });
 
 test('video commands accept exactly one supported attached start frame', () => {
