@@ -21,6 +21,7 @@ import {
     VIDEO_PLAN_SCHEMA,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
+    videoPromptRequestsSpeech,
 } from '../dist/VideoFrontierPlanner.js';
 import {
     buildVideoKeyframePrompt,
@@ -164,12 +165,22 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /user-supplied start image/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Every hard scene change/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one independently generated clip/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat explicit speaking intent as authority to write speech/);
+    assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /Never invent dialogue/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
         if (value.type === 'object') assert.equal(value.additionalProperties, false);
         for (const child of Object.values(value)) visit(child);
     };
     visit(VIDEO_PLAN_SCHEMA);
+});
+
+test('frontier planner distinguishes requested dialogue from silent action', () => {
+    assert.equal(videoPromptRequestsSpeech('a cat and dog discussing the future of blockchain'), true);
+    assert.equal(videoPromptRequestsSpeech('a woman sings about cheese'), true);
+    assert.equal(videoPromptRequestsSpeech('a man says "hello"'), true);
+    assert.equal(videoPromptRequestsSpeech('a silent discussion conveyed through pantomime'), false);
+    assert.equal(videoPromptRequestsSpeech('dogs eat cheese in a kitchen'), false);
 });
 
 test('video commands accept exactly one supported attached start frame', () => {
