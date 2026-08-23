@@ -129,9 +129,10 @@ export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_in
 
 export function completedVideoPost(job: VideoJobView): string {
     const runtime = formatVideoRuntime(job.runtime_seconds);
+    const notice = sanitizeVideoWorkerText(job.generation_notice, '', 1000).trim();
     return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
         runtime ? ` — completed in **${runtime}**` : ''
-    }.\n> ${truncatePrompt(videoJobDirection(job))}`;
+    }.${notice ? `\n**Note:** ${notice}` : ''}\n> ${truncatePrompt(videoJobDirection(job))}`;
 }
 
 export function failedVideoPost(job: VideoJobView): string {

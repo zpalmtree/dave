@@ -224,6 +224,18 @@ function plannedIntent(row: JobRow): string | null {
     }
 }
 
+function generationNotice(row: JobRow): string | null {
+    if (!row.planner_json) return null;
+    try {
+        const notice = JSON.parse(row.planner_json)?.generation_notice;
+        return typeof notice === 'string' && notice.trim()
+            ? sanitizeVideoWorkerText(notice, '', 1000).trim() || null
+            : null;
+    } catch {
+        return null;
+    }
+}
+
 function nowSeconds(): number {
     return Math.floor(Date.now() / 1000);
 }
@@ -2050,6 +2062,7 @@ export class VideoBroker {
                 model: row.model,
                 prompt: row.prompt,
                 planned_intent: plannedIntent(row),
+                generation_notice: generationNotice(row),
                 requester_id: row.requester_id,
                 origin_bot_id: row.origin_bot_id,
                 channel_id: row.channel_id,

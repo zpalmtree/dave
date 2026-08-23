@@ -50,6 +50,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         heartbeatTimeoutMs: 5000,
         frontierPlanner: async () => ({
             intent: 'A measured two-part test.',
+            generation_notice: 'The screenplay was truncated for this test.',
             continuity_bible: 'Test continuity.',
             keyframe: {
                 recommended: false,
@@ -240,6 +241,10 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         assert.equal(prepared.body.job.initial_estimate_high_seconds, 197);
         assert.ok(prepared.body.job.initial_estimate_recorded_at > 0);
         assert.equal(prepared.body.job.planned_intent, 'A measured two-part test.');
+        assert.equal(
+            prepared.body.job.generation_notice,
+            'The screenplay was truncated for this test.',
+        );
         assert.equal(
             prepared.body.job.expected_finish_at - prepared.body.job.expected_start_at,
             127,
