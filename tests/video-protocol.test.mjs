@@ -5,12 +5,18 @@ import { Commands } from '../dist/CommandDeclarations.js';
 import {
     formatVideoJob,
     formatVideoRuntime,
+    completedVideoPost,
     singleVideoResponderGate,
     videoPromptFromMessages,
     videoSourceImageFromMessage,
     videoSourceImageFromMessages,
 } from '../dist/VideoGeneration.js';
-import { VIDEO_MODELS, isVideoModel, parsePauseDuration } from '../dist/VideoProtocol.js';
+import {
+    VIDEO_MODELS,
+    isVideoModel,
+    parsePauseDuration,
+    sanitizeVideoWorkerText,
+} from '../dist/VideoProtocol.js';
 import {
     VIDEO_PLAN_SCHEMA,
     VIDEO_PLANNER_INSTRUCTIONS,
@@ -67,6 +73,30 @@ test('video runtime is formatted for the delivered post', () => {
     assert.equal(formatVideoRuntime(8.4), '8s');
     assert.equal(formatVideoRuntime(65.6), '1m 6s');
     assert.equal(formatVideoRuntime(3661), '1h 1m 1s');
+    assert.match(completedVideoPost({
+        id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
+        model: 'minimaxdraft',
+        runtime_seconds: 65.6,
+        prompt: 'An anime family battle',
+    }), /a1869ead.*completed in \*\*1m 6s\*\*/);
+});
+
+test('worker progress never exposes local filesystem paths', () => {
+    assert.equal(
+        sanitizeVideoWorkerText(
+            'Completed H3: D:\\AI\\ComfyUI_windows_portable\\output\\segment.mp4',
+            'Generating',
+        ),
+        'H3 segment complete',
+    );
+    assert.equal(
+        sanitizeVideoWorkerText('Loading /home/zp/private/model.safetensors', 'Generating'),
+        'Loading [local file]',
+    );
+    assert.doesNotMatch(
+        sanitizeVideoWorkerText('Failed at C:\\Users\\zp\\secret\\frame.png', 'Worker failure', 2000),
+        /Users|secret|frame\.png/,
+    );
 });
 
 test('fast video commands map to explicit quality tradeoffs', () => {

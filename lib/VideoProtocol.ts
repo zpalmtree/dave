@@ -148,6 +148,27 @@ export function isVideoModel(value: unknown): value is VideoModelId {
         || value === 'minimaxdraft';
 }
 
+export function sanitizeVideoWorkerText(
+    value: unknown,
+    fallback: string,
+    maxLength = 255,
+): string {
+    const compact = String(value || '').replace(/\s+/g, ' ').trim();
+    const completedPath = /^Completed\s+([^:]{1,80}):\s*(?:[A-Za-z]:[\\/]|\\\\|\/(?:home|mnt|Users|tmp|var|opt|srv)\/)/i.exec(compact);
+    if (completedPath) {
+        const label = completedPath[1].trim();
+        return (label.toLowerCase().endsWith('segment')
+            ? `${label} complete`
+            : `${label} segment complete`).slice(0, maxLength);
+    }
+    const sanitized = compact
+        .replace(/\b[A-Za-z]:[\\/][^\r\n]*/g, '[local file]')
+        .replace(/\\\\[^\r\n]*/g, '[local file]')
+        .replace(/(^|\s)\/(?:home|mnt|Users|tmp|var|opt|srv)\/[^\r\n]*/g, '$1[local file]')
+        .trim();
+    return (sanitized || fallback).slice(0, maxLength);
+}
+
 export function parsePauseDuration(value: string | undefined): number {
     if (!value) return 6 * 60 * 60;
     const match = /^(\d+(?:\.\d+)?)(m|h|d)$/i.exec(value.trim());
