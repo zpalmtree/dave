@@ -225,6 +225,10 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         assert.equal(prepared.body.job.estimate_ready, true);
         assert.equal(prepared.body.job.estimate_low_seconds, 95);
         assert.equal(prepared.body.job.estimate_high_seconds, 178);
+        assert.equal(
+            prepared.body.job.expected_finish_at - prepared.body.job.expected_start_at,
+            137,
+        );
     } finally {
         if (socket) socket.close();
         await broker.stop();
