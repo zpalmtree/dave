@@ -1,4 +1,5 @@
 import { Message, AttachmentBuilder, MessageFlags } from 'discord.js';
+import { createCanvas, loadImage } from 'canvas';
 import { config } from './Config.js';
 import {
     truncateResponse,
@@ -41,6 +42,8 @@ const XAI_TEXT_MODEL = AI_MODELS.grokChat;
 const XAI_SUMMARY_MODEL = AI_MODELS.grokSummary;
 const XAI_IMAGE_MODEL = AI_MODELS.grokImage;
 const MAX_GROK_IMAGE_EDIT_SOURCES = 3;
+const MAX_GROK_IMAGE_INPUT_BYTES = 20 * 1024 * 1024;
+const GROK_IMAGE_INPUTS_REQUIRING_CONVERSION = new Set(['gif', 'webp']);
 
 const DEFAULT_SETTINGS = {
     model: XAI_TEXT_MODEL,
@@ -89,6 +92,43 @@ interface GrokResponse {
     result?: string;
     error?: string;
     messages?: XAIMessage[];
+}
+
+function imageExtension(url: string): string | undefined {
+    try {
+        const filename = new URL(url).pathname.split('/').pop() || '';
+        const extension = filename.split('.').pop()?.toLowerCase();
+        return extension && extension !== filename ? extension : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+async function prepareGrokImageInput(url: string, signal: AbortSignal): Promise<string> {
+    if (!GROK_IMAGE_INPUTS_REQUIRING_CONVERSION.has(imageExtension(url) || '')) {
+        return url;
+    }
+
+    const response = await fetch(url, { signal });
+    if (!response.ok) {
+        throw new Error(`Failed to download the attached image (${response.status}).`);
+    }
+
+    const source = Buffer.from(await response.arrayBuffer());
+    if (source.length > MAX_GROK_IMAGE_INPUT_BYTES) {
+        throw new Error('The attached image exceeds xAI\'s 20 MiB input limit.');
+    }
+
+    const image = await loadImage(source);
+    const canvas = createCanvas(image.width, image.height);
+    canvas.getContext('2d').drawImage(image, 0, 0);
+    const png = canvas.toBuffer('image/png');
+
+    if (png.length > MAX_GROK_IMAGE_INPUT_BYTES) {
+        throw new Error('The converted image exceeds xAI\'s 20 MiB input limit.');
+    }
+
+    return `data:image/png;base64,${png.toString('base64')}`;
 }
 
 async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean = false): Promise<GrokResponse> {
@@ -170,26 +210,27 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         `User: ${prompt}`,
     ].filter(Boolean).join('\n\n');
 
-    // Build input - use string for simple requests, or structured for images
-    let inputMessages: string | XAIMessage[];
-    if (imageURLs.length > 0) {
-        inputMessages = [{
-            role: 'user' as const,
-            content: [
-                { type: 'input_text' as const, text: fullPrompt },
-                ...imageURLs.map(url => ({
-                    type: 'input_image' as const,
-                    image_url: url,
-                    detail: 'high' as const,
-                }))
-            ]
-        }];
-    } else {
-        // Use simple string input for text-only requests
-        inputMessages = fullPrompt;
-    }
+    let timeoutId: NodeJS.Timeout | undefined;
 
     try {
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), DEFAULT_SETTINGS.timeout);
+        const preparedImageURLs = await Promise.all(
+            imageURLs.map(url => prepareGrokImageInput(url, controller.signal)),
+        );
+        const inputMessages: string | XAIMessage[] = preparedImageURLs.length > 0
+            ? [{
+                role: 'user' as const,
+                content: [
+                    { type: 'input_text' as const, text: fullPrompt },
+                    ...preparedImageURLs.map(url => ({
+                        type: 'input_image' as const,
+                        image_url: url,
+                        detail: 'high' as const,
+                    })),
+                ],
+            }]
+            : fullPrompt;
         const twoMonthsAgo = (() => {
             const d = new Date();
             d.setMonth(d.getMonth() - 2);
@@ -208,9 +249,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
                 enable_image_understanding: true,
             },
         ];
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), DEFAULT_SETTINGS.timeout);
 
         const hasImages = imageURLs.length > 0;
         const requestBody = {
@@ -235,8 +273,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             body: JSON.stringify(requestBody),
             signal: controller.signal,
         });
-
-        clearTimeout(timeoutId);
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -298,6 +334,8 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         }
 
         return { error: formatProviderApiError({ provider: 'xAI', error: err }) };
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
     }
 }
 
