@@ -1327,6 +1327,21 @@ export class VideoBroker {
                         job.requester_id,
                         sourceImage,
                     );
+                    const plannerMetrics = (plan as any).planner_metrics;
+                    if (plannerMetrics && typeof plannerMetrics === 'object') {
+                        for (const [name, seconds] of [
+                            ['frontier_prompt_analysis', Number(plannerMetrics.prompt_analysis_seconds)],
+                            ['frontier_screenplay', Number(plannerMetrics.screenplay_seconds)],
+                        ] as const) {
+                            if (Number.isFinite(seconds) && seconds >= 0) {
+                                await this.recordMetricSpan(job.public_id, {
+                                    source: 'broker',
+                                    name,
+                                    duration_seconds: seconds,
+                                });
+                            }
+                        }
+                    }
                     await this.run(
                         `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
                          WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
