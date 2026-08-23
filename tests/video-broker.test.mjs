@@ -154,15 +154,23 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                     vram_total_mb: 32607,
                     vram_peak_mb: 30000,
                     vram_average_mb: 28000,
+                    vram_free_min_mb: 900,
                     utilization_average_percent: 96,
                     utilization_peak_percent: 100,
                     power_average_watts: 410,
+                    temperature_peak_c: 73,
+                    pcie_link_width_min: 8,
+                    pcie_link_width_max: 8,
+                    hardware_slowdown_samples: 0,
+                    thermal_slowdown_samples: 0,
+                    power_brake_slowdown_samples: 0,
                     samples: 60,
                 },
                 environment: {
                     worker_sha256: 'a'.repeat(64),
                     generator_sha256: 'b'.repeat(64),
                     python_version: '3.test',
+                    comfy_aimdo_version: '0.4.14',
                     warm_model_before: null,
                     warm_model_after: 'h3',
                 },
@@ -199,6 +207,9 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         assert.equal(stats.body.models[0].phases.generator, 55);
         assert.equal(stats.body.models[0].phases.discord_delivery, 1.25);
         assert.equal(stats.body.models[0].gpu.vram_peak_average_mb, 30000);
+        assert.equal(stats.body.models[0].gpu.vram_free_minimum_mb, 900);
+        assert.equal(stats.body.models[0].gpu.temperature_peak_c, 73);
+        assert.equal(stats.body.models[0].latest_environment.comfy_aimdo_version, '0.4.14');
         assert.equal(stats.body.models[0].cold_starts, 1);
         assert.equal(stats.body.models[0].bottlenecks[0].name, 'generator_process');
         const learned = await botFetch('/v1/jobs', {
@@ -907,6 +918,134 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         socket.close();
         await closed;
         socket = null;
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('worker GPU-reset safety signal pauses dispatch and preserves failed-attempt telemetry', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-gpu-reset-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+        preplanQueuedJobs: false,
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: {
+                authorization: 'Bearer bot-secret',
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    let socket;
+    try {
+        const submitted = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimax',
+                prompt: 'GPU reset circuit-breaker test',
+                requester_id: 'safety-user',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'safety-message',
+                status_message_id: 'safety-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello',
+            protocol: 1,
+            worker_id: 'safety-worker',
+            capabilities: ['minimax'],
+            current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const lease = await take(value => value.type === 'job');
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'failed',
+            job_id: lease.job.id,
+            error: 'Windows reset the NVIDIA GPU driver during generation.',
+            retryable: true,
+            safety_pause_seconds: 3600,
+            metrics: {
+                schema_version: 1,
+                model: 'minimax',
+                generator_model: 'h3',
+                total_seconds: 130.76,
+                gpu: {
+                    name: 'NVIDIA GeForce RTX 5090',
+                    driver_version: '610.47',
+                    vram_total_mb: 32607,
+                    vram_peak_mb: 32500,
+                    vram_free_min_mb: 107,
+                    temperature_peak_c: 73,
+                    samples: 120,
+                },
+                environment: {
+                    python_version: '3.13.14',
+                    comfy_aimdo_version: '0.4.13',
+                    warm_model_before: 'h3',
+                    warm_model_after: null,
+                },
+                flags: { quality: 'final' },
+                failure: {
+                    kind: 'nvidia_driver_reset',
+                    event_count: 170,
+                    event_ids: [13, 14, 153],
+                    latest_utc: '2026-08-23T05:52:15.297Z',
+                },
+                spans: [],
+            },
+        }));
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const unload = await take(value => value.type === 'unload');
+        assert.equal(unload.reason, 'safety-pause');
+        const paused = await eventually(
+            () => botFetch('/v1/queue'),
+            value => value.body.state.paused_until && value.body.jobs[0]?.status === 'queued',
+        );
+        assert.equal(paused.body.jobs[0].stage, 'Paused after GPU driver reset');
+        assert.equal(paused.body.jobs[0].error, 'Windows reset the NVIDIA GPU driver during generation.');
+        await assert.rejects(() => take(value => value.type === 'job', 150), /Timed out/);
+
+        const resumed = await botFetch('/v1/control/resume', { method: 'POST', body: '{}' });
+        assert.equal(resumed.status, 200);
+        const retry = await take(value => value.type === 'job');
+        assert.equal(retry.job.id, lease.job.id);
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'failed',
+            job_id: retry.job.id,
+            error: 'finish test',
+            retryable: false,
+        }));
+        socket.send(JSON.stringify({ type: 'ready' }));
+        await eventually(
+            () => botFetch('/v1/users/safety-user/jobs'),
+            value => value.body.jobs[0].status === 'failed',
+        );
     } finally {
         if (socket) socket.close();
         await broker.stop();
