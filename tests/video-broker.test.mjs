@@ -744,6 +744,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
     const generatedBytes = Buffer.from('generated-keyframe');
     const attachedBytes = Buffer.from('attached-keyframe');
     let keyframeCalls = 0;
+    let referenceResolverCalls = 0;
     const plannerSawSource = [];
     const plan = {
         intent: 'test',
@@ -752,6 +753,12 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
             recommended: true,
             reason: 'identity anchor',
             prompt: 'three racers',
+            reference_requirements: [{
+                label: 'Racer identity',
+                kind: 'identity',
+                search_query: 'racer portrait',
+                visual_facts_to_preserve: 'Distinctive face.',
+            }],
             motion_contract: {
                 subject_orientation: 'right',
                 gaze_direction: 'right',
@@ -774,14 +781,28 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
             plannerSawSource.push(Boolean(sourceImage));
             return plan;
         },
-        keyframeGenerator: async () => {
+        keyframeGenerator: async (_planned, references) => {
             keyframeCalls += 1;
+            assert.equal(references.length, 1);
+            assert.equal(references[0].label, 'Racer identity');
             return {
                 bytes: generatedBytes,
                 mimeType: 'image/png',
                 provider: 'test-provider',
                 model: 'test-image-model',
             };
+        },
+        keyframeReferenceResolver: async () => {
+            referenceResolverCalls += 1;
+            return [{
+                label: 'Racer identity',
+                kind: 'identity',
+                visualFactsToPreserve: 'Distinctive face.',
+                bytes: Buffer.from('reference'),
+                mimeType: 'image/png',
+                sourceUrl: 'https://images.example/racer.png',
+                contextUrl: 'https://example.com/racer',
+            }];
         },
         sourceImageDownloader: async (_descriptor, targetDirectory) => {
             mkdirSync(targetDirectory, { recursive: true });
@@ -858,6 +879,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.equal(cachedFrame.status, 200);
         assert.deepEqual(Buffer.from(await cachedFrame.arrayBuffer()), generatedBytes);
         assert.equal(keyframeCalls, 1);
+        assert.equal(referenceResolverCalls, 1);
 
         socket.send(JSON.stringify({
             type: 'event',
@@ -902,6 +924,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.deepEqual(Buffer.from(await suppliedFrame.arrayBuffer()), attachedBytes);
         assert.deepEqual(plannerSawSource, [false, true]);
         assert.equal(keyframeCalls, 1);
+        assert.equal(referenceResolverCalls, 1);
         socket.send(JSON.stringify({
             type: 'event',
             event: 'failed',
