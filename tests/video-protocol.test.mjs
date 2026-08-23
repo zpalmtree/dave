@@ -24,6 +24,7 @@ import {
     VIDEO_PLAN_SCHEMA,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
+    videoPromptIsDirectUtterance,
     videoPromptRequestsSpeech,
 } from '../dist/VideoFrontierPlanner.js';
 import {
@@ -191,6 +192,9 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /social-media or application screenshot/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /flat rigid artifact/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Visible text is immutable source content/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /first-person confession/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not sanitize, rehabilitate, moralize/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /counterfactual fidelity check/);
     assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /Never invent dialogue/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
@@ -219,8 +223,17 @@ test('frontier planner distinguishes requested dialogue from silent action', () 
     assert.equal(videoPromptRequestsSpeech('a cat and dog discussing the future of blockchain'), true);
     assert.equal(videoPromptRequestsSpeech('a woman sings about cheese'), true);
     assert.equal(videoPromptRequestsSpeech('a man says "hello"'), true);
+    assert.equal(videoPromptRequestsSpeech('greetings slugs, did you know you can generate videos now'), true);
+    assert.equal(videoPromptRequestsSpeech('juan:hello igor:shut up sound:baboons'), true);
+    assert.equal(videoPromptRequestsSpeech('style:anime sound:baboons'), false);
+    assert.equal(videoPromptRequestsSpeech('armpit and feet i LOVE armpit and feet please dont call me gooner'), true);
     assert.equal(videoPromptRequestsSpeech('a silent discussion conveyed through pantomime'), false);
     assert.equal(videoPromptRequestsSpeech('dogs eat cheese in a kitchen'), false);
+    assert.equal(videoPromptIsDirectUtterance('I want a video of dogs eating cheese'), false);
+    assert.equal(videoPromptIsDirectUtterance('please generate a man saying hello'), false);
+    assert.equal(videoPromptIsDirectUtterance('5 dogs say "We are ready"'), false);
+    assert.equal(videoPromptIsDirectUtterance('greetings slugs, did you know you can generate videos now'), true);
+    assert.equal(videoPromptIsDirectUtterance('armpit and feet i LOVE armpit and feet please dont call me gooner'), true);
 });
 
 test('video commands accept exactly one supported attached start frame', () => {
