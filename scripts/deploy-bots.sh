@@ -158,24 +158,54 @@ NODE
 }
 
 VIDEO_DISPATCH_DRAINED=0
+VIDEO_LEGACY_DRAINED=0
+
+legacy_video_dispatch_drain() {
+    VIDEO_LEGACY_DRAIN_SECONDS="$VIDEO_DRAIN_TIMEOUT_SECONDS" node --input-type=module <<'NODE'
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import sqlite3 from 'sqlite3';
+
+const configPath = process.env.VIDEO_CONFIG_FILE || join(homedir(), '.config', 'dave-video.json');
+const file = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : {};
+const dbPath = process.env.VIDEO_BROKER_DB || file.brokerDb || join(homedir(), 'video-broker.sqlite3');
+const until = Math.floor(Date.now() / 1000) + Number(process.env.VIDEO_LEGACY_DRAIN_SECONDS || 3600);
+const db = new sqlite3.Database(dbPath);
+await new Promise((resolve, reject) => db.run(
+    'UPDATE video_control SET paused_until = ?, updated_by = ?, updated_at = ? WHERE id = 1',
+    [until, 'deploy-bots.sh compatibility drain', Math.floor(Date.now() / 1000)],
+    error => error ? reject(error) : resolve(),
+));
+await new Promise((resolve, reject) => db.close(error => error ? reject(error) : resolve()));
+NODE
+}
 
 resume_video_dispatch() {
     if [ "$VIDEO_DISPATCH_DRAINED" != "1" ]; then
         return
     fi
     echo "Resuming video dispatch."
-    video_control /v1/control/resume-dispatch >/dev/null || true
+    if [ "$VIDEO_LEGACY_DRAINED" = "1" ]; then
+        video_control /v1/control/resume >/dev/null || true
+    else
+        video_control /v1/control/resume-dispatch >/dev/null || true
+    fi
     VIDEO_DISPATCH_DRAINED=0
+    VIDEO_LEGACY_DRAINED=0
 }
 
 drain_video_dispatch() {
     local result
     result="$(video_control /v1/control/drain)"
     if [ "$result" = "unsupported" ]; then
-        echo "Running broker predates dispatch drain; deploy caller must verify it is idle."
-        return
+        echo "Running broker predates dispatch drain; applying a compatibility dispatch hold without cancelling its active render."
+        legacy_video_dispatch_drain
+        VIDEO_DISPATCH_DRAINED=1
+        VIDEO_LEGACY_DRAINED=1
+    else
+        VIDEO_DISPATCH_DRAINED=1
     fi
-    VIDEO_DISPATCH_DRAINED=1
     echo "Video dispatch drained; waiting for active rendering and preparation to finish."
     local deadline=$((SECONDS + VIDEO_DRAIN_TIMEOUT_SECONDS))
     while [ "$(video_control /v1/control)" != "idle" ]; do
