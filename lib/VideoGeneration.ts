@@ -268,7 +268,7 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 export async function handleVideoRequest(model: VideoModelId, msg: Message, prompt: string): Promise<void> {
     prompt = prompt.trim();
     if (!prompt) {
-        await msg.reply(`Usage: \`${config.prefix}${model === 'minimax' ? 'minimax' : 'ltx'} <prompt>\``);
+        await msg.reply(`Usage: \`${config.prefix}${VIDEO_MODELS[model].command} <prompt>\``);
         return;
     }
     if (prompt.length > VIDEO_PROMPT_MAX_LENGTH) {
@@ -284,7 +284,8 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
-    const pending = await msg.reply(`Submitting a maximum-quality ${VIDEO_MODELS[model].displayName} video…`);
+    const speedLabel = model.endsWith('fast') ? 'fast-preview' : 'maximum-quality';
+    const pending = await msg.reply(`Submitting a ${speedLabel} ${VIDEO_MODELS[model].displayName} video…`);
     try {
         const response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
             method: 'POST',
@@ -313,6 +314,14 @@ export async function handleLtxVideo(msg: Message, prompt: string): Promise<void
 
 export async function handleMinimaxVideo(msg: Message, prompt: string): Promise<void> {
     await handleVideoRequest('minimax', msg, prompt);
+}
+
+export async function handleLtxFastVideo(msg: Message, prompt: string): Promise<void> {
+    await handleVideoRequest('ltxfast', msg, prompt);
+}
+
+export async function handleMinimaxFastVideo(msg: Message, prompt: string): Promise<void> {
+    await handleVideoRequest('minimaxfast', msg, prompt);
 }
 
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
