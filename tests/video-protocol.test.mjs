@@ -167,6 +167,9 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Every hard scene change/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one independently generated clip/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat explicit speaking intent as authority to write speech/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);
     assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /Never invent dialogue/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
