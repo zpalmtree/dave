@@ -542,6 +542,8 @@ export class VideoBroker {
                     [nowSeconds(), this.worker.currentJob],
                 );
                 this.sendWorker({ type: 'cancel', job_id: this.worker.currentJob, reason: 'pause' });
+            } else if (this.worker) {
+                this.sendWorker({ type: 'unload', reason: 'pause' });
             }
             writeJson(res, 200, { paused_until: until, state: await this.brokerState() });
             return;
@@ -837,7 +839,14 @@ export class VideoBroker {
                     initialized = true;
                     await this.reconcileWorker(hello);
                     this.sendWorker({ type: 'hello_ack', protocol: VIDEO_PROTOCOL_VERSION, state: await this.brokerState() });
-                    if (!hello.current_job) await this.dispatchNext();
+                    if (!hello.current_job) {
+                        const control = await this.control();
+                        if (control.paused_until) {
+                            this.sendWorker({ type: 'unload', reason: 'pause' });
+                        } else {
+                            await this.dispatchNext();
+                        }
+                    }
                     return;
                 }
                 await this.handleWorkerMessage(message);
