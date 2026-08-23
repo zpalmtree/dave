@@ -11,6 +11,7 @@ import {
     VideoJobView,
     VideoModelId,
     parsePauseDuration,
+    sanitizeVideoWorkerText,
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
 import { config } from './Config.js';
@@ -77,6 +78,13 @@ export function formatVideoRuntime(seconds: number | null | undefined): string |
     if (minutes) parts.push(`${minutes}m`);
     if (remaining || parts.length === 0) parts.push(`${remaining}s`);
     return parts.join(' ');
+}
+
+export function completedVideoPost(job: VideoJobView): string {
+    const runtime = formatVideoRuntime(job.runtime_seconds);
+    return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
+        runtime ? ` — completed in **${runtime}**` : ''
+    }.\n> ${truncatePrompt(job.prompt)}`;
 }
 
 export interface SubmittedVideoSourceImage {
@@ -177,7 +185,7 @@ export function formatVideoJob(job: VideoJobView): string {
         return `${head}\nThe desktop connection was lost during generation. The job is preserved and will resume or retry after reconnecting.`;
     }
     if (['leased', 'planning', 'running', 'uploading', 'pausing', 'cancelling'].includes(job.status)) {
-        const stage = job.stage || job.status.replace('_', ' ');
+        const stage = sanitizeVideoWorkerText(job.stage, job.status.replace('_', ' '));
         const timing = job.worker_online && !job.paused_until && job.expected_finish_at
             ? ` Expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
@@ -186,7 +194,7 @@ export function formatVideoJob(job: VideoJobView): string {
     if (job.status === 'ready') return `${head}\nGeneration complete; delivering the video…`;
     if (job.status === 'delivered') return `${head}\nDelivered.`;
     if (job.status === 'cancelled') return `${head}\nCancelled.`;
-    return `${head}\nFailed: ${job.error || 'Unknown worker error.'}`;
+    return `${head}\nFailed: ${sanitizeVideoWorkerText(job.error, 'Unknown worker error.', 1800)}`;
 }
 
 class VideoGenerationService {
@@ -221,6 +229,37 @@ class VideoGenerationService {
         await brokerRequest(`/v1/jobs/${job.id}/${endpoint}`, { method: 'POST', body: '{}' });
     }
 
+    private async existingDelivery(job: VideoJobView, channel: any): Promise<any | null> {
+        try {
+            const recent = await channel.messages.fetch({ limit: 100 });
+            const marker = `video **${shortJobId(job.id)}** is ready`;
+            return recent.find((candidate: any) => candidate.id !== job.status_message_id
+                && candidate.author?.id === this.client.user?.id
+                && candidate.content?.includes(marker)) || null;
+        } catch (error) {
+            console.warn(`[Video] Could not check for an existing delivery of ${job.id}: ${String(error)}`);
+            return null;
+        }
+    }
+
+    private async postDelivery(job: VideoJobView, statusMessage: any): Promise<any> {
+        const channel = statusMessage.channel;
+        const payload = {
+            content: completedVideoPost(job),
+            files: [{ attachment: job.result_path, name: `${job.model}-${shortJobId(job.id)}.mp4` }],
+            allowedMentions: { repliedUser: true },
+        };
+        const existing = await this.existingDelivery(job, channel);
+        if (existing) return existing;
+        try {
+            const commandMessage = await channel.messages.fetch(job.command_message_id);
+            return await commandMessage.reply(payload);
+        } catch (error) {
+            console.warn(`[Video] Could not reply to original command for ${job.id}; posting in channel: ${String(error)}`);
+            return channel.send(payload);
+        }
+    }
+
     private async updateJob(job: VideoJobView): Promise<void> {
         const message = await this.statusMessage(job);
         if (!message) return;
@@ -230,14 +269,10 @@ class VideoGenerationService {
                 console.warn(`[Video] Result is not readable for ${job.id}: ${job.result_path}`);
                 return;
             }
-            const runtime = formatVideoRuntime(job.runtime_seconds);
+            const delivery = await this.postDelivery(job, message);
             await message.edit({
-                content: `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
-                    runtime
-                        ? ` — completed in **${runtime}**`
-                        : ''
-                }.\n> ${truncatePrompt(job.prompt)}`,
-                files: [{ attachment: job.result_path, name: `${job.model}-${shortJobId(job.id)}.mp4` }],
+                content: `**${VIDEO_MODELS[job.model].displayName} · ${shortJobId(job.id)}**\nDelivered in ${delivery.url}.`,
+                attachments: [],
             });
             await this.acknowledge(job, 'delivered');
             this.rendered.delete(job.id);

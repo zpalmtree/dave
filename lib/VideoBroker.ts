@@ -26,6 +26,7 @@ import {
     VideoModelId,
     VideoWorkerHello,
     isVideoModel,
+    sanitizeVideoWorkerText,
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
 import {
@@ -706,15 +707,16 @@ export class VideoBroker {
             .map(row => Number(row.runtime_seconds))
             .filter(value => Number.isFinite(value) && value > 0)
             .sort((a, b) => a - b);
-        if (samples.length < 3) {
+        if (samples.length === 0) {
             return { low: definition.fallbackLowSeconds, high: definition.fallbackHighSeconds };
         }
         const percentile = (fraction: number) => samples[Math.min(
             samples.length - 1,
             Math.max(0, Math.round((samples.length - 1) * fraction)),
         )];
-        const low = Math.max(60, Math.round(percentile(0.2) * 0.9));
-        const high = Math.max(low + 60, Math.round(percentile(0.9) * 1.15));
+        const sparse = samples.length < 3;
+        const low = Math.max(sparse ? 30 : 60, Math.round(percentile(0.2) * (sparse ? 0.75 : 0.9)));
+        const high = Math.max(low + (sparse ? 30 : 60), Math.round(percentile(0.9) * (sparse ? 1.75 : 1.15)));
         return { low, high };
     }
 
@@ -1096,7 +1098,9 @@ export class VideoBroker {
                      progress = COALESCE(?, progress), updated_at = ? WHERE public_id = ?`,
                     [
                         nowSeconds() + 60,
-                        message.stage === undefined ? null : String(message.stage).slice(0, 255),
+                        message.stage === undefined
+                            ? null
+                            : sanitizeVideoWorkerText(message.stage, 'Generating'),
                         typeof message.progress === 'number' ? Math.min(1, Math.max(0, message.progress)) : null,
                         nowSeconds(),
                         message.job_id,
@@ -1125,7 +1129,7 @@ export class VideoBroker {
                      estimate_high_seconds = COALESCE(?, estimate_high_seconds),
                      updated_at = ? WHERE public_id = ?`,
                     [
-                        String(message.stage || 'Planning').slice(0, 255),
+                        sanitizeVideoWorkerText(message.stage, 'Planning'),
                         Number(message.estimate_low_seconds) > 0
                             ? Math.max(1, Number(message.estimate_low_seconds))
                             : null,
@@ -1141,7 +1145,7 @@ export class VideoBroker {
                     `UPDATE video_jobs SET status = 'running', stage = ?, progress = ?, lease_expires_at = ?,
                      updated_at = ? WHERE public_id = ?`,
                     [
-                        String(message.stage || 'Generating').slice(0, 255),
+                        sanitizeVideoWorkerText(message.stage, 'Generating'),
                         typeof message.progress === 'number' ? Math.min(1, Math.max(0, message.progress)) : null,
                         nowSeconds() + 60,
                         nowSeconds(),
@@ -1180,6 +1184,7 @@ export class VideoBroker {
                     return;
                 }
                 const retry = Boolean(message.retryable) && (row?.attempt || 0) < 2;
+                const publicError = sanitizeVideoWorkerText(message.error, 'Worker failure', 2000);
                 await this.run(
                     retry
                         ? `UPDATE video_jobs SET status = 'queued', attempt = attempt + 1, stage = 'Retrying',
@@ -1188,8 +1193,8 @@ export class VideoBroker {
                         : `UPDATE video_jobs SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
                            WHERE public_id = ?`,
                     retry
-                        ? [String(message.error || 'Worker failure').slice(0, 2000), nowSeconds(), jobId]
-                        : [String(message.error || 'Worker failure').slice(0, 2000), nowSeconds(), nowSeconds(), jobId],
+                        ? [publicError, nowSeconds(), jobId]
+                        : [publicError, nowSeconds(), nowSeconds(), jobId],
                 );
                 this.worker.currentJob = null;
                 this.worker.ready = false;

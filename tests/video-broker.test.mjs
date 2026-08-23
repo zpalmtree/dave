@@ -119,6 +119,21 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             value => value.body.jobs[0].status === 'ready',
         );
         assert.equal(completed.body.jobs[0].runtime_seconds, 65.625);
+        const learned = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxdraft',
+                prompt: 'Sparse runtime estimate test',
+                requester_id: 'runtime-user-2',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'runtime-message-2',
+                status_message_id: 'runtime-status-2',
+            }),
+        });
+        assert.equal(learned.status, 201);
+        assert.equal(learned.body.job.estimate_low_seconds, 49);
+        assert.equal(learned.body.job.estimate_high_seconds, 115);
     } finally {
         if (socket) socket.close();
         await broker.stop();
