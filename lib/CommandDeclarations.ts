@@ -149,6 +149,7 @@ import {
     handleLtxFastVideo,
     handleLtxVideo,
     handleMinimaxFastVideo,
+    handleMinimaxDraftVideo,
     handleMinimaxVideo,
     handleVideoAdmin,
     handleVideoQueue,
@@ -178,7 +179,7 @@ const sharedCommands: Command[] = [
             description: 'Generate a maximum-quality local MiniMax H3 video; attach one image to use it as frame 0',
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['minimaxfast', 'ltx', 'videoqueue'],
+        relatedCommands: ['minimaxfast', 'minimaxdraft', 'ltx', 'videoqueue'],
         commandGates: [discordOnlyGate],
     },
     {
@@ -187,7 +188,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleLtxFastVideo,
-            description: 'Generate a lower-resolution LTX 2.5 preview; attach one image to use it as frame 0',
+            description: 'Generate a much faster lower-resolution one-stage LTX 2.5 preview; attach one image to use it as frame 0',
             examples: [{ value: 'ltxfast a chihuahua crusade through a medieval castle' }],
         },
         relatedCommands: ['ltx', 'minimaxfast', 'videoqueue'],
@@ -202,7 +203,19 @@ const sharedCommands: Command[] = [
             description: 'Generate a full-resolution MiniMax H3 video with the 8-step Turbo LoRA',
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['minimax', 'ltxfast', 'videoqueue'],
+        relatedCommands: ['minimax', 'minimaxdraft', 'ltxfast', 'videoqueue'],
+        commandGates: [discordOnlyGate],
+    },
+    {
+        aliases: ['minimaxdraft'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMinimaxDraftVideo,
+            description: 'Generate the fastest lower-resolution MiniMax H3 preview with the 4-step Turbo LoRA',
+            examples: [{ value: 'minimaxdraft an arcade kart race between historical figures' }],
+        },
+        relatedCommands: ['minimaxfast', 'minimax', 'ltxfast', 'videoqueue'],
         commandGates: [discordOnlyGate],
     },
     {
@@ -217,7 +230,7 @@ const sharedCommands: Command[] = [
                 { value: 'videoqueue cancel 12ab34cd' },
             ],
         },
-        relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast'],
+        relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft'],
         commandGates: [discordOnlyGate],
     },
     {

@@ -22,6 +22,7 @@ import {
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VideoJobStatus,
     VideoJobView,
+    VideoGeneratorModelId,
     VideoModelId,
     VideoWorkerHello,
     isVideoModel,
@@ -62,6 +63,7 @@ interface BrokerOptions {
     botToken: string;
     workerToken: string;
     heartbeatTimeoutMs?: number;
+    preplanQueuedJobs?: boolean;
     frontierPlanner?: typeof createFrontierVideoPlan;
     keyframeGenerator?: (plan: Record<string, any>) => Promise<VideoKeyframeResult>;
     sourceImageDownloader?: (
@@ -77,6 +79,7 @@ interface WorkerConnection {
     lastHeartbeat: number;
     currentJob: string | null;
     ready: boolean;
+    warmModel: VideoGeneratorModelId | null;
 }
 
 interface JobRow {
@@ -118,6 +121,11 @@ interface JobRow {
     keyframe_mime: string | null;
     keyframe_provider: string | null;
     keyframe_model: string | null;
+    affinity_bypasses: number;
+}
+
+function generatorModel(value: unknown): VideoGeneratorModelId | null {
+    return value === 'ltx' || value === 'h3' ? value : null;
 }
 
 function nowSeconds(): number {
@@ -274,9 +282,14 @@ export class VideoBroker {
     private readonly wsServer = new WebSocketServer({ noServer: true });
     private worker: WorkerConnection | null = null;
     private writeChain: Promise<unknown> = Promise.resolve();
+    private preparationChain: Promise<void> = Promise.resolve();
+    private readonly preparationQueued = new Set<string>();
+    private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
+    private readonly backgroundTasks = new Set<Promise<void>>();
     private heartbeatTimer: NodeJS.Timeout | null = null;
     private cleanupTimer: NodeJS.Timeout | null = null;
+    private stopping = false;
 
     constructor(options: BrokerOptions) {
         this.options = options;
@@ -321,6 +334,17 @@ export class VideoBroker {
         return result;
     }
 
+    private trackBackground(task: Promise<void>): void {
+        this.backgroundTasks.add(task);
+        void task.then(
+            () => this.backgroundTasks.delete(task),
+            error => {
+                this.backgroundTasks.delete(task);
+                console.error('Video broker background task failed', error);
+            },
+        );
+    }
+
     async initialize(): Promise<void> {
         await this.run('PRAGMA journal_mode = WAL');
         await this.run('PRAGMA busy_timeout = 5000');
@@ -362,7 +386,8 @@ export class VideoBroker {
             keyframe_path TEXT,
             keyframe_mime TEXT,
             keyframe_provider TEXT,
-            keyframe_model TEXT
+            keyframe_model TEXT,
+            affinity_bypasses INTEGER NOT NULL DEFAULT 0
         )`);
         const jobColumns = await this.all<{ name: string }>('PRAGMA table_info(video_jobs)');
         const columnNames = new Set(jobColumns.map(column => column.name));
@@ -371,6 +396,9 @@ export class VideoBroker {
         }
         if (!columnNames.has('planner_model')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN planner_model TEXT');
+        }
+        if (!columnNames.has('affinity_bypasses')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN affinity_bypasses INTEGER NOT NULL DEFAULT 0');
         }
         for (const [name, definition] of [
             ['source_image_path', 'TEXT'],
@@ -426,10 +454,13 @@ export class VideoBroker {
     }
 
     async stop(): Promise<void> {
+        this.stopping = true;
         if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
         if (this.cleanupTimer) clearInterval(this.cleanupTimer);
         if (this.worker) this.worker.socket.close(1001, 'broker shutdown');
         await new Promise<void>(resolvePromise => this.server.close(() => resolvePromise()));
+        await this.preparationChain.catch(() => undefined);
+        await Promise.allSettled([...this.backgroundTasks]);
         await new Promise<void>((resolvePromise, reject) => this.db.close(err => err ? reject(err) : resolvePromise()));
     }
 
@@ -544,6 +575,7 @@ export class VideoBroker {
                 this.sendWorker({ type: 'cancel', job_id: this.worker.currentJob, reason: 'pause' });
             } else if (this.worker) {
                 this.sendWorker({ type: 'unload', reason: 'pause' });
+                this.worker.warmModel = null;
             }
             writeJson(res, 200, { paused_until: until, state: await this.brokerState() });
             return;
@@ -650,6 +682,7 @@ export class VideoBroker {
                 throw error;
             }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+            if (this.worker) this.schedulePreparation(publicId);
             await this.dispatchNext();
             return { status: 201, body: { job: (await this.views([row!]))[0], duplicate: false } };
         });
@@ -685,6 +718,136 @@ export class VideoBroker {
              WHERE model = ? AND status = 'queued'`,
             [estimate.low, estimate.high, nowSeconds(), model],
         );
+    }
+
+    private async ensurePlan(job: JobRow): Promise<{ plan: Record<string, any>; plannerModel: string }> {
+        if (job.planner_json) {
+            return {
+                plan: JSON.parse(job.planner_json),
+                plannerModel: job.planner_model || VIDEO_PLANNER_MODEL,
+            };
+        }
+        let planning = this.plannerInFlight.get(job.public_id);
+        if (!planning) {
+            planning = (async () => {
+                let sourceImage: VideoPlanSourceImage | undefined;
+                if (job.source_image_path && job.source_image_mime
+                    && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_mime as any)
+                    && existsSync(job.source_image_path)
+                    && statSync(job.source_image_path).isFile()) {
+                    sourceImage = {
+                        mimeType: job.source_image_mime as VideoPlanSourceImage['mimeType'],
+                        data: readFileSync(job.source_image_path),
+                    };
+                }
+                const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
+                    job.prompt,
+                    job.model,
+                    job.requester_id,
+                    sourceImage,
+                );
+                await this.run(
+                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
+                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                    [JSON.stringify(plan), VIDEO_PLANNER_MODEL, nowSeconds(), job.public_id],
+                );
+                return { plan, plannerModel: VIDEO_PLANNER_MODEL };
+            })();
+            this.plannerInFlight.set(job.public_id, planning);
+        }
+        try {
+            return await planning;
+        } finally {
+            if (this.plannerInFlight.get(job.public_id) === planning) {
+                this.plannerInFlight.delete(job.public_id);
+            }
+        }
+    }
+
+    private async ensureKeyframe(job: JobRow, plan: Record<string, any>): Promise<void> {
+        if (job.source_image_path || plan?.keyframe?.recommended !== true
+            || (job.keyframe_path && job.keyframe_mime)) return;
+        let generation = this.keyframeInFlight.get(job.public_id);
+        if (!generation) {
+            generation = (async () => {
+                const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(plan);
+                if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
+                    throw new Error('Generated first frame is empty or too large.');
+                }
+                const current = await this.get<JobRow>(
+                    'SELECT status FROM video_jobs WHERE public_id = ?',
+                    [job.public_id],
+                );
+                if (!current || !ACTIVE_VIDEO_STATUSES.includes(current.status)) return;
+                const directory = resolve(this.options.resultsDir, job.public_id);
+                mkdirSync(directory, { recursive: true });
+                const extension = imageExtension(result.mimeType);
+                const temporary = join(directory, `keyframe.${extension}.part`);
+                const destination = join(directory, `keyframe.${extension}`);
+                rmSync(temporary, { force: true });
+                const stream = createWriteStream(temporary, { flags: 'wx' });
+                await new Promise<void>((resolvePromise, reject) => {
+                    stream.once('finish', resolvePromise);
+                    stream.once('error', reject);
+                    stream.end(result.bytes);
+                });
+                rmSync(destination, { force: true });
+                renameSync(temporary, destination);
+                await this.run(
+                    `UPDATE video_jobs SET keyframe_path = ?, keyframe_mime = ?,
+                     keyframe_provider = ?, keyframe_model = ?, updated_at = ?
+                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                    [
+                        destination,
+                        result.mimeType,
+                        result.provider,
+                        result.model,
+                        nowSeconds(),
+                        job.public_id,
+                    ],
+                );
+            })();
+            this.keyframeInFlight.set(job.public_id, generation);
+        }
+        try {
+            await generation;
+        } finally {
+            if (this.keyframeInFlight.get(job.public_id) === generation) {
+                this.keyframeInFlight.delete(job.public_id);
+            }
+        }
+    }
+
+    private schedulePreparation(publicId: string): void {
+        if (!this.options.preplanQueuedJobs || this.preparationQueued.has(publicId)) return;
+        this.preparationQueued.add(publicId);
+        const prepare = async () => {
+            try {
+                const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+                if (!job || !ACTIVE_VIDEO_STATUSES.includes(job.status)) return;
+                const { plan } = await this.ensurePlan(job);
+                const refreshed = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+                if (!refreshed || !ACTIVE_VIDEO_STATUSES.includes(refreshed.status)) return;
+                await this.ensureKeyframe(refreshed, plan);
+            } catch (error) {
+                console.warn(`Queued video preparation failed for ${publicId}; the worker will retry on demand.`, error);
+            } finally {
+                this.preparationQueued.delete(publicId);
+            }
+        };
+        this.preparationChain = this.preparationChain.then(prepare, prepare);
+    }
+
+    private async scheduleNextQueuedPreparation(): Promise<void> {
+        if (!this.options.preplanQueuedJobs || !this.worker) return;
+        const placeholders = this.worker.capabilities.map(() => '?').join(',');
+        if (!placeholders) return;
+        const row = await this.get<JobRow>(
+            `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
+             ORDER BY id ASC LIMIT 1`,
+            this.worker.capabilities,
+        );
+        if (row) this.schedulePreparation(row.public_id);
     }
 
     private async cancelJob(id: string, requesterId: string, isAdmin: boolean): Promise<any> {
@@ -736,7 +899,8 @@ export class VideoBroker {
     private async views(rows: JobRow[]): Promise<VideoJobView[]> {
         if (rows.length === 0) return [];
         const allActive = await this.all<JobRow>(
-            `SELECT * FROM video_jobs WHERE status IN (${ACTIVE_SQL}) ORDER BY id ASC`,
+            `SELECT * FROM video_jobs WHERE status IN (${ACTIVE_SQL})
+             ORDER BY CASE WHEN status = 'queued' THEN 1 ELSE 0 END, id ASC`,
         );
         const control = await this.control();
         const online = Boolean(this.worker);
@@ -835,6 +999,7 @@ export class VideoBroker {
                         lastHeartbeat: Date.now(),
                         currentJob: hello.current_job,
                         ready: !hello.current_job,
+                        warmModel: generatorModel(hello.warm_model),
                     };
                     initialized = true;
                     await this.reconcileWorker(hello);
@@ -843,6 +1008,7 @@ export class VideoBroker {
                         const control = await this.control();
                         if (control.paused_until) {
                             this.sendWorker({ type: 'unload', reason: 'pause' });
+                            this.worker.warmModel = null;
                         } else {
                             await this.dispatchNext();
                         }
@@ -857,7 +1023,9 @@ export class VideoBroker {
         });
         socket.on('close', () => {
             clearTimeout(helloTimeout);
-            if (this.worker?.socket === socket) void this.markWorkerOffline();
+            if (!this.stopping && this.worker?.socket === socket) {
+                this.trackBackground(this.markWorkerOffline());
+            }
         });
         socket.on('error', error => console.error('Video worker socket error', error));
     }
@@ -930,6 +1098,9 @@ export class VideoBroker {
             return;
         }
         if (message.type === 'ready') {
+            if (message.warm_model === null || message.warm_model !== undefined) {
+                this.worker.warmModel = generatorModel(message.warm_model);
+            }
             this.worker.ready = true;
             this.worker.currentJob = null;
             await this.dispatchNext();
@@ -1046,12 +1217,26 @@ export class VideoBroker {
         if (control.paused_until) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
         if (!placeholders) return;
-        const row = await this.get<JobRow>(
+        const candidates = await this.all<JobRow>(
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
-             ORDER BY id ASC LIMIT 1`,
+             ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
-        if (!row) return;
+        if (!candidates.length) return;
+        const oldest = candidates[0];
+        let row = oldest;
+        const warmModel = this.worker.warmModel;
+        if (candidates.length > 1 && warmModel
+            && VIDEO_MODELS[oldest.model].generatorModel !== warmModel
+            && oldest.affinity_bypasses < 1
+            && VIDEO_MODELS[candidates[1].model].generatorModel === warmModel) {
+            row = candidates[1];
+            await this.run(
+                'UPDATE video_jobs SET affinity_bypasses = affinity_bypasses + 1, updated_at = ? WHERE public_id = ?',
+                [nowSeconds(), oldest.public_id],
+            );
+        }
+        this.schedulePreparation(row.public_id);
         const result = await this.run(
             `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
              started_at = COALESCE(started_at, ?), stage = 'Leased to desktop', updated_at = ?
@@ -1061,6 +1246,7 @@ export class VideoBroker {
         if (result.changes !== 1) return;
         this.worker.ready = false;
         this.worker.currentJob = row.public_id;
+        this.worker.warmModel = VIDEO_MODELS[row.model].generatorModel;
         this.sendWorker({
             type: 'job',
             protocol: VIDEO_PROTOCOL_VERSION,
@@ -1071,6 +1257,7 @@ export class VideoBroker {
                 profile: 'maximum',
             },
         });
+        await this.scheduleNextQueuedPreparation();
     }
 
     private sendWorker(message: unknown): void {
@@ -1125,28 +1312,12 @@ export class VideoBroker {
                 return;
             }
             try {
-                let sourceImage: VideoPlanSourceImage | undefined;
-                if (job.source_image_path && job.source_image_mime
-                    && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_mime as any)
-                    && existsSync(job.source_image_path)
-                    && statSync(job.source_image_path).isFile()) {
-                    sourceImage = {
-                        mimeType: job.source_image_mime as VideoPlanSourceImage['mimeType'],
-                        data: readFileSync(job.source_image_path),
-                    };
-                }
-                const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
-                    job.prompt,
-                    job.model,
-                    job.requester_id,
-                    sourceImage,
-                );
-                await this.run(
-                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
-                     WHERE public_id = ?`,
-                    [JSON.stringify(plan), VIDEO_PLANNER_MODEL, nowSeconds(), job.public_id],
-                );
-                writeJson(res, 200, { plan, planner_model: VIDEO_PLANNER_MODEL, cached: false });
+                const prepared = await this.ensurePlan(job);
+                writeJson(res, 200, {
+                    plan: prepared.plan,
+                    planner_model: prepared.plannerModel,
+                    cached: false,
+                });
             } catch (error) {
                 console.warn(`Frontier planning failed for ${job.public_id}`, error);
                 writeJson(res, 502, {
@@ -1182,49 +1353,7 @@ export class VideoBroker {
             }
             try {
                 if (!job.keyframe_path || !job.keyframe_mime) {
-                    let generation = this.keyframeInFlight.get(job.public_id);
-                    if (!generation) {
-                        generation = (async () => {
-                            const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(plan);
-                            if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
-                                throw new Error('Generated first frame is empty or too large.');
-                            }
-                            const directory = resolve(this.options.resultsDir, job!.public_id);
-                            mkdirSync(directory, { recursive: true });
-                            const extension = imageExtension(result.mimeType);
-                            const temporary = join(directory, `keyframe.${extension}.part`);
-                            const destination = join(directory, `keyframe.${extension}`);
-                            rmSync(temporary, { force: true });
-                            const stream = createWriteStream(temporary, { flags: 'wx' });
-                            await new Promise<void>((resolvePromise, reject) => {
-                                stream.once('finish', resolvePromise);
-                                stream.once('error', reject);
-                                stream.end(result.bytes);
-                            });
-                            rmSync(destination, { force: true });
-                            renameSync(temporary, destination);
-                            await this.run(
-                                `UPDATE video_jobs SET keyframe_path = ?, keyframe_mime = ?,
-                                 keyframe_provider = ?, keyframe_model = ?, updated_at = ? WHERE public_id = ?`,
-                                [
-                                    destination,
-                                    result.mimeType,
-                                    result.provider,
-                                    result.model,
-                                    nowSeconds(),
-                                    job!.public_id,
-                                ],
-                            );
-                        })();
-                        this.keyframeInFlight.set(job.public_id, generation);
-                    }
-                    try {
-                        await generation;
-                    } finally {
-                        if (this.keyframeInFlight.get(job.public_id) === generation) {
-                            this.keyframeInFlight.delete(job.public_id);
-                        }
-                    }
+                    await this.ensureKeyframe(job, plan);
                     job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
                 }
                 if (!job?.keyframe_path || !job.keyframe_mime) {
@@ -1339,6 +1468,7 @@ export function videoBrokerOptionsFromEnvironment(): BrokerOptions {
         resultsDir: settings.resultsDir,
         botToken,
         workerToken,
+        preplanQueuedJobs: true,
     };
 }
 

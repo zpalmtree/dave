@@ -284,7 +284,9 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
-    const speedLabel = model.endsWith('fast') ? 'fast-preview' : 'maximum-quality';
+    const speedLabel = model.endsWith('fast') || model.endsWith('draft')
+        ? 'fast-preview'
+        : 'maximum-quality';
     const pending = await msg.reply(`Submitting a ${speedLabel} ${VIDEO_MODELS[model].displayName} video…`);
     try {
         const response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
@@ -322,6 +324,10 @@ export async function handleLtxFastVideo(msg: Message, prompt: string): Promise<
 
 export async function handleMinimaxFastVideo(msg: Message, prompt: string): Promise<void> {
     await handleVideoRequest('minimaxfast', msg, prompt);
+}
+
+export async function handleMinimaxDraftVideo(msg: Message, prompt: string): Promise<void> {
+    await handleVideoRequest('minimaxdraft', msg, prompt);
 }
 
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
