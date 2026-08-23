@@ -30,6 +30,37 @@ interface JobsResponse {
     state: BrokerState;
 }
 
+interface VideoStatsResponse {
+    samples: number;
+    models: Array<{
+        model: VideoModelId;
+        display_name: string;
+        samples: number;
+        total_seconds: { average: number | null; median: number | null };
+        output_duration_average: number | null;
+        seconds_per_output_second_average: number | null;
+        segment_count_average: number | null;
+        phases: Record<'planning' | 'first_frame' | 'generator' | 'compression' | 'upload' | 'discord_delivery', number | null>;
+        gpu: {
+            vram_peak_average_mb: number | null;
+            utilization_average_percent: number | null;
+            power_average_watts: number | null;
+        };
+        cold_starts: number;
+        bottlenecks: Array<{
+            source: string;
+            name: string;
+            average_seconds: number | null;
+            samples: number;
+        }>;
+        latest_environment: {
+            planner_model: string | null;
+            keyframe_provider: string | null;
+            keyframe_model: string | null;
+        };
+    }>;
+}
+
 class BrokerError extends Error {
     constructor(message: string, public readonly status: number) {
         super(message);
@@ -225,8 +256,15 @@ class VideoGenerationService {
         }
     }
 
-    private async acknowledge(job: VideoJobView, endpoint: 'delivered' | 'notified'): Promise<void> {
-        await brokerRequest(`/v1/jobs/${job.id}/${endpoint}`, { method: 'POST', body: '{}' });
+    private async acknowledge(
+        job: VideoJobView,
+        endpoint: 'delivered' | 'notified',
+        durationSeconds?: number,
+    ): Promise<void> {
+        await brokerRequest(`/v1/jobs/${job.id}/${endpoint}`, {
+            method: 'POST',
+            body: JSON.stringify(durationSeconds === undefined ? {} : { duration_seconds: durationSeconds }),
+        });
     }
 
     private async existingDelivery(job: VideoJobView, channel: any): Promise<any | null> {
@@ -269,12 +307,14 @@ class VideoGenerationService {
                 console.warn(`[Video] Result is not readable for ${job.id}: ${job.result_path}`);
                 return;
             }
+            const deliveryStarted = Date.now();
             const delivery = await this.postDelivery(job, message);
+            const deliverySeconds = (Date.now() - deliveryStarted) / 1000;
             await message.edit({
                 content: `**${VIDEO_MODELS[job.model].displayName} · ${shortJobId(job.id)}**\nDelivered in ${delivery.url}.`,
                 attachments: [],
             });
-            await this.acknowledge(job, 'delivered');
+            await this.acknowledge(job, 'delivered', deliverySeconds);
             this.rendered.delete(job.id);
             return;
         }
@@ -502,4 +542,60 @@ export async function handleVideoAdmin(msg: Message, args: string): Promise<void
         ? `online${state.worker_busy ? ' and rendering' : ' and idle'}`
         : 'offline';
     await msg.reply(`Desktop worker: **${worker}**. Queued jobs: **${state.queued}**.${pauseText(state.paused_until)}`);
+}
+
+function metricDuration(value: number | null): string {
+    return value === null ? '—' : formatVideoRuntime(value) || '—';
+}
+
+function metricNumber(value: number | null, suffix = ''): string {
+    return value === null ? '—' : `${value.toFixed(1)}${suffix}`;
+}
+
+export async function handleVideoStats(msg: Message, args: string): Promise<void> {
+    const requested = args.trim().toLowerCase() || 'all';
+    if (requested !== 'all' && !Object.prototype.hasOwnProperty.call(VIDEO_MODELS, requested)) {
+        await msg.reply(`Usage: \`${config.prefix}videostats [all|ltx|ltxfast|minimax|minimaxfast|minimaxdraft]\``);
+        return;
+    }
+    const stats = await brokerRequest<VideoStatsResponse>(
+        `/v1/stats?model=${encodeURIComponent(requested)}&limit=100`,
+    );
+    if (!stats.samples) {
+        await msg.reply('No structured video performance samples have been recorded yet. The next completed render will populate this report.');
+        return;
+    }
+    const blocks = stats.models.map(model => {
+        const phases = model.phases;
+        const bottlenecks = model.bottlenecks
+            .filter(span => span.average_seconds !== null)
+            .slice(0, 3)
+            .map(span => `${span.name} ${metricDuration(span.average_seconds)}`)
+            .join(', ') || '—';
+        const peakVram = model.gpu.vram_peak_average_mb === null
+            ? '—'
+            : `${(model.gpu.vram_peak_average_mb / 1024).toFixed(1)} GiB`;
+        return [
+            `**${model.display_name}** · ${model.samples} sample${model.samples === 1 ? '' : 's'}`,
+            `Total median **${metricDuration(model.total_seconds.median)}**, average ${metricDuration(model.total_seconds.average)} · ${metricNumber(model.seconds_per_output_second_average, 's')} per output second · ${metricNumber(model.output_duration_average, 's')} output`,
+            `Pipeline avg: plan ${metricDuration(phases.planning)} · frame ${metricDuration(phases.first_frame)} · generator ${metricDuration(phases.generator)} · compress ${metricDuration(phases.compression)} · upload ${metricDuration(phases.upload)} · Discord ${metricDuration(phases.discord_delivery)}`,
+            `Latest planner/frame: ${model.latest_environment.planner_model || '—'} · ${model.latest_environment.keyframe_provider || 'none'} / ${model.latest_environment.keyframe_model || 'none'}`,
+            `GPU avg: peak VRAM ${peakVram} · utilization ${metricNumber(model.gpu.utilization_average_percent, '%')} · power ${metricNumber(model.gpu.power_average_watts, 'W')} · cold starts ${model.cold_starts}/${model.samples}`,
+            `Largest spans: ${bottlenecks}`,
+        ].join('\n');
+    });
+    const heading = `**Video performance · latest ${stats.samples} structured run${stats.samples === 1 ? '' : 's'}**`;
+    const chunks: string[] = [];
+    let current = heading;
+    for (const block of blocks) {
+        if (`${current}\n\n${block}`.length > 1900) {
+            chunks.push(current);
+            current = block;
+        } else {
+            current = `${current}\n\n${block}`;
+        }
+    }
+    chunks.push(current);
+    await msg.reply(chunks[0]);
+    for (const chunk of chunks.slice(1)) await (msg.channel as any).send(chunk);
 }

@@ -23,7 +23,9 @@ import {
     VideoJobStatus,
     VideoJobView,
     VideoGeneratorModelId,
+    VideoMetricSpan,
     VideoModelId,
+    VideoWorkerMetrics,
     VideoWorkerHello,
     isVideoModel,
     sanitizeVideoWorkerText,
@@ -126,6 +128,51 @@ interface JobRow {
     affinity_bypasses: number;
 }
 
+interface VideoJobMetricRow {
+    job_public_id: string;
+    model: VideoModelId;
+    generator_model: VideoGeneratorModelId;
+    total_seconds: number;
+    output_duration_seconds: number | null;
+    width: number | null;
+    height: number | null;
+    fps: number | null;
+    segment_count: number | null;
+    output_bytes: number | null;
+    source_image: number;
+    gpu_name: string | null;
+    driver_version: string | null;
+    vram_total_mb: number | null;
+    vram_peak_mb: number | null;
+    vram_average_mb: number | null;
+    gpu_utilization_average: number | null;
+    gpu_utilization_peak: number | null;
+    power_average_watts: number | null;
+    gpu_samples: number | null;
+    worker_sha256: string | null;
+    generator_sha256: string | null;
+    python_version: string | null;
+    warm_model_before: VideoGeneratorModelId | null;
+    warm_model_after: VideoGeneratorModelId | null;
+    quality: string | null;
+    fast: number;
+    turbo4: number;
+    ltx_one_stage: number;
+    recorded_at: number;
+    planner_model: string | null;
+    keyframe_provider: string | null;
+    keyframe_model: string | null;
+}
+
+interface VideoJobSpanRow {
+    job_public_id: string;
+    source: VideoMetricSpan['source'];
+    name: string;
+    segment_index: number;
+    duration_seconds: number;
+    metadata_json: string | null;
+}
+
 function generatorModel(value: unknown): VideoGeneratorModelId | null {
     return value === 'ltx' || value === 'h3' ? value : null;
 }
@@ -172,6 +219,140 @@ async function readJson(req: IncomingMessage, maxBytes = 256 * 1024): Promise<an
     }
     if (length === 0) return {};
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+function boundedNumber(
+    value: unknown,
+    minimum: number,
+    maximum: number,
+    nullable = true,
+): number | null {
+    if ((value === null || value === undefined || value === '') && nullable) return null;
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < minimum || number > maximum) {
+        throw new Error(`Metric must be a finite number between ${minimum} and ${maximum}.`);
+    }
+    return number;
+}
+
+function boundedMetricText(value: unknown, maximum = 160): string | null {
+    if (value === null || value === undefined || value === '') return null;
+    const text = sanitizeVideoWorkerText(value, '', maximum);
+    if (!text || text.includes('[local file]')) throw new Error('Metric text contains a local path.');
+    return text;
+}
+
+function optionalGeneratorModel(value: unknown): VideoGeneratorModelId | null {
+    if (value === null || value === undefined || value === '') return null;
+    const model = generatorModel(value);
+    if (!model) throw new Error('Invalid warm model metric.');
+    return model;
+}
+
+function normalizedMetricSpan(value: any): VideoMetricSpan {
+    if (!value || typeof value !== 'object') throw new Error('Invalid metric span.');
+    if (!['broker', 'worker', 'comfy'].includes(String(value.source))) {
+        throw new Error('Invalid metric span source.');
+    }
+    const name = boundedMetricText(value.name, 120);
+    if (!name) throw new Error('Metric span name is required.');
+    const segment = value.segment_index === null || value.segment_index === undefined
+        ? null
+        : boundedNumber(value.segment_index, 1, 100, false);
+    const metadata: VideoMetricSpan['metadata'] = {};
+    if (typeof value.metadata?.cached === 'boolean') metadata.cached = value.metadata.cached;
+    if (['ok', 'error', 'skipped'].includes(value.metadata?.status)) metadata.status = value.metadata.status;
+    if (['t2v', 'i2v'].includes(value.metadata?.mode)) metadata.mode = value.metadata.mode;
+    if (['draft', 'final'].includes(value.metadata?.quality)) metadata.quality = value.metadata.quality;
+    if (['start', 'cut', 'continue', 'dissolve'].includes(value.metadata?.transition)) {
+        metadata.transition = value.metadata.transition;
+    }
+    return {
+        source: value.source,
+        name,
+        duration_seconds: boundedNumber(value.duration_seconds, 0, 24 * 60 * 60, false)!,
+        segment_index: segment === null ? null : Math.round(segment),
+        ...(Object.keys(metadata).length ? { metadata } : {}),
+    };
+}
+
+function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): VideoWorkerMetrics {
+    if (!value || typeof value !== 'object' || value.schema_version !== 1) {
+        throw new Error('Unsupported video metrics payload.');
+    }
+    if (value.model !== expectedModel || !isVideoModel(value.model)) {
+        throw new Error('Metrics model does not match the leased job.');
+    }
+    const expectedGenerator = VIDEO_MODELS[expectedModel].generatorModel;
+    if (value.generator_model !== expectedGenerator) {
+        throw new Error('Metrics generator model does not match the leased job.');
+    }
+    if (!Array.isArray(value.spans) || value.spans.length > 300) {
+        throw new Error('Metrics spans must be an array of at most 300 entries.');
+    }
+    const output = value.output && typeof value.output === 'object' ? {
+        duration_seconds: boundedNumber(value.output.duration_seconds, 0.01, 300) ?? undefined,
+        width: Math.round(boundedNumber(value.output.width, 16, 16384) ?? 0) || undefined,
+        height: Math.round(boundedNumber(value.output.height, 16, 16384) ?? 0) || undefined,
+        fps: boundedNumber(value.output.fps, 0.1, 240) ?? undefined,
+        segment_count: Math.round(boundedNumber(value.output.segment_count, 1, 100) ?? 0) || undefined,
+        bytes: Math.round(boundedNumber(value.output.bytes, 1, 1024 * 1024 * 1024) ?? 0) || undefined,
+        source_image: Boolean(value.output.source_image),
+    } : undefined;
+    const gpu = value.gpu && typeof value.gpu === 'object' ? {
+        name: boundedMetricText(value.gpu.name) ?? undefined,
+        driver_version: boundedMetricText(value.gpu.driver_version, 80) ?? undefined,
+        vram_total_mb: boundedNumber(value.gpu.vram_total_mb, 1, 1024 * 1024) ?? undefined,
+        vram_peak_mb: boundedNumber(value.gpu.vram_peak_mb, 0, 1024 * 1024) ?? undefined,
+        vram_average_mb: boundedNumber(value.gpu.vram_average_mb, 0, 1024 * 1024) ?? undefined,
+        utilization_average_percent: boundedNumber(value.gpu.utilization_average_percent, 0, 100) ?? undefined,
+        utilization_peak_percent: boundedNumber(value.gpu.utilization_peak_percent, 0, 100) ?? undefined,
+        power_average_watts: boundedNumber(value.gpu.power_average_watts, 0, 5000) ?? undefined,
+        samples: Math.round(boundedNumber(value.gpu.samples, 0, 1_000_000) ?? 0),
+    } : undefined;
+    const environment = value.environment && typeof value.environment === 'object' ? {
+        worker_sha256: boundedMetricText(value.environment.worker_sha256, 64) ?? undefined,
+        generator_sha256: boundedMetricText(value.environment.generator_sha256, 64) ?? undefined,
+        python_version: boundedMetricText(value.environment.python_version, 160) ?? undefined,
+        warm_model_before: optionalGeneratorModel(value.environment.warm_model_before),
+        warm_model_after: optionalGeneratorModel(value.environment.warm_model_after),
+    } : undefined;
+    for (const hash of [environment?.worker_sha256, environment?.generator_sha256]) {
+        if (hash && !/^[0-9a-f]{64}$/.test(hash)) throw new Error('Invalid environment fingerprint.');
+    }
+    const quality = ['draft', 'final'].includes(value.flags?.quality)
+        ? value.flags.quality as 'draft' | 'final'
+        : undefined;
+    return {
+        schema_version: 1,
+        model: expectedModel,
+        generator_model: expectedGenerator,
+        total_seconds: boundedNumber(value.total_seconds, 0.01, 24 * 60 * 60, false)!,
+        ...(output ? { output } : {}),
+        ...(gpu ? { gpu } : {}),
+        ...(environment ? { environment } : {}),
+        flags: {
+            fast: Boolean(value.flags?.fast),
+            turbo4: Boolean(value.flags?.turbo4),
+            ltx_one_stage: Boolean(value.flags?.ltx_one_stage),
+            ...(quality ? { quality } : {}),
+        },
+        spans: value.spans.map(normalizedMetricSpan),
+    };
+}
+
+function average(values: Array<number | null | undefined>): number | null {
+    const finite = values.filter((value): value is number => Number.isFinite(value));
+    return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+}
+
+function median(values: Array<number | null | undefined>): number | null {
+    const finite = values
+        .filter((value): value is number => Number.isFinite(value))
+        .sort((a, b) => a - b);
+    if (!finite.length) return null;
+    const middle = Math.floor(finite.length / 2);
+    return finite.length % 2 ? finite[middle] : (finite[middle - 1] + finite[middle]) / 2;
 }
 
 function imageExtension(mimeType: string): string {
@@ -442,6 +623,53 @@ export class VideoBroker {
             runtime_seconds REAL NOT NULL,
             recorded_at INTEGER NOT NULL
         )`);
+        await this.run(`CREATE TABLE IF NOT EXISTS video_job_metrics (
+            job_public_id TEXT PRIMARY KEY,
+            model TEXT NOT NULL,
+            generator_model TEXT NOT NULL,
+            total_seconds REAL NOT NULL,
+            output_duration_seconds REAL,
+            width INTEGER,
+            height INTEGER,
+            fps REAL,
+            segment_count INTEGER,
+            output_bytes INTEGER,
+            source_image INTEGER NOT NULL DEFAULT 0,
+            gpu_name TEXT,
+            driver_version TEXT,
+            vram_total_mb REAL,
+            vram_peak_mb REAL,
+            vram_average_mb REAL,
+            gpu_utilization_average REAL,
+            gpu_utilization_peak REAL,
+            power_average_watts REAL,
+            gpu_samples INTEGER,
+            worker_sha256 TEXT,
+            generator_sha256 TEXT,
+            python_version TEXT,
+            warm_model_before TEXT,
+            warm_model_after TEXT,
+            quality TEXT,
+            fast INTEGER NOT NULL DEFAULT 0,
+            turbo4 INTEGER NOT NULL DEFAULT 0,
+            ltx_one_stage INTEGER NOT NULL DEFAULT 0,
+            recorded_at INTEGER NOT NULL
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS video_job_metrics_model_idx
+            ON video_job_metrics(model, recorded_at DESC)`);
+        await this.run(`CREATE TABLE IF NOT EXISTS video_job_spans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_public_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            name TEXT NOT NULL,
+            segment_index INTEGER NOT NULL DEFAULT -1,
+            duration_seconds REAL NOT NULL,
+            metadata_json TEXT,
+            recorded_at INTEGER NOT NULL,
+            UNIQUE(job_public_id, source, name, segment_index)
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS video_job_spans_job_idx
+            ON video_job_spans(job_public_id)`);
     }
 
     async start(): Promise<void> {
@@ -513,6 +741,19 @@ export class VideoBroker {
     }
 
     private async handleBotHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+        if (url.pathname === '/v1/stats' && req.method === 'GET') {
+            const requestedModel = url.searchParams.get('model');
+            const model = requestedModel && requestedModel !== 'all'
+                ? requestedModel
+                : null;
+            if (model !== null && !isVideoModel(model)) {
+                writeJson(res, 400, { error: 'Unknown video model.' });
+                return;
+            }
+            const limit = Math.max(1, Math.min(500, Math.round(Number(url.searchParams.get('limit')) || 100)));
+            writeJson(res, 200, await this.videoStats(model, limit));
+            return;
+        }
         if (url.pathname === '/v1/jobs' && req.method === 'POST') {
             const body = await readJson(req);
             const result = await this.enqueue(body);
@@ -547,11 +788,20 @@ export class VideoBroker {
         }
         const delivered = /^\/v1\/jobs\/([0-9a-f-]+)\/delivered$/.exec(url.pathname);
         if (delivered && req.method === 'POST') {
+            const body = await readJson(req);
             await this.run(
                 `UPDATE video_jobs SET status = 'delivered', delivered_at = ?, notified_at = ?, updated_at = ?
                  WHERE public_id = ? AND status = 'ready'`,
                 [nowSeconds(), nowSeconds(), nowSeconds(), delivered[1]],
             );
+            if (body.duration_seconds !== null && body.duration_seconds !== undefined) {
+                await this.recordMetricSpan(delivered[1], {
+                    source: 'broker',
+                    name: 'discord_delivery',
+                    duration_seconds: boundedNumber(body.duration_seconds, 0, 10 * 60, false)!,
+                    metadata: { status: 'ok' },
+                });
+            }
             writeJson(res, 200, { ok: true });
             return;
         }
@@ -642,12 +892,15 @@ export class VideoBroker {
             const now = nowSeconds();
             const directory = resolve(this.options.resultsDir, publicId);
             let sourceImage: StoredVideoSourceImage | null = null;
+            let sourceImageDownloadSeconds: number | null = null;
             if (sourceDescriptor) {
+                const sourceImageStarted = Date.now();
                 try {
                     sourceImage = await (this.options.sourceImageDownloader || downloadDiscordSourceImage)(
                         sourceDescriptor,
                         directory,
                     );
+                    sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
                 } catch (error) {
                     rmSync(directory, { recursive: true, force: true });
                     return {
@@ -685,6 +938,14 @@ export class VideoBroker {
                         sourceImage?.bytes || null,
                     ],
                 );
+                if (sourceImageDownloadSeconds !== null) {
+                    await this.recordMetricSpan(publicId, {
+                        source: 'broker',
+                        name: 'source_image_download',
+                        duration_seconds: sourceImageDownloadSeconds,
+                        metadata: { status: 'ok' },
+                    });
+                }
             } catch (error) {
                 if (sourceImage) rmSync(directory, { recursive: true, force: true });
                 throw error;
@@ -729,6 +990,211 @@ export class VideoBroker {
         );
     }
 
+    private async recordMetricSpan(jobId: string, span: VideoMetricSpan): Promise<void> {
+        const normalized = normalizedMetricSpan(span);
+        await this.run(
+            `INSERT INTO video_job_spans(
+                job_public_id, source, name, segment_index, duration_seconds, metadata_json, recorded_at
+             ) VALUES(?,?,?,?,?,?,?)
+             ON CONFLICT(job_public_id, source, name, segment_index) DO UPDATE SET
+                duration_seconds = excluded.duration_seconds,
+                metadata_json = excluded.metadata_json,
+                recorded_at = excluded.recorded_at`,
+            [
+                jobId,
+                normalized.source,
+                normalized.name,
+                normalized.segment_index ?? -1,
+                normalized.duration_seconds,
+                normalized.metadata ? JSON.stringify(normalized.metadata) : null,
+                nowSeconds(),
+            ],
+        );
+    }
+
+    private async storeWorkerMetrics(job: JobRow, body: any): Promise<void> {
+        const metrics = normalizedWorkerMetrics(body, job.model);
+        const output = metrics.output || {};
+        const gpu = metrics.gpu || {};
+        const environment = metrics.environment || {};
+        const flags = metrics.flags || {};
+        await this.withWriteLock(async () => {
+            await this.run(
+                `INSERT INTO video_job_metrics(
+                    job_public_id, model, generator_model, total_seconds,
+                    output_duration_seconds, width, height, fps, segment_count, output_bytes,
+                    source_image, gpu_name, driver_version, vram_total_mb, vram_peak_mb,
+                    vram_average_mb, gpu_utilization_average, gpu_utilization_peak,
+                    power_average_watts, gpu_samples, worker_sha256, generator_sha256,
+                    python_version, warm_model_before, warm_model_after, quality, fast,
+                    turbo4, ltx_one_stage, recorded_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(job_public_id) DO UPDATE SET
+                    model = excluded.model,
+                    generator_model = excluded.generator_model,
+                    total_seconds = excluded.total_seconds,
+                    output_duration_seconds = excluded.output_duration_seconds,
+                    width = excluded.width,
+                    height = excluded.height,
+                    fps = excluded.fps,
+                    segment_count = excluded.segment_count,
+                    output_bytes = excluded.output_bytes,
+                    source_image = excluded.source_image,
+                    gpu_name = excluded.gpu_name,
+                    driver_version = excluded.driver_version,
+                    vram_total_mb = excluded.vram_total_mb,
+                    vram_peak_mb = excluded.vram_peak_mb,
+                    vram_average_mb = excluded.vram_average_mb,
+                    gpu_utilization_average = excluded.gpu_utilization_average,
+                    gpu_utilization_peak = excluded.gpu_utilization_peak,
+                    power_average_watts = excluded.power_average_watts,
+                    gpu_samples = excluded.gpu_samples,
+                    worker_sha256 = excluded.worker_sha256,
+                    generator_sha256 = excluded.generator_sha256,
+                    python_version = excluded.python_version,
+                    warm_model_before = excluded.warm_model_before,
+                    warm_model_after = excluded.warm_model_after,
+                    quality = excluded.quality,
+                    fast = excluded.fast,
+                    turbo4 = excluded.turbo4,
+                    ltx_one_stage = excluded.ltx_one_stage,
+                    recorded_at = excluded.recorded_at`,
+                [
+                    job.public_id,
+                    metrics.model,
+                    metrics.generator_model,
+                    metrics.total_seconds,
+                    output.duration_seconds ?? null,
+                    output.width ?? null,
+                    output.height ?? null,
+                    output.fps ?? null,
+                    output.segment_count ?? null,
+                    output.bytes ?? null,
+                    output.source_image ? 1 : 0,
+                    gpu.name ?? null,
+                    gpu.driver_version ?? null,
+                    gpu.vram_total_mb ?? null,
+                    gpu.vram_peak_mb ?? null,
+                    gpu.vram_average_mb ?? null,
+                    gpu.utilization_average_percent ?? null,
+                    gpu.utilization_peak_percent ?? null,
+                    gpu.power_average_watts ?? null,
+                    gpu.samples ?? null,
+                    environment.worker_sha256 ?? null,
+                    environment.generator_sha256 ?? null,
+                    environment.python_version ?? null,
+                    environment.warm_model_before ?? null,
+                    environment.warm_model_after ?? null,
+                    flags.quality ?? null,
+                    flags.fast ? 1 : 0,
+                    flags.turbo4 ? 1 : 0,
+                    flags.ltx_one_stage ? 1 : 0,
+                    nowSeconds(),
+                ],
+            );
+            for (const span of metrics.spans) await this.recordMetricSpan(job.public_id, span);
+        });
+    }
+
+    private async videoStats(model: VideoModelId | null, limit: number): Promise<any> {
+        const params: any[] = [];
+        const filter = model ? 'WHERE m.model = ?' : '';
+        if (model) params.push(model);
+        params.push(limit);
+        const rows = await this.all<VideoJobMetricRow>(
+            `SELECT m.*, j.planner_model, j.keyframe_provider, j.keyframe_model
+             FROM video_job_metrics m
+             JOIN video_jobs j ON j.public_id = m.job_public_id
+             ${filter} ORDER BY m.recorded_at DESC LIMIT ?`,
+            params,
+        );
+        if (!rows.length) {
+            return { generated_at: nowSeconds(), filter: model || 'all', samples: 0, models: [] };
+        }
+        const ids = rows.map(row => row.job_public_id);
+        const spans = await this.all<VideoJobSpanRow>(
+            `SELECT job_public_id, source, name, segment_index, duration_seconds, metadata_json
+             FROM video_job_spans WHERE job_public_id IN (${ids.map(() => '?').join(',')})`,
+            ids,
+        );
+        const summaries = [...new Set(rows.map(row => row.model))].map(modelId => {
+            const modelRows = rows.filter(row => row.model === modelId);
+            const jobIds = new Set(modelRows.map(row => row.job_public_id));
+            const modelSpans = spans.filter(span => jobIds.has(span.job_public_id));
+            const phase = (source: VideoMetricSpan['source'], name: string) => average(
+                modelSpans
+                    .filter(span => span.source === source && span.name === name)
+                    .map(span => span.duration_seconds),
+            );
+            const spanGroups = new Map<string, VideoJobSpanRow[]>();
+            for (const span of modelSpans) {
+                const key = `${span.source}\u0000${span.name}`;
+                spanGroups.set(key, [...(spanGroups.get(key) || []), span]);
+            }
+            const bottlenecks = [...spanGroups.entries()]
+                .map(([key, values]) => {
+                    const [source, name] = key.split('\u0000');
+                    return {
+                        source,
+                        name,
+                        average_seconds: average(values.map(value => value.duration_seconds)),
+                        samples: values.length,
+                    };
+                })
+                .sort((a, b) => (b.average_seconds || 0) - (a.average_seconds || 0))
+                .slice(0, 8);
+            return {
+                model: modelId,
+                display_name: VIDEO_MODELS[modelId].displayName,
+                samples: modelRows.length,
+                total_seconds: {
+                    average: average(modelRows.map(row => row.total_seconds)),
+                    median: median(modelRows.map(row => row.total_seconds)),
+                    minimum: Math.min(...modelRows.map(row => row.total_seconds)),
+                    maximum: Math.max(...modelRows.map(row => row.total_seconds)),
+                },
+                output_duration_average: average(modelRows.map(row => row.output_duration_seconds)),
+                seconds_per_output_second_average: average(modelRows.map(row => (
+                    row.output_duration_seconds && row.output_duration_seconds > 0
+                        ? row.total_seconds / row.output_duration_seconds
+                        : null
+                ))),
+                segment_count_average: average(modelRows.map(row => row.segment_count)),
+                phases: {
+                    planning: phase('broker', 'frontier_planner'),
+                    first_frame: phase('broker', 'frontier_keyframe'),
+                    generator: phase('worker', 'generator_process'),
+                    compression: phase('worker', 'delivery_compression'),
+                    upload: phase('worker', 'result_upload'),
+                    discord_delivery: phase('broker', 'discord_delivery'),
+                },
+                gpu: {
+                    vram_peak_average_mb: average(modelRows.map(row => row.vram_peak_mb)),
+                    utilization_average_percent: average(modelRows.map(row => row.gpu_utilization_average)),
+                    power_average_watts: average(modelRows.map(row => row.power_average_watts)),
+                },
+                cold_starts: modelRows.filter(row => row.warm_model_before !== row.generator_model).length,
+                bottlenecks,
+                latest_environment: {
+                    gpu_name: modelRows[0].gpu_name,
+                    driver_version: modelRows[0].driver_version,
+                    worker_sha256: modelRows[0].worker_sha256,
+                    generator_sha256: modelRows[0].generator_sha256,
+                    python_version: modelRows[0].python_version,
+                    planner_model: modelRows[0].planner_model,
+                    keyframe_provider: modelRows[0].keyframe_provider,
+                    keyframe_model: modelRows[0].keyframe_model,
+                },
+            };
+        });
+        return {
+            generated_at: nowSeconds(),
+            filter: model || 'all',
+            samples: rows.length,
+            models: summaries,
+        };
+    }
+
     private async ensurePlan(job: JobRow): Promise<{ plan: Record<string, any>; plannerModel: string }> {
         if (job.planner_json) {
             return {
@@ -739,28 +1205,44 @@ export class VideoBroker {
         let planning = this.plannerInFlight.get(job.public_id);
         if (!planning) {
             planning = (async () => {
-                let sourceImage: VideoPlanSourceImage | undefined;
-                if (job.source_image_path && job.source_image_mime
-                    && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_mime as any)
-                    && existsSync(job.source_image_path)
-                    && statSync(job.source_image_path).isFile()) {
-                    sourceImage = {
-                        mimeType: job.source_image_mime as VideoPlanSourceImage['mimeType'],
-                        data: readFileSync(job.source_image_path),
-                    };
+                const started = Date.now();
+                let status: 'ok' | 'error' = 'error';
+                try {
+                    let sourceImage: VideoPlanSourceImage | undefined;
+                    if (job.source_image_path && job.source_image_mime
+                        && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_mime as any)
+                        && existsSync(job.source_image_path)
+                        && statSync(job.source_image_path).isFile()) {
+                        sourceImage = {
+                            mimeType: job.source_image_mime as VideoPlanSourceImage['mimeType'],
+                            data: readFileSync(job.source_image_path),
+                        };
+                    }
+                    const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
+                        job.prompt,
+                        job.model,
+                        job.requester_id,
+                        sourceImage,
+                    );
+                    await this.run(
+                        `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
+                         WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                        [JSON.stringify(plan), VIDEO_PLANNER_MODEL, nowSeconds(), job.public_id],
+                    );
+                    status = 'ok';
+                    return { plan, plannerModel: VIDEO_PLANNER_MODEL };
+                } finally {
+                    try {
+                        await this.recordMetricSpan(job.public_id, {
+                            source: 'broker',
+                            name: 'frontier_planner',
+                            duration_seconds: (Date.now() - started) / 1000,
+                            metadata: { status },
+                        });
+                    } catch (error) {
+                        console.warn(`Could not store planner timing for ${job.public_id}`, error);
+                    }
                 }
-                const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
-                    job.prompt,
-                    job.model,
-                    job.requester_id,
-                    sourceImage,
-                );
-                await this.run(
-                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
-                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
-                    [JSON.stringify(plan), VIDEO_PLANNER_MODEL, nowSeconds(), job.public_id],
-                );
-                return { plan, plannerModel: VIDEO_PLANNER_MODEL };
             })();
             this.plannerInFlight.set(job.public_id, planning);
         }
@@ -779,42 +1261,61 @@ export class VideoBroker {
         let generation = this.keyframeInFlight.get(job.public_id);
         if (!generation) {
             generation = (async () => {
-                const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(plan);
-                if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
-                    throw new Error('Generated first frame is empty or too large.');
+                const started = Date.now();
+                let status: 'ok' | 'error' | 'skipped' = 'error';
+                try {
+                    const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(plan);
+                    if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
+                        throw new Error('Generated first frame is empty or too large.');
+                    }
+                    const current = await this.get<JobRow>(
+                        'SELECT status FROM video_jobs WHERE public_id = ?',
+                        [job.public_id],
+                    );
+                    if (!current || !ACTIVE_VIDEO_STATUSES.includes(current.status)) {
+                        status = 'skipped';
+                        return;
+                    }
+                    const directory = resolve(this.options.resultsDir, job.public_id);
+                    mkdirSync(directory, { recursive: true });
+                    const extension = imageExtension(result.mimeType);
+                    const temporary = join(directory, `keyframe.${extension}.part`);
+                    const destination = join(directory, `keyframe.${extension}`);
+                    rmSync(temporary, { force: true });
+                    const stream = createWriteStream(temporary, { flags: 'wx' });
+                    await new Promise<void>((resolvePromise, reject) => {
+                        stream.once('finish', resolvePromise);
+                        stream.once('error', reject);
+                        stream.end(result.bytes);
+                    });
+                    rmSync(destination, { force: true });
+                    renameSync(temporary, destination);
+                    await this.run(
+                        `UPDATE video_jobs SET keyframe_path = ?, keyframe_mime = ?,
+                         keyframe_provider = ?, keyframe_model = ?, updated_at = ?
+                         WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                        [
+                            destination,
+                            result.mimeType,
+                            result.provider,
+                            result.model,
+                            nowSeconds(),
+                            job.public_id,
+                        ],
+                    );
+                    status = 'ok';
+                } finally {
+                    try {
+                        await this.recordMetricSpan(job.public_id, {
+                            source: 'broker',
+                            name: 'frontier_keyframe',
+                            duration_seconds: (Date.now() - started) / 1000,
+                            metadata: { status },
+                        });
+                    } catch (error) {
+                        console.warn(`Could not store first-frame timing for ${job.public_id}`, error);
+                    }
                 }
-                const current = await this.get<JobRow>(
-                    'SELECT status FROM video_jobs WHERE public_id = ?',
-                    [job.public_id],
-                );
-                if (!current || !ACTIVE_VIDEO_STATUSES.includes(current.status)) return;
-                const directory = resolve(this.options.resultsDir, job.public_id);
-                mkdirSync(directory, { recursive: true });
-                const extension = imageExtension(result.mimeType);
-                const temporary = join(directory, `keyframe.${extension}.part`);
-                const destination = join(directory, `keyframe.${extension}`);
-                rmSync(temporary, { force: true });
-                const stream = createWriteStream(temporary, { flags: 'wx' });
-                await new Promise<void>((resolvePromise, reject) => {
-                    stream.once('finish', resolvePromise);
-                    stream.once('error', reject);
-                    stream.end(result.bytes);
-                });
-                rmSync(destination, { force: true });
-                renameSync(temporary, destination);
-                await this.run(
-                    `UPDATE video_jobs SET keyframe_path = ?, keyframe_mime = ?,
-                     keyframe_provider = ?, keyframe_model = ?, updated_at = ?
-                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
-                    [
-                        destination,
-                        result.mimeType,
-                        result.provider,
-                        result.model,
-                        nowSeconds(),
-                        job.public_id,
-                    ],
-                );
             })();
             this.keyframeInFlight.set(job.public_id, generation);
         }
@@ -1354,6 +1855,7 @@ export class VideoBroker {
                 writeImage(res, job.source_image_path, job.source_image_mime, {
                     'x-video-keyframe-provider': 'user-attachment',
                     'x-video-keyframe-model': 'none',
+                    'x-video-keyframe-cached': 'true',
                 });
                 return;
             }
@@ -1368,6 +1870,7 @@ export class VideoBroker {
                 return;
             }
             try {
+                const cached = Boolean(job.keyframe_path && job.keyframe_mime);
                 if (!job.keyframe_path || !job.keyframe_mime) {
                     await this.ensureKeyframe(job, plan);
                     job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
@@ -1378,6 +1881,7 @@ export class VideoBroker {
                 writeImage(res, job.keyframe_path, job.keyframe_mime, {
                     'x-video-keyframe-provider': job.keyframe_provider || 'frontier-image',
                     'x-video-keyframe-model': job.keyframe_model || 'unknown',
+                    'x-video-keyframe-cached': cached ? 'true' : 'false',
                 });
             } catch (error) {
                 console.warn(`Frontier first-frame generation failed for ${keyframe[1]}`, error);
@@ -1385,6 +1889,22 @@ export class VideoBroker {
                     error: error instanceof Error ? error.message : String(error),
                     fallback: 'local',
                 });
+            }
+            return;
+        }
+        const metricsUpload = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/metrics$/.exec(url.pathname);
+        if (metricsUpload && req.method === 'PUT') {
+            const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [metricsUpload[1]]);
+            if (!job || job.worker_id !== this.worker?.id || metricsUpload[1] !== this.worker.currentJob
+                || !ACTIVE_VIDEO_STATUSES.includes(job.status)) {
+                writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+                return;
+            }
+            try {
+                await this.storeWorkerMetrics(job, await readJson(req));
+                writeJson(res, 200, { ok: true });
+            } catch (error) {
+                writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
             }
             return;
         }

@@ -9,6 +9,61 @@ export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/
 export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast' | 'minimaxdraft';
 export type VideoGeneratorModelId = 'ltx' | 'h3';
 
+export interface VideoMetricSpan {
+    source: 'broker' | 'worker' | 'comfy';
+    name: string;
+    duration_seconds: number;
+    segment_index?: number | null;
+    metadata?: {
+        cached?: boolean;
+        status?: 'ok' | 'error' | 'skipped';
+        mode?: 't2v' | 'i2v';
+        quality?: 'draft' | 'final';
+        transition?: 'start' | 'cut' | 'continue' | 'dissolve';
+    };
+}
+
+export interface VideoWorkerMetrics {
+    schema_version: 1;
+    model: VideoModelId;
+    generator_model: VideoGeneratorModelId;
+    total_seconds: number;
+    output?: {
+        duration_seconds?: number;
+        width?: number;
+        height?: number;
+        fps?: number;
+        segment_count?: number;
+        bytes?: number;
+        source_image?: boolean;
+    };
+    gpu?: {
+        name?: string;
+        driver_version?: string;
+        vram_total_mb?: number;
+        vram_peak_mb?: number;
+        vram_average_mb?: number;
+        utilization_average_percent?: number;
+        utilization_peak_percent?: number;
+        power_average_watts?: number;
+        samples?: number;
+    };
+    environment?: {
+        worker_sha256?: string;
+        generator_sha256?: string;
+        python_version?: string;
+        warm_model_before?: VideoGeneratorModelId | null;
+        warm_model_after?: VideoGeneratorModelId | null;
+    };
+    flags?: {
+        fast?: boolean;
+        turbo4?: boolean;
+        ltx_one_stage?: boolean;
+        quality?: 'draft' | 'final';
+    };
+    spans: VideoMetricSpan[];
+}
+
 export type VideoJobStatus =
     | 'queued'
     | 'leased'

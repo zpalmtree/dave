@@ -108,6 +108,53 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             body: bytes,
         });
         assert.equal(upload.status, 200);
+        const metrics = await fetch(`${base}/v1/worker/jobs/${lease.job.id}/metrics`, {
+            method: 'PUT',
+            headers: {
+                authorization: 'Bearer worker-secret',
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                schema_version: 1,
+                model: 'minimaxdraft',
+                generator_model: 'h3',
+                total_seconds: 65.625,
+                output: {
+                    duration_seconds: 7.292,
+                    width: 1280,
+                    height: 720,
+                    fps: 24,
+                    segment_count: 1,
+                    bytes: bytes.length,
+                    source_image: true,
+                },
+                gpu: {
+                    name: 'NVIDIA GeForce RTX 5090',
+                    driver_version: 'test-driver',
+                    vram_total_mb: 32607,
+                    vram_peak_mb: 30000,
+                    vram_average_mb: 28000,
+                    utilization_average_percent: 96,
+                    utilization_peak_percent: 100,
+                    power_average_watts: 410,
+                    samples: 60,
+                },
+                environment: {
+                    worker_sha256: 'a'.repeat(64),
+                    generator_sha256: 'b'.repeat(64),
+                    python_version: '3.test',
+                    warm_model_before: null,
+                    warm_model_after: 'h3',
+                },
+                flags: { quality: 'draft', turbo4: true },
+                spans: [
+                    { source: 'worker', name: 'generator_process', duration_seconds: 55 },
+                    { source: 'worker', name: 'result_upload', duration_seconds: 2 },
+                    { source: 'comfy', name: 'Initializing sampler', segment_index: 1, duration_seconds: 40 },
+                ],
+            }),
+        });
+        assert.equal(metrics.status, 200);
         socket.send(JSON.stringify({
             type: 'event',
             event: 'complete',
@@ -119,6 +166,21 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             value => value.body.jobs[0].status === 'ready',
         );
         assert.equal(completed.body.jobs[0].runtime_seconds, 65.625);
+        const delivered = await botFetch(`/v1/jobs/${lease.job.id}/delivered`, {
+            method: 'POST',
+            body: JSON.stringify({ duration_seconds: 1.25 }),
+        });
+        assert.equal(delivered.status, 200);
+        const stats = await botFetch('/v1/stats?model=minimaxdraft');
+        assert.equal(stats.status, 200);
+        assert.equal(stats.body.samples, 1);
+        assert.equal(stats.body.models[0].model, 'minimaxdraft');
+        assert.equal(stats.body.models[0].total_seconds.median, 65.625);
+        assert.equal(stats.body.models[0].phases.generator, 55);
+        assert.equal(stats.body.models[0].phases.discord_delivery, 1.25);
+        assert.equal(stats.body.models[0].gpu.vram_peak_average_mb, 30000);
+        assert.equal(stats.body.models[0].cold_starts, 1);
+        assert.equal(stats.body.models[0].bottlenecks[0].name, 'generator_process');
         const learned = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({
