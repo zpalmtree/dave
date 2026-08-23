@@ -154,6 +154,7 @@ import {
     handleVideoAdmin,
     handleVideoQueue,
     ownerOnlyVideoGate,
+    singleVideoResponderGate,
 } from './VideoGeneration.js';
 
 /* Keep shared command order synchronized across deployment tracks. */
@@ -164,11 +165,11 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleLtxVideo,
-            description: 'Generate a maximum-quality local LTX 2.5 video; attach one image to use it as frame 0',
+            description: 'Generate a maximum-quality local LTX 2.5 video; attach an image or reply to text/image context',
             examples: [{ value: 'ltx a chihuahua crusade through a medieval castle' }],
         },
         relatedCommands: ['ltxfast', 'minimax', 'videoqueue'],
-        commandGates: [discordOnlyGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
         aliases: ['minimax'],
@@ -176,11 +177,11 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxVideo,
-            description: 'Generate a maximum-quality local MiniMax H3 video; attach one image to use it as frame 0',
+            description: 'Generate a maximum-quality local MiniMax H3 video; attach an image or reply to text/image context',
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimaxfast', 'minimaxdraft', 'ltx', 'videoqueue'],
-        commandGates: [discordOnlyGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
         aliases: ['ltxfast'],
@@ -188,11 +189,11 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleLtxFastVideo,
-            description: 'Generate a much faster lower-resolution one-stage LTX 2.5 preview; attach one image to use it as frame 0',
+            description: 'Generate a faster one-stage LTX 2.5 preview; attach an image or reply to text/image context',
             examples: [{ value: 'ltxfast a chihuahua crusade through a medieval castle' }],
         },
         relatedCommands: ['ltx', 'minimaxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
         aliases: ['minimaxfast'],
@@ -200,11 +201,11 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxFastVideo,
-            description: 'Generate a full-resolution MiniMax H3 video with the 8-step Turbo LoRA',
+            description: 'Generate full-resolution MiniMax H3 with the 8-step Turbo LoRA; supports reply text/images',
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimax', 'minimaxdraft', 'ltxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
         aliases: ['minimaxdraft'],
@@ -212,11 +213,11 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxDraftVideo,
-            description: 'Generate the fastest lower-resolution MiniMax H3 preview with the 4-step Turbo LoRA',
+            description: 'Generate a MiniMax H3 4-step draft; attach an image or reply to text/image context',
             examples: [{ value: 'minimaxdraft an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimaxfast', 'minimax', 'ltxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
         aliases: ['videoqueue', 'vq'],
@@ -231,7 +232,7 @@ const sharedCommands: Command[] = [
             ],
         },
         relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft'],
-        commandGates: [discordOnlyGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
         aliases: ['videogen'],
@@ -248,7 +249,7 @@ const sharedCommands: Command[] = [
                 { value: 'videogen resume' },
             ],
         },
-        commandGates: [discordOnlyGate, ownerOnlyVideoGate],
+        commandGates: [discordOnlyGate, singleVideoResponderGate, ownerOnlyVideoGate],
     },
     {
         aliases: ['roll', 'reroll'],

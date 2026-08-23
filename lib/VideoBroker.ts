@@ -110,6 +110,7 @@ interface JobRow {
     updated_at: number;
     started_at: number | null;
     completed_at: number | null;
+    runtime_seconds: number | null;
     delivered_at: number | null;
     notified_at: number | null;
     planner_json: string | null;
@@ -376,6 +377,7 @@ export class VideoBroker {
             updated_at INTEGER NOT NULL,
             started_at INTEGER,
             completed_at INTEGER,
+            runtime_seconds REAL,
             delivered_at INTEGER,
             notified_at INTEGER,
             planner_json TEXT,
@@ -399,6 +401,11 @@ export class VideoBroker {
         }
         if (!columnNames.has('affinity_bypasses')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN affinity_bypasses INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!columnNames.has('runtime_seconds')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN runtime_seconds REAL');
+            await this.run(`UPDATE video_jobs SET runtime_seconds = completed_at - started_at
+                WHERE completed_at IS NOT NULL AND started_at IS NOT NULL AND completed_at > started_at`);
         }
         for (const [name, definition] of [
             ['source_image_path', 'TEXT'],
@@ -955,6 +962,7 @@ export class VideoBroker {
                 updated_at: row.updated_at,
                 started_at: row.started_at,
                 completed_at: row.completed_at,
+                runtime_seconds: row.runtime_seconds,
                 delivered_at: row.delivered_at,
                 worker_online: online,
                 worker_busy: busy,
@@ -1193,15 +1201,18 @@ export class VideoBroker {
                     return;
                 }
                 if (!row?.result_path) throw new Error('Worker completed before uploading a result.');
+                const runtimeSeconds = Number(message.runtime_seconds) > 0
+                    ? Number(message.runtime_seconds)
+                    : null;
                 await this.run(
                     `UPDATE video_jobs SET status = 'ready', stage = 'Ready for Discord delivery', progress = 1,
-                     completed_at = ?, updated_at = ? WHERE public_id = ?`,
-                    [nowSeconds(), nowSeconds(), jobId],
+                     runtime_seconds = ?, completed_at = ?, updated_at = ? WHERE public_id = ?`,
+                    [runtimeSeconds, nowSeconds(), nowSeconds(), jobId],
                 );
-                if (Number(message.runtime_seconds) > 0) {
+                if (runtimeSeconds !== null) {
                     await this.run(
                         'INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at) VALUES(?,?,?)',
-                        [row.model, Number(message.runtime_seconds), nowSeconds()],
+                        [row.model, runtimeSeconds, nowSeconds()],
                     );
                     await this.refreshQueuedEstimates(row.model);
                 }

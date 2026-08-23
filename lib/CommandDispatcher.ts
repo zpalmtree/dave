@@ -85,7 +85,9 @@ export async function dispatchPrefixedCommand(msg: Message, db: Database): Promi
                 const { canAccess, error } = gate(msg);
 
                 if (!canAccess) {
-                    await msg.reply(error!);
+                    if (error) {
+                        await msg.reply(error);
+                    }
                     return;
                 }
             }

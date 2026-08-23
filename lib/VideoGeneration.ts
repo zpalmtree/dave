@@ -43,6 +43,42 @@ function truncatePrompt(prompt: string, length = 180): string {
     return prompt.length <= length ? prompt : `${prompt.slice(0, length - 1)}…`;
 }
 
+const DEFAULT_SINGLE_VIDEO_RESPONDER_CHANNEL_ID = '483470443001413675';
+const DEFAULT_SINGLE_VIDEO_RESPONDER_BOT_ID = '446154284514541579';
+
+function singleResponderChannelId(): string {
+    return process.env.VIDEO_SINGLE_RESPONDER_CHANNEL_ID
+        || DEFAULT_SINGLE_VIDEO_RESPONDER_CHANNEL_ID;
+}
+
+function singleResponderBotId(): string {
+    return process.env.VIDEO_SINGLE_RESPONDER_BOT_ID
+        || DEFAULT_SINGLE_VIDEO_RESPONDER_BOT_ID;
+}
+
+export function singleVideoResponderGate(msg: Message): { canAccess: boolean; error?: string } {
+    if (msg.channel.id !== singleResponderChannelId()) {
+        return { canAccess: true };
+    }
+    return msg.client.user?.id === singleResponderBotId()
+        ? { canAccess: true }
+        : { canAccess: false };
+}
+
+export function formatVideoRuntime(seconds: number | null | undefined): string | null {
+    if (!Number.isFinite(seconds) || Number(seconds) <= 0) return null;
+    let remaining = Math.max(1, Math.round(Number(seconds)));
+    const hours = Math.floor(remaining / 3600);
+    remaining %= 3600;
+    const minutes = Math.floor(remaining / 60);
+    remaining %= 60;
+    const parts: string[] = [];
+    if (hours) parts.push(`${hours}h`);
+    if (minutes) parts.push(`${minutes}m`);
+    if (remaining || parts.length === 0) parts.push(`${remaining}s`);
+    return parts.join(' ');
+}
+
 export interface SubmittedVideoSourceImage {
     url: string;
     mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
@@ -83,6 +119,33 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoSourceI
         bytes: attachment.size,
         name: attachment.name || 'start-frame',
     };
+}
+
+export function videoSourceImageFromMessages(
+    commandMessage: Message,
+    referencedMessage: Message | null,
+): SubmittedVideoSourceImage | null {
+    return videoSourceImageFromMessage(commandMessage)
+        || (referencedMessage ? videoSourceImageFromMessage(referencedMessage) : null);
+}
+
+export function videoPromptFromMessages(commandPrompt: string, referencedMessage: Message | null): string {
+    const current = commandPrompt.trim();
+    const referenced = referencedMessage?.content?.trim() || '';
+    if (!referenced) return current;
+    if (!current) return referenced;
+    return `Context from the replied message:\n${referenced}\n\nCurrent instruction (takes priority):\n${current}`;
+}
+
+async function fetchReferencedVideoMessage(msg: Message): Promise<Message | null> {
+    const messageId = msg.reference?.messageId;
+    if (!messageId || !('messages' in msg.channel)) return null;
+    try {
+        return await msg.channel.messages.fetch(messageId);
+    } catch (error) {
+        console.warn(`[Video] Could not fetch referenced message ${messageId}: ${String(error)}`);
+        return null;
+    }
 }
 
 function percentage(value: number | null): string {
@@ -167,8 +230,13 @@ class VideoGenerationService {
                 console.warn(`[Video] Result is not readable for ${job.id}: ${job.result_path}`);
                 return;
             }
+            const runtime = formatVideoRuntime(job.runtime_seconds);
             await message.edit({
-                content: `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready.\n> ${truncatePrompt(job.prompt)}`,
+                content: `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
+                    runtime
+                        ? ` — completed in **${runtime}**`
+                        : ''
+                }.\n> ${truncatePrompt(job.prompt)}`,
                 files: [{ attachment: job.result_path, name: `${job.model}-${shortJobId(job.id)}.mp4` }],
             });
             await this.acknowledge(job, 'delivered');
@@ -266,20 +334,24 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 }
 
 export async function handleVideoRequest(model: VideoModelId, msg: Message, prompt: string): Promise<void> {
-    prompt = prompt.trim();
+    const referencedMessage = await fetchReferencedVideoMessage(msg);
+    let sourceImage: SubmittedVideoSourceImage | null;
+    try {
+        sourceImage = videoSourceImageFromMessages(msg, referencedMessage);
+    } catch (error) {
+        await msg.reply(error instanceof Error ? error.message : String(error));
+        return;
+    }
+    prompt = videoPromptFromMessages(prompt, referencedMessage);
+    if (!prompt && sourceImage) {
+        prompt = 'Animate the supplied starting image with coherent, natural motion that fits the visible scene.';
+    }
     if (!prompt) {
-        await msg.reply(`Usage: \`${config.prefix}${VIDEO_MODELS[model].command} <prompt>\``);
+        await msg.reply(`Usage: \`${config.prefix}${VIDEO_MODELS[model].command} <prompt>\` (or reply to a message containing a prompt or image).`);
         return;
     }
     if (prompt.length > VIDEO_PROMPT_MAX_LENGTH) {
         await msg.reply(`Video prompts are limited to ${VIDEO_PROMPT_MAX_LENGTH} characters.`);
-        return;
-    }
-    let sourceImage: SubmittedVideoSourceImage | null;
-    try {
-        sourceImage = videoSourceImageFromMessage(msg);
-    } catch (error) {
-        await msg.reply(error instanceof Error ? error.message : String(error));
         return;
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');

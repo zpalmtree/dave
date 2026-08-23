@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Commands } from '../dist/CommandDeclarations.js';
-import { formatVideoJob, videoSourceImageFromMessage } from '../dist/VideoGeneration.js';
+import {
+    formatVideoJob,
+    formatVideoRuntime,
+    singleVideoResponderGate,
+    videoPromptFromMessages,
+    videoSourceImageFromMessage,
+    videoSourceImageFromMessages,
+} from '../dist/VideoGeneration.js';
 import { VIDEO_MODELS, isVideoModel, parsePauseDuration } from '../dist/VideoProtocol.js';
 import {
     VIDEO_PLAN_SCHEMA,
@@ -31,6 +38,35 @@ test('local video commands are declared as Discord-only', () => {
         assert.ok(command, `${name} command is present`);
         assert.equal(command.discordOnly, true);
     }
+});
+
+test('test channel video commands have one silent Dave responder', () => {
+    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft', 'videoqueue', 'videogen']) {
+        const command = Commands.find(candidate => candidate.aliases.includes(name));
+        assert.ok(command.commandGates.includes(singleVideoResponderGate));
+    }
+    const message = (channelId, botId) => ({
+        channel: { id: channelId },
+        client: { user: { id: botId } },
+    });
+    assert.deepEqual(
+        singleVideoResponderGate(message('483470443001413675', '446154284514541579')),
+        { canAccess: true },
+    );
+    assert.deepEqual(
+        singleVideoResponderGate(message('483470443001413675', '903156913724874832')),
+        { canAccess: false },
+    );
+    assert.deepEqual(singleVideoResponderGate(message('another-channel', '903156913724874832')), {
+        canAccess: true,
+    });
+});
+
+test('video runtime is formatted for the delivered post', () => {
+    assert.equal(formatVideoRuntime(null), null);
+    assert.equal(formatVideoRuntime(8.4), '8s');
+    assert.equal(formatVideoRuntime(65.6), '1m 6s');
+    assert.equal(formatVideoRuntime(3661), '1h 1m 1s');
 });
 
 test('fast video commands map to explicit quality tradeoffs', () => {
@@ -78,6 +114,7 @@ test('offline queue messages omit fake ETAs', () => {
         updated_at: 1,
         started_at: null,
         completed_at: null,
+        runtime_seconds: null,
         delivered_at: null,
         worker_online: false,
         worker_busy: false,
@@ -131,6 +168,45 @@ test('video commands accept exactly one supported attached start frame', () => {
             attachments: new Map([['gif', { ...attachment, contentType: 'image/gif', name: 'frame.gif' }]]),
         }),
         /PNG, JPEG, or WebP/,
+    );
+});
+
+test('video commands inherit prompt and image context from a replied-to message', () => {
+    const replyAttachment = {
+        url: 'https://cdn.discordapp.com/attachments/1/2/reply.png',
+        contentType: 'image/png',
+        name: 'reply.png',
+        size: 1234,
+    };
+    const commandAttachment = {
+        ...replyAttachment,
+        url: 'https://cdn.discordapp.com/attachments/1/2/command.webp',
+        contentType: 'image/webp',
+        name: 'command.webp',
+    };
+    const reply = {
+        content: 'Three racers approach a neon finish line.',
+        attachments: new Map([['reply', replyAttachment]]),
+    };
+    const commandWithoutImage = { attachments: new Map() };
+    assert.equal(
+        videoPromptFromMessages('', reply),
+        'Three racers approach a neon finish line.',
+    );
+    assert.equal(
+        videoPromptFromMessages('Make it rainy.', reply),
+        'Context from the replied message:\nThree racers approach a neon finish line.\n\nCurrent instruction (takes priority):\nMake it rainy.',
+    );
+    assert.equal(
+        videoSourceImageFromMessages(commandWithoutImage, reply).url,
+        replyAttachment.url,
+    );
+    assert.equal(
+        videoSourceImageFromMessages(
+            { attachments: new Map([['command', commandAttachment]]) },
+            reply,
+        ).url,
+        commandAttachment.url,
     );
 });
 
