@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +37,94 @@ function socketInbox(socket) {
         });
     };
 }
+
+test('broker keeps the measured end-to-end runtime on the completed job', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-runtime-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: {
+                authorization: 'Bearer bot-secret',
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+
+    let socket;
+    try {
+        const submitted = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxdraft',
+                prompt: 'Runtime tracking test',
+                requester_id: 'runtime-user',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'runtime-message',
+                status_message_id: 'runtime-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello',
+            protocol: 1,
+            worker_id: 'runtime-worker',
+            capabilities: ['minimaxdraft'],
+            current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const lease = await take(value => value.type === 'job');
+        const bytes = Buffer.from('valid-enough-test-video-payload');
+        const digest = createHash('sha256').update(bytes).digest('hex');
+        const upload = await fetch(`${base}/v1/worker/jobs/${lease.job.id}/result`, {
+            method: 'PUT',
+            headers: {
+                authorization: 'Bearer worker-secret',
+                'content-type': 'video/mp4',
+                'content-length': String(bytes.length),
+                'x-content-sha256': digest,
+            },
+            body: bytes,
+        });
+        assert.equal(upload.status, 200);
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'complete',
+            job_id: lease.job.id,
+            runtime_seconds: 65.625,
+        }));
+        const completed = await eventually(
+            () => botFetch('/v1/users/runtime-user/jobs'),
+            value => value.body.jobs[0].status === 'ready',
+        );
+        assert.equal(completed.body.jobs[0].runtime_seconds, 65.625);
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
 
 async function eventually(callback, predicate, timeoutMs = 2000) {
     const deadline = Date.now() + timeoutMs;

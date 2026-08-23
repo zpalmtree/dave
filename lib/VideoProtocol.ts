@@ -123,6 +123,7 @@ export interface VideoJobView {
     updated_at: number;
     started_at: number | null;
     completed_at: number | null;
+    runtime_seconds: number | null;
     delivered_at: number | null;
     worker_online: boolean;
     worker_busy: boolean;

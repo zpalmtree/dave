@@ -301,6 +301,43 @@ test('shared dispatch records command logs and token-spend context', async () =>
     }
 });
 
+test('a command gate may silently let another bot instance respond', async () => {
+    const db = new sqlite3.Database(':memory:');
+    const originalDevEnv = config.devEnv;
+    let commandAdded = false;
+    let implementationCalls = 0;
+    let replyCalls = 0;
+    const testCommand = {
+        aliases: ['silent-gate-test'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: () => { implementationCalls += 1; },
+            description: 'test command',
+        },
+        commandGates: [() => ({ canAccess: false })],
+    };
+
+    try {
+        await createTablesIfNeeded(db);
+        config.devEnv = false;
+        Commands.push(testCommand);
+        commandAdded = true;
+        await dispatchPrefixedCommand({
+            content: '$silent-gate-test',
+            author: { id: 'test-user' },
+            channel: { id: 'test-channel' },
+            guild: { id: 'test-server' },
+            reply: async () => { replyCalls += 1; },
+        }, db);
+        assert.equal(implementationCalls, 0);
+        assert.equal(replyCalls, 0);
+    } finally {
+        if (commandAdded) Commands.pop();
+        config.devEnv = originalDevEnv;
+        await new Promise(resolve => db.close(resolve));
+    }
+});
+
 test('timer migration and queries keep Discord and Uproar channels separate', async () => {
     const db = new sqlite3.Database(':memory:');
 
