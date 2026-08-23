@@ -6,7 +6,7 @@ export const VIDEO_RESULT_MAX_BYTES = 10 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
-export type VideoModelId = 'ltx' | 'minimax';
+export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast';
 
 export type VideoJobStatus =
     | 'queued'
@@ -67,6 +67,24 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
         fallbackLowSeconds: 600,
         fallbackHighSeconds: 1800,
     },
+    ltxfast: {
+        id: 'ltxfast',
+        command: 'ltxfast',
+        displayName: 'LTX 2.5 Fast Preview',
+        generatorModel: 'ltx',
+        generatorArgs: ['--model', 'ltx', '--quality', 'draft'],
+        fallbackLowSeconds: 360,
+        fallbackHighSeconds: 1200,
+    },
+    minimaxfast: {
+        id: 'minimaxfast',
+        command: 'minimaxfast',
+        displayName: 'MiniMax H3 Turbo',
+        generatorModel: 'h3',
+        generatorArgs: ['--model', 'h3', '--quality', 'final', '--fast'],
+        fallbackLowSeconds: 360,
+        fallbackHighSeconds: 1200,
+    },
 };
 
 export interface VideoJobView {
@@ -111,7 +129,10 @@ export interface VideoWorkerHello {
 }
 
 export function isVideoModel(value: unknown): value is VideoModelId {
-    return value === 'ltx' || value === 'minimax';
+    return value === 'ltx'
+        || value === 'ltxfast'
+        || value === 'minimax'
+        || value === 'minimaxfast';
 }
 
 export function parsePauseDuration(value: string | undefined): number {

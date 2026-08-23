@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { Commands } from '../dist/CommandDeclarations.js';
 import { formatVideoJob, videoSourceImageFromMessage } from '../dist/VideoGeneration.js';
-import { parsePauseDuration } from '../dist/VideoProtocol.js';
+import { VIDEO_MODELS, isVideoModel, parsePauseDuration } from '../dist/VideoProtocol.js';
 import {
     VIDEO_PLAN_SCHEMA,
     VIDEO_PLANNER_INSTRUCTIONS,
@@ -26,11 +26,21 @@ test('video pause durations default to six hours and enforce safe limits', () =>
 });
 
 test('local video commands are declared as Discord-only', () => {
-    for (const name of ['ltx', 'minimax', 'videoqueue', 'videogen']) {
+    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'videoqueue', 'videogen']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command, `${name} command is present`);
         assert.equal(command.discordOnly, true);
     }
+});
+
+test('fast video commands map to explicit quality tradeoffs', () => {
+    assert.deepEqual(VIDEO_MODELS.ltxfast.generatorArgs, ['--model', 'ltx', '--quality', 'draft']);
+    assert.deepEqual(
+        VIDEO_MODELS.minimaxfast.generatorArgs,
+        ['--model', 'h3', '--quality', 'final', '--fast'],
+    );
+    assert.equal(isVideoModel('ltxfast'), true);
+    assert.equal(isVideoModel('minimaxfast'), true);
 });
 
 test('offline queue messages omit fake ETAs', () => {

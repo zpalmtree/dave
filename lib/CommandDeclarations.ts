@@ -146,7 +146,9 @@ import { config } from './Config.js';
 
 import {
     discordOnlyGate,
+    handleLtxFastVideo,
     handleLtxVideo,
+    handleMinimaxFastVideo,
     handleMinimaxVideo,
     handleVideoAdmin,
     handleVideoQueue,
@@ -164,7 +166,7 @@ const sharedCommands: Command[] = [
             description: 'Generate a maximum-quality local LTX 2.5 video; attach one image to use it as frame 0',
             examples: [{ value: 'ltx a chihuahua crusade through a medieval castle' }],
         },
-        relatedCommands: ['minimax', 'videoqueue'],
+        relatedCommands: ['ltxfast', 'minimax', 'videoqueue'],
         commandGates: [discordOnlyGate],
     },
     {
@@ -176,7 +178,31 @@ const sharedCommands: Command[] = [
             description: 'Generate a maximum-quality local MiniMax H3 video; attach one image to use it as frame 0',
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['ltx', 'videoqueue'],
+        relatedCommands: ['minimaxfast', 'ltx', 'videoqueue'],
+        commandGates: [discordOnlyGate],
+    },
+    {
+        aliases: ['ltxfast'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleLtxFastVideo,
+            description: 'Generate a lower-resolution LTX 2.5 preview; attach one image to use it as frame 0',
+            examples: [{ value: 'ltxfast a chihuahua crusade through a medieval castle' }],
+        },
+        relatedCommands: ['ltx', 'minimaxfast', 'videoqueue'],
+        commandGates: [discordOnlyGate],
+    },
+    {
+        aliases: ['minimaxfast'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleMinimaxFastVideo,
+            description: 'Generate a full-resolution MiniMax H3 video with the 8-step Turbo LoRA',
+            examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
+        },
+        relatedCommands: ['minimax', 'ltxfast', 'videoqueue'],
         commandGates: [discordOnlyGate],
     },
     {
@@ -191,7 +217,7 @@ const sharedCommands: Command[] = [
                 { value: 'videoqueue cancel 12ab34cd' },
             ],
         },
-        relatedCommands: ['ltx', 'minimax'],
+        relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast'],
         commandGates: [discordOnlyGate],
     },
     {

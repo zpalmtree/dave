@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 
 import { config } from './Config.js';
-import { VideoModelId } from './VideoProtocol.js';
+import { VIDEO_MODELS, VideoModelId } from './VideoProtocol.js';
 
 export const VIDEO_PLANNER_MODEL = 'gpt-5.6-sol';
 
@@ -133,8 +133,10 @@ export async function createFrontierVideoPlan(
     requesterId: string,
     sourceImage?: VideoPlanSourceImage,
 ): Promise<Record<string, unknown>> {
-    const segmentMaximum = model === 'minimax' ? 15 : 20;
-    const segmentMinimum = model === 'minimax' ? 5 : 3;
+    const definition = VIDEO_MODELS[model];
+    const isH3 = definition.generatorModel === 'h3';
+    const segmentMaximum = isH3 ? 15 : 20;
+    const segmentMinimum = isH3 ? 5 : 3;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
     try {
@@ -142,7 +144,7 @@ export async function createFrontierVideoPlan(
             type: 'input_text',
             text: [
                 'Aspect ratio: 16:9.',
-                `Target video model: ${model === 'minimax' ? 'MiniMax H3' : 'LTX 2.5'}.`,
+                `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
                 'Choose an automatic total duration no longer than 30 seconds.',
                 sourceImage
