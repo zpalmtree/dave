@@ -212,6 +212,79 @@ test('broker preserves an interrupted job at the front while paused', async () =
     }
 });
 
+test('broker unloads an idle worker when paused and after reconnecting while paused', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-idle-pause-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: {
+                authorization: 'Bearer bot-secret',
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+
+    let socket;
+    try {
+        const connectWorker = async () => {
+            const worker = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+                headers: { authorization: 'Bearer worker-secret' },
+            });
+            const take = socketInbox(worker);
+            await new Promise((resolve, reject) => {
+                worker.once('open', resolve);
+                worker.once('error', reject);
+            });
+            worker.send(JSON.stringify({
+                type: 'hello',
+                protocol: 1,
+                worker_id: 'test-worker',
+                capabilities: ['ltx', 'minimax'],
+                current_job: null,
+            }));
+            await take(value => value.type === 'hello_ack');
+            return { worker, take };
+        };
+
+        let connected = await connectWorker();
+        socket = connected.worker;
+        const paused = await botFetch('/v1/control/pause', {
+            method: 'POST',
+            body: JSON.stringify({ seconds: 60, actor_id: 'owner' }),
+        });
+        assert.equal(paused.status, 200);
+        const firstUnload = await connected.take(value => value.type === 'unload');
+        assert.equal(firstUnload.reason, 'pause');
+
+        socket.close();
+        await eventually(
+            () => botFetch('/v1/control'),
+            value => value.body.worker_online === false,
+        );
+        connected = await connectWorker();
+        socket = connected.worker;
+        const reconnectUnload = await connected.take(value => value.type === 'unload');
+        assert.equal(reconnectUnload.reason, 'pause');
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('broker serves a cached frontier frame and gives a user attachment precedence', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-keyframe-'));
     const generatedBytes = Buffer.from('generated-keyframe');
