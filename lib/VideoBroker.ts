@@ -149,13 +149,21 @@ interface VideoJobMetricRow {
     vram_total_mb: number | null;
     vram_peak_mb: number | null;
     vram_average_mb: number | null;
+    vram_free_min_mb: number | null;
     gpu_utilization_average: number | null;
     gpu_utilization_peak: number | null;
     power_average_watts: number | null;
+    temperature_peak_c: number | null;
+    pcie_link_width_min: number | null;
+    pcie_link_width_max: number | null;
+    hardware_slowdown_samples: number | null;
+    thermal_slowdown_samples: number | null;
+    power_brake_slowdown_samples: number | null;
     gpu_samples: number | null;
     worker_sha256: string | null;
     generator_sha256: string | null;
     python_version: string | null;
+    comfy_aimdo_version: string | null;
     warm_model_before: VideoGeneratorModelId | null;
     warm_model_after: VideoGeneratorModelId | null;
     quality: string | null;
@@ -321,15 +329,23 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
         vram_total_mb: boundedNumber(value.gpu.vram_total_mb, 1, 1024 * 1024) ?? undefined,
         vram_peak_mb: boundedNumber(value.gpu.vram_peak_mb, 0, 1024 * 1024) ?? undefined,
         vram_average_mb: boundedNumber(value.gpu.vram_average_mb, 0, 1024 * 1024) ?? undefined,
+        vram_free_min_mb: boundedNumber(value.gpu.vram_free_min_mb, 0, 1024 * 1024) ?? undefined,
         utilization_average_percent: boundedNumber(value.gpu.utilization_average_percent, 0, 100) ?? undefined,
         utilization_peak_percent: boundedNumber(value.gpu.utilization_peak_percent, 0, 100) ?? undefined,
         power_average_watts: boundedNumber(value.gpu.power_average_watts, 0, 5000) ?? undefined,
+        temperature_peak_c: boundedNumber(value.gpu.temperature_peak_c, 0, 200) ?? undefined,
+        pcie_link_width_min: boundedNumber(value.gpu.pcie_link_width_min, 1, 32) ?? undefined,
+        pcie_link_width_max: boundedNumber(value.gpu.pcie_link_width_max, 1, 32) ?? undefined,
+        hardware_slowdown_samples: Math.round(boundedNumber(value.gpu.hardware_slowdown_samples, 0, 1_000_000) ?? 0),
+        thermal_slowdown_samples: Math.round(boundedNumber(value.gpu.thermal_slowdown_samples, 0, 1_000_000) ?? 0),
+        power_brake_slowdown_samples: Math.round(boundedNumber(value.gpu.power_brake_slowdown_samples, 0, 1_000_000) ?? 0),
         samples: Math.round(boundedNumber(value.gpu.samples, 0, 1_000_000) ?? 0),
     } : undefined;
     const environment = value.environment && typeof value.environment === 'object' ? {
         worker_sha256: boundedMetricText(value.environment.worker_sha256, 64) ?? undefined,
         generator_sha256: boundedMetricText(value.environment.generator_sha256, 64) ?? undefined,
         python_version: boundedMetricText(value.environment.python_version, 160) ?? undefined,
+        comfy_aimdo_version: boundedMetricText(value.environment.comfy_aimdo_version, 80) ?? undefined,
         warm_model_before: optionalGeneratorModel(value.environment.warm_model_before),
         warm_model_after: optionalGeneratorModel(value.environment.warm_model_after),
     } : undefined;
@@ -339,6 +355,24 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
     const quality = ['draft', 'final'].includes(value.flags?.quality)
         ? value.flags.quality as 'draft' | 'final'
         : undefined;
+    const failureKind = ['nvidia_driver_reset', 'generator_failure'].includes(value.failure?.kind)
+        ? value.failure.kind as 'nvidia_driver_reset' | 'generator_failure'
+        : null;
+    const eventIds = Array.isArray(value.failure?.event_ids)
+        ? value.failure.event_ids
+            .map((eventId: unknown) => Number(eventId))
+            .filter((eventId: number) => Number.isFinite(eventId) && eventId >= 0 && eventId <= 65535)
+            .map((eventId: number) => Math.round(eventId))
+            .slice(0, 20)
+        : undefined;
+    const failure = failureKind ? {
+        kind: failureKind,
+        event_count: Math.round(boundedNumber(value.failure?.event_count, 0, 1_000_000) ?? 0),
+        ...(eventIds ? { event_ids: eventIds } : {}),
+        ...(value.failure?.latest_utc
+            ? { latest_utc: boundedMetricText(value.failure.latest_utc, 80) ?? undefined }
+            : {}),
+    } : undefined;
     return {
         schema_version: 1,
         model: expectedModel,
@@ -347,6 +381,7 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
         ...(output ? { output } : {}),
         ...(gpu ? { gpu } : {}),
         ...(environment ? { environment } : {}),
+        ...(failure ? { failure } : {}),
         flags: {
             fast: Boolean(value.flags?.fast),
             turbo4: Boolean(value.flags?.turbo4),
@@ -369,6 +404,16 @@ function median(values: Array<number | null | undefined>): number | null {
     if (!finite.length) return null;
     const middle = Math.floor(finite.length / 2);
     return finite.length % 2 ? finite[middle] : (finite[middle - 1] + finite[middle]) / 2;
+}
+
+function minimum(values: Array<number | null | undefined>): number | null {
+    const finite = values.filter((value): value is number => Number.isFinite(value));
+    return finite.length ? Math.min(...finite) : null;
+}
+
+function maximum(values: Array<number | null | undefined>): number | null {
+    const finite = values.filter((value): value is number => Number.isFinite(value));
+    return finite.length ? Math.max(...finite) : null;
 }
 
 function imageExtension(mimeType: string): string {
@@ -672,13 +717,21 @@ export class VideoBroker {
             vram_total_mb REAL,
             vram_peak_mb REAL,
             vram_average_mb REAL,
+            vram_free_min_mb REAL,
             gpu_utilization_average REAL,
             gpu_utilization_peak REAL,
             power_average_watts REAL,
+            temperature_peak_c REAL,
+            pcie_link_width_min REAL,
+            pcie_link_width_max REAL,
+            hardware_slowdown_samples INTEGER,
+            thermal_slowdown_samples INTEGER,
+            power_brake_slowdown_samples INTEGER,
             gpu_samples INTEGER,
             worker_sha256 TEXT,
             generator_sha256 TEXT,
             python_version TEXT,
+            comfy_aimdo_version TEXT,
             warm_model_before TEXT,
             warm_model_after TEXT,
             quality TEXT,
@@ -687,8 +740,39 @@ export class VideoBroker {
             ltx_one_stage INTEGER NOT NULL DEFAULT 0,
             recorded_at INTEGER NOT NULL
         )`);
+        const metricColumns = new Set(
+            (await this.all<{ name: string }>('PRAGMA table_info(video_job_metrics)'))
+                .map(column => column.name),
+        );
+        for (const [name, definition] of [
+            ['vram_free_min_mb', 'REAL'],
+            ['temperature_peak_c', 'REAL'],
+            ['pcie_link_width_min', 'REAL'],
+            ['pcie_link_width_max', 'REAL'],
+            ['hardware_slowdown_samples', 'INTEGER'],
+            ['thermal_slowdown_samples', 'INTEGER'],
+            ['power_brake_slowdown_samples', 'INTEGER'],
+            ['comfy_aimdo_version', 'TEXT'],
+        ] as const) {
+            if (!metricColumns.has(name)) {
+                await this.run(`ALTER TABLE video_job_metrics ADD COLUMN ${name} ${definition}`);
+            }
+        }
         await this.run(`CREATE INDEX IF NOT EXISTS video_job_metrics_model_idx
             ON video_job_metrics(model, recorded_at DESC)`);
+        await this.run(`CREATE TABLE IF NOT EXISTS video_job_attempt_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_public_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            total_seconds REAL NOT NULL,
+            error TEXT,
+            metrics_json TEXT NOT NULL,
+            recorded_at INTEGER NOT NULL,
+            UNIQUE(job_public_id, attempt)
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS video_job_attempt_metrics_job_idx
+            ON video_job_attempt_metrics(job_public_id, attempt)`);
         await this.run(`CREATE TABLE IF NOT EXISTS video_job_spans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_public_id TEXT NOT NULL,
@@ -1171,11 +1255,13 @@ export class VideoBroker {
                     job_public_id, model, generator_model, total_seconds,
                     output_duration_seconds, width, height, fps, segment_count, output_bytes,
                     source_image, gpu_name, driver_version, vram_total_mb, vram_peak_mb,
-                    vram_average_mb, gpu_utilization_average, gpu_utilization_peak,
-                    power_average_watts, gpu_samples, worker_sha256, generator_sha256,
-                    python_version, warm_model_before, warm_model_after, quality, fast,
+                    vram_average_mb, vram_free_min_mb, gpu_utilization_average, gpu_utilization_peak,
+                    power_average_watts, temperature_peak_c, pcie_link_width_min, pcie_link_width_max,
+                    hardware_slowdown_samples, thermal_slowdown_samples, power_brake_slowdown_samples,
+                    gpu_samples, worker_sha256, generator_sha256,
+                    python_version, comfy_aimdo_version, warm_model_before, warm_model_after, quality, fast,
                     turbo4, ltx_one_stage, recorded_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(job_public_id) DO UPDATE SET
                     model = excluded.model,
                     generator_model = excluded.generator_model,
@@ -1192,13 +1278,21 @@ export class VideoBroker {
                     vram_total_mb = excluded.vram_total_mb,
                     vram_peak_mb = excluded.vram_peak_mb,
                     vram_average_mb = excluded.vram_average_mb,
+                    vram_free_min_mb = excluded.vram_free_min_mb,
                     gpu_utilization_average = excluded.gpu_utilization_average,
                     gpu_utilization_peak = excluded.gpu_utilization_peak,
                     power_average_watts = excluded.power_average_watts,
+                    temperature_peak_c = excluded.temperature_peak_c,
+                    pcie_link_width_min = excluded.pcie_link_width_min,
+                    pcie_link_width_max = excluded.pcie_link_width_max,
+                    hardware_slowdown_samples = excluded.hardware_slowdown_samples,
+                    thermal_slowdown_samples = excluded.thermal_slowdown_samples,
+                    power_brake_slowdown_samples = excluded.power_brake_slowdown_samples,
                     gpu_samples = excluded.gpu_samples,
                     worker_sha256 = excluded.worker_sha256,
                     generator_sha256 = excluded.generator_sha256,
                     python_version = excluded.python_version,
+                    comfy_aimdo_version = excluded.comfy_aimdo_version,
                     warm_model_before = excluded.warm_model_before,
                     warm_model_after = excluded.warm_model_after,
                     quality = excluded.quality,
@@ -1223,13 +1317,21 @@ export class VideoBroker {
                     gpu.vram_total_mb ?? null,
                     gpu.vram_peak_mb ?? null,
                     gpu.vram_average_mb ?? null,
+                    gpu.vram_free_min_mb ?? null,
                     gpu.utilization_average_percent ?? null,
                     gpu.utilization_peak_percent ?? null,
                     gpu.power_average_watts ?? null,
+                    gpu.temperature_peak_c ?? null,
+                    gpu.pcie_link_width_min ?? null,
+                    gpu.pcie_link_width_max ?? null,
+                    gpu.hardware_slowdown_samples ?? null,
+                    gpu.thermal_slowdown_samples ?? null,
+                    gpu.power_brake_slowdown_samples ?? null,
                     gpu.samples ?? null,
                     environment.worker_sha256 ?? null,
                     environment.generator_sha256 ?? null,
                     environment.python_version ?? null,
+                    environment.comfy_aimdo_version ?? null,
                     environment.warm_model_before ?? null,
                     environment.warm_model_after ?? null,
                     flags.quality ?? null,
@@ -1241,6 +1343,30 @@ export class VideoBroker {
             );
             for (const span of metrics.spans) await this.recordMetricSpan(job.public_id, span);
         });
+    }
+
+    private async storeWorkerAttemptMetrics(job: JobRow, body: any, error: string): Promise<void> {
+        const metrics = normalizedWorkerMetrics(body, job.model);
+        await this.run(
+            `INSERT INTO video_job_attempt_metrics(
+                job_public_id, attempt, status, total_seconds, error, metrics_json, recorded_at
+             ) VALUES(?,?,?,?,?,?,?)
+             ON CONFLICT(job_public_id, attempt) DO UPDATE SET
+                status = excluded.status,
+                total_seconds = excluded.total_seconds,
+                error = excluded.error,
+                metrics_json = excluded.metrics_json,
+                recorded_at = excluded.recorded_at`,
+            [
+                job.public_id,
+                job.attempt,
+                metrics.failure?.kind || 'generator_failure',
+                metrics.total_seconds,
+                error,
+                JSON.stringify(metrics),
+                nowSeconds(),
+            ],
+        );
     }
 
     private async videoStats(model: VideoModelId | null, limit: number): Promise<any> {
@@ -1317,8 +1443,10 @@ export class VideoBroker {
                 },
                 gpu: {
                     vram_peak_average_mb: average(modelRows.map(row => row.vram_peak_mb)),
+                    vram_free_minimum_mb: minimum(modelRows.map(row => row.vram_free_min_mb)),
                     utilization_average_percent: average(modelRows.map(row => row.gpu_utilization_average)),
                     power_average_watts: average(modelRows.map(row => row.power_average_watts)),
+                    temperature_peak_c: maximum(modelRows.map(row => row.temperature_peak_c)),
                 },
                 cold_starts: modelRows.filter(row => row.warm_model_before !== row.generator_model).length,
                 bottlenecks,
@@ -1328,6 +1456,7 @@ export class VideoBroker {
                     worker_sha256: modelRows[0].worker_sha256,
                     generator_sha256: modelRows[0].generator_sha256,
                     python_version: modelRows[0].python_version,
+                    comfy_aimdo_version: modelRows[0].comfy_aimdo_version,
                     planner_model: modelRows[0].planner_model,
                     keyframe_provider: modelRows[0].keyframe_provider,
                     keyframe_model: modelRows[0].keyframe_model,
@@ -1787,6 +1916,11 @@ export class VideoBroker {
             }
             this.worker.ready = true;
             this.worker.currentJob = null;
+            const control = await this.control();
+            if (control.paused_until) {
+                this.sendWorker({ type: 'unload', reason: 'safety-pause' });
+                return;
+            }
             await this.dispatchNext();
             return;
         }
@@ -1872,15 +2006,36 @@ export class VideoBroker {
                 }
                 const retry = Boolean(message.retryable) && (row?.attempt || 0) < 2;
                 const publicError = sanitizeVideoWorkerText(message.error, 'Worker failure', 2000);
+                if (message.metrics && typeof message.metrics === 'object') {
+                    try {
+                        await this.storeWorkerAttemptMetrics(row, message.metrics, publicError);
+                    } catch (error) {
+                        console.warn(`Could not store failed-attempt telemetry for ${jobId}`, error);
+                    }
+                }
+                const safetyPauseSeconds = message.safety_pause_seconds === undefined
+                    ? null
+                    : Math.round(boundedNumber(message.safety_pause_seconds, 60, 24 * 60 * 60, false)!);
+                if (safetyPauseSeconds !== null) {
+                    await this.run(
+                        `UPDATE video_control SET paused_until = ?, updated_by = ?, updated_at = ? WHERE id = 1`,
+                        [nowSeconds() + safetyPauseSeconds, `worker-safety:${this.worker.id}`, nowSeconds()],
+                    );
+                }
                 await this.run(
                     retry
-                        ? `UPDATE video_jobs SET status = 'queued', attempt = attempt + 1, stage = 'Retrying',
+                        ? `UPDATE video_jobs SET status = 'queued', attempt = attempt + 1, stage = ?,
                            progress = NULL, worker_id = NULL, lease_expires_at = NULL, error = ?, updated_at = ?
                            WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
                            WHERE public_id = ?`,
                     retry
-                        ? [publicError, nowSeconds(), jobId]
+                        ? [
+                            safetyPauseSeconds === null ? 'Retrying' : 'Paused after GPU driver reset',
+                            publicError,
+                            nowSeconds(),
+                            jobId,
+                        ]
                         : [publicError, nowSeconds(), nowSeconds(), jobId],
                 );
                 this.worker.currentJob = null;

@@ -22,6 +22,13 @@ Jobs can be submitted while the desktop is offline or generation is paused. In
 those states Dave deliberately omits ETA. The queue accepts at most three
 unfinished jobs per user and twenty globally.
 
+If Windows records an NVIDIA `nvlddmkm` recovery while a render fails, the
+desktop worker treats it as a GPU-driver reset rather than an ordinary retry.
+The failed attempt and GPU telemetry are retained, the job returns to the front
+of the queue, and dispatch pauses for six hours so another queued render cannot
+immediately reset the driver again. The owner can inspect the machine and use
+`$videogen resume` sooner.
+
 ## Server configuration
 
 The default configuration file is `~/.config/dave-video.json` and must be mode
@@ -49,7 +56,10 @@ Copy `video_gen/video_worker.json.example` to `video_gen/video_worker.json`, set
 the tailnet-only `wss://.../v1/worker` URL and matching worker token, then run
 `video_worker.cmd`. The worker journals its active job, reconnects after network
 loss, sends a heartbeat every 15 seconds, and retries transient render failures
-at most twice. The server asks `gpt-5.6-sol` at high reasoning effort for a strict
+at most twice. MiniMax H3 requires `comfy-aimdo` 0.4.14 or newer for the expanded
+Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
+local startup path pins and verifies that runtime before starting ComfyUI. The
+server asks `gpt-5.6-sol` at high reasoning effort for a strict
 structured screenplay only after the job reaches the desktop. The API key never
 leaves the server, successful plans are cached per job, and the local Qwen planner
 is the automatic offline fallback. The worker optionally anchors the video with a

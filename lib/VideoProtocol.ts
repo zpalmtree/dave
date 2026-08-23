@@ -44,17 +44,31 @@ export interface VideoWorkerMetrics {
         vram_total_mb?: number;
         vram_peak_mb?: number;
         vram_average_mb?: number;
+        vram_free_min_mb?: number;
         utilization_average_percent?: number;
         utilization_peak_percent?: number;
         power_average_watts?: number;
+        temperature_peak_c?: number;
+        pcie_link_width_min?: number;
+        pcie_link_width_max?: number;
+        hardware_slowdown_samples?: number;
+        thermal_slowdown_samples?: number;
+        power_brake_slowdown_samples?: number;
         samples?: number;
     };
     environment?: {
         worker_sha256?: string;
         generator_sha256?: string;
         python_version?: string;
+        comfy_aimdo_version?: string;
         warm_model_before?: VideoGeneratorModelId | null;
         warm_model_after?: VideoGeneratorModelId | null;
+    };
+    failure?: {
+        kind: 'nvidia_driver_reset' | 'generator_failure';
+        event_count?: number;
+        event_ids?: number[];
+        latest_utc?: string;
     };
     flags?: {
         fast?: boolean;
