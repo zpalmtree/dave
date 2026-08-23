@@ -123,7 +123,6 @@ import {
     handleLtxFastVideo,
     handleLtxVideo,
     handleMinimaxFastVideo,
-    handleMinimaxDraftVideo,
     handleMinimaxVideo,
     handleVideoAdmin,
     handleVideoQueue,
@@ -155,7 +154,7 @@ const sharedCommands: Command[] = [
             description: 'Generate a maximum-quality local MiniMax H3 video; attach an image or reply to text/image context',
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['minimaxfast', 'minimaxdraft', 'ltx', 'videoqueue'],
+        relatedCommands: ['minimaxfast', 'ltx', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
@@ -179,19 +178,7 @@ const sharedCommands: Command[] = [
             description: 'Generate full-resolution MiniMax H3 with the 8-step Turbo LoRA; supports reply text/images',
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['minimax', 'minimaxdraft', 'ltxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate, singleVideoResponderGate],
-    },
-    {
-        aliases: ['minimaxdraft'],
-        discordOnly: true,
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMinimaxDraftVideo,
-            description: 'Generate a MiniMax H3 4-step draft; attach an image or reply to text/image context',
-            examples: [{ value: 'minimaxdraft an arcade kart race between historical figures' }],
-        },
-        relatedCommands: ['minimaxfast', 'minimax', 'ltxfast', 'videoqueue'],
+        relatedCommands: ['minimax', 'ltxfast', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
@@ -206,7 +193,7 @@ const sharedCommands: Command[] = [
                 { value: 'videoqueue cancel 12ab34cd' },
             ],
         },
-        relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft'],
+        relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
@@ -236,7 +223,7 @@ const sharedCommands: Command[] = [
             description: 'Show structured local video pipeline and GPU performance metrics',
             examples: [
                 { value: 'videostats' },
-                { value: 'videostats minimaxdraft' },
+                { value: 'videostats minimaxfast' },
             ],
         },
         relatedCommands: ['videogen'],

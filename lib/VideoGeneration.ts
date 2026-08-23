@@ -542,10 +542,6 @@ export async function handleMinimaxFastVideo(msg: Message, prompt: string): Prom
     await handleVideoRequest('minimaxfast', msg, prompt);
 }
 
-export async function handleMinimaxDraftVideo(msg: Message, prompt: string): Promise<void> {
-    await handleVideoRequest('minimaxdraft', msg, prompt);
-}
-
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
     const response = await brokerRequest<JobsResponse>(`/v1/users/${encodeURIComponent(msg.author.id)}/jobs`);
     const [action, requestedId] = args.trim().split(/\s+/, 2);
@@ -624,7 +620,7 @@ function metricNumber(value: number | null, suffix = ''): string {
 export async function handleVideoStats(msg: Message, args: string): Promise<void> {
     const requested = args.trim().toLowerCase() || 'all';
     if (requested !== 'all' && !Object.prototype.hasOwnProperty.call(VIDEO_MODELS, requested)) {
-        await msg.reply(`Usage: \`${config.prefix}videostats [all|ltx|ltxfast|minimax|minimaxfast|minimaxdraft]\``);
+        await msg.reply(`Usage: \`${config.prefix}videostats [all|ltx|ltxfast|minimax|minimaxfast]\``);
         return;
     }
     const stats = await brokerRequest<VideoStatsResponse>(
