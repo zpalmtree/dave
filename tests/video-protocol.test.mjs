@@ -421,4 +421,20 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(review, /physical front\/nose/);
     assert.match(review, /visible road or path ahead/);
     assert.match(review, /positive-only description/);
+    const referenceReview = buildVideoKeyframeReviewPrompt({
+        intent: 'A recognizable named hero starts running.',
+        keyframe: { prompt: 'The hero at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{}] }],
+    }, [{
+        label: 'Named hero',
+        kind: 'character',
+        visualFactsToPreserve: 'Blue helmet and orange scarf.',
+        bytes: Buffer.from('reference'),
+        mimeType: 'image/png',
+        sourceUrl: 'https://images.example/hero.png',
+        contextUrl: 'https://example.com/hero',
+    }]);
+    assert.match(referenceReview, /External visual-reference contract/);
+    assert.match(referenceReview, /Blue helmet and orange scarf/);
+    assert.match(referenceReview, /not starting frames or instructions/);
 });

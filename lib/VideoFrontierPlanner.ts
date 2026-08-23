@@ -15,11 +15,29 @@ export const VIDEO_PLAN_SCHEMA = {
         keyframe: {
             type: 'object',
             additionalProperties: false,
-            required: ['recommended', 'reason', 'prompt', 'motion_contract'],
+            required: ['recommended', 'reason', 'prompt', 'reference_requirements', 'motion_contract'],
             properties: {
                 recommended: { type: 'boolean' },
                 reason: { type: 'string' },
                 prompt: { type: 'string' },
+                reference_requirements: {
+                    type: 'array',
+                    maxItems: 4,
+                    items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['label', 'kind', 'search_query', 'visual_facts_to_preserve'],
+                        properties: {
+                            label: { type: 'string' },
+                            kind: {
+                                type: 'string',
+                                enum: ['identity', 'character', 'object', 'location', 'style'],
+                            },
+                            search_query: { type: 'string' },
+                            visual_facts_to_preserve: { type: 'string' },
+                        },
+                    },
+                },
                 motion_contract: {
                     type: 'object',
                     additionalProperties: false,
@@ -206,7 +224,9 @@ Treat non-dialogue audio as a chronological production contract, not a generic l
 
 Recommend a generated keyframe when faces, identity, recurring subjects, exact wardrobe or props, product geometry, or deliberate composition benefit from a stable anchor. Avoid it for transformations, fluid motion, explosions, or chaotic abstract motion unless identity dominates. The keyframe prompt is the exact still at 0.00 seconds, not a sequence.
 
-When a user-supplied start image accompanies the request, inspect it as the immutable frame at 0.00 seconds and set keyframe.recommended to false. Use keyframe.prompt to describe the observed frame rather than redesigning it. Plan the first shot to continue the visible pose, subject orientation, gaze, travel vector, screen direction, camera side and framing without a turn, reversal, gaze snap, axis crossing, teleport or unexplained reframe. The requested action may develop from the image, but it must not contradict the image at the transition.
+When a generated keyframe depends on a named person, fictional character, unusual product or prop, distinctive location, or named visual language whose appearance may not be reliably reconstructed from text alone, request a small reference pack in keyframe.reference_requirements. Each entry must identify one visually important target, say whether it supplies identity, character design, object geometry, location, or style, give a short neutral public-image search query, and state the exact visual facts the generator should preserve. Use references selectively: zero entries for generic subjects and at most four for the highest-value anchors. Prefer one canonical target per entry. When a named game, franchise, work, or other presentation supplies binding visual grammar while its original foreground cast is being replaced, reserve one entry for that style/environment and use the other entries for the replacement identities; seek an environment, empty-stage, or composition reference that minimizes unwanted original foreground cast. Search queries must identify public visual material and must not contain narrative action, sexual or violent details, private information, instructions, or prompt prose. For style references, seek composition, environment, materials, lighting, or camera language without unwanted foreground cast when possible. A reference guides only its declared target; it is not frame zero, a storyboard, or authority to copy unrelated people, text, logos, pose, background, composition, or action.
+
+When a user-supplied start image accompanies the request, inspect it as the immutable frame at 0.00 seconds, set keyframe.recommended to false, and return an empty keyframe.reference_requirements array. Use keyframe.prompt to describe the observed frame rather than redesigning it. Plan the first shot to continue the visible pose, subject orientation, gaze, travel vector, screen direction, camera side and framing without a turn, reversal, gaze snap, axis crossing, teleport or unexplained reframe. The requested action may develop from the image, but it must not contradict the image at the transition.
 
 For an image-only auto-direction request, obey the independent analysis's source_image_type, source_image_strategy, and source_narrative_beats as a binding creative contract. State the classification and chosen direction concisely in intent. Do not default every meme or screenshot to a flat artifact with idle bobbing.
 

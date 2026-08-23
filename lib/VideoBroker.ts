@@ -41,6 +41,11 @@ import {
     VideoKeyframeResult,
     createFrontierVideoKeyframe,
 } from './VideoKeyframeProvider.js';
+import {
+    VideoKeyframeReference,
+    countVideoKeyframeReferenceRequirements,
+    resolveVideoKeyframeReferences,
+} from './VideoKeyframeReferences.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
@@ -68,7 +73,14 @@ interface BrokerOptions {
     heartbeatTimeoutMs?: number;
     preplanQueuedJobs?: boolean;
     frontierPlanner?: typeof createFrontierVideoPlan;
-    keyframeGenerator?: (plan: Record<string, any>) => Promise<VideoKeyframeResult>;
+    keyframeGenerator?: (
+        plan: Record<string, any>,
+        references?: VideoKeyframeReference[],
+    ) => Promise<VideoKeyframeResult>;
+    keyframeReferenceResolver?: (
+        plan: Record<string, any>,
+        jobDirectory: string,
+    ) => Promise<VideoKeyframeReference[]>;
     sourceImageDownloader?: (
         descriptor: VideoSourceImageDescriptor,
         directory: string,
@@ -290,6 +302,16 @@ function normalizedMetricSpan(value: any): VideoMetricSpan {
     if (['draft', 'final'].includes(value.metadata?.quality)) metadata.quality = value.metadata.quality;
     if (['start', 'cut', 'continue', 'dissolve'].includes(value.metadata?.transition)) {
         metadata.transition = value.metadata.transition;
+    }
+    if (value.metadata?.references_requested !== undefined) {
+        metadata.references_requested = Math.round(
+            boundedNumber(value.metadata.references_requested, 0, 4, false)!,
+        );
+    }
+    if (value.metadata?.references_resolved !== undefined) {
+        metadata.references_resolved = Math.round(
+            boundedNumber(value.metadata.references_resolved, 0, 4, false)!,
+        );
     }
     return {
         source: value.source,
@@ -1555,7 +1577,39 @@ export class VideoBroker {
                 const started = Date.now();
                 let status: 'ok' | 'error' | 'skipped' = 'error';
                 try {
-                    const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(plan);
+                    const directory = resolve(this.options.resultsDir, job.public_id);
+                    mkdirSync(directory, { recursive: true });
+                    const referencesRequested = countVideoKeyframeReferenceRequirements(plan);
+                    const referenceStarted = Date.now();
+                    let referenceStatus: 'ok' | 'error' = 'ok';
+                    let references: VideoKeyframeReference[] = [];
+                    try {
+                        references = await (
+                            this.options.keyframeReferenceResolver || resolveVideoKeyframeReferences
+                        )(plan, directory);
+                    } catch (error) {
+                        referenceStatus = 'error';
+                        console.warn(`First-frame reference retrieval failed for ${job.public_id}; continuing without references.`, error);
+                    } finally {
+                        try {
+                            await this.recordMetricSpan(job.public_id, {
+                                source: 'broker',
+                                name: 'frontier_keyframe_references',
+                                duration_seconds: (Date.now() - referenceStarted) / 1000,
+                                metadata: {
+                                    status: referenceStatus,
+                                    references_requested: referencesRequested,
+                                    references_resolved: references.length,
+                                },
+                            });
+                        } catch (error) {
+                            console.warn(`Could not store first-frame reference timing for ${job.public_id}`, error);
+                        }
+                    }
+                    const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
+                        plan,
+                        references,
+                    );
                     if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
                         throw new Error('Generated first frame is empty or too large.');
                     }
@@ -1567,8 +1621,6 @@ export class VideoBroker {
                         status = 'skipped';
                         return;
                     }
-                    const directory = resolve(this.options.resultsDir, job.public_id);
-                    mkdirSync(directory, { recursive: true });
                     const extension = imageExtension(result.mimeType);
                     const temporary = join(directory, `keyframe.${extension}.part`);
                     const destination = join(directory, `keyframe.${extension}`);

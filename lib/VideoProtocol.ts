@@ -21,6 +21,8 @@ export interface VideoMetricSpan {
         mode?: 't2v' | 'i2v';
         quality?: 'draft' | 'final';
         transition?: 'start' | 'cut' | 'continue' | 'dissolve';
+        references_requested?: number;
+        references_resolved?: number;
     };
 }
 
