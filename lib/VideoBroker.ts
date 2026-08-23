@@ -101,6 +101,7 @@ interface JobRow {
     attempt: number;
     estimate_low_seconds: number;
     estimate_high_seconds: number;
+    estimate_ready: number;
     stage: string | null;
     progress: number | null;
     worker_id: string | null;
@@ -547,6 +548,7 @@ export class VideoBroker {
             attempt INTEGER NOT NULL DEFAULT 0,
             estimate_low_seconds INTEGER NOT NULL,
             estimate_high_seconds INTEGER NOT NULL,
+            estimate_ready INTEGER NOT NULL DEFAULT 0,
             stage TEXT,
             progress REAL,
             worker_id TEXT,
@@ -588,6 +590,9 @@ export class VideoBroker {
             await this.run('ALTER TABLE video_jobs ADD COLUMN runtime_seconds REAL');
             await this.run(`UPDATE video_jobs SET runtime_seconds = completed_at - started_at
                 WHERE completed_at IS NOT NULL AND started_at IS NOT NULL AND completed_at > started_at`);
+        }
+        if (!columnNames.has('estimate_ready')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN estimate_ready INTEGER NOT NULL DEFAULT 0');
         }
         for (const [name, definition] of [
             ['source_image_path', 'TEXT'],
@@ -778,6 +783,16 @@ export class VideoBroker {
                 [decodeURIComponent(userJobs[1])],
             );
             writeJson(res, 200, { jobs: await this.views(rows), state: await this.brokerState() });
+            return;
+        }
+        const prepare = /^\/v1\/jobs\/([0-9a-f-]+)\/prepare$/.exec(url.pathname);
+        if (prepare && req.method === 'POST') {
+            const job = await this.prepareInitialEstimate(prepare[1]);
+            if (!job) {
+                writeJson(res, 404, { error: 'Unknown video job.' });
+                return;
+            }
+            writeJson(res, 200, { job });
             return;
         }
         const cancel = /^\/v1\/jobs\/([0-9a-f-]+)\/cancel$/.exec(url.pathname);
@@ -979,6 +994,82 @@ export class VideoBroker {
         const low = Math.max(sparse ? 30 : 60, Math.round(percentile(0.2) * (sparse ? 0.75 : 0.9)));
         const high = Math.max(low + (sparse ? 30 : 60), Math.round(percentile(0.9) * (sparse ? 1.75 : 1.15)));
         return { low, high };
+    }
+
+    private async plannedRuntimeEstimate(
+        job: JobRow,
+        plan: Record<string, any>,
+    ): Promise<{ low: number; high: number }> {
+        const segments = Array.isArray(plan.segments) ? plan.segments : [];
+        const plannedDuration = segments.reduce(
+            (sum: number, segment: any) => sum + Math.max(0, Number(segment?.target_seconds) || 0),
+            0,
+        );
+        const segmentCount = Math.max(1, segments.length);
+        if (!(plannedDuration > 0)) return this.runtimeEstimate(job.model);
+        const usesStartFrame = Boolean(job.source_image_path || plan?.keyframe?.recommended === true);
+        const rows = await this.all<{
+            total_seconds: number;
+            output_duration_seconds: number;
+            segment_count: number;
+            source_image: number;
+        }>(
+            `SELECT total_seconds, output_duration_seconds, segment_count, source_image
+             FROM video_job_metrics
+             WHERE model = ? AND output_duration_seconds > 0 AND segment_count > 0
+             ORDER BY recorded_at DESC LIMIT 50`,
+            [job.model],
+        );
+        const predictions = rows.map(row => {
+            const durationRatio = plannedDuration / Number(row.output_duration_seconds);
+            const segmentRatio = segmentCount / Number(row.segment_count);
+            const durationFactor = 0.25 + 0.75 * durationRatio;
+            const segmentFactor = 0.85 + 0.15 * segmentRatio;
+            const sourceFactor = usesStartFrame === Boolean(row.source_image)
+                ? 1
+                : usesStartFrame ? 1.08 : 0.96;
+            const factor = Math.max(0.3, Math.min(4, durationFactor * segmentFactor * sourceFactor));
+            return Number(row.total_seconds) * factor;
+        }).filter(value => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
+        if (predictions.length) {
+            const percentile = (fraction: number) => predictions[Math.min(
+                predictions.length - 1,
+                Math.max(0, Math.round((predictions.length - 1) * fraction)),
+            )];
+            const lowFactor = predictions.length === 1 ? 0.75 : predictions.length === 2 ? 0.82 : 0.9;
+            const highFactor = predictions.length === 1 ? 1.4 : predictions.length === 2 ? 1.28 : 1.15;
+            const low = Math.max(30, Math.round(percentile(0.2) * lowFactor));
+            const high = Math.max(low + 30, Math.round(percentile(0.8) * highFactor));
+            return { low, high };
+        }
+        const legacy = await this.runtimeEstimate(job.model);
+        const durationFactor = Math.max(0.4, Math.min(2.5, 0.25 + 0.75 * (plannedDuration / 10)));
+        const segmentFactor = 1 + Math.max(0, segmentCount - 1) * 0.12;
+        return {
+            low: Math.max(30, Math.round(legacy.low * durationFactor * segmentFactor)),
+            high: Math.max(60, Math.round(legacy.high * durationFactor * segmentFactor)),
+        };
+    }
+
+    private async prepareInitialEstimate(publicId: string): Promise<VideoJobView | null> {
+        let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+        if (!job) return null;
+        if (ACTIVE_VIDEO_STATUSES.includes(job.status)) {
+            try {
+                const { plan } = await this.ensurePlan(job);
+                const estimate = await this.plannedRuntimeEstimate(job, plan);
+                await this.run(
+                    `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?,
+                     estimate_ready = 1, updated_at = ?
+                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                    [estimate.low, estimate.high, nowSeconds(), publicId],
+                );
+                job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]) || job;
+            } catch (error) {
+                console.warn(`Could not prepare initial ETA for ${publicId}`, error);
+            }
+        }
+        return (await this.views([job]))[0] || null;
     }
 
     private async refreshQueuedEstimates(model: VideoModelId): Promise<void> {
@@ -1453,6 +1544,7 @@ export class VideoBroker {
                 queue_position: projection.position,
                 estimate_low_seconds: row.estimate_low_seconds,
                 estimate_high_seconds: row.estimate_high_seconds,
+                estimate_ready: Boolean(row.estimate_ready),
                 expected_start_at: projection.start,
                 expected_finish_at: projection.finish,
                 stage: row.stage,
@@ -1624,19 +1716,25 @@ export class VideoBroker {
         if (message.type === 'event') {
             const event = String(message.event || '');
             if (event === 'plan') {
+                const estimateLow = Number(message.estimate_low_seconds) > 0
+                    ? Math.max(1, Number(message.estimate_low_seconds))
+                    : null;
+                const estimateHigh = Number(message.estimate_high_seconds) > 0
+                    ? Math.max(1, Number(message.estimate_high_seconds))
+                    : null;
                 await this.run(
                     `UPDATE video_jobs SET status = 'planning', stage = ?,
                      estimate_low_seconds = COALESCE(?, estimate_low_seconds),
                      estimate_high_seconds = COALESCE(?, estimate_high_seconds),
+                     estimate_ready = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL
+                        THEN 1 ELSE estimate_ready END,
                      updated_at = ? WHERE public_id = ?`,
                     [
                         sanitizeVideoWorkerText(message.stage, 'Planning'),
-                        Number(message.estimate_low_seconds) > 0
-                            ? Math.max(1, Number(message.estimate_low_seconds))
-                            : null,
-                        Number(message.estimate_high_seconds) > 0
-                            ? Math.max(1, Number(message.estimate_high_seconds))
-                            : null,
+                        estimateLow,
+                        estimateHigh,
+                        estimateLow,
+                        estimateHigh,
                         nowSeconds(),
                         jobId,
                     ],

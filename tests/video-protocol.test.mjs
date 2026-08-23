@@ -133,6 +133,7 @@ test('offline queue messages omit fake ETAs', () => {
         queue_position: 2,
         estimate_low_seconds: 10,
         estimate_high_seconds: 20,
+        estimate_ready: false,
         expected_start_at: null,
         expected_finish_at: null,
         stage: null,
