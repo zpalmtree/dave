@@ -28,6 +28,7 @@ import {
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
+    compileBestEffortFrontierVideoPlan,
     createFrontierVideoPlan,
     validateFrontierVideoPlanForKeyframe,
 } from '../dist/VideoFrontierPlanner.js';
@@ -89,6 +90,13 @@ test('video runtime is formatted for the delivered post', () => {
         runtime_seconds: 65.6,
         prompt: 'An anime family battle',
     }), /a1869ead.*completed in \*\*1m 6s\*\*/);
+    assert.match(completedVideoPost({
+        id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
+        model: 'minimaxfast',
+        runtime_seconds: 65.6,
+        prompt: 'An anime family battle',
+        generation_notice: 'The screenplay was truncated.',
+    }), /\*\*Note:\*\* The screenplay was truncated\./);
 });
 
 test('failed video post is a standalone sanitized reply', () => {
@@ -403,6 +411,57 @@ test('frontier planner repairs a complete screenplay that violates its dialogue 
     }
     assert.equal(requests.length, 3);
     assert.match(requests[2].input[1].content[0].text, /omitted dialogue required/);
+});
+
+test('frontier planner compiles the second invalid completed screenplay instead of failing', async () => {
+    const replies = [
+        { status: 'completed', output_text: JSON.stringify(frontierAnalysis('generated')), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse(replies.shift());
+    try {
+        const result = await createFrontierVideoPlan(
+            'A cat and dog discuss cheese.', 'minimaxfast', 'requester-best-effort', undefined,
+        );
+        assert.equal(result.planner_metrics.screenplay_attempts, 2);
+        assert.equal(result.planner_metrics.best_effort_compiled, true);
+        assert.match(result.generation_notice, /rendered best-effort/);
+        assert.ok(result.segments[0].shots[0].dialogue[0].text);
+        assert.doesNotThrow(
+            () => validateFrontierVideoPlanForKeyframe(
+                result, 'minimaxfast', 'A cat and dog discuss cheese.',
+            ),
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('best-effort compiler truncates automatic screenplays to 30 seconds', () => {
+    const plan = frontierPlan();
+    plan.segments = [0, 1, 2].map(index => ({
+        ...structuredClone(plan.segments[0]),
+        title: `Beat ${index + 1}`,
+        transition: index === 0 ? 'start' : 'cut',
+        target_seconds: 15,
+        shots: [{ ...structuredClone(plan.segments[0].shots[0]), duration_seconds: 15 }],
+    }));
+    const compiled = compileBestEffortFrontierVideoPlan(
+        plan,
+        frontierAnalysis(),
+        'A dog runs through three stages.',
+        'minimaxfast',
+    );
+    assert.equal(compiled.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 30);
+    assert.equal(compiled.segments.length, 2);
+    assert.match(compiled.generation_notice, /30-second generation budget.*truncated/);
+    assert.doesNotThrow(
+        () => validateFrontierVideoPlanForKeyframe(
+            compiled, 'minimaxfast', 'A dog runs through three stages.',
+        ),
+    );
 });
 
 test('broker validation catches long H3 dialogue and literal omissions before desktop dispatch', () => {

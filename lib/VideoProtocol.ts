@@ -174,6 +174,7 @@ export interface VideoJobView {
     model: VideoModelId;
     prompt: string;
     planned_intent?: string | null;
+    generation_notice?: string | null;
     requester_id: string;
     origin_bot_id: string;
     channel_id: string;

@@ -274,6 +274,10 @@ const NUMBER_WORDS = [
     'eighteen', 'nineteen', 'twenty',
 ];
 
+const AUTO_TOTAL_LIMIT_SECONDS = 30;
+const SAFE_NONSPEECH_AUDIO = 'Natural environmental ambience and synchronized action sound effects.';
+const SPEECH_IN_AUDIO = /\b(?:voice|speaker|character|person|man|woman)\s+(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|announces?|narrates?|sings?)\b|\b(?:dialogue|speech|spoken words?|vocals?)\s*:|\b(?:lip[- ]?sync|mouth movement)\b/i;
+
 function videoPlanSchemaForMaximum(maximum: number): Record<string, unknown> {
     const schema: any = JSON.parse(JSON.stringify(VIDEO_PLAN_SCHEMA));
     schema.properties.segments.items.properties.target_seconds.maximum = maximum;
@@ -318,6 +322,255 @@ function dialogueFloorSeconds(segment: any): number {
         + (line.match(/[.!?]|\.{3}/g) || []).length * 0.45, 0);
     const turnPause = Math.max(0, lines.length - 1) * 0.4;
     return words / (140 / 60) + punctuationPause + turnPause + 1.25;
+}
+
+function planAutomaticFloor(plan: any, model: VideoModelId): number {
+    const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
+    const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
+    return (plan?.segments || []).reduce((total: number, segment: any) => total + Math.max(
+        minimum,
+        Math.min(maximum, Number(segment?.target_seconds) || 0),
+        dialogueFloorSeconds(segment),
+        Math.min((segment?.shots?.length || 1) * 1.5, maximum),
+    ), 0);
+}
+
+function truncateDialogueToSeconds(shots: any[], maximumSeconds: number): boolean {
+    let changed = false;
+    while (dialogueFloorSeconds({ shots }) > maximumSeconds + 1e-6) {
+        let lastShot: any;
+        let lastLine: any;
+        for (let shotIndex = shots.length - 1; shotIndex >= 0 && !lastLine; shotIndex -= 1) {
+            const dialogue = shots[shotIndex]?.dialogue;
+            if (Array.isArray(dialogue) && dialogue.length) {
+                lastShot = shots[shotIndex];
+                lastLine = dialogue[dialogue.length - 1];
+            }
+        }
+        if (!lastLine || !lastShot) break;
+        const words = String(lastLine.text || '').trim().split(/\s+/).filter(Boolean);
+        if (words.length <= 1) {
+            lastShot.dialogue.pop();
+        } else {
+            lastLine.text = words.slice(0, -1).join(' ');
+        }
+        changed = true;
+    }
+    return changed;
+}
+
+/**
+ * Turn a rejected but content-bearing screenplay into a generator-safe plan.
+ * This is deliberately deterministic: it preserves the candidate's earliest
+ * usable direction, supplies only missing structural defaults, and truncates
+ * instead of making a third expensive model call or failing the job.
+ */
+export function compileBestEffortFrontierVideoPlan(
+    candidate: any,
+    promptAnalysis: any,
+    rawPrompt: string,
+    model: VideoModelId,
+    validationFailure = '',
+): Record<string, any> {
+    const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
+    const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
+    const source = candidate && typeof candidate === 'object' ? candidate : {};
+    const rawSegments = Array.isArray(source.segments) && source.segments.length
+        ? source.segments
+        : [{
+            title: 'Best-effort request',
+            transition: 'start',
+            target_seconds: Math.min(7, maximum),
+            music: 'N/A',
+            shots: [{
+                duration_seconds: Math.min(7, maximum),
+                visual: rawPrompt,
+                camera: 'Use camera language appropriate to the requested presentation.',
+                audio: SAFE_NONSPEECH_AUDIO,
+                dialogue: [],
+            }],
+        }];
+    let structurallyAdjusted = rawSegments !== source.segments || rawSegments.length > 8;
+    let durationTruncated = false;
+    const segments: any[] = [];
+    let remaining = AUTO_TOTAL_LIMIT_SECONDS;
+
+    for (const [segmentIndex, originalValue] of rawSegments.slice(0, 8).entries()) {
+        if (remaining < minimum - 1e-6) {
+            durationTruncated = true;
+            break;
+        }
+        const original = originalValue && typeof originalValue === 'object' ? originalValue : {};
+        if (original !== originalValue) structurallyAdjusted = true;
+        const rawShots = Array.isArray(original.shots) && original.shots.length
+            ? original.shots.slice(0, 4)
+            : [{}];
+        if (!Array.isArray(original.shots) || !original.shots.length || original.shots.length > 4) {
+            structurallyAdjusted = true;
+        }
+        const shots = rawShots.map((shotValue: any, shotIndex: number) => {
+            const shot = shotValue && typeof shotValue === 'object' ? shotValue : {};
+            if (shot !== shotValue) structurallyAdjusted = true;
+            const dialogue = (Array.isArray(shot.dialogue) ? shot.dialogue : [])
+                .filter((line: any) => line && typeof line === 'object' && String(line.text || '').trim())
+                .map((line: any, lineIndex: number) => ({
+                    speaker_id: String(line.speaker_id || `speaker-${shotIndex + 1}-${lineIndex + 1}`).trim(),
+                    language: String(line.language || 'English').trim(),
+                    delivery: String(line.delivery || 'clear natural delivery').trim(),
+                    text: String(line.text).trim(),
+                }));
+            if (!Array.isArray(shot.dialogue) || dialogue.length !== shot.dialogue.length) {
+                structurallyAdjusted = true;
+            }
+            let audio = String(shot.audio || '').trim() || SAFE_NONSPEECH_AUDIO;
+            if (dialogue.some((line: any) => audio.includes(line.text)) || SPEECH_IN_AUDIO.test(audio)) {
+                audio = SAFE_NONSPEECH_AUDIO;
+                structurallyAdjusted = true;
+            }
+            return {
+                duration_seconds: Math.max(0.5, Number(shot.duration_seconds) || 1.5),
+                visual: String(shot.visual || '').trim() || rawPrompt,
+                camera: String(shot.camera || '').trim()
+                    || 'Use camera language appropriate to the requested presentation.',
+                audio,
+                dialogue,
+            };
+        });
+
+        if (segmentIndex === 0) {
+            const contract = promptAnalysis?.dialogue_contract;
+            const requiredLines = Array.isArray(contract?.lines) ? contract.lines : [];
+            for (const line of requiredLines) {
+                const text = String(line?.text || '').trim();
+                if (text && !planPreservesDialogueLine({ segments: [{ shots }] }, text)) {
+                    shots[0].dialogue.push({
+                        speaker_id: String(line?.speaker_hint || 'speaker-1').trim() || 'speaker-1',
+                        language: 'English',
+                        delivery: 'clear natural delivery',
+                        text,
+                    });
+                    structurallyAdjusted = true;
+                }
+            }
+            if (String(contract?.mode || 'none') !== 'none'
+                && !shots.some((shot: any) => shot.dialogue.length)) {
+                const subject = (promptAnalysis?.subjects || []).map(String).filter(Boolean).join(' and ');
+                const intent = String(promptAnalysis?.resolved_intent || rawPrompt).trim();
+                shots[0].dialogue.push({
+                    speaker_id: subject || 'speaker-1',
+                    language: 'English',
+                    delivery: 'clear natural delivery',
+                    text: intent,
+                });
+                structurallyAdjusted = true;
+            }
+        }
+
+        const shotCountFloor = Math.min(shots.length * 1.5, maximum);
+        const structuralFloor = Math.max(minimum, shotCountFloor);
+        if (remaining < structuralFloor - 1e-6) {
+            durationTruncated = true;
+            break;
+        }
+        const requestedTarget = Math.max(
+            structuralFloor,
+            Number(original.target_seconds) || shots.reduce(
+                (total: number, shot: any) => total + Number(shot.duration_seconds || 0),
+                0,
+            ),
+        );
+        let target = Math.min(maximum, requestedTarget, remaining);
+        if (target + 1e-6 < requestedTarget) durationTruncated = true;
+        if (truncateDialogueToSeconds(shots, target)) durationTruncated = true;
+        const dialogueFloor = dialogueFloorSeconds({ shots });
+        target = Math.max(structuralFloor, target, dialogueFloor);
+        if (target > remaining + 1e-6) {
+            durationTruncated = true;
+            break;
+        }
+        const shotDurationTotal = shots.reduce(
+            (total: number, shot: any) => total + Number(shot.duration_seconds || 0),
+            0,
+        ) || shots.length;
+        for (const shot of shots) {
+            shot.duration_seconds = target * Number(shot.duration_seconds || 1) / shotDurationTotal;
+        }
+        segments.push({
+            title: String(original.title || `Segment ${segmentIndex + 1}`).trim(),
+            transition: segmentIndex === 0
+                ? 'start'
+                : (['continue', 'cut', 'dissolve'].includes(String(original.transition))
+                    ? String(original.transition)
+                    : 'cut'),
+            target_seconds: target,
+            music: String(original.music || 'N/A').trim() || 'N/A',
+            shots,
+        });
+        remaining -= target;
+    }
+
+    if (!segments.length) {
+        throw new Error('The rejected screenplay contained no content that could be rendered safely.');
+    }
+    if (rawSegments.length > segments.length) durationTruncated = true;
+    const actualDialogue = segments.flatMap(segment => segment.shots.flatMap((shot: any) => shot.dialogue));
+    const analysis = promptAnalysis && typeof promptAnalysis === 'object'
+        ? JSON.parse(JSON.stringify(promptAnalysis))
+        : {};
+    analysis.dialogue_contract = {
+        mode: actualDialogue.length ? 'generated' : 'none',
+        lines: actualDialogue.map((line: any) => ({
+            speaker_hint: String(line.speaker_id || 'speaker'),
+            text: String(line.text || ''),
+            verbatim: false,
+        })),
+    };
+    const notices: string[] = [];
+    if (durationTruncated) {
+        notices.push(
+            'The screenplay exceeded the 30-second generation budget and was truncated; '
+            + 'later beats or dialogue may be omitted.',
+        );
+    }
+    if (validationFailure || structurallyAdjusted) {
+        notices.push(
+            'The screenplay failed validation and was rendered best-effort; '
+            + 'some requested details may be missing.',
+        );
+    }
+    const keyframe = source.keyframe && typeof source.keyframe === 'object' ? source.keyframe : {};
+    const motion = keyframe.motion_contract && typeof keyframe.motion_contract === 'object'
+        ? keyframe.motion_contract
+        : {};
+    return {
+        intent: String(source.intent || promptAnalysis?.resolved_intent || rawPrompt).trim() || rawPrompt,
+        continuity_bible: [
+            String(source.continuity_bible || '').trim(),
+            `Original request (preserve literally): ${rawPrompt}`,
+        ].filter(Boolean).join(' '),
+        keyframe: {
+            recommended: Boolean(keyframe.recommended),
+            reason: String(keyframe.reason || 'Use a stable opening composition.').trim(),
+            prompt: String(keyframe.prompt || rawPrompt).trim(),
+            reference_requirements: Array.isArray(keyframe.reference_requirements)
+                ? keyframe.reference_requirements.slice(0, 4)
+                : [],
+            motion_contract: {
+                subject_orientation: String(motion.subject_orientation || 'Face into the opening action.').trim(),
+                gaze_direction: String(motion.gaze_direction || 'Look toward the opening action.').trim(),
+                travel_direction: String(motion.travel_direction || 'Continue in the established screen direction.').trim(),
+                camera_relation: String(motion.camera_relation || 'Keep the opening camera side and framing.').trim(),
+                first_second_action: String(motion.first_second_action || 'Continue directly from frame zero.').trim(),
+            },
+        },
+        segments,
+        prompt_analysis: analysis,
+        generation_notice: notices.join(' '),
+        generation_adjustments: {
+            best_effort: true,
+            duration_truncated: durationTruncated,
+        },
+    };
 }
 
 export function validateFrontierVideoPlanForKeyframe(
@@ -636,7 +889,7 @@ export async function createFrontierVideoPlan(
                     : 'Aspect ratio: 16:9.',
                 `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                'Choose an automatic total duration no longer than 30 seconds, unless required speech physically needs a short overrun; never omit or rush required words to satisfy the cap.',
+                'Choose an automatic total duration no longer than 30 seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.',
                 sourceImage
                     ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
                     : 'No user-supplied starting image is present.',
@@ -660,6 +913,7 @@ export async function createFrontierVideoPlan(
         const screenplayStarted = Date.now();
         let repairFailure = '';
         let repairCandidate = '';
+        let lastParsedCandidate: any = null;
         for (let screenplayAttempt = 1; screenplayAttempt <= 2; screenplayAttempt += 1) {
             const repairInput = screenplayAttempt === 1 ? [] : [{
                 role: 'user',
@@ -703,6 +957,7 @@ export async function createFrontierVideoPlan(
                 if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
                     throw new Error('GPT-5.6 Sol returned an invalid screenplay object.');
                 }
+                lastParsedCandidate = plan;
                 if (dialogueMode !== 'none' && !planHasDialogue(plan)) {
                     throw new Error('GPT-5.6 Sol omitted dialogue required by its independent prompt analysis.');
                 }
@@ -714,6 +969,32 @@ export async function createFrontierVideoPlan(
                     throw new Error('GPT-5.6 Sol rewrote or omitted dialogue protected by its independent prompt analysis.');
                 }
                 (plan as any).prompt_analysis = promptAnalysis;
+                if (planAutomaticFloor(plan, model) > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+                    const compiled = compileBestEffortFrontierVideoPlan(
+                        plan,
+                        promptAnalysis,
+                        prompt,
+                        model,
+                    );
+                    validateFrontierVideoPlanForKeyframe(compiled, model, prompt);
+                    compiled.planner_metrics = {
+                        prompt_analysis_seconds: promptAnalysisSeconds,
+                        screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
+                        screenplay_attempts: screenplayAttempt,
+                        best_effort_compiled: true,
+                    };
+                    await options.onAttempt?.({
+                        stage: 'screenplay_best_effort',
+                        attempt: 1,
+                        outcome: 'accepted',
+                        provider: 'local',
+                        model: 'deterministic-video-plan-compiler',
+                        serviceTier: 'local',
+                        durationSeconds: 0,
+                        detail: 'truncated_to_automatic_duration_budget',
+                    });
+                    return compiled;
+                }
                 validateFrontierVideoPlanForKeyframe(plan, model, prompt);
                 (plan as any).planner_metrics = {
                     prompt_analysis_seconds: promptAnalysisSeconds,
@@ -740,7 +1021,33 @@ export async function createFrontierVideoPlan(
                     durationSeconds: 0,
                     detail: repairFailure,
                 });
-                if (screenplayAttempt >= 2) throw error;
+                if (screenplayAttempt >= 2) {
+                    const compiled = compileBestEffortFrontierVideoPlan(
+                        lastParsedCandidate,
+                        promptAnalysis,
+                        prompt,
+                        model,
+                        repairFailure,
+                    );
+                    validateFrontierVideoPlanForKeyframe(compiled, model, prompt);
+                    compiled.planner_metrics = {
+                        prompt_analysis_seconds: promptAnalysisSeconds,
+                        screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
+                        screenplay_attempts: screenplayAttempt,
+                        best_effort_compiled: true,
+                    };
+                    await options.onAttempt?.({
+                        stage: 'screenplay_best_effort',
+                        attempt: 1,
+                        outcome: 'accepted',
+                        provider: 'local',
+                        model: 'deterministic-video-plan-compiler',
+                        serviceTier: 'local',
+                        durationSeconds: 0,
+                        detail: 'compiled_after_second_validation_rejection',
+                    });
+                    return compiled;
+                }
                 console.warn(`Frontier screenplay validation failed; requesting one repair: ${repairFailure}`);
             }
         }
