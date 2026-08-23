@@ -177,7 +177,7 @@ test('offline queue messages omit fake ETAs', () => {
     assert.doesNotMatch(text, /Expected (start|finish)/);
 });
 
-test('global video queue identifies requesters and splits long server queues safely', () => {
+test('global video queue identifies same-server requesters without exposing cross-server identities', () => {
     const queued = {
         id: '12345678-1234-1234-1234-123456789abc',
         model: 'minimax',
@@ -185,7 +185,7 @@ test('global video queue identifies requesters and splits long server queues saf
         requester_id: '483470443001413675',
         origin_bot_id: 'b',
         channel_id: 'c',
-        guild_id: null,
+        guild_id: 'guild-a',
         command_message_id: 'm',
         status_message_id: 's',
         status: 'queued',
@@ -211,19 +211,27 @@ test('global video queue identifies requesters and splits long server queues saf
         worker_busy: true,
         paused_until: null,
     };
-    const formatted = formatGlobalVideoQueueJob(queued);
+    const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
     assert.match(formatted, /Queue position: \*\*2\*\*/);
     assert.match(formatted, /<@483470443001413675>/);
     assert.match(formatted, /Three racers approach a neon finish line/);
+
+    const crossServer = formatGlobalVideoQueueJob({
+        ...queued,
+        requester_id: '975310864209753108',
+        guild_id: 'guild-b',
+    }, 'guild-a');
+    assert.match(crossServer, /requester hidden/);
+    assert.doesNotMatch(crossServer, /975310864209753108/);
 
     const chunks = globalVideoQueueChunks(Array.from({ length: 12 }, (_, index) => ({
         ...queued,
         id: `${String(index).padStart(8, '0')}-1234-1234-1234-123456789abc`,
         prompt: `Server-wide queued prompt ${index} ${'x'.repeat(90)}`,
-    })), 700);
+    })), 'guild-a', 700);
     assert.ok(chunks.length > 1);
     assert.ok(chunks.every(chunk => chunk.length <= 700));
-    assert.deepEqual(globalVideoQueueChunks([]), ['The server video queue is empty.']);
+    assert.deepEqual(globalVideoQueueChunks([], 'guild-a'), ['The server video queue is empty.']);
 });
 
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
