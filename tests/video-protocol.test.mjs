@@ -43,15 +43,16 @@ test('video pause durations default to six hours and enforce safe limits', () =>
 });
 
 test('local video commands are declared as Discord-only', () => {
-    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft', 'videoqueue', 'videogen', 'videostats']) {
+    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'videoqueue', 'videogen', 'videostats']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command, `${name} command is present`);
         assert.equal(command.discordOnly, true);
     }
+    assert.equal(Commands.some(candidate => candidate.aliases.includes('minimaxdraft')), false);
 });
 
 test('test channel video commands have one silent Dave responder', () => {
-    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft', 'videoqueue', 'videogen', 'videostats']) {
+    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'videoqueue', 'videogen', 'videostats']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command.commandGates.includes(singleVideoResponderGate));
     }
