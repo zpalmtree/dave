@@ -30,6 +30,15 @@ export interface TokenSpendUsage {
     costOverride?: number;
 }
 
+export interface ExternalTokenSpendMetadata {
+    eventId: string;
+    sourceJobId: string;
+    stage: string;
+    attempt: number;
+    serviceTier: string | null;
+    outcome: string;
+}
+
 /* USD prices. Token prices are per million tokens; images, web searches, and
  * audio minutes are priced per unit. Prices are current as of August 2026.
  * Models missing from this table still have their usage recorded at $0. */
@@ -187,13 +196,24 @@ export function recordTokenSpend(usage: TokenSpendUsage): void {
         return;
     }
 
-    insertQuery(
+    void insertTokenSpend(context, usage).catch((err) => {
+        console.warn(`[TokenSpend] Failed to record usage: ${(err as any).toString()}`);
+    });
+}
+
+async function insertTokenSpend(
+    context: TokenSpendContext,
+    usage: TokenSpendUsage,
+    external?: ExternalTokenSpendMetadata,
+): Promise<void> {
+    if (!tokenSpendDb) throw new Error('Token-spend database is not initialized.');
+    await insertQuery(
         `INSERT INTO token_usage
             (user_id, channel_id, guild_id, command, model, input_tokens,
-             output_tokens, cache_read_tokens, cache_write_tokens, images,
-             cost, timestamp)
+             output_tokens, cache_read_tokens, cache_write_tokens, images, web_searches,
+             cost, external_event_id, source_job_id, stage, attempt, service_tier, outcome, timestamp)
         VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         tokenSpendDb,
         [
             context.userId,
@@ -206,10 +226,31 @@ export function recordTokenSpend(usage: TokenSpendUsage): void {
             usage.cacheReadTokens ?? 0,
             usage.cacheWriteTokens ?? 0,
             usage.images ?? 0,
+            usage.webSearches ?? 0,
             estimateTokenSpendCost(usage),
+            external?.eventId ?? null,
+            external?.sourceJobId ?? null,
+            external?.stage ?? null,
+            external?.attempt ?? null,
+            external?.serviceTier ?? null,
+            external?.outcome ?? null,
             moment.utc().format('YYYY-MM-DD HH:mm:ss'),
         ],
-    ).catch((err) => {
-        console.warn(`[TokenSpend] Failed to record usage: ${(err as any).toString()}`);
-    });
+    );
+}
+
+export async function recordExternalTokenSpend(
+    context: TokenSpendContext,
+    usage: TokenSpendUsage,
+    metadata: ExternalTokenSpendMetadata,
+): Promise<void> {
+    if (!tokenSpendDb) throw new Error('Token-spend database is not initialized.');
+    try {
+        await insertTokenSpend(context, usage, metadata);
+    } catch (error: any) {
+        if (/UNIQUE constraint failed: token_usage\.external_event_id/.test(String(error?.message || error))) {
+            return;
+        }
+        throw error;
+    }
 }

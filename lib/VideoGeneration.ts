@@ -16,6 +16,8 @@ import {
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
 import { config } from './Config.js';
+import { recordExternalTokenSpend } from './TokenSpend.js';
+import { VideoUsageEvent } from './VideoUsage.js';
 
 interface BrokerState {
     worker_online: boolean;
@@ -23,7 +25,14 @@ interface BrokerState {
     worker_id: string | null;
     current_job: string | null;
     paused_until: number | null;
+    dispatch_paused?: boolean;
+    preparation_busy?: boolean;
+    active_jobs?: number;
     queued: number;
+}
+
+interface UsageEventsResponse {
+    events: VideoUsageEvent[];
 }
 
 interface JobsResponse {
@@ -224,11 +233,11 @@ export function formatVideoJob(job: VideoJobView): string {
         const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)}`;
         if (!job.worker_online) return `${head}\n${position} Desktop worker is offline; ETA will appear after it reconnects.`;
-        if (!job.estimate_ready) return `${head}\n${position} Planning the screenplay; ETA will appear when its duration and segments are known.`;
+        if (!job.estimate_ready) return `${head}\n**Accepted and processing.** ${position} Screenplay planning is in progress; the ETA is being calculated from its duration and scene count.`;
         const timing = job.expected_start_at && job.expected_finish_at
             ? ` Expected start ${formatDiscordDateAndRelative(job.expected_start_at)}; expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
-        return `${head}\n${position}${timing}`;
+        return `${head}\n**Accepted and processing.** ${position}${timing}`;
     }
     if (job.status === 'running_disconnected') {
         return `${head}\nThe desktop connection was lost during generation. The job is preserved and will resume or retry after reconnecting.`;
@@ -238,7 +247,10 @@ export function formatVideoJob(job: VideoJobView): string {
         const timing = job.estimate_ready && job.worker_online && !job.paused_until && job.expected_finish_at
             ? ` Expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
-        return `${head}\n${sentence(`${stage}${percentage(job.progress)}`)}${timing}${pauseText(job.paused_until)}`;
+        const etaPending = !timing && !job.paused_until
+            ? ' ETA is still being calculated.'
+            : '';
+        return `${head}\n**Processing:** ${sentence(`${stage}${percentage(job.progress)}`)}${timing}${etaPending}${pauseText(job.paused_until)}`;
     }
     if (job.status === 'ready') return `${head}\nGeneration complete; delivering the video…`;
     if (job.status === 'delivered') return `${head}\nDelivered.`;
@@ -419,6 +431,7 @@ class VideoGenerationService {
         if (!settings.botToken) return;
         this.polling = true;
         try {
+            await syncVideoUsageForBot(this.client.user.id);
             const response = await brokerRequest<JobsResponse>(
                 `/v1/bots/${encodeURIComponent(this.client.user.id)}/jobs`,
             );
@@ -429,6 +442,7 @@ class VideoGenerationService {
                     console.warn(`[Video] Could not update ${job.id}: ${String(error)}`);
                 }
             }
+            await syncVideoUsageForBot(this.client.user.id);
         } catch (error) {
             console.warn(`[Video] Broker poll failed: ${String(error)}`);
         } finally {
@@ -438,6 +452,67 @@ class VideoGenerationService {
 }
 
 const services = new Map<string, VideoGenerationService>();
+const usageSyncs = new Map<string, Promise<void>>();
+
+export async function syncVideoUsageForBot(botId: string): Promise<void> {
+    const active = usageSyncs.get(botId);
+    if (active) return active;
+    const syncing = (async () => {
+        try {
+            while (true) {
+                const response = await brokerRequest<UsageEventsResponse>(
+                    `/v1/bots/${encodeURIComponent(botId)}/usage-events?limit=100`,
+                );
+                if (!response.events.length) return;
+                const imported: string[] = [];
+                for (const event of response.events) {
+                    try {
+                        await recordExternalTokenSpend({
+                            userId: event.user_id,
+                            channelId: event.channel_id,
+                            guildId: event.guild_id,
+                            command: event.command,
+                        }, {
+                            model: event.model,
+                            inputTokens: event.input_tokens,
+                            outputTokens: event.output_tokens,
+                            cacheReadTokens: event.cache_read_tokens,
+                            cacheWriteTokens: event.cache_write_tokens,
+                            images: event.images,
+                            webSearches: event.web_searches,
+                            costOverride: event.cost,
+                        }, {
+                            eventId: event.event_id,
+                            sourceJobId: event.job_id,
+                            stage: event.stage,
+                            attempt: event.attempt,
+                            serviceTier: event.service_tier,
+                            outcome: event.outcome,
+                        });
+                        imported.push(event.event_id);
+                    } catch (error) {
+                        console.warn(`[Video] Could not import usage event ${event.event_id}: ${String(error)}`);
+                        break;
+                    }
+                }
+                if (!imported.length) return;
+                await brokerRequest(`/v1/bots/${encodeURIComponent(botId)}/usage-events/ack`, {
+                    method: 'POST',
+                    body: JSON.stringify({ event_ids: imported }),
+                });
+                if (response.events.length < 100 || imported.length < response.events.length) return;
+            }
+        } catch (error) {
+            console.warn(`[Video] Usage sync failed for bot ${botId}: ${String(error)}`);
+        }
+    })();
+    usageSyncs.set(botId, syncing);
+    try {
+        await syncing;
+    } finally {
+        if (usageSyncs.get(botId) === syncing) usageSyncs.delete(botId);
+    }
+}
 
 export function startVideoGenerationService(client: Client): void {
     if (!client.user) return;
@@ -519,7 +594,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     const speedLabel = model.endsWith('fast') || model.endsWith('draft')
         ? 'fast-preview'
         : 'maximum-quality';
-    const pending = await msg.reply(`Submitting a ${speedLabel} ${VIDEO_MODELS[model].displayName} video…`);
+    const pending = await msg.reply(`**Processing your video request now.** Submitting ${VIDEO_MODELS[model].displayName} (${speedLabel}); queue position and ETA calculation will appear here next.`);
     try {
         const response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
             method: 'POST',
@@ -536,6 +611,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
             }),
         }, 45_000);
         let job = response.job;
+        await pending.edit({ content: `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job))}` });
         try {
             const prepared = await brokerRequest<{ job: VideoJobView }>(
                 `/v1/jobs/${job.id}/prepare`,
@@ -570,7 +646,10 @@ export async function handleMinimaxFastVideo(msg: Message, prompt: string): Prom
 }
 
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
-    const response = await brokerRequest<JobsResponse>('/v1/queue');
+    const guildId = msg.guild?.id || '';
+    const response = await brokerRequest<JobsResponse>(
+        `/v1/queue?guild_id=${encodeURIComponent(guildId)}`,
+    );
     const [action, requestedId] = args.trim().split(/\s+/, 2);
     if (action?.toLowerCase() === 'cancel') {
         if (!requestedId) {

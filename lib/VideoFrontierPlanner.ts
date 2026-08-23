@@ -2,6 +2,12 @@ import { createHash } from 'crypto';
 
 import { config } from './Config.js';
 import { VIDEO_IMAGE_ONLY_AUTO_PROMPT, VIDEO_MODELS, VideoModelId } from './VideoProtocol.js';
+import {
+    VideoFrontierCallOptions,
+    VideoUsagePersistenceError,
+    requestedOpenAIServiceTier,
+    resolvedOpenAIServiceTier,
+} from './VideoUsage.js';
 
 export const VIDEO_PLANNER_MODEL = 'gpt-5.6-sol';
 
@@ -262,6 +268,67 @@ function planPreservesDialogueLine(plan: any, requiredLine: string): boolean {
     return Boolean(supplied && dialogue.includes(supplied));
 }
 
+export function validateFrontierVideoPlanForKeyframe(
+    plan: any,
+    model: VideoModelId,
+): void {
+    if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
+        throw new Error('GPT-5.6 Sol returned no screenplay segments.');
+    }
+    if (!String(plan.intent || '').trim() || !String(plan.continuity_bible || '').trim()) {
+        throw new Error('GPT-5.6 Sol omitted the intent or continuity bible.');
+    }
+    const keyframe = plan.keyframe;
+    if (!keyframe || typeof keyframe !== 'object'
+        || !String(keyframe.reason || '').trim() || !String(keyframe.prompt || '').trim()) {
+        throw new Error('GPT-5.6 Sol omitted the keyframe decision, reason, or prompt.');
+    }
+    const motion = keyframe.motion_contract;
+    for (const field of [
+        'subject_orientation',
+        'gaze_direction',
+        'travel_direction',
+        'camera_relation',
+        'first_second_action',
+    ]) {
+        if (!motion || !String(motion[field] || '').trim()) {
+            throw new Error(`GPT-5.6 Sol omitted keyframe motion field ${field}.`);
+        }
+    }
+    const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
+    for (const [segmentIndex, segment] of plan.segments.entries()) {
+        if (!segment || typeof segment !== 'object'
+            || !Array.isArray(segment.shots) || !segment.shots.length || segment.shots.length > 4) {
+            throw new Error(`GPT-5.6 Sol segment ${segmentIndex + 1} must contain one to four shots.`);
+        }
+        const target = Number(segment.target_seconds);
+        if (!Number.isFinite(target) || target <= 0 || target > maximum) {
+            throw new Error(`GPT-5.6 Sol segment ${segmentIndex + 1} exceeds the ${maximum}s model limit.`);
+        }
+        for (const [shotIndex, shot] of segment.shots.entries()) {
+            if (!shot || typeof shot !== 'object'
+                || !String(shot.visual || '').trim()
+                || !String(shot.camera || '').trim()
+                || !String(shot.audio || '').trim()
+                || !Array.isArray(shot.dialogue)) {
+                throw new Error(`GPT-5.6 Sol shot ${segmentIndex + 1}.${shotIndex + 1} is incomplete.`);
+            }
+            const audio = String(shot.audio);
+            for (const line of shot.dialogue) {
+                if (!line || typeof line !== 'object' || !String(line.text || '').trim()) {
+                    throw new Error(`GPT-5.6 Sol shot ${segmentIndex + 1}.${shotIndex + 1} has invalid dialogue.`);
+                }
+                if (audio.includes(String(line.text).trim())) {
+                    throw new Error(`GPT-5.6 Sol repeated dialogue in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
+                }
+            }
+            if (/\b(?:voice|speaker|character|person|man|woman)\s+(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|announces?|narrates?|sings?)\b|\b(?:dialogue|speech|spoken words?|vocals?)\s*:|\b(?:lip[- ]?sync|mouth movement)\b/i.test(audio)) {
+                throw new Error(`GPT-5.6 Sol put speech direction in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
+            }
+        }
+    }
+}
+
 export interface VideoPlanSourceImage {
     mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
     data: Buffer;
@@ -282,12 +349,92 @@ function extractOutputText(response: any): string {
     throw new Error(response?.error?.message || 'GPT-5.6 Sol returned no screenplay.');
 }
 
+function transientOpenAIStatus(status: number): boolean {
+    return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+async function requestSolResponse(
+    payload: Record<string, any>,
+    signal: AbortSignal,
+    stage: string,
+    options: VideoFrontierCallOptions,
+): Promise<any> {
+    const requestedTier = requestedOpenAIServiceTier(options.serviceTier);
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const started = Date.now();
+        let outcome: 'success' | 'error' = 'error';
+        let serviceTier = requestedTier || 'default';
+        let detail: string | undefined;
+        let retryable = true;
+        try {
+            const response = await fetch('https://api.openai.com/v1/responses', {
+                method: 'POST',
+                signal,
+                headers: {
+                    authorization: `Bearer ${config.openaiApiKey}`,
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({
+                    ...payload,
+                    ...(requestedTier ? { service_tier: requestedTier } : {}),
+                }),
+            });
+            const body: any = await response.json();
+            serviceTier = resolvedOpenAIServiceTier(body, options.serviceTier);
+            const usage = body?.usage;
+            if (usage) {
+                const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
+                await options.onUsage?.({
+                    stage,
+                    attempt,
+                    outcome: response.ok ? 'success' : 'error',
+                    provider: 'openai',
+                    model: String(body.model || VIDEO_PLANNER_MODEL),
+                    serviceTier,
+                    inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
+                    outputTokens: Number(usage.output_tokens || 0),
+                    cacheReadTokens: cached,
+                });
+            }
+            if (!response.ok) {
+                detail = body?.error?.message || `OpenAI returned HTTP ${response.status}.`;
+                const error = new Error(detail);
+                lastError = error;
+                retryable = transientOpenAIStatus(response.status);
+                if (attempt < 2 && retryable) continue;
+                throw error;
+            }
+            outcome = 'success';
+            return body;
+        } catch (error) {
+            lastError = error;
+            detail = error instanceof Error ? error.message : String(error);
+            if (error instanceof VideoUsagePersistenceError) throw error;
+            if (signal.aborted || !retryable || attempt >= 2) throw error;
+        } finally {
+            await options.onAttempt?.({
+                stage,
+                attempt,
+                outcome,
+                provider: 'openai',
+                model: VIDEO_PLANNER_MODEL,
+                serviceTier,
+                durationSeconds: (Date.now() - started) / 1000,
+                detail,
+            });
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error('OpenAI request failed.');
+}
+
 async function analyzePromptWithSol(
     prompt: string,
     model: VideoModelId,
     safetyIdentifier: string,
     sourceImage: VideoPlanSourceImage | undefined,
     signal: AbortSignal,
+    options: VideoFrontierCallOptions,
 ): Promise<Record<string, any>> {
     const imageOnly = Boolean(sourceImage && prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT);
     const content: any[] = [{
@@ -309,36 +456,24 @@ async function analyzePromptWithSol(
             detail: 'high',
         });
     }
-    const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        signal,
-        headers: {
-            authorization: `Bearer ${config.openaiApiKey}`,
-            'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-            model: VIDEO_PLANNER_MODEL,
-            reasoning: { effort: 'high' },
-            instructions: VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
-            input: [{ role: 'user', content }],
-            text: {
-                verbosity: 'low',
-                format: {
-                    type: 'json_schema',
-                    name: 'local_video_prompt_analysis',
-                    strict: true,
-                    schema: VIDEO_PROMPT_ANALYSIS_SCHEMA,
-                },
+    const body = await requestSolResponse({
+        model: VIDEO_PLANNER_MODEL,
+        reasoning: { effort: 'high' },
+        instructions: VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
+        input: [{ role: 'user', content }],
+        text: {
+            verbosity: 'low',
+            format: {
+                type: 'json_schema',
+                name: 'local_video_prompt_analysis',
+                strict: true,
+                schema: VIDEO_PROMPT_ANALYSIS_SCHEMA,
             },
-            max_output_tokens: 5000,
-            safety_identifier: safetyIdentifier,
-            store: false,
-        }),
-    });
-    const body: any = await response.json();
-    if (!response.ok) {
-        throw new Error(body?.error?.message || `OpenAI prompt analysis returned HTTP ${response.status}.`);
-    }
+        },
+        max_output_tokens: 5000,
+        safety_identifier: safetyIdentifier,
+        store: false,
+    }, signal, 'prompt_analysis', options);
     const analysis = JSON.parse(extractOutputText(body));
     if (!analysis || typeof analysis !== 'object'
         || !analysis.dialogue_contract || !Array.isArray(analysis.dialogue_contract.lines)) {
@@ -358,6 +493,7 @@ export async function createFrontierVideoPlan(
     model: VideoModelId,
     requesterId: string,
     sourceImage?: VideoPlanSourceImage,
+    options: VideoFrontierCallOptions = {},
 ): Promise<Record<string, unknown>> {
     const definition = VIDEO_MODELS[model];
     const isH3 = definition.generatorModel === 'h3';
@@ -375,6 +511,7 @@ export async function createFrontierVideoPlan(
             safetyIdentifier,
             sourceImage,
             controller.signal,
+            options,
         );
         const promptAnalysisSeconds = (Date.now() - analysisStarted) / 1000;
         const dialogueMode = String(promptAnalysis.dialogue_contract?.mode || 'none');
@@ -408,39 +545,27 @@ export async function createFrontierVideoPlan(
             });
         }
         const screenplayStarted = Date.now();
-        const response = await fetch('https://api.openai.com/v1/responses', {
-            method: 'POST',
-            signal: controller.signal,
-            headers: {
-                authorization: `Bearer ${config.openaiApiKey}`,
-                'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: VIDEO_PLANNER_MODEL,
-                reasoning: { effort: 'high' },
-                instructions: VIDEO_PLANNER_INSTRUCTIONS,
-                input: [{
-                    role: 'user',
-                    content,
-                }],
-                text: {
-                    verbosity: 'low',
-                    format: {
-                        type: 'json_schema',
-                        name: 'local_video_screenplay',
-                        strict: true,
-                        schema: VIDEO_PLAN_SCHEMA,
-                    },
+        const body = await requestSolResponse({
+            model: VIDEO_PLANNER_MODEL,
+            reasoning: { effort: 'high' },
+            instructions: VIDEO_PLANNER_INSTRUCTIONS,
+            input: [{
+                role: 'user',
+                content,
+            }],
+            text: {
+                verbosity: 'low',
+                format: {
+                    type: 'json_schema',
+                    name: 'local_video_screenplay',
+                    strict: true,
+                    schema: VIDEO_PLAN_SCHEMA,
                 },
-                max_output_tokens: 8000,
-                safety_identifier: safetyIdentifier,
-                store: false,
-            }),
-        });
-        const body: any = await response.json();
-        if (!response.ok) {
-            throw new Error(body?.error?.message || `OpenAI returned HTTP ${response.status}.`);
-        }
+            },
+            max_output_tokens: 8000,
+            safety_identifier: safetyIdentifier,
+            store: false,
+        }, controller.signal, 'screenplay', options);
         const plan = JSON.parse(extractOutputText(body));
         if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
             throw new Error('GPT-5.6 Sol returned an invalid screenplay object.');
@@ -467,6 +592,7 @@ export async function createFrontierVideoPlan(
                 + `${Number(usage.output_tokens || 0)} output tokens`,
             );
         }
+        validateFrontierVideoPlanForKeyframe(plan, model);
         return plan;
     } finally {
         clearTimeout(timeout);
