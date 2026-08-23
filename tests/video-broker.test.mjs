@@ -223,12 +223,34 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         });
         assert.equal(prepared.status, 200);
         assert.equal(prepared.body.job.estimate_ready, true);
-        assert.equal(prepared.body.job.estimate_low_seconds, 95);
-        assert.equal(prepared.body.job.estimate_high_seconds, 178);
+        assert.equal(prepared.body.job.estimate_low_seconds, 57);
+        assert.equal(prepared.body.job.estimate_high_seconds, 197);
+        assert.equal(prepared.body.job.initial_estimate_low_seconds, 57);
+        assert.equal(prepared.body.job.initial_estimate_high_seconds, 197);
+        assert.ok(prepared.body.job.initial_estimate_recorded_at > 0);
         assert.equal(prepared.body.job.planned_intent, 'A measured two-part test.');
         assert.equal(
             prepared.body.job.expected_finish_at - prepared.body.job.expected_start_at,
-            137,
+            127,
+        );
+        const otherRequester = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxdraft',
+                prompt: 'Another requester queue test',
+                requester_id: 'runtime-user-3',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'runtime-message-3',
+                status_message_id: 'runtime-status-3',
+            }),
+        });
+        assert.equal(otherRequester.status, 201);
+        const queue = await botFetch('/v1/queue');
+        assert.equal(queue.status, 200);
+        assert.deepEqual(
+            new Set(queue.body.jobs.map(job => job.requester_id)),
+            new Set(['runtime-user-2', 'runtime-user-3']),
         );
     } finally {
         if (socket) socket.close();

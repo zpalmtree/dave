@@ -246,6 +246,30 @@ export function formatVideoJob(job: VideoJobView): string {
     return `${head}\nFailed: ${sanitizeVideoWorkerText(job.error, 'Unknown worker error.', 1800)}`;
 }
 
+export function formatGlobalVideoQueueJob(job: VideoJobView): string {
+    const [head, ...details] = formatVideoJob(job).split('\n');
+    const requester = /^\d+$/.test(job.requester_id) ? `<@${job.requester_id}>` : 'unknown requester';
+    return `${head} · ${requester}\n${details.join('\n')}\n> ${truncatePrompt(videoJobDirection(job), 100)}`;
+}
+
+export function globalVideoQueueChunks(jobs: VideoJobView[], limit = 1900): string[] {
+    if (!jobs.length) return ['The server video queue is empty.'];
+    const header = `**Server video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}**`;
+    const chunks: string[] = [];
+    let current = header;
+    for (const job of jobs) {
+        const block = formatGlobalVideoQueueJob(job);
+        if (`${current}\n\n${block}`.length > limit && current !== header) {
+            chunks.push(current);
+            current = `${header} (continued)\n\n${block}`;
+        } else {
+            current += `\n\n${block}`;
+        }
+    }
+    chunks.push(current);
+    return chunks;
+}
+
 class VideoGenerationService {
     private timer: NodeJS.Timeout | null = null;
     private polling = false;
@@ -543,7 +567,7 @@ export async function handleMinimaxFastVideo(msg: Message, prompt: string): Prom
 }
 
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
-    const response = await brokerRequest<JobsResponse>(`/v1/users/${encodeURIComponent(msg.author.id)}/jobs`);
+    const response = await brokerRequest<JobsResponse>('/v1/queue');
     const [action, requestedId] = args.trim().split(/\s+/, 2);
     if (action?.toLowerCase() === 'cancel') {
         if (!requestedId) {
@@ -564,10 +588,20 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
     }
     const unfinished = response.jobs.filter(job => !['delivered', 'failed', 'cancelled'].includes(job.status));
     if (!unfinished.length) {
-        await msg.reply(`You have no unfinished video jobs.${pauseText(response.state.paused_until)}`);
+        await msg.reply(`The server video queue is empty.${pauseText(response.state.paused_until)}`);
         return;
     }
-    await msg.reply(unfinished.map(job => `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job), 100)}`).join('\n\n'));
+    const chunks = globalVideoQueueChunks(unfinished);
+    await msg.reply({
+        content: chunks[0],
+        allowedMentions: { parse: [], repliedUser: false },
+    });
+    for (const chunk of chunks.slice(1)) {
+        await msg.reply({
+            content: chunk,
+            allowedMentions: { parse: [], repliedUser: false },
+        });
+    }
 }
 
 export async function handleVideoAdmin(msg: Message, args: string): Promise<void> {

@@ -102,6 +102,9 @@ interface JobRow {
     estimate_low_seconds: number;
     estimate_high_seconds: number;
     estimate_ready: number;
+    initial_estimate_low_seconds: number | null;
+    initial_estimate_high_seconds: number | null;
+    initial_estimate_recorded_at: number | null;
     stage: string | null;
     progress: number | null;
     worker_id: string | null;
@@ -561,6 +564,9 @@ export class VideoBroker {
             estimate_low_seconds INTEGER NOT NULL,
             estimate_high_seconds INTEGER NOT NULL,
             estimate_ready INTEGER NOT NULL DEFAULT 0,
+            initial_estimate_low_seconds INTEGER,
+            initial_estimate_high_seconds INTEGER,
+            initial_estimate_recorded_at INTEGER,
             stage TEXT,
             progress REAL,
             worker_id TEXT,
@@ -605,6 +611,15 @@ export class VideoBroker {
         }
         if (!columnNames.has('estimate_ready')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN estimate_ready INTEGER NOT NULL DEFAULT 0');
+        }
+        for (const name of [
+            'initial_estimate_low_seconds',
+            'initial_estimate_high_seconds',
+            'initial_estimate_recorded_at',
+        ]) {
+            if (!columnNames.has(name)) {
+                await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} INTEGER`);
+            }
         }
         for (const [name, definition] of [
             ['source_image_path', 'TEXT'],
@@ -793,6 +808,15 @@ export class VideoBroker {
             const rows = await this.all<JobRow>(
                 'SELECT * FROM video_jobs WHERE requester_id = ? ORDER BY id DESC LIMIT 10',
                 [decodeURIComponent(userJobs[1])],
+            );
+            writeJson(res, 200, { jobs: await this.views(rows), state: await this.brokerState() });
+            return;
+        }
+        if (url.pathname === '/v1/queue' && req.method === 'GET') {
+            const rows = await this.all<JobRow>(
+                `SELECT * FROM video_jobs
+                 WHERE status IN (${ACTIVE_SQL}) OR status = 'ready'
+                 ORDER BY CASE WHEN status = 'queued' THEN 1 ELSE 0 END, id ASC`,
             );
             writeJson(res, 200, { jobs: await this.views(rows), state: await this.brokerState() });
             return;
@@ -1048,10 +1072,18 @@ export class VideoBroker {
                 predictions.length - 1,
                 Math.max(0, Math.round((predictions.length - 1) * fraction)),
             )];
-            const lowFactor = predictions.length === 1 ? 0.75 : predictions.length === 2 ? 0.82 : 0.9;
-            const highFactor = predictions.length === 1 ? 1.4 : predictions.length === 2 ? 1.28 : 1.15;
-            const low = Math.max(30, Math.round(percentile(0.2) * lowFactor));
-            const high = Math.max(low + 30, Math.round(percentile(0.8) * highFactor));
+            const center = percentile(0.5);
+            let low = Math.max(30, Math.round(center * 0.45));
+            let high = Math.max(low + 30, Math.round(center * 1.55));
+            // One or two structured samples must not create a falsely precise ETA.
+            // Blend the broader model history until plan-aware evidence is mature.
+            if (predictions.length < 3) {
+                const legacy = await this.runtimeEstimate(job.model);
+                const durationFactor = Math.max(0.4, Math.min(2.5, 0.25 + 0.75 * (plannedDuration / 10)));
+                const segmentFactor = 1 + Math.max(0, segmentCount - 1) * 0.12;
+                low = Math.min(low, Math.max(30, Math.round(legacy.low * durationFactor * segmentFactor)));
+                high = Math.max(high, Math.round(legacy.high * durationFactor * segmentFactor));
+            }
             return { low, high };
         }
         const legacy = await this.runtimeEstimate(job.model);
@@ -1072,9 +1104,21 @@ export class VideoBroker {
                 const estimate = await this.plannedRuntimeEstimate(job, plan);
                 await this.run(
                     `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?,
-                     estimate_ready = 1, updated_at = ?
+                     estimate_ready = 1,
+                     initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
+                     initial_estimate_high_seconds = COALESCE(initial_estimate_high_seconds, ?),
+                     initial_estimate_recorded_at = COALESCE(initial_estimate_recorded_at, ?),
+                     updated_at = ?
                      WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
-                    [estimate.low, estimate.high, nowSeconds(), publicId],
+                    [
+                        estimate.low,
+                        estimate.high,
+                        estimate.low,
+                        estimate.high,
+                        nowSeconds(),
+                        nowSeconds(),
+                        publicId,
+                    ],
                 );
                 job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]) || job;
             } catch (error) {
@@ -1088,7 +1132,7 @@ export class VideoBroker {
         const estimate = await this.runtimeEstimate(model);
         await this.run(
             `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?, updated_at = ?
-             WHERE model = ? AND status = 'queued'`,
+             WHERE model = ? AND status = 'queued' AND estimate_ready = 0`,
             [estimate.low, estimate.high, nowSeconds(), model],
         );
     }
@@ -1577,6 +1621,9 @@ export class VideoBroker {
                 estimate_low_seconds: row.estimate_low_seconds,
                 estimate_high_seconds: row.estimate_high_seconds,
                 estimate_ready: Boolean(row.estimate_ready),
+                initial_estimate_low_seconds: row.initial_estimate_low_seconds,
+                initial_estimate_high_seconds: row.initial_estimate_high_seconds,
+                initial_estimate_recorded_at: row.initial_estimate_recorded_at,
                 expected_start_at: projection.start,
                 expected_finish_at: projection.finish,
                 stage: row.stage,
@@ -1671,7 +1718,7 @@ export class VideoBroker {
                 if (!isVideoModel(model) || !estimate) continue;
                 await this.run(
                     `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?, updated_at = ?
-                     WHERE status = 'queued' AND model = ?`,
+                     WHERE status = 'queued' AND model = ? AND estimate_ready = 0`,
                     [Math.max(1, estimate.low), Math.max(1, estimate.high), nowSeconds(), model],
                 );
             }
@@ -1760,6 +1807,10 @@ export class VideoBroker {
                      estimate_high_seconds = COALESCE(?, estimate_high_seconds),
                      estimate_ready = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL
                         THEN 1 ELSE estimate_ready END,
+                     initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
+                     initial_estimate_high_seconds = COALESCE(initial_estimate_high_seconds, ?),
+                     initial_estimate_recorded_at = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL
+                        THEN COALESCE(initial_estimate_recorded_at, ?) ELSE initial_estimate_recorded_at END,
                      updated_at = ? WHERE public_id = ?`,
                     [
                         sanitizeVideoWorkerText(message.stage, 'Planning'),
@@ -1767,6 +1818,11 @@ export class VideoBroker {
                         estimateHigh,
                         estimateLow,
                         estimateHigh,
+                        estimateLow,
+                        estimateHigh,
+                        estimateLow,
+                        estimateHigh,
+                        nowSeconds(),
                         nowSeconds(),
                         jobId,
                     ],
