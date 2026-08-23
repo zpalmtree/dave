@@ -48,6 +48,26 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         botToken: 'bot-secret',
         workerToken: 'worker-secret',
         heartbeatTimeoutMs: 5000,
+        frontierPlanner: async () => ({
+            intent: 'A measured two-part test.',
+            continuity_bible: 'Test continuity.',
+            keyframe: {
+                recommended: false,
+                reason: 'No frame needed.',
+                prompt: 'Test frame.',
+                motion_contract: {
+                    subject_orientation: 'Forward.',
+                    gaze_direction: 'Forward.',
+                    travel_direction: 'Forward.',
+                    camera_relation: 'Behind.',
+                    first_second_action: 'Move.',
+                },
+            },
+            segments: [
+                { target_seconds: 7.292, shots: [] },
+                { target_seconds: 7.292, shots: [] },
+            ],
+        }),
     });
     await broker.start();
     const base = `http://127.0.0.1:${broker.listeningPort()}`;
@@ -196,6 +216,15 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         assert.equal(learned.status, 201);
         assert.equal(learned.body.job.estimate_low_seconds, 49);
         assert.equal(learned.body.job.estimate_high_seconds, 115);
+        assert.equal(learned.body.job.estimate_ready, false);
+        const prepared = await botFetch(`/v1/jobs/${learned.body.job.id}/prepare`, {
+            method: 'POST',
+            body: '{}',
+        });
+        assert.equal(prepared.status, 200);
+        assert.equal(prepared.body.job.estimate_ready, true);
+        assert.equal(prepared.body.job.estimate_low_seconds, 95);
+        assert.equal(prepared.body.job.estimate_high_seconds, 178);
     } finally {
         if (socket) socket.close();
         await broker.stop();

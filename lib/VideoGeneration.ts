@@ -207,6 +207,7 @@ export function formatVideoJob(job: VideoJobView): string {
         const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)}`;
         if (!job.worker_online) return `${head}\n${position} Desktop worker is offline; ETA will appear after it reconnects.`;
+        if (!job.estimate_ready) return `${head}\n${position} Planning the screenplay; ETA will appear when its duration and segments are known.`;
         const timing = job.expected_start_at && job.expected_finish_at
             ? ` Expected start ${formatDiscordDateAndRelative(job.expected_start_at)}; expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
@@ -217,7 +218,7 @@ export function formatVideoJob(job: VideoJobView): string {
     }
     if (['leased', 'planning', 'running', 'uploading', 'pausing', 'cancelling'].includes(job.status)) {
         const stage = sanitizeVideoWorkerText(job.stage, job.status.replace('_', ' '));
-        const timing = job.worker_online && !job.paused_until && job.expected_finish_at
+        const timing = job.estimate_ready && job.worker_online && !job.paused_until && job.expected_finish_at
             ? ` Expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
         return `${head}\n${sentence(`${stage}${percentage(job.progress)}`)}${timing}${pauseText(job.paused_until)}`;
@@ -450,7 +451,18 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
                 source_image: sourceImage,
             }),
         }, 45_000);
-        await pending.edit({ content: `${formatVideoJob(response.job)}\n> ${truncatePrompt(prompt)}` });
+        let job = response.job;
+        try {
+            const prepared = await brokerRequest<{ job: VideoJobView }>(
+                `/v1/jobs/${job.id}/prepare`,
+                { method: 'POST', body: '{}' },
+                5 * 60 * 1000,
+            );
+            job = prepared.job;
+        } catch (error) {
+            console.warn(`[Video] Could not prepare the first ETA for ${job.id}: ${String(error)}`);
+        }
+        await pending.edit({ content: `${formatVideoJob(job)}\n> ${truncatePrompt(prompt)}` });
         await services.get(msg.client.user.id)?.refresh();
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
