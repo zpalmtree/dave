@@ -187,7 +187,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleVideoQueue,
-            description: 'Show or cancel your queued local video jobs',
+            description: 'Show the full server video queue or cancel one of your jobs',
             examples: [
                 { value: 'videoqueue' },
                 { value: 'videoqueue cancel 12ab34cd' },

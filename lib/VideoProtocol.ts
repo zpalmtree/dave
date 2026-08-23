@@ -169,6 +169,9 @@ export interface VideoJobView {
     estimate_low_seconds: number;
     estimate_high_seconds: number;
     estimate_ready: boolean;
+    initial_estimate_low_seconds?: number | null;
+    initial_estimate_high_seconds?: number | null;
+    initial_estimate_recorded_at?: number | null;
     expected_start_at: number | null;
     expected_finish_at: number | null;
     stage: string | null;

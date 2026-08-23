@@ -4,7 +4,9 @@ import test from 'node:test';
 import { Commands } from '../dist/CommandDeclarations.js';
 import {
     formatVideoJob,
+    formatGlobalVideoQueueJob,
     formatVideoRuntime,
+    globalVideoQueueChunks,
     completedVideoPost,
     failedVideoPost,
     singleVideoResponderGate,
@@ -175,6 +177,55 @@ test('offline queue messages omit fake ETAs', () => {
     assert.doesNotMatch(text, /Expected (start|finish)/);
 });
 
+test('global video queue identifies requesters and splits long server queues safely', () => {
+    const queued = {
+        id: '12345678-1234-1234-1234-123456789abc',
+        model: 'minimax',
+        prompt: 'Three racers approach a neon finish line.',
+        requester_id: '483470443001413675',
+        origin_bot_id: 'b',
+        channel_id: 'c',
+        guild_id: null,
+        command_message_id: 'm',
+        status_message_id: 's',
+        status: 'queued',
+        queue_position: 2,
+        estimate_low_seconds: 300,
+        estimate_high_seconds: 600,
+        estimate_ready: true,
+        expected_start_at: 2_000_000_000,
+        expected_finish_at: 2_000_000_450,
+        stage: null,
+        progress: null,
+        error: null,
+        result_path: null,
+        result_bytes: null,
+        has_source_image: false,
+        created_at: 1,
+        updated_at: 1,
+        started_at: null,
+        completed_at: null,
+        runtime_seconds: null,
+        delivered_at: null,
+        worker_online: true,
+        worker_busy: true,
+        paused_until: null,
+    };
+    const formatted = formatGlobalVideoQueueJob(queued);
+    assert.match(formatted, /Queue position: \*\*2\*\*/);
+    assert.match(formatted, /<@483470443001413675>/);
+    assert.match(formatted, /Three racers approach a neon finish line/);
+
+    const chunks = globalVideoQueueChunks(Array.from({ length: 12 }, (_, index) => ({
+        ...queued,
+        id: `${String(index).padStart(8, '0')}-1234-1234-1234-123456789abc`,
+        prompt: `Server-wide queued prompt ${index} ${'x'.repeat(90)}`,
+    })), 700);
+    assert.ok(chunks.length > 1);
+    assert.ok(chunks.every(chunk => chunk.length <= 700));
+    assert.deepEqual(globalVideoQueueChunks([]), ['The server video queue is empty.']);
+});
+
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
     assert.equal(VIDEO_PLANNER_MODEL, 'gpt-5.6-sol');
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /vehicle nose, visible road\/path ahead/);
@@ -188,10 +239,10 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /meme with captions/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /social-media or application screenshot/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /flat rigid artifact/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Visible text is immutable source content/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /narrative_montage/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /narrative_adaptation/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /rigid_artifact/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat visible language as quoted source material/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /first-person confession/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not sanitize, rehabilitate, moralize/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /counterfactual fidelity check/);
@@ -235,11 +286,25 @@ test('frontier prompt analysis classifies intent independently before screenplay
         'generated',
         'mixed',
     ]);
+    assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.source_image_strategy.enum, [
+        'none',
+        'continuous_scene',
+        'narrative_montage',
+        'premise_reenactment',
+        'narrative_adaptation',
+        'rigid_artifact',
+        'motion_graphic',
+    ]);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Classify these axes independently/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /prompt can itself be an utterance/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Copy every user-supplied spoken line exactly/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /production directions, not speakers/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /generic reinterpretations/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative affordances/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative_montage/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /translate each meaningful stage into a concrete visible action/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not default every meme or screenshot/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not merely pan across panels or make all pictured subjects bob/);
 });
 
 test('video commands accept exactly one supported attached start frame', () => {
