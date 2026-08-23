@@ -68,7 +68,7 @@ test('extracts only the final assistant message from a Responses API payload', (
         ],
     };
 
-    assert.equal(extractGrokResponseText(completion, false), 'The bill passed 218-210.');
+    assert.equal(extractGrokResponseText(completion), 'The bill passed 218-210.');
 });
 
 test('joins multiple output_text parts within the final assistant message', () => {
@@ -85,7 +85,7 @@ test('joins multiple output_text parts within the final assistant message', () =
         ],
     };
 
-    assert.equal(extractGrokResponseText(completion, false), 'First paragraph.\n\nSecond paragraph.');
+    assert.equal(extractGrokResponseText(completion), 'First paragraph.\n\nSecond paragraph.');
 });
 
 test('recognizes xAI image moderation rejections', () => {

@@ -46,7 +46,6 @@ const DEFAULT_SETTINGS = {
     model: XAI_TEXT_MODEL,
     temperature: 0.7,
     reasoningEffort: 'low' as const,
-    maxTokens: 4096,
     maxCompletionTokens: 25000,
     timeout: AI_REQUEST_TIMEOUTS.grokText,
     bannedUsers: ['663270358161293343'],
@@ -58,9 +57,10 @@ interface XAIMessage {
 }
 
 interface XAIContentPart {
-    type: 'text' | 'image_url';
+    type: 'input_text' | 'input_image';
     text?: string;
-    image_url?: { url: string };
+    image_url?: string;
+    detail?: 'auto' | 'low' | 'high';
 }
 
 interface XAITool {
@@ -81,7 +81,6 @@ interface GrokHandlerOptions {
     model?: string;
     includeSystemPrompt?: boolean;
     files?: string[];
-    maxTokens?: number;
     maxCompletionTokens?: number;
     includeFiles?: boolean;
 }
@@ -102,7 +101,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         model = DEFAULT_SETTINGS.model,
         includeSystemPrompt = true,
         files = [],
-        maxTokens = DEFAULT_SETTINGS.maxTokens,
         maxCompletionTokens,
         includeFiles = true,
     } = options;
@@ -178,10 +176,11 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         inputMessages = [{
             role: 'user' as const,
             content: [
-                { type: 'text' as const, text: fullPrompt },
+                { type: 'input_text' as const, text: fullPrompt },
                 ...imageURLs.map(url => ({
-                    type: 'image_url' as const,
-                    image_url: { url }
+                    type: 'input_image' as const,
+                    image_url: url,
+                    detail: 'high' as const,
                 }))
             ]
         }];
@@ -213,30 +212,21 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), DEFAULT_SETTINGS.timeout);
 
-        // Use chat/completions for images (responses endpoint doesn't support multimodal input)
-        // Use responses endpoint for text-only (supports agentic tools like web_search)
         const hasImages = imageURLs.length > 0;
-        const endpoint = hasImages ? `${XAI_BASE_URL}/chat/completions` : `${XAI_BASE_URL}/responses`;
+        const requestBody = {
+            model,
+            input: inputMessages,
+            tools,
+            include: ['no_inline_citations'],
+            temperature,
+            reasoning: { effort: reasoningEffort },
+            max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
+            /* xAI recommends disabling stored response history for image
+             * inputs because retaining it can make multimodal requests fail. */
+            ...(hasImages ? { store: false } : {}),
+        };
 
-        const requestBody = hasImages
-            ? {
-                model,
-                messages: inputMessages as XAIMessage[],
-                temperature,
-                reasoning_effort: reasoningEffort,
-                max_tokens: maxCompletionTokens || maxTokens,
-            }
-            : {
-                model,
-                input: inputMessages,
-                tools,
-                include: ['no_inline_citations'],
-                temperature,
-                reasoning: { effort: reasoningEffort },
-                max_output_tokens: maxCompletionTokens || DEFAULT_SETTINGS.maxCompletionTokens,
-            };
-
-        const response = await fetch(endpoint, {
+        const response = await fetch(`${XAI_BASE_URL}/responses`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -274,7 +264,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
             return { error: `xAI did not finish generating an answer (${reason}). Please try again.` };
         }
 
-        const responseText = extractGrokResponseText(completion, hasImages);
+        const responseText = extractGrokResponseText(completion);
 
         if (responseText) {
             const generation = stripGrokCitations(responseText);

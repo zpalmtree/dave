@@ -49,21 +49,20 @@ function getTextParts(content: unknown): string[] {
     return typeof part.content === 'string' ? [part.content] : [];
 }
 
-export function extractGrokResponseText(completion: unknown, hasImages: boolean): string | null {
+export function extractGrokResponseText(completion: unknown): string | null {
     if (!completion || typeof completion !== 'object') {
         return null;
     }
 
     const data = completion as {
-        choices?: Array<{ message?: XAIResponseMessage }>;
         output?: XAIResponseMessage[];
     };
     /* Agentic Responses API runs emit interim assistant messages narrating
      * progress ("Looking up...") between tool calls - only the last assistant
      * message is the actual answer. */
-    const assistantMessages = hasImages
-        ? data.choices?.slice(0, 1).map(choice => choice.message).filter((message): message is XAIResponseMessage => Boolean(message)) || []
-        : data.output?.filter(item => item.role === 'assistant').slice(-1) || [];
+    const assistantMessages = data.output
+        ?.filter(item => item.role === 'assistant')
+        .slice(-1) || [];
     const text = assistantMessages
         .flatMap(message => getTextParts(message.content))
         .map(part => part.trim())
