@@ -246,19 +246,22 @@ export function formatVideoJob(job: VideoJobView): string {
     return `${head}\nFailed: ${sanitizeVideoWorkerText(job.error, 'Unknown worker error.', 1800)}`;
 }
 
-export function formatGlobalVideoQueueJob(job: VideoJobView): string {
+export function formatGlobalVideoQueueJob(job: VideoJobView, viewerGuildId: string | null): string {
     const [head, ...details] = formatVideoJob(job).split('\n');
-    const requester = /^\d+$/.test(job.requester_id) ? `<@${job.requester_id}>` : 'unknown requester';
+    const sameServer = viewerGuildId !== null && job.guild_id === viewerGuildId;
+    const requester = sameServer && /^\d+$/.test(job.requester_id)
+        ? `<@${job.requester_id}>`
+        : sameServer ? 'unknown requester' : 'requester hidden';
     return `${head} · ${requester}\n${details.join('\n')}\n> ${truncatePrompt(videoJobDirection(job), 100)}`;
 }
 
-export function globalVideoQueueChunks(jobs: VideoJobView[], limit = 1900): string[] {
+export function globalVideoQueueChunks(jobs: VideoJobView[], viewerGuildId: string | null, limit = 1900): string[] {
     if (!jobs.length) return ['The server video queue is empty.'];
     const header = `**Server video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}**`;
     const chunks: string[] = [];
     let current = header;
     for (const job of jobs) {
-        const block = formatGlobalVideoQueueJob(job);
+        const block = formatGlobalVideoQueueJob(job, viewerGuildId);
         if (`${current}\n\n${block}`.length > limit && current !== header) {
             chunks.push(current);
             current = `${header} (continued)\n\n${block}`;
@@ -591,7 +594,7 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         await msg.reply(`The server video queue is empty.${pauseText(response.state.paused_until)}`);
         return;
     }
-    const chunks = globalVideoQueueChunks(unfinished);
+    const chunks = globalVideoQueueChunks(unfinished, msg.guild?.id ?? null);
     await msg.reply({
         content: chunks[0],
         allowedMentions: { parse: [], repliedUser: false },
