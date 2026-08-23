@@ -153,6 +153,7 @@ import {
     handleMinimaxVideo,
     handleVideoAdmin,
     handleVideoQueue,
+    handleVideoStats,
     ownerOnlyVideoGate,
     singleVideoResponderGate,
 } from './VideoGeneration.js';
@@ -249,6 +250,22 @@ const sharedCommands: Command[] = [
                 { value: 'videogen resume' },
             ],
         },
+        commandGates: [discordOnlyGate, singleVideoResponderGate, ownerOnlyVideoGate],
+    },
+    {
+        aliases: ['videostats'],
+        hidden: true,
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleVideoStats,
+            description: 'Show structured local video pipeline and GPU performance metrics',
+            examples: [
+                { value: 'videostats' },
+                { value: 'videostats minimaxdraft' },
+            ],
+        },
+        relatedCommands: ['videogen'],
         commandGates: [discordOnlyGate, singleVideoResponderGate, ownerOnlyVideoGate],
     },
     {
