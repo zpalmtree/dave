@@ -22,10 +22,10 @@ import {
 } from '../dist/VideoProtocol.js';
 import {
     VIDEO_PLAN_SCHEMA,
+    VIDEO_PROMPT_ANALYSIS_SCHEMA,
+    VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
-    videoPromptIsDirectUtterance,
-    videoPromptRequestsSpeech,
 } from '../dist/VideoFrontierPlanner.js';
 import {
     buildVideoKeyframePrompt,
@@ -202,6 +202,7 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
         for (const child of Object.values(value)) visit(child);
     };
     visit(VIDEO_PLAN_SCHEMA);
+    visit(VIDEO_PROMPT_ANALYSIS_SCHEMA);
 });
 
 test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {
@@ -219,21 +220,26 @@ test('image-only jobs show the inferred direction instead of an internal fallbac
     }), 'Make the dog run.');
 });
 
-test('frontier planner distinguishes requested dialogue from silent action', () => {
-    assert.equal(videoPromptRequestsSpeech('a cat and dog discussing the future of blockchain'), true);
-    assert.equal(videoPromptRequestsSpeech('a woman sings about cheese'), true);
-    assert.equal(videoPromptRequestsSpeech('a man says "hello"'), true);
-    assert.equal(videoPromptRequestsSpeech('greetings slugs, did you know you can generate videos now'), true);
-    assert.equal(videoPromptRequestsSpeech('juan:hello igor:shut up sound:baboons'), true);
-    assert.equal(videoPromptRequestsSpeech('style:anime sound:baboons'), false);
-    assert.equal(videoPromptRequestsSpeech('armpit and feet i LOVE armpit and feet please dont call me gooner'), true);
-    assert.equal(videoPromptRequestsSpeech('a silent discussion conveyed through pantomime'), false);
-    assert.equal(videoPromptRequestsSpeech('dogs eat cheese in a kitchen'), false);
-    assert.equal(videoPromptIsDirectUtterance('I want a video of dogs eating cheese'), false);
-    assert.equal(videoPromptIsDirectUtterance('please generate a man saying hello'), false);
-    assert.equal(videoPromptIsDirectUtterance('5 dogs say "We are ready"'), false);
-    assert.equal(videoPromptIsDirectUtterance('greetings slugs, did you know you can generate videos now'), true);
-    assert.equal(videoPromptIsDirectUtterance('armpit and feet i LOVE armpit and feet please dont call me gooner'), true);
+test('frontier prompt analysis classifies intent independently before screenplay planning', () => {
+    assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.request_form.enum, [
+        'visual_direction',
+        'verbatim_utterance',
+        'speaker_script',
+        'conversation_topic',
+        'mixed',
+        'image_only',
+    ]);
+    assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.dialogue_contract.properties.mode.enum, [
+        'none',
+        'verbatim',
+        'generated',
+        'mixed',
+    ]);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Classify these axes independently/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /prompt can itself be an utterance/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Copy every user-supplied spoken line exactly/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /production directions, not speakers/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /generic reinterpretations/);
 });
 
 test('video commands accept exactly one supported attached start frame', () => {
