@@ -1512,6 +1512,10 @@ export class VideoBroker {
         const projections = new Map<string, { position: number | null; start: number | null; finish: number | null }>();
         let queuePosition = 0;
         for (const row of allActive) {
+            const expectedRuntime = Math.max(
+                1,
+                Math.round((row.estimate_low_seconds + row.estimate_high_seconds) / 2),
+            );
             if (!canEstimate) {
                 projections.set(row.public_id, { position: row.status === 'queued' ? ++queuePosition : null, start: null, finish: null });
                 continue;
@@ -1519,11 +1523,11 @@ export class VideoBroker {
             if (row.status === 'queued') {
                 queuePosition += 1;
                 const start = cursor;
-                cursor += Math.max(1, row.estimate_high_seconds);
+                cursor += expectedRuntime;
                 projections.set(row.public_id, { position: queuePosition, start, finish: cursor });
             } else {
                 const start = row.started_at || now;
-                const finish = Math.max(now + 30, start + row.estimate_high_seconds);
+                const finish = Math.max(now + 30, start + expectedRuntime);
                 cursor = Math.max(cursor, finish);
                 projections.set(row.public_id, { position: null, start, finish: cursor });
             }
