@@ -161,6 +161,8 @@ VIDEO_DISPATCH_DRAINED=0
 VIDEO_LEGACY_DRAINED=0
 
 legacy_video_dispatch_drain() {
+    (
+    cd "$REMOTE_MASTER_DIR"
     VIDEO_LEGACY_DRAIN_SECONDS="$VIDEO_DRAIN_TIMEOUT_SECONDS" node --input-type=module <<'NODE'
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -179,6 +181,7 @@ await new Promise((resolve, reject) => db.run(
 ));
 await new Promise((resolve, reject) => db.close(error => error ? reject(error) : resolve()));
 NODE
+    )
 }
 
 resume_video_dispatch() {
