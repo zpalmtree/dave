@@ -26,7 +26,7 @@ test('video pause durations default to six hours and enforce safe limits', () =>
 });
 
 test('local video commands are declared as Discord-only', () => {
-    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'videoqueue', 'videogen']) {
+    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'minimaxdraft', 'videoqueue', 'videogen']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command, `${name} command is present`);
         assert.equal(command.discordOnly, true);
@@ -34,13 +34,21 @@ test('local video commands are declared as Discord-only', () => {
 });
 
 test('fast video commands map to explicit quality tradeoffs', () => {
-    assert.deepEqual(VIDEO_MODELS.ltxfast.generatorArgs, ['--model', 'ltx', '--quality', 'draft']);
+    assert.deepEqual(
+        VIDEO_MODELS.ltxfast.generatorArgs,
+        ['--model', 'ltx', '--quality', 'draft', '--ltx-one-stage'],
+    );
     assert.deepEqual(
         VIDEO_MODELS.minimaxfast.generatorArgs,
         ['--model', 'h3', '--quality', 'final', '--fast'],
     );
+    assert.deepEqual(
+        VIDEO_MODELS.minimaxdraft.generatorArgs,
+        ['--model', 'h3', '--quality', 'draft', '--turbo4'],
+    );
     assert.equal(isVideoModel('ltxfast'), true);
     assert.equal(isVideoModel('minimaxfast'), true);
+    assert.equal(isVideoModel('minimaxdraft'), true);
 });
 
 test('offline queue messages omit fake ETAs', () => {
@@ -87,6 +95,8 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /at most three identity-critical people/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /user-supplied start image/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Every hard scene change/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one independently generated clip/);
     const visit = value => {
         if (!value || typeof value !== 'object') return;
         if (value.type === 'object') assert.equal(value.additionalProperties, false);
