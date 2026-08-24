@@ -284,6 +284,13 @@ test('global video queue identifies same-server requesters without exposing cros
     }, 'guild-a');
     assert.match(crossServer, /requester hidden/);
     assert.doesNotMatch(crossServer, /975310864209753108/);
+    const moderatorGlobalView = globalVideoQueueChunks([{
+        ...queued,
+        requester_id: '975310864209753108',
+        guild_id: 'guild-b',
+    }], 'guild-a', 700, true);
+    assert.match(moderatorGlobalView[0], /<@975310864209753108>/);
+    assert.doesNotMatch(moderatorGlobalView[0], /requester hidden/);
 
     const chunks = globalVideoQueueChunks(Array.from({ length: 12 }, (_, index) => ({
         ...queued,
