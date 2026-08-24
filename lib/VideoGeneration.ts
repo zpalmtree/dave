@@ -293,12 +293,14 @@ export function formatGlobalVideoQueueJob(
     job: VideoJobView,
     viewerGuildId: string | null,
     promptLength?: number,
+    revealAllRequesters = false,
 ): string {
     const [head, ...details] = formatVideoJob(job).split('\n');
     const sameServer = viewerGuildId !== null && job.guild_id === viewerGuildId;
-    const requester = sameServer && /^\d+$/.test(job.requester_id)
+    const mayIdentifyRequester = sameServer || revealAllRequesters;
+    const requester = mayIdentifyRequester && /^\d+$/.test(job.requester_id)
         ? `<@${job.requester_id}>`
-        : sameServer ? 'unknown requester' : 'requester hidden';
+        : mayIdentifyRequester ? 'unknown requester' : 'requester hidden';
     const direction = videoJobDirection(job);
     const displayedDirection = promptLength === undefined
         ? direction
@@ -306,24 +308,34 @@ export function formatGlobalVideoQueueJob(
     return `${head} · ${requester}\n${details.join('\n')}\n> ${displayedDirection}`;
 }
 
-export function globalVideoQueueChunks(jobs: VideoJobView[], viewerGuildId: string | null, limit = 1900): string[] {
+export function globalVideoQueueChunks(
+    jobs: VideoJobView[],
+    viewerGuildId: string | null,
+    limit = 1900,
+    revealAllRequesters = false,
+): string[] {
     if (!jobs.length) return ['The server video queue is empty.'];
     const header = `**Server video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}**`;
     const chunks: string[] = [];
     let current = header;
     for (const job of jobs) {
-        let block = formatGlobalVideoQueueJob(job, viewerGuildId);
+        let block = formatGlobalVideoQueueJob(job, viewerGuildId, undefined, revealAllRequesters);
         if (`${current}\n\n${block}`.length > limit && current !== header) {
             chunks.push(current);
             current = `${header} (continued)`;
         }
         if (`${current}\n\n${block}`.length > limit) {
-            const withoutPrompt = formatGlobalVideoQueueJob(job, viewerGuildId, 1);
+            const withoutPrompt = formatGlobalVideoQueueJob(job, viewerGuildId, 1, revealAllRequesters);
             const availablePromptLength = Math.max(
                 1,
                 limit - `${current}\n\n${withoutPrompt}`.length + 1,
             );
-            block = formatGlobalVideoQueueJob(job, viewerGuildId, availablePromptLength);
+            block = formatGlobalVideoQueueJob(
+                job,
+                viewerGuildId,
+                availablePromptLength,
+                revealAllRequesters,
+            );
         }
         current += `\n\n${block}`;
     }
@@ -690,7 +702,8 @@ export async function handleMinimaxFastVideo(msg: Message, prompt: string): Prom
 
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
     const guildId = msg.guild?.id || '';
-    const queueScope = canViewGlobalVideoQueue(msg)
+    const showGlobalQueue = canViewGlobalVideoQueue(msg);
+    const queueScope = showGlobalQueue
         ? ''
         : `?guild_id=${encodeURIComponent(guildId)}`;
     const response = await brokerRequest<JobsResponse>(
@@ -719,7 +732,12 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         await msg.reply(`The server video queue is empty.${pauseText(response.state.paused_until)}`);
         return;
     }
-    const chunks = globalVideoQueueChunks(unfinished, msg.guild?.id ?? null);
+    const chunks = globalVideoQueueChunks(
+        unfinished,
+        msg.guild?.id ?? null,
+        1900,
+        showGlobalQueue,
+    );
     await msg.reply({
         content: chunks[0],
         allowedMentions: { parse: [], repliedUser: false },
