@@ -765,6 +765,8 @@ test('broker prepares a queued screenplay and keyframe while the GPU worker is b
 test('broker caches an explicit frontier rejection so the desktop consistently plans locally', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-frontier-rejection-'));
     let plannerCalls = 0;
+    let referenceResolverCalls = 0;
+    let keyframeCalls = 0;
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
@@ -772,6 +774,33 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         frontierPlanner: async () => {
             plannerCalls += 1;
             throw new FrontierPlannerRejectedError('provider_policy');
+        },
+        keyframeReferenceResolver: async plan => {
+            referenceResolverCalls += 1;
+            assert.equal(
+                plan.keyframe.reference_requirements[0].search_query,
+                'Gigachad meme character face',
+            );
+            return [{
+                label: 'Gigachad character',
+                kind: 'character',
+                visualFactsToPreserve: 'Angular face and exaggerated jawline.',
+                bytes: Buffer.from('gigachad-reference'),
+                mimeType: 'image/png',
+                sourceUrl: 'https://images.example/gigachad.png',
+                contextUrl: 'https://example.com/gigachad',
+            }];
+        },
+        keyframeGenerator: async (_plan, references) => {
+            keyframeCalls += 1;
+            assert.equal(references.length, 1);
+            assert.equal(references[0].label, 'Gigachad character');
+            return {
+                bytes: Buffer.from('local-reference-keyframe'),
+                mimeType: 'image/png',
+                provider: 'test-provider',
+                model: 'test-image-model',
+            };
         },
     });
     await broker.start();
@@ -795,7 +824,7 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
             method: 'POST',
             headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
             body: JSON.stringify({
-                model: 'minimaxfast', prompt: 'Route this request locally.',
+                model: 'minimaxfast', prompt: 'Gigachad walks confidently into a gym.',
                 requester_id: 'rejection-user', origin_bot_id: 'bot-1', channel_id: 'channel-1',
                 command_message_id: 'rejection-message', status_message_id: 'rejection-status',
             }),
@@ -822,6 +851,69 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         assert.equal(cachedBody.disposition, 'reject');
         assert.equal(cachedBody.reason_code, 'provider_policy');
         assert.equal(plannerCalls, 1);
+        assert.equal(lease.job.has_source_image, false);
+
+        const localPlan = {
+            intent: 'Gigachad walks confidently into a gym.',
+            continuity_bible: 'Keep Gigachad recognizable throughout.',
+            keyframe: {
+                recommended: true,
+                reason: 'The named character needs a stable identity anchor.',
+                prompt: 'Gigachad at the entrance of a gym, ready to walk forward.',
+                reference_requirements: [{
+                    label: 'Gigachad character',
+                    kind: 'character',
+                    search_query: 'Gigachad meme character face',
+                    visual_facts_to_preserve: 'Angular face and exaggerated jawline.',
+                }],
+                motion_contract: {
+                    subject_orientation: 'Facing into the gym.',
+                    gaze_direction: 'Looking into the gym.',
+                    travel_direction: 'Forward into the gym.',
+                    camera_relation: 'Front-side three-quarter tracking view.',
+                    first_second_action: 'Continue stepping through the entrance.',
+                },
+            },
+            segments: [{
+                title: 'Entrance',
+                transition: 'start',
+                target_seconds: 5,
+                music: 'N/A',
+                shots: [{
+                    duration_seconds: 5,
+                    visual: 'Gigachad walks confidently into the gym.',
+                    camera: 'Track beside him without crossing the axis.',
+                    audio: 'Gym room tone, footsteps, and a door hinge.',
+                    dialogue: [],
+                }],
+            }],
+        };
+        const uploaded = await fetch(`${base}/v1/worker/jobs/${job.id}/local-plan`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer worker-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ plan: localPlan }),
+        });
+        assert.equal(uploaded.status, 200);
+        assert.equal((await uploaded.json()).planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+
+        const stored = await requestPlan();
+        assert.equal(stored.status, 200);
+        const storedBody = await stored.json();
+        assert.equal(storedBody.cached, true);
+        assert.equal(storedBody.planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        assert.equal(
+            storedBody.plan.keyframe.reference_requirements[0].label,
+            'Gigachad character',
+        );
+        const frame = await fetch(`${base}/v1/worker/jobs/${job.id}/keyframe`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer worker-secret', 'content-type': 'application/json' },
+            body: '{}',
+        });
+        assert.equal(frame.status, 200);
+        assert.equal(frame.headers.get('x-video-keyframe-provider'), 'test-provider');
+        assert.equal(referenceResolverCalls, 1);
+        assert.equal(keyframeCalls, 1);
     } finally {
         if (socket) socket.close();
         await broker.stop();
@@ -958,6 +1050,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         await take(value => value.type === 'hello_ack');
         const firstLease = await take(value => value.type === 'job');
         assert.equal(firstLease.job.id, first.body.job.id);
+        assert.equal(firstLease.job.has_source_image, false);
 
         const firstPlan = await workerFetch(`/v1/worker/jobs/${first.body.job.id}/plan`);
         assert.equal(firstPlan.status, 200);
@@ -1006,6 +1099,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.equal(second.body.job.has_source_image, true);
         const secondLease = await take(value => value.type === 'job');
         assert.equal(secondLease.job.id, second.body.job.id);
+        assert.equal(secondLease.job.has_source_image, true);
         const secondPlan = await workerFetch(`/v1/worker/jobs/${second.body.job.id}/plan`);
         assert.equal(secondPlan.status, 200);
         const suppliedFrame = await workerFetch(`/v1/worker/jobs/${second.body.job.id}/keyframe`);
