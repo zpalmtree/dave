@@ -84,7 +84,6 @@ interface BrokerOptions {
     botToken: string;
     workerToken: string;
     heartbeatTimeoutMs?: number;
-    preplanQueuedJobs?: boolean;
     frontierPlanner?: typeof createFrontierVideoPlan;
     keyframeGenerator?: (
         plan: Record<string, any>,
@@ -139,6 +138,10 @@ interface JobRow {
     worker_id: string | null;
     lease_expires_at: number | null;
     lease_token: string | null;
+    gpu_queue_state: 'submitting' | 'queued' | 'admitted' | null;
+    gpu_queue_submitted_at: number | null;
+    gpu_admitted_at: number | null;
+    gpu_queue_wait_seconds: number | null;
     result_path: string | null;
     result_sha256: string | null;
     result_bytes: number | null;
@@ -236,8 +239,8 @@ function workerScheduler(value: unknown): VideoWorkerSchedulerState {
     };
 }
 
-function schedulerAdmitsWork(value: VideoWorkerSchedulerState): boolean {
-    return value.available && value.mode === 'normal' && value.health === 'healthy';
+function schedulerAcceptsReservations(value: VideoWorkerSchedulerState): boolean {
+    return value.available;
 }
 
 function plannedIntent(row: JobRow): string | null {
@@ -606,8 +609,6 @@ export class VideoBroker {
     private readonly wsServer = new WebSocketServer({ noServer: true });
     private worker: WorkerConnection | null = null;
     private writeChain: Promise<unknown> = Promise.resolve();
-    private preparationChain: Promise<void> = Promise.resolve();
-    private readonly preparationQueued = new Set<string>();
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
     private readonly backgroundTasks = new Set<Promise<void>>();
@@ -697,6 +698,10 @@ export class VideoBroker {
             worker_id TEXT,
             lease_expires_at INTEGER,
             lease_token TEXT,
+            gpu_queue_state TEXT,
+            gpu_queue_submitted_at INTEGER,
+            gpu_admitted_at INTEGER,
+            gpu_queue_wait_seconds INTEGER,
             result_path TEXT,
             result_sha256 TEXT,
             result_bytes INTEGER,
@@ -740,6 +745,16 @@ export class VideoBroker {
         }
         if (!columnNames.has('lease_token')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN lease_token TEXT');
+        }
+        for (const [name, definition] of [
+            ['gpu_queue_state', 'TEXT'],
+            ['gpu_queue_submitted_at', 'INTEGER'],
+            ['gpu_admitted_at', 'INTEGER'],
+            ['gpu_queue_wait_seconds', 'INTEGER'],
+        ] as const) {
+            if (!columnNames.has(name)) {
+                await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
+            }
         }
         for (const name of [
             'initial_estimate_low_seconds',
@@ -945,7 +960,6 @@ export class VideoBroker {
         if (this.cleanupTimer) clearInterval(this.cleanupTimer);
         if (this.worker) this.worker.socket.close(1001, 'broker shutdown');
         await new Promise<void>(resolvePromise => this.server.close(() => resolvePromise()));
-        await this.preparationChain.catch(() => undefined);
         await Promise.allSettled([...this.backgroundTasks]);
         await new Promise<void>((resolvePromise, reject) => this.db.close(err => err ? reject(err) : resolvePromise()));
     }
@@ -1281,7 +1295,6 @@ export class VideoBroker {
                 throw error;
             }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-            if (this.worker?.currentJob) this.schedulePreparation(publicId, false);
             await this.dispatchNext();
             return { status: 201, body: { job: (await this.views([row!]))[0], duplicate: false } };
         });
@@ -1377,34 +1390,34 @@ export class VideoBroker {
     private async prepareInitialEstimate(publicId: string): Promise<VideoJobView | null> {
         let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
         if (!job) return null;
+        if (job.gpu_queue_state !== 'admitted') {
+            return (await this.views([job]))[0] || null;
+        }
         if (ACTIVE_VIDEO_STATUSES.includes(job.status)) {
             try {
                 const { plan } = await this.ensurePlan(job, true);
-                const estimate = await this.plannedRuntimeEstimate(job, plan);
-                await this.run(
-                    `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?,
-                     estimate_ready = 1,
-                     initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
-                     initial_estimate_high_seconds = COALESCE(initial_estimate_high_seconds, ?),
-                     initial_estimate_recorded_at = COALESCE(initial_estimate_recorded_at, ?),
-                     updated_at = ?
-                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
-                    [
-                        estimate.low,
-                        estimate.high,
-                        estimate.low,
-                        estimate.high,
-                        nowSeconds(),
-                        nowSeconds(),
-                        publicId,
-                    ],
-                );
+                await this.storePlanEstimate(job, plan);
                 job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]) || job;
             } catch (error) {
                 console.warn(`Could not prepare initial ETA for ${publicId}`, error);
             }
         }
         return (await this.views([job]))[0] || null;
+    }
+
+    private async storePlanEstimate(job: JobRow, plan: Record<string, any>): Promise<void> {
+        const estimate = await this.plannedRuntimeEstimate(job, plan);
+        const now = nowSeconds();
+        await this.run(
+            `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?,
+             estimate_ready = 1,
+             initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
+             initial_estimate_high_seconds = COALESCE(initial_estimate_high_seconds, ?),
+             initial_estimate_recorded_at = COALESCE(initial_estimate_recorded_at, ?),
+             updated_at = ?
+             WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+            [estimate.low, estimate.high, estimate.low, estimate.high, now, now, job.public_id],
+        );
     }
 
     private async refreshQueuedEstimates(model: VideoModelId): Promise<void> {
@@ -1992,44 +2005,6 @@ export class VideoBroker {
         }
     }
 
-    private schedulePreparation(publicId: string, criticalPath = false): void {
-        if (!this.options.preplanQueuedJobs || this.preparationQueued.has(publicId)) return;
-        this.preparationQueued.add(publicId);
-        const prepare = async () => {
-            try {
-                const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-                if (!job || !ACTIVE_VIDEO_STATUSES.includes(job.status)) return;
-                const { plan } = await this.ensurePlan(job, criticalPath);
-                const refreshed = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-                if (!refreshed || !ACTIVE_VIDEO_STATUSES.includes(refreshed.status)) return;
-                await this.ensureKeyframe(refreshed, plan, criticalPath);
-            } catch (error) {
-                if (error instanceof FrontierPlannerRejectedError) {
-                    console.log(
-                        `Frontier planner routed ${publicId} to the local planner (${error.reasonCode}).`,
-                    );
-                } else {
-                    console.warn(`Queued video preparation failed for ${publicId}; the worker will retry on demand.`, error);
-                }
-            } finally {
-                this.preparationQueued.delete(publicId);
-            }
-        };
-        this.preparationChain = this.preparationChain.then(prepare, prepare);
-    }
-
-    private async scheduleNextQueuedPreparation(): Promise<void> {
-        if (!this.options.preplanQueuedJobs || !this.worker) return;
-        const placeholders = this.worker.capabilities.map(() => '?').join(',');
-        if (!placeholders) return;
-        const row = await this.get<JobRow>(
-            `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
-             ORDER BY id ASC LIMIT 1`,
-            this.worker.capabilities,
-        );
-        if (row) this.schedulePreparation(row.public_id, false);
-    }
-
     private async cancelJob(id: string, requesterId: string, isAdmin: boolean): Promise<any> {
         const matches = await this.all<JobRow>(
             'SELECT * FROM video_jobs WHERE public_id LIKE ? ORDER BY id DESC LIMIT 2',
@@ -2080,8 +2055,7 @@ export class VideoBroker {
             scheduler: this.worker?.scheduler || null,
             queued: queued?.count || 0,
             active_jobs: active?.count || 0,
-            preparation_busy: this.plannerInFlight.size > 0 || this.keyframeInFlight.size > 0
-                || this.preparationQueued.size > 0,
+            preparation_busy: this.plannerInFlight.size > 0 || this.keyframeInFlight.size > 0,
         };
     }
 
@@ -2096,12 +2070,8 @@ export class VideoBroker {
         // A dispatch drain only blocks future leases. It must not erase the ETA
         // of work the desktop is already rendering.
         const canEstimateActive = online && !control.paused_until;
-        const canEstimateQueued = canEstimateActive
-            && schedulerAdmitsWork(this.worker!.scheduler)
-            && !control.dispatch_paused;
         const busy = Boolean(this.worker?.currentJob);
         const now = nowSeconds();
-        let cursor = Math.max(now, control.paused_until || now);
         const projections = new Map<string, { position: number | null; start: number | null; finish: number | null }>();
         let queuePosition = 0;
         for (const row of allActive) {
@@ -2111,22 +2081,18 @@ export class VideoBroker {
             );
             if (row.status === 'queued') {
                 queuePosition += 1;
-                if (!canEstimateQueued) {
-                    projections.set(row.public_id, { position: queuePosition, start: null, finish: null });
-                    continue;
-                }
-                const start = cursor;
-                cursor += expectedRuntime;
-                projections.set(row.public_id, { position: queuePosition, start, finish: cursor });
+                // Jobs that have not reached the desktop do not have a gpuq reservation yet.
+                // Projecting them would omit unrelated GPU work that can already be ahead.
+                projections.set(row.public_id, { position: queuePosition, start: null, finish: null });
             } else {
-                if (!canEstimateActive) {
+                if (!canEstimateActive || row.gpu_queue_state === 'submitting'
+                    || row.gpu_queue_state === 'queued') {
                     projections.set(row.public_id, { position: null, start: null, finish: null });
                     continue;
                 }
-                const start = row.started_at || now;
+                const start = row.gpu_admitted_at || row.started_at || now;
                 const finish = Math.max(now + 30, start + expectedRuntime);
-                cursor = Math.max(cursor, finish);
-                projections.set(row.public_id, { position: null, start, finish: cursor });
+                projections.set(row.public_id, { position: null, start, finish });
             }
         }
         return rows.map(row => {
@@ -2169,6 +2135,10 @@ export class VideoBroker {
                 worker_busy: busy,
                 paused_until: control.paused_until,
                 dispatch_paused: control.dispatch_paused,
+                gpu_queue_state: row.gpu_queue_state,
+                gpu_queue_submitted_at: row.gpu_queue_submitted_at,
+                gpu_admitted_at: row.gpu_admitted_at,
+                gpu_queue_wait_seconds: row.gpu_queue_wait_seconds,
             };
         });
     }
@@ -2286,7 +2256,9 @@ export class VideoBroker {
         if (disconnected) {
             await this.run(
                 `UPDATE video_jobs SET status = 'queued', stage = 'Resuming after reconnect', progress = NULL,
-                 worker_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE public_id = ?`,
+                 worker_id = NULL, lease_expires_at = NULL, gpu_queue_state = NULL,
+                 gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                 updated_at = ? WHERE public_id = ?`,
                 [nowSeconds(), disconnected.public_id],
             );
         }
@@ -2314,7 +2286,7 @@ export class VideoBroker {
                     ],
                 );
             }
-            if (!this.worker.currentJob && this.worker.ready && schedulerAdmitsWork(this.worker.scheduler)) {
+            if (!this.worker.currentJob && this.worker.ready && schedulerAcceptsReservations(this.worker.scheduler)) {
                 await this.dispatchNext();
             }
             return;
@@ -2339,7 +2311,41 @@ export class VideoBroker {
             && message.lease_id !== this.worker.leaseId) return;
         if (message.type === 'event') {
             const event = String(message.event || '');
-            if (event === 'plan') {
+            if (event === 'gpu_queue') {
+                const state = message.state === 'admitted' ? 'admitted' : 'queued';
+                const now = nowSeconds();
+                const submittedAt = Number.isFinite(Number(message.submitted_at))
+                    ? Math.max(1, Math.min(now + 60, Math.round(Number(message.submitted_at))))
+                    : now;
+                const admittedAt = state === 'admitted'
+                    ? Number.isFinite(Number(message.admitted_at))
+                        ? Math.max(submittedAt, Math.min(now + 60, Math.round(Number(message.admitted_at))))
+                        : now
+                    : null;
+                const queueWait = admittedAt === null
+                    ? null
+                    : Math.max(0, Math.round(Number(message.queue_wait_seconds) || admittedAt - submittedAt));
+                await this.run(
+                    `UPDATE video_jobs SET gpu_queue_state = ?,
+                     gpu_queue_submitted_at = COALESCE(gpu_queue_submitted_at, ?),
+                     gpu_admitted_at = COALESCE(gpu_admitted_at, ?),
+                     gpu_queue_wait_seconds = COALESCE(gpu_queue_wait_seconds, ?),
+                     stage = ?, lease_expires_at = ?, updated_at = ? WHERE public_id = ?`,
+                    [
+                        state,
+                        submittedAt,
+                        admittedAt,
+                        queueWait,
+                        sanitizeVideoWorkerText(
+                            message.stage,
+                            state === 'admitted' ? 'GPU admitted; planning screenplay' : 'Waiting for GPU queue admission',
+                        ),
+                        now + 60,
+                        now,
+                        jobId,
+                    ],
+                );
+            } else if (event === 'plan') {
                 const estimateLow = Number(message.estimate_low_seconds) > 0
                     ? Math.max(1, Number(message.estimate_low_seconds))
                     : null;
@@ -2403,7 +2409,9 @@ export class VideoBroker {
                 await this.run(
                     pause
                         ? `UPDATE video_jobs SET status = 'queued', stage = 'Paused for desktop use', progress = NULL,
-                           worker_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE public_id = ?`
+                           worker_id = NULL, lease_expires_at = NULL, gpu_queue_state = NULL,
+                           gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                           updated_at = ? WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'cancelled', stage = NULL, progress = NULL,
                            completed_at = ?, updated_at = ? WHERE public_id = ?`,
                     pause ? [nowSeconds(), jobId] : [nowSeconds(), nowSeconds(), jobId],
@@ -2438,7 +2446,10 @@ export class VideoBroker {
                 await this.run(
                     retry
                         ? `UPDATE video_jobs SET status = 'queued', attempt = attempt + 1, stage = ?,
-                           progress = NULL, worker_id = NULL, lease_expires_at = NULL, error = ?, updated_at = ?
+                           progress = NULL, worker_id = NULL, lease_expires_at = NULL,
+                           gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
+                           gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                           error = ?, updated_at = ?
                            WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
                            WHERE public_id = ?`,
@@ -2470,9 +2481,13 @@ export class VideoBroker {
                     [runtimeSeconds, nowSeconds(), nowSeconds(), jobId],
                 );
                 if (runtimeSeconds !== null) {
+                    const processingRuntime = Math.max(
+                        0.01,
+                        runtimeSeconds - Math.max(0, Number(row.gpu_queue_wait_seconds) || 0),
+                    );
                     await this.run(
                         'INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at) VALUES(?,?,?)',
-                        [row.model, runtimeSeconds, nowSeconds()],
+                        [row.model, processingRuntime, nowSeconds()],
                     );
                     await this.refreshQueuedEstimates(row.model);
                 }
@@ -2492,7 +2507,7 @@ export class VideoBroker {
 
     private async dispatchNext(): Promise<void> {
         if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
-        if (!schedulerAdmitsWork(this.worker.scheduler)) return;
+        if (!schedulerAcceptsReservations(this.worker.scheduler)) return;
         const control = await this.control();
         if (control.paused_until || control.dispatch_paused) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
@@ -2516,11 +2531,12 @@ export class VideoBroker {
                 [nowSeconds(), oldest.public_id],
             );
         }
-        this.schedulePreparation(row.public_id, true);
         const leaseId = randomUUID();
         const result = await this.run(
             `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
-             lease_token = ?, started_at = COALESCE(started_at, ?), stage = 'Leased to desktop', updated_at = ?
+             lease_token = ?, gpu_queue_state = 'submitting', gpu_queue_submitted_at = NULL,
+             gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+             started_at = COALESCE(started_at, ?), stage = 'Reserving GPU queue position', updated_at = ?
              WHERE public_id = ? AND status = 'queued'`,
             [this.worker.id, nowSeconds() + 60, leaseId, nowSeconds(), nowSeconds(), row.public_id],
         );
@@ -2541,7 +2557,6 @@ export class VideoBroker {
                 lease_id: leaseId,
             },
         });
-        await this.scheduleNextQueuedPreparation();
     }
 
     private sendWorker(message: unknown): void {
@@ -2598,6 +2613,7 @@ export class VideoBroker {
             }
             try {
                 const prepared = await this.ensurePlan(job, true);
+                await this.storePlanEstimate(job, prepared.plan);
                 writeJson(res, 200, {
                     plan: prepared.plan,
                     planner_model: prepared.plannerModel,
@@ -2842,7 +2858,6 @@ export function videoBrokerOptionsFromEnvironment(): BrokerOptions {
         resultsDir: settings.resultsDir,
         botToken,
         workerToken,
-        preplanQueuedJobs: true,
     };
 }
 

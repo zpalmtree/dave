@@ -230,6 +230,37 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         assert.equal(learned.body.job.estimate_low_seconds, 49);
         assert.equal(learned.body.job.estimate_high_seconds, 115);
         assert.equal(learned.body.job.estimate_ready, false);
+        const beforeReservation = await botFetch(`/v1/jobs/${learned.body.job.id}/prepare`, {
+            method: 'POST',
+            body: '{}',
+        });
+        assert.equal(beforeReservation.status, 200);
+        assert.equal(beforeReservation.body.job.estimate_ready, false);
+        socket.send(JSON.stringify({ type: 'ready', warm_model: 'h3' }));
+        const learnedLease = await take(value => value.type === 'job');
+        assert.equal(learnedLease.job.id, learned.body.job.id);
+        const submittedAt = Math.floor(Date.now() / 1000) - 120;
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
+            state: 'queued', submitted_at: submittedAt,
+            stage: 'Waiting for GPU queue admission',
+        }));
+        const waitingForGpu = await eventually(
+            () => botFetch('/v1/users/runtime-user-2/jobs'),
+            value => value.body.jobs[0].gpu_queue_state === 'queued',
+        );
+        assert.equal(waitingForGpu.body.jobs[0].expected_finish_at, null);
+        const admittedAt = Math.floor(Date.now() / 1000);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
+            state: 'admitted', submitted_at: submittedAt, admitted_at: admittedAt,
+            queue_wait_seconds: admittedAt - submittedAt,
+            stage: 'GPU admitted; planning screenplay',
+        }));
+        await eventually(
+            () => botFetch('/v1/users/runtime-user-2/jobs'),
+            value => value.body.jobs[0].gpu_queue_state === 'admitted',
+        );
         const prepared = await botFetch(`/v1/jobs/${learned.body.job.id}/prepare`, {
             method: 'POST',
             body: '{}',
@@ -250,9 +281,8 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             prepared.body.job.expected_finish_at - prepared.body.job.expected_start_at,
             127,
         );
-        socket.send(JSON.stringify({ type: 'ready', warm_model: 'h3' }));
-        const learnedLease = await take(value => value.type === 'job');
-        assert.equal(learnedLease.job.id, learned.body.job.id);
+        assert.equal(prepared.body.job.expected_start_at, admittedAt);
+        assert.equal(prepared.body.job.gpu_queue_wait_seconds, admittedAt - submittedAt);
         socket.send(JSON.stringify({
             type: 'event',
             event: 'plan',
@@ -609,7 +639,7 @@ test('broker may reuse a warm model once without starving the oldest queued job'
 
         const waiting = await botFetch('/v1/users/user-ltx/jobs');
         assert.equal(waiting.body.jobs[0].queue_position, 1);
-        assert.ok(waiting.body.jobs[0].expected_start_at);
+        assert.equal(waiting.body.jobs[0].expected_start_at, null);
 
         socket.send(JSON.stringify({
             type: 'event',
@@ -629,7 +659,7 @@ test('broker may reuse a warm model once without starving the oldest queued job'
     }
 });
 
-test('broker prepares a queued screenplay and keyframe while the GPU worker is busy', async () => {
+test('broker defers screenplay and keyframe work until the gpuq reservation is admitted', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-preplan-'));
     const plannerCalls = [];
     const keyframeCalls = [];
@@ -641,7 +671,6 @@ test('broker prepares a queued screenplay and keyframe while the GPU worker is b
         botToken: 'bot-secret',
         workerToken: 'worker-secret',
         heartbeatTimeoutMs: 5000,
-        preplanQueuedJobs: true,
         frontierPlanner: async prompt => {
             plannerCalls.push(prompt);
             return {
@@ -731,11 +760,12 @@ test('broker prepares a queued screenplay and keyframe while the GPU worker is b
         const firstLease = await take(value => value.type === 'job');
         assert.equal(firstLease.job.id, first.id);
         const second = await submit('Prepared while busy', 'message-2');
-        await eventually(
-            async () => ({ plannerCalls: [...plannerCalls], keyframeCalls: [...keyframeCalls] }),
-            value => value.plannerCalls.includes('Prepared while busy')
-                && value.keyframeCalls.includes('Prepared while busy'),
-        );
+        const premature = await botFetch(`/v1/jobs/${second.id}/prepare`, {
+            method: 'POST', body: '{}',
+        });
+        assert.equal(premature.status, 200);
+        assert.equal(plannerCalls.includes('Prepared while busy'), false);
+        assert.equal(keyframeCalls.includes('Prepared while busy'), false);
 
         socket.send(JSON.stringify({
             type: 'event',
@@ -747,9 +777,14 @@ test('broker prepares a queued screenplay and keyframe while the GPU worker is b
         socket.send(JSON.stringify({ type: 'ready' }));
         const secondLease = await take(value => value.type === 'job');
         assert.equal(secondLease.job.id, second.id);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: second.id,
+            state: 'admitted', submitted_at: Math.floor(Date.now() / 1000),
+            admitted_at: Math.floor(Date.now() / 1000), queue_wait_seconds: 0,
+        }));
         const planResponse = await workerFetch(`/v1/worker/jobs/${second.id}/plan`);
         assert.equal(planResponse.status, 200);
-        assert.equal((await planResponse.json()).cached, true);
+        assert.equal((await planResponse.json()).cached, false);
         const frameResponse = await workerFetch(`/v1/worker/jobs/${second.id}/keyframe`);
         assert.equal(frameResponse.status, 200);
         assert.equal(frameResponse.headers.get('x-video-keyframe-provider'), 'test-provider');
@@ -770,7 +805,7 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
-        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        botToken: 'bot-secret', workerToken: 'worker-secret',
         frontierPlanner: async () => {
             plannerCalls += 1;
             throw new FrontierPlannerRejectedError('provider_policy');
@@ -1142,7 +1177,6 @@ test('worker GPU-reset safety signal pauses dispatch and preserves failed-attemp
         botToken: 'bot-secret',
         workerToken: 'worker-secret',
         heartbeatTimeoutMs: 5000,
-        preplanQueuedJobs: false,
     });
     await broker.start();
     const base = `http://127.0.0.1:${broker.listeningPort()}`;
@@ -1301,7 +1335,21 @@ test('broker exposes attributed provider usage once and acknowledges it per orig
         });
         return { status: response.status, body: await response.json() };
     };
+    let socket;
     try {
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'usage-worker',
+            capabilities: ['minimaxfast'], current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
         const submitted = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({
@@ -1316,6 +1364,13 @@ test('broker exposes attributed provider usage once and acknowledges it per orig
             }),
         });
         assert.equal(submitted.status, 201);
+        const lease = await take(value => value.type === 'job');
+        assert.equal(lease.job.id, submitted.body.job.id);
+        const now = Math.floor(Date.now() / 1000);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: lease.job.id,
+            state: 'admitted', submitted_at: now, admitted_at: now, queue_wait_seconds: 0,
+        }));
         const prepared = await botFetch(`/v1/jobs/${submitted.body.job.id}/prepare`, {
             method: 'POST', body: '{}',
         });
@@ -1348,6 +1403,7 @@ test('broker exposes attributed provider usage once and acknowledges it per orig
         const empty = await botFetch('/v1/bots/bot-usage/usage-events');
         assert.deepEqual(empty.body.events, []);
     } finally {
+        if (socket) socket.close();
         await broker.stop();
         rmSync(directory, { recursive: true, force: true });
     }
@@ -1358,7 +1414,7 @@ test('dispatch drain leaves an active render running and blocks the next lease',
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
-        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        botToken: 'bot-secret', workerToken: 'worker-secret',
         frontierPlanner: async prompt => ({
             intent: prompt, continuity_bible: 'drain test',
             keyframe: { recommended: false, reference_requirements: [] },
@@ -1399,6 +1455,12 @@ test('dispatch drain leaves an active render running and blocks the next lease',
         });
         const lease = await take(value => value.type === 'job');
         assert.equal(lease.job.id, submitted.body.job.id);
+        const now = Math.floor(Date.now() / 1000);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: lease.job.id,
+            state: 'admitted', submitted_at: now - 30, admitted_at: now,
+            queue_wait_seconds: 30,
+        }));
         socket.send(JSON.stringify({
             type: 'event', event: 'plan', job_id: lease.job.id,
             estimate_low_seconds: 120, estimate_high_seconds: 240,
@@ -1427,12 +1489,12 @@ test('dispatch drain leaves an active render running and blocks the next lease',
     }
 });
 
-test('desktop scheduler health gates leases and lease tokens fence terminal events', async () => {
+test('desktop reserves gpuq during gaming, anchors ETA to admission, and fences terminal events', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-gpuq-'));
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
-        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        botToken: 'bot-secret', workerToken: 'worker-secret',
     });
     await broker.start();
     const base = `http://127.0.0.1:${broker.listeningPort()}`;
@@ -1468,15 +1530,41 @@ test('desktop scheduler health gates leases and lease tokens fence terminal even
         }));
         const hello = await take(value => value.type === 'hello_ack');
         assert.equal(hello.state.scheduler.mode, 'gaming');
-        await assert.rejects(() => take(value => value.type === 'job', 150), /Timed out/);
-
-        socket.send(JSON.stringify({
-            type: 'heartbeat', job_id: null,
-            scheduler: { available: true, mode: 'normal', gaming_ready: false, health: 'healthy' },
-        }));
         const lease = await take(value => value.type === 'job');
         assert.equal(lease.job.id, submitted.body.job.id);
         assert.match(lease.job.lease_id, /^[0-9a-f-]{36}$/);
+        const submittedAt = Math.floor(Date.now() / 1000) - 90;
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: lease.job.id,
+            state: 'queued', submitted_at: submittedAt,
+            stage: 'Waiting for GPU queue admission',
+        }));
+        const waiting = await eventually(
+            () => botFetch(`/v1/users/gpuq-user/jobs`),
+            value => value.body.jobs[0].gpu_queue_state === 'queued',
+        );
+        assert.equal(waiting.body.jobs[0].expected_start_at, null);
+        assert.equal(waiting.body.jobs[0].expected_finish_at, null);
+
+        const admittedAt = Math.floor(Date.now() / 1000);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: lease.job.id,
+            state: 'admitted', submitted_at: submittedAt, admitted_at: admittedAt,
+            queue_wait_seconds: admittedAt - submittedAt,
+        }));
+        socket.send(JSON.stringify({
+            type: 'event', event: 'plan', job_id: lease.job.id,
+            estimate_low_seconds: 120, estimate_high_seconds: 240,
+            stage: 'Screenplay ready',
+        }));
+        const estimated = await eventually(
+            () => botFetch(`/v1/users/gpuq-user/jobs`),
+            value => value.body.jobs[0].gpu_queue_state === 'admitted'
+                && value.body.jobs[0].estimate_ready,
+        );
+        assert.equal(estimated.body.jobs[0].expected_start_at, admittedAt);
+        assert.equal(estimated.body.jobs[0].gpu_queue_wait_seconds, admittedAt - submittedAt);
+        assert.equal(estimated.body.jobs[0].expected_finish_at, admittedAt + 180);
 
         socket.send(JSON.stringify({
             type: 'event', event: 'failed', event_id: 'stale-event',
