@@ -1317,3 +1317,77 @@ test('dispatch drain leaves an active render running and blocks the next lease',
         rmSync(directory, { recursive: true, force: true });
     }
 });
+
+test('desktop scheduler health gates leases and lease tokens fence terminal events', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-gpuq-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    let socket;
+    try {
+        const submitted = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxfast', prompt: 'Coordinator gate test', requester_id: 'gpuq-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1', guild_id: 'guild-1',
+                command_message_id: 'gpuq-message', status_message_id: 'gpuq-status',
+            }),
+        });
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'gpuq-worker',
+            capabilities: ['minimaxfast'], current_job: null,
+            scheduler: { available: true, mode: 'gaming', gaming_ready: true, health: 'healthy' },
+        }));
+        const hello = await take(value => value.type === 'hello_ack');
+        assert.equal(hello.state.scheduler.mode, 'gaming');
+        await assert.rejects(() => take(value => value.type === 'job', 150), /Timed out/);
+
+        socket.send(JSON.stringify({
+            type: 'heartbeat', job_id: null,
+            scheduler: { available: true, mode: 'normal', gaming_ready: false, health: 'healthy' },
+        }));
+        const lease = await take(value => value.type === 'job');
+        assert.equal(lease.job.id, submitted.body.job.id);
+        assert.match(lease.job.lease_id, /^[0-9a-f-]{36}$/);
+
+        socket.send(JSON.stringify({
+            type: 'event', event: 'failed', event_id: 'stale-event',
+            job_id: lease.job.id, lease_id: 'wrong-lease', error: 'must be ignored', retryable: false,
+        }));
+        await assert.rejects(() => take(value => value.type === 'event_ack', 150), /Timed out/);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'failed', event_id: 'current-event',
+            job_id: lease.job.id, lease_id: lease.job.lease_id, error: 'expected test failure', retryable: false,
+        }));
+        const acknowledgement = await take(value => value.type === 'event_ack');
+        assert.equal(acknowledgement.event_id, 'current-event');
+        const terminal = await eventually(
+            () => botFetch(`/v1/users/gpuq-user/jobs`),
+            value => value.body.jobs[0].status === 'failed',
+        );
+        assert.equal(terminal.body.jobs[0].error, 'expected test failure');
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});

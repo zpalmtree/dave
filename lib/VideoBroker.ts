@@ -27,6 +27,7 @@ import {
     VideoModelId,
     VideoWorkerMetrics,
     VideoWorkerHello,
+    VideoWorkerSchedulerState,
     isVideoModel,
     sanitizeVideoWorkerText,
 } from './VideoProtocol.js';
@@ -107,6 +108,8 @@ interface WorkerConnection {
     currentJob: string | null;
     ready: boolean;
     warmModel: VideoGeneratorModelId | null;
+    leaseId: string | null;
+    scheduler: VideoWorkerSchedulerState;
 }
 
 interface JobRow {
@@ -133,6 +136,7 @@ interface JobRow {
     progress: number | null;
     worker_id: string | null;
     lease_expires_at: number | null;
+    lease_token: string | null;
     result_path: string | null;
     result_sha256: string | null;
     result_bytes: number | null;
@@ -211,6 +215,27 @@ interface VideoJobSpanRow {
 
 function generatorModel(value: unknown): VideoGeneratorModelId | null {
     return value === 'ltx' || value === 'h3' ? value : null;
+}
+
+function workerScheduler(value: unknown): VideoWorkerSchedulerState {
+    if (!value || typeof value !== 'object') {
+        return { available: true, mode: 'normal', health: 'healthy' };
+    }
+    const scheduler = value as Record<string, unknown>;
+    return {
+        available: scheduler.available === true,
+        mode: typeof scheduler.mode === 'string'
+            ? scheduler.mode as VideoWorkerSchedulerState['mode']
+            : null,
+        gaming_ready: scheduler.gaming_ready === true,
+        health: typeof scheduler.health === 'string'
+            ? scheduler.health as VideoWorkerSchedulerState['health']
+            : null,
+    };
+}
+
+function schedulerAdmitsWork(value: VideoWorkerSchedulerState): boolean {
+    return value.available && value.mode === 'normal' && value.health === 'healthy';
 }
 
 function plannedIntent(row: JobRow): string | null {
@@ -669,6 +694,7 @@ export class VideoBroker {
             progress REAL,
             worker_id TEXT,
             lease_expires_at INTEGER,
+            lease_token TEXT,
             result_path TEXT,
             result_sha256 TEXT,
             result_bytes INTEGER,
@@ -709,6 +735,9 @@ export class VideoBroker {
         }
         if (!columnNames.has('estimate_ready')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN estimate_ready INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!columnNames.has('lease_token')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN lease_token TEXT');
         }
         for (const name of [
             'initial_estimate_low_seconds',
@@ -2046,6 +2075,7 @@ export class VideoBroker {
             current_job: this.worker?.currentJob || null,
             paused_until: control.paused_until,
             dispatch_paused: control.dispatch_paused,
+            scheduler: this.worker?.scheduler || null,
             queued: queued?.count || 0,
             active_jobs: active?.count || 0,
             preparation_busy: this.plannerInFlight.size > 0 || this.keyframeInFlight.size > 0
@@ -2061,7 +2091,8 @@ export class VideoBroker {
         );
         const control = await this.control();
         const online = Boolean(this.worker);
-        const canEstimate = online && !control.paused_until && !control.dispatch_paused;
+        const canEstimate = online && schedulerAdmitsWork(this.worker!.scheduler)
+            && !control.paused_until && !control.dispatch_paused;
         const busy = Boolean(this.worker?.currentJob);
         const now = nowSeconds();
         let cursor = Math.max(now, control.paused_until || now);
@@ -2169,6 +2200,8 @@ export class VideoBroker {
                         currentJob: hello.current_job,
                         ready: !hello.current_job,
                         warmModel: generatorModel(hello.warm_model),
+                        leaseId: hello.current_lease || null,
+                        scheduler: workerScheduler(hello.scheduler),
                     };
                     initialized = true;
                     await this.reconcileWorker(hello);
@@ -2212,7 +2245,9 @@ export class VideoBroker {
         }
         if (hello.current_job) {
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [hello.current_job]);
-            if (row && ACTIVE_VIDEO_STATUSES.includes(row.status)) {
+            const leaseMatches = !row?.lease_token || !hello.current_lease
+                || row.lease_token === hello.current_lease;
+            if (row && ACTIVE_VIDEO_STATUSES.includes(row.status) && leaseMatches) {
                 if (row.status === 'pausing' || row.status === 'cancelling') {
                     this.sendWorker({
                         type: 'cancel',
@@ -2251,6 +2286,9 @@ export class VideoBroker {
         if (!this.worker) return;
         this.worker.lastHeartbeat = Date.now();
         if (message.type === 'heartbeat') {
+            if (message.scheduler !== undefined) {
+                this.worker.scheduler = workerScheduler(message.scheduler);
+            }
             if (message.job_id && message.job_id === this.worker.currentJob) {
                 await this.run(
                     `UPDATE video_jobs SET lease_expires_at = ?, stage = COALESCE(?, stage),
@@ -2265,6 +2303,9 @@ export class VideoBroker {
                         message.job_id,
                     ],
                 );
+            }
+            if (!this.worker.currentJob && this.worker.ready && schedulerAdmitsWork(this.worker.scheduler)) {
+                await this.dispatchNext();
             }
             return;
         }
@@ -2284,6 +2325,8 @@ export class VideoBroker {
         }
         const jobId = String(message.job_id || '');
         if (!jobId || jobId !== this.worker.currentJob) return;
+        if (this.worker.leaseId && message.lease_id !== undefined
+            && message.lease_id !== this.worker.leaseId) return;
         if (message.type === 'event') {
             const event = String(message.event || '');
             if (event === 'plan') {
@@ -2426,11 +2469,20 @@ export class VideoBroker {
                 this.worker.currentJob = null;
                 this.worker.ready = false;
             }
+            if (['cancelled', 'failed', 'complete'].includes(event)
+                && typeof message.event_id === 'string' && message.event_id) {
+                this.sendWorker({
+                    type: 'event_ack',
+                    job_id: jobId,
+                    event_id: message.event_id,
+                });
+            }
         }
     }
 
     private async dispatchNext(): Promise<void> {
         if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
+        if (!schedulerAdmitsWork(this.worker.scheduler)) return;
         const control = await this.control();
         if (control.paused_until || control.dispatch_paused) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
@@ -2455,15 +2507,17 @@ export class VideoBroker {
             );
         }
         this.schedulePreparation(row.public_id, true);
+        const leaseId = randomUUID();
         const result = await this.run(
             `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
-             started_at = COALESCE(started_at, ?), stage = 'Leased to desktop', updated_at = ?
+             lease_token = ?, started_at = COALESCE(started_at, ?), stage = 'Leased to desktop', updated_at = ?
              WHERE public_id = ? AND status = 'queued'`,
-            [this.worker.id, nowSeconds() + 60, nowSeconds(), nowSeconds(), row.public_id],
+            [this.worker.id, nowSeconds() + 60, leaseId, nowSeconds(), nowSeconds(), row.public_id],
         );
         if (result.changes !== 1) return;
         this.worker.ready = false;
         this.worker.currentJob = row.public_id;
+        this.worker.leaseId = leaseId;
         this.worker.warmModel = VIDEO_MODELS[row.model].generatorModel;
         this.sendWorker({
             type: 'job',
@@ -2473,6 +2527,7 @@ export class VideoBroker {
                 model: row.model,
                 prompt: row.prompt,
                 profile: 'maximum',
+                lease_id: leaseId,
             },
         });
         await this.scheduleNextQueuedPreparation();
@@ -2517,7 +2572,8 @@ export class VideoBroker {
         const planning = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/plan$/.exec(url.pathname);
         if (planning && req.method === 'POST') {
             const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [planning[1]]);
-            if (!job || job.worker_id !== this.worker?.id || planning[1] !== this.worker.currentJob) {
+            if (!job || job.worker_id !== this.worker?.id || planning[1] !== this.worker.currentJob
+                || !this.workerLeaseMatches(req, job)) {
                 writeJson(res, 409, { error: 'Job is not leased to this worker.' });
                 return;
             }
@@ -2558,7 +2614,8 @@ export class VideoBroker {
         const keyframe = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/keyframe$/.exec(url.pathname);
         if (keyframe && req.method === 'POST') {
             let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
-            if (!job || job.worker_id !== this.worker?.id || keyframe[1] !== this.worker.currentJob) {
+            if (!job || job.worker_id !== this.worker?.id || keyframe[1] !== this.worker.currentJob
+                || !this.workerLeaseMatches(req, job)) {
                 writeJson(res, 409, { error: 'Job is not leased to this worker.' });
                 return;
             }
@@ -2607,6 +2664,7 @@ export class VideoBroker {
         if (metricsUpload && req.method === 'PUT') {
             const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [metricsUpload[1]]);
             if (!job || job.worker_id !== this.worker?.id || metricsUpload[1] !== this.worker.currentJob
+                || !this.workerLeaseMatches(req, job)
                 || !ACTIVE_VIDEO_STATUSES.includes(job.status)) {
                 writeJson(res, 409, { error: 'Job is not leased to this worker.' });
                 return;
@@ -2625,7 +2683,8 @@ export class VideoBroker {
             return;
         }
         const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [upload[1]]);
-        if (!job || job.worker_id !== this.worker?.id || upload[1] !== this.worker.currentJob) {
+        if (!job || job.worker_id !== this.worker?.id || upload[1] !== this.worker.currentJob
+            || !this.workerLeaseMatches(req, job)) {
             writeJson(res, 409, { error: 'Job is not leased to this worker.' });
             return;
         }
@@ -2673,6 +2732,12 @@ export class VideoBroker {
             rmSync(temporary, { force: true });
             throw error;
         }
+    }
+
+    private workerLeaseMatches(req: IncomingMessage, job: JobRow): boolean {
+        if (!job.lease_token) return true;
+        const supplied = req.headers['x-video-lease'];
+        return supplied === undefined || supplied === job.lease_token;
     }
 
     private async cleanupFiles(): Promise<void> {
