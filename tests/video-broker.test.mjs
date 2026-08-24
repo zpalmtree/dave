@@ -959,10 +959,12 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
 test('broker serves a cached frontier frame and gives a user attachment precedence', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-keyframe-'));
     const generatedBytes = Buffer.from('generated-keyframe');
+    const derivedBytes = Buffer.from('derived-segment-keyframe');
     const attachedBytes = Buffer.from('attached-keyframe');
     let keyframeCalls = 0;
     let referenceResolverCalls = 0;
     const plannerSawSource = [];
+    const derivedAspects = [];
     const plan = {
         intent: 'test',
         continuity_bible: 'test continuity',
@@ -984,7 +986,17 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
                 first_second_action: 'accelerate right',
             },
         },
-        segments: [],
+        segments: [{
+            title: 'Opening', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
+                duration_seconds: 5, visual: 'A racer waits at the starting line.',
+                camera: 'Rear three-quarter view.', audio: 'Track ambience.', dialogue: [],
+            }],
+        }, {
+            title: 'Podium', transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
+                duration_seconds: 5, visual: 'The same racer celebrates on the podium.',
+                camera: 'Low frontal view.', audio: 'Crowd cheers.', dialogue: [],
+            }],
+        }],
     };
     const broker = new VideoBroker({
         host: '127.0.0.1',
@@ -998,8 +1010,21 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
             plannerSawSource.push(Boolean(sourceImage));
             return plan;
         },
-        keyframeGenerator: async (_planned, references) => {
+        keyframeGenerator: async (planned, references, options) => {
             keyframeCalls += 1;
+            if (planned.keyframe.reason.startsWith('Preserve the recurring cast')) {
+                assert.equal(references.length, 1);
+                assert.equal(references[0].label, 'Recurring cast identity from frame zero');
+                assert.deepEqual(references[0].bytes, attachedBytes);
+                assert.match(planned.keyframe.prompt, /same racer celebrates on the podium/i);
+                derivedAspects.push(options.aspectRatio);
+                return {
+                    bytes: derivedBytes,
+                    mimeType: 'image/png',
+                    provider: 'derived-provider',
+                    model: 'derived-image-model',
+                };
+            }
             assert.equal(references.length, 1);
             assert.equal(references[0].label, 'Racer identity');
             return {
@@ -1141,8 +1166,22 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.equal(suppliedFrame.status, 200);
         assert.equal(suppliedFrame.headers.get('x-video-keyframe-provider'), 'user-attachment');
         assert.deepEqual(Buffer.from(await suppliedFrame.arrayBuffer()), attachedBytes);
+        const derivedFrame = await workerFetch(
+            `/v1/worker/jobs/${second.body.job.id}/keyframe?segment=2&aspect=3:4`,
+        );
+        assert.equal(derivedFrame.status, 200);
+        assert.equal(derivedFrame.headers.get('x-video-keyframe-provider'), 'derived-provider');
+        assert.equal(derivedFrame.headers.get('x-video-keyframe-segment'), '2');
+        assert.deepEqual(Buffer.from(await derivedFrame.arrayBuffer()), derivedBytes);
+        const cachedDerivedFrame = await workerFetch(
+            `/v1/worker/jobs/${second.body.job.id}/keyframe?segment=2&aspect=3:4`,
+        );
+        assert.equal(cachedDerivedFrame.status, 200);
+        assert.equal(cachedDerivedFrame.headers.get('x-video-keyframe-cached'), 'true');
+        assert.deepEqual(Buffer.from(await cachedDerivedFrame.arrayBuffer()), derivedBytes);
         assert.deepEqual(plannerSawSource, [false, true]);
-        assert.equal(keyframeCalls, 1);
+        assert.deepEqual(derivedAspects, ['3:4']);
+        assert.equal(keyframeCalls, 2);
         assert.equal(referenceResolverCalls, 1);
         socket.send(JSON.stringify({
             type: 'event',

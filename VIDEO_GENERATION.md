@@ -68,11 +68,19 @@ server asks `gpt-5.6-sol` at high reasoning effort for a strict
 structured screenplay only after the job reaches the desktop. The API key never
 leaves the server, successful plans are cached per job, and the desktop's local
 uncensored HauhauCS Qwen 3.8 27B Q4_K_P planner is the automatic offline fallback.
-It runs through llama.cpp with full GPU offload, 8K context, embedded MTP, and a
+It runs through llama.cpp with full GPU offload, 16K context, embedded MTP, and a
 vision projector for supplied reference images, then releases its VRAM before
 rendering. The worker optionally anchors the video with a
 generated first frame and reports model stages and percentages when ComfyUI
 exposes them.
+
+When a screenplay uses a hard cut or dissolve after an anchored first segment,
+the broker uses that original frame as identity-only visual evidence to create a
+new shot-specific frame zero. The generated frame matches the video's aspect
+ratio, is reviewed for recurring-cast identity and motion-ready composition, and
+the desktop renders that segment as I2V. Physically continuous `continue`
+segments still inherit the preceding segment's final frame. If a derived frame
+is unavailable or rejected by a provider, only that segment falls back to T2V.
 
 As soon as a job reaches the desktop, the worker submits one durable `gpuq`
 reservation. That reservation may wait behind other desktop GPU work, then owns
