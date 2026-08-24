@@ -40,7 +40,9 @@ import {
     validateFrontierVideoPlanForKeyframe,
 } from './VideoFrontierPlanner.js';
 import {
+    VIDEO_KEYFRAME_ASPECT_RATIOS,
     VIDEO_KEYFRAME_MAX_BYTES,
+    VideoKeyframeAspectRatio,
     VideoKeyframeOptions,
     VideoKeyframeResult,
     createFrontierVideoKeyframe,
@@ -163,6 +165,16 @@ interface JobRow {
     keyframe_provider: string | null;
     keyframe_model: string | null;
     affinity_bypasses: number;
+}
+
+interface SegmentKeyframeRow {
+    job_public_id: string;
+    segment_index: number;
+    path: string;
+    mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
+    provider: string;
+    model: string;
+    created_at: number;
 }
 
 interface VideoJobMetricRow {
@@ -505,6 +517,40 @@ function imageExtension(mimeType: string): string {
     return 'png';
 }
 
+function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: number): Record<string, any> | null {
+    const segment = Array.isArray(plan?.segments) ? plan.segments[segmentIndex - 1] : null;
+    const firstShot = Array.isArray(segment?.shots) ? segment.shots[0] : null;
+    if (!segment || !firstShot || !['cut', 'dissolve'].includes(String(segment.transition))) return null;
+    const title = String(segment.title || `Segment ${segmentIndex}`).trim();
+    const visual = String(firstShot.visual || '').trim();
+    const camera = String(firstShot.camera || '').trim();
+    if (!visual || !camera) return null;
+    return {
+        intent: String(plan.intent || visual),
+        continuity_bible: String(plan.continuity_bible || ''),
+        keyframe: {
+            recommended: true,
+            reason: `Preserve the recurring cast across the ${segment.transition} into ${title}.`,
+            prompt: [
+                `Opening still for segment ${segmentIndex}, ${title}: ${visual}`,
+                `Camera and framing: ${camera}.`,
+                'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
+                'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.',
+                'Show one frozen, motion-ready instant at 0.00 seconds of this segment.',
+            ].join(' '),
+            reference_requirements: [],
+            motion_contract: {
+                subject_orientation: 'Orient each recurring subject for the opening action described by this segment.',
+                gaze_direction: 'Direct each subject gaze toward the focus of the opening action.',
+                travel_direction: 'Show the travel vector implied by the opening action and composition.',
+                camera_relation: camera,
+                first_second_action: `Continue directly into this action: ${visual}`,
+            },
+        },
+        segments: [segment],
+    };
+}
+
 function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object') throw new Error('Invalid starting-image metadata.');
@@ -611,6 +657,7 @@ export class VideoBroker {
     private writeChain: Promise<unknown> = Promise.resolve();
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
+    private readonly segmentKeyframeInFlight = new Map<string, Promise<void>>();
     private readonly backgroundTasks = new Set<Promise<void>>();
     private heartbeatTimer: NodeJS.Timeout | null = null;
     private cleanupTimer: NodeJS.Timeout | null = null;
@@ -782,6 +829,18 @@ export class VideoBroker {
             ON video_jobs(status, id)`);
         await this.run(`CREATE INDEX IF NOT EXISTS video_jobs_origin_idx
             ON video_jobs(origin_bot_id, status, updated_at)`);
+        await this.run(`CREATE TABLE IF NOT EXISTS video_segment_keyframes (
+            job_public_id TEXT NOT NULL,
+            segment_index INTEGER NOT NULL CHECK (segment_index >= 2),
+            path TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY(job_public_id, segment_index)
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS video_segment_keyframes_job_idx
+            ON video_segment_keyframes(job_public_id)`);
         await this.run(`CREATE TABLE IF NOT EXISTS video_control (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             paused_until INTEGER,
@@ -2005,6 +2064,166 @@ export class VideoBroker {
         }
     }
 
+    private segmentProviderHooks(job: JobRow, segmentIndex: number): VideoProviderHooks {
+        const hooks = this.providerHooks(job);
+        const stage = (value: string) => `segment_${segmentIndex}_${value}`;
+        return {
+            onAttempt: hooks.onAttempt
+                ? attempt => hooks.onAttempt!({ ...attempt, stage: stage(attempt.stage) })
+                : undefined,
+            onUsage: hooks.onUsage
+                ? usage => hooks.onUsage!({ ...usage, stage: stage(usage.stage) })
+                : undefined,
+        };
+    }
+
+    private async segmentIdentityReference(
+        job: JobRow,
+        plan: Record<string, any>,
+    ): Promise<VideoKeyframeReference | null> {
+        let current = job;
+        if (!current.source_image_path && !current.keyframe_path && plan?.keyframe?.recommended === true) {
+            await this.ensureKeyframe(current, plan, true);
+            current = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [job.public_id]) || current;
+        }
+        const path = current.source_image_path || current.keyframe_path;
+        const mimeType = current.source_image_path ? current.source_image_mime : current.keyframe_mime;
+        if (!path || !mimeType || !existsSync(path)
+            || !VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) return null;
+        return {
+            label: 'Recurring cast identity from frame zero',
+            kind: 'identity',
+            visualFactsToPreserve: (
+                'Preserve the recognizable facial identity, body proportions, hair, skin tone, '
+                + 'and defining appearance of each recurring person shown in this reference.'
+            ),
+            bytes: readFileSync(path),
+            mimeType: mimeType as VideoKeyframeReference['mimeType'],
+            sourceUrl: current.source_image_path ? 'user-attachment' : 'generated-frame-zero',
+            contextUrl: current.source_image_path ? 'user-attachment' : 'generated-frame-zero',
+        };
+    }
+
+    private async ensureSegmentKeyframe(
+        job: JobRow,
+        plan: Record<string, any>,
+        segmentIndex: number,
+        aspectRatio: VideoKeyframeAspectRatio,
+    ): Promise<void> {
+        const derivedPlan = derivedSegmentKeyframePlan(plan, segmentIndex);
+        if (!derivedPlan) return;
+        const existing = await this.get<SegmentKeyframeRow>(
+            'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
+            [job.public_id, segmentIndex],
+        );
+        if (existing?.path && existsSync(existing.path)) return;
+        if (existing) {
+            await this.run(
+                'DELETE FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
+                [job.public_id, segmentIndex],
+            );
+        }
+        const inflightKey = `${job.public_id}:${segmentIndex}`;
+        let generation = this.segmentKeyframeInFlight.get(inflightKey);
+        if (!generation) {
+            generation = (async () => {
+                const started = Date.now();
+                let status: 'ok' | 'error' | 'skipped' = 'error';
+                try {
+                    const identity = await this.segmentIdentityReference(job, plan);
+                    if (!identity) {
+                        status = 'skipped';
+                        return;
+                    }
+                    const hooks = this.segmentProviderHooks(job, segmentIndex);
+                    const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
+                        derivedPlan,
+                        [identity],
+                        {
+                            serviceTier: 'fast',
+                            ...hooks,
+                            strategy: this.keyframeStrategy(job),
+                            aspectRatio,
+                        },
+                    );
+                    if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
+                        throw new Error('Generated segment frame is empty or too large.');
+                    }
+                    await hooks.onAttempt?.({
+                        stage: 'keyframe_review_decision',
+                        attempt: 1,
+                        outcome: result.reviewStatus === 'unreviewed' ? 'unreviewed' : 'accepted',
+                        provider: result.provider,
+                        model: result.model,
+                        serviceTier: 'priority',
+                        durationSeconds: 0,
+                    });
+                    const current = await this.get<JobRow>(
+                        'SELECT status FROM video_jobs WHERE public_id = ?',
+                        [job.public_id],
+                    );
+                    if (!current || !ACTIVE_VIDEO_STATUSES.includes(current.status)) {
+                        status = 'skipped';
+                        return;
+                    }
+                    const directory = resolve(this.options.resultsDir, job.public_id);
+                    mkdirSync(directory, { recursive: true });
+                    const extension = imageExtension(result.mimeType);
+                    const temporary = join(directory, `segment-${segmentIndex}-keyframe.${extension}.part`);
+                    const destination = join(directory, `segment-${segmentIndex}-keyframe.${extension}`);
+                    rmSync(temporary, { force: true });
+                    const stream = createWriteStream(temporary, { flags: 'wx' });
+                    await new Promise<void>((resolvePromise, reject) => {
+                        stream.once('finish', resolvePromise);
+                        stream.once('error', reject);
+                        stream.end(result.bytes);
+                    });
+                    rmSync(destination, { force: true });
+                    renameSync(temporary, destination);
+                    await this.run(
+                        `INSERT INTO video_segment_keyframes(
+                            job_public_id, segment_index, path, mime_type, provider, model, created_at
+                         ) VALUES(?, ?, ?, ?, ?, ?, ?)
+                         ON CONFLICT(job_public_id, segment_index) DO UPDATE SET
+                            path = excluded.path, mime_type = excluded.mime_type,
+                            provider = excluded.provider, model = excluded.model,
+                            created_at = excluded.created_at`,
+                        [
+                            job.public_id,
+                            segmentIndex,
+                            destination,
+                            result.mimeType,
+                            result.provider,
+                            result.model,
+                            nowSeconds(),
+                        ],
+                    );
+                    status = 'ok';
+                } finally {
+                    try {
+                        await this.recordMetricSpan(job.public_id, {
+                            source: 'broker',
+                            name: 'frontier_segment_keyframe',
+                            segment_index: segmentIndex,
+                            duration_seconds: (Date.now() - started) / 1000,
+                            metadata: { status },
+                        });
+                    } catch (error) {
+                        console.warn(`Could not store segment-frame timing for ${job.public_id}`, error);
+                    }
+                }
+            })();
+            this.segmentKeyframeInFlight.set(inflightKey, generation);
+        }
+        try {
+            await generation;
+        } finally {
+            if (this.segmentKeyframeInFlight.get(inflightKey) === generation) {
+                this.segmentKeyframeInFlight.delete(inflightKey);
+            }
+        }
+    }
+
     private async cancelJob(id: string, requesterId: string, isAdmin: boolean): Promise<any> {
         const matches = await this.all<JobRow>(
             'SELECT * FROM video_jobs WHERE public_id LIKE ? ORDER BY id DESC LIMIT 2',
@@ -2697,6 +2916,66 @@ export class VideoBroker {
                 writeJson(res, 409, { error: 'Job is not leased to this worker.' });
                 return;
             }
+            const segmentValue = url.searchParams.get('segment');
+            const segmentIndex = segmentValue === null ? 1 : Number(segmentValue);
+            if (!Number.isInteger(segmentIndex) || segmentIndex < 1 || segmentIndex > 8) {
+                writeJson(res, 400, { error: 'Segment must be an integer from 1 through 8.' });
+                return;
+            }
+            if (segmentIndex > 1) {
+                if (!job.planner_json) {
+                    writeJson(res, 409, { error: 'A screenplay is required before generating segment frames.' });
+                    return;
+                }
+                const aspectValue = url.searchParams.get('aspect') || '16:9';
+                if (!VIDEO_KEYFRAME_ASPECT_RATIOS.includes(aspectValue as VideoKeyframeAspectRatio)) {
+                    writeJson(res, 400, { error: 'Unsupported segment-frame aspect ratio.' });
+                    return;
+                }
+                const plan = JSON.parse(job.planner_json);
+                if (!derivedSegmentKeyframePlan(plan, segmentIndex)) {
+                    res.writeHead(204, { 'cache-control': 'no-store' });
+                    res.end();
+                    return;
+                }
+                try {
+                    let stored = await this.get<SegmentKeyframeRow>(
+                        'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
+                        [job.public_id, segmentIndex],
+                    );
+                    const cached = Boolean(stored?.path && existsSync(stored.path));
+                    if (!cached) {
+                        await this.ensureSegmentKeyframe(
+                            job,
+                            plan,
+                            segmentIndex,
+                            aspectValue as VideoKeyframeAspectRatio,
+                        );
+                        stored = await this.get<SegmentKeyframeRow>(
+                            'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
+                            [job.public_id, segmentIndex],
+                        );
+                    }
+                    if (!stored?.path || !stored.mime_type || !existsSync(stored.path)) {
+                        res.writeHead(204, { 'cache-control': 'no-store' });
+                        res.end();
+                        return;
+                    }
+                    writeImage(res, stored.path, stored.mime_type, {
+                        'x-video-keyframe-provider': stored.provider || 'frontier-image',
+                        'x-video-keyframe-model': stored.model || 'unknown',
+                        'x-video-keyframe-cached': cached ? 'true' : 'false',
+                        'x-video-keyframe-segment': String(segmentIndex),
+                    });
+                } catch (error) {
+                    console.warn(`Derived frame generation failed for ${keyframe[1]} segment ${segmentIndex}`, error);
+                    writeJson(res, 502, {
+                        error: error instanceof Error ? error.message : String(error),
+                        fallback: 't2v',
+                    });
+                }
+                return;
+            }
             if (job.source_image_path && job.source_image_mime && existsSync(job.source_image_path)) {
                 writeImage(res, job.source_image_path, job.source_image_mime, {
                     'x-video-keyframe-provider': 'user-attachment',
@@ -2835,6 +3114,7 @@ export class VideoBroker {
                 console.warn(`Could not clean video result ${row.public_id}`, error);
                 continue;
             }
+            await this.run('DELETE FROM video_segment_keyframes WHERE job_public_id = ?', [row.public_id]);
             await this.run(
                 `UPDATE video_jobs SET result_path = NULL, source_image_path = NULL, keyframe_path = NULL,
                  updated_at = ? WHERE public_id = ?`,
