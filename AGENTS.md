@@ -45,3 +45,13 @@ Default remote settings can be overridden with environment variables:
 
 - If cherry-pick conflicts occur, resolve them immediately and keep behavior equivalent across branches.
 - Do not leave one branch behind for follow-up unless the user explicitly approves it.
+
+# Related Desktop Video Pipeline
+
+The Windows GPU worker and generator are not stored in this Git repository. From
+WSL their live source is at `/mnt/d/AI/ComfyUI_windows_portable/video_gen`, which
+corresponds to `D:\AI\ComfyUI_windows_portable\video_gen` on Windows. The launcher
+is `/mnt/d/AI/ComfyUI_windows_portable/video_worker.cmd`. Video command, broker,
+queue, frontier-planning, and Discord-delivery code is stored in this repository;
+ComfyUI workflow compilation and local fallback planning are stored in that
+desktop directory. Inspect both locations for end-to-end video changes.

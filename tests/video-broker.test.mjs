@@ -8,6 +8,7 @@ import test from 'node:test';
 import { WebSocket } from 'ws';
 
 import { VideoBroker } from '../dist/VideoBroker.js';
+import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 
 function socketInbox(socket) {
     const queue = [];
@@ -737,6 +738,73 @@ test('broker prepares a queued screenplay and keyframe while the GPU worker is b
         assert.equal(frameResponse.headers.get('x-video-keyframe-provider'), 'test-provider');
         assert.equal(plannerCalls.filter(prompt => prompt === 'Prepared while busy').length, 1);
         assert.equal(keyframeCalls.filter(prompt => prompt === 'Prepared while busy').length, 1);
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('broker caches an explicit frontier rejection so the desktop consistently plans locally', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-frontier-rejection-'));
+    let plannerCalls = 0;
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        frontierPlanner: async () => {
+            plannerCalls += 1;
+            throw new FrontierPlannerRejectedError('provider_policy');
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    let socket;
+    try {
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'rejection-worker',
+            capabilities: ['minimaxfast'], current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const submitted = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimaxfast', prompt: 'Route this request locally.',
+                requester_id: 'rejection-user', origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: 'rejection-message', status_message_id: 'rejection-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        const job = (await submitted.json()).job;
+        const lease = await take(value => value.type === 'job');
+        assert.equal(lease.job.id, job.id);
+        const requestPlan = () => fetch(`${base}/v1/worker/jobs/${job.id}/plan`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer worker-secret', 'content-type': 'application/json' },
+            body: '{}',
+        });
+        const first = await requestPlan();
+        assert.equal(first.status, 502);
+        const firstBody = await first.json();
+        assert.equal(firstBody.fallback, 'local');
+        assert.equal(firstBody.disposition, 'reject');
+        assert.equal(firstBody.reason_code, 'provider_policy');
+        const cached = await requestPlan();
+        assert.equal(cached.status, 502);
+        const cachedBody = await cached.json();
+        assert.equal(cachedBody.fallback, 'local');
+        assert.equal(cachedBody.disposition, 'reject');
+        assert.equal(cachedBody.reason_code, 'provider_policy');
+        assert.equal(plannerCalls, 1);
     } finally {
         if (socket) socket.close();
         await broker.stop();

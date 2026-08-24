@@ -52,9 +52,14 @@ private HTTPS/WSS traffic to the broker's loopback port.
 
 ## Desktop worker
 
-Copy `video_gen/video_worker.json.example` to `video_gen/video_worker.json`, set
+The live desktop source is outside this repository at
+`D:\AI\ComfyUI_windows_portable\video_gen` on Windows, mounted in WSL as
+`/mnt/d/AI/ComfyUI_windows_portable/video_gen`. The launcher is
+`D:\AI\ComfyUI_windows_portable\video_worker.cmd`. Copy
+`video_worker.json.example` to `video_worker.json` inside that `video_gen`
+directory, set
 the tailnet-only `wss://.../v1/worker` URL and matching worker token, then run
-`video_worker.cmd`. The worker journals its active job, reconnects after network
+the `video_worker.cmd` launcher above. The worker journals its active job, reconnects after network
 loss, sends a heartbeat every 15 seconds, and retries transient render failures
 at most twice. MiniMax H3 requires `comfy-aimdo` 0.4.14 or newer for the expanded
 Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
