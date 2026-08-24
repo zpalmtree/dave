@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { Commands } from '../dist/CommandDeclarations.js';
 import {
+    canViewGlobalVideoQueue,
     formatVideoJob,
     formatGlobalVideoQueueJob,
     formatVideoRuntime,
@@ -78,6 +79,29 @@ test('test channel video commands have one silent Dave responder', () => {
     assert.deepEqual(singleVideoResponderGate(message('another-channel', '903156913724874832')), {
         canAccess: true,
     });
+});
+
+test('only test-channel moderators can view the global video queue', () => {
+    const message = ({
+        channelId = '483470443001413675',
+        authorId = 'ordinary-user',
+        canManageMessages = false,
+    } = {}) => ({
+        channel: { id: channelId },
+        author: { id: authorId },
+        member: {
+            permissions: {
+                has: () => canManageMessages,
+            },
+        },
+    });
+
+    assert.equal(canViewGlobalVideoQueue(message({ canManageMessages: true })), true);
+    assert.equal(canViewGlobalVideoQueue(message()), false);
+    assert.equal(canViewGlobalVideoQueue(message({
+        channelId: 'another-channel',
+        canManageMessages: true,
+    })), false);
 });
 
 test('video runtime is formatted for the delivered post', () => {

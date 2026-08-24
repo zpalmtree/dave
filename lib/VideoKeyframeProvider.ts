@@ -226,7 +226,7 @@ async function generateOpenAIKeyframe(
     const timeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
     try {
         const aspectRatio = options.aspectRatio || '16:9';
-        const outputSize: Record<VideoKeyframeAspectRatio, string> = {
+        const outputSizes: Record<VideoKeyframeAspectRatio, string> = {
             '1:1': '1024x1024',
             '2:3': '1024x1536',
             '3:2': '1536x1024',
@@ -235,7 +235,8 @@ async function generateOpenAIKeyframe(
             '9:16': '864x1536',
             '16:9': '1536x864',
             '21:9': '1536x640',
-        }[aspectRatio];
+        };
+        const outputSize = outputSizes[aspectRatio];
         const fullPrompt = `Output aspect ratio: ${aspectRatio}.\n${referenceContract(references)}\n\n${prompt}`;
         let response;
         if (references.length) {
