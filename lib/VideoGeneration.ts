@@ -144,8 +144,16 @@ export function completedVideoPost(job: VideoJobView): string {
     }.${notice ? `\n**Note:** ${notice}` : ''}\n> ${truncatePrompt(videoJobDirection(job))}`;
 }
 
+function videoFailureDetail(job: VideoJobView, maxLength: number): string {
+    const error = sanitizeVideoWorkerText(job.error, 'Unknown worker error.', maxLength);
+    const generic = /^(?:(?:generator|local planner) exited with code \d+|worker failure|unknown worker error)\.?$/i;
+    if (!generic.test(error)) return error;
+    const stage = sanitizeVideoWorkerText(job.stage, '', 500).trim().replace(/[.!]+$/, '');
+    return stage ? `${error} Last reported stage: ${stage}.` : error;
+}
+
 export function failedVideoPost(job: VideoJobView): string {
-    const error = sanitizeVideoWorkerText(job.error, 'Unknown worker error.', 1500);
+    const error = videoFailureDetail(job, 1500);
     return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** failed.\n${error}\n> ${
         truncatePrompt(videoJobDirection(job))
     }`;
@@ -272,7 +280,7 @@ export function formatVideoJob(job: VideoJobView): string {
     if (job.status === 'ready') return `${head}\nGeneration complete; delivering the video…`;
     if (job.status === 'delivered') return `${head}\nDelivered.`;
     if (job.status === 'cancelled') return `${head}\nCancelled.`;
-    return `${head}\nFailed: ${sanitizeVideoWorkerText(job.error, 'Unknown worker error.', 1800)}`;
+    return `${head}\nFailed: ${videoFailureDetail(job, 1800)}`;
 }
 
 export function formatGlobalVideoQueueJob(job: VideoJobView, viewerGuildId: string | null): string {
