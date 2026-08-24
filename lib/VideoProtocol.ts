@@ -206,6 +206,7 @@ export interface VideoJobView {
     worker_online: boolean;
     worker_busy: boolean;
     paused_until: number | null;
+    dispatch_paused: boolean;
 }
 
 export interface VideoWorkerHello {

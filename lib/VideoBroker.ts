@@ -2127,6 +2127,7 @@ export class VideoBroker {
                 worker_online: online,
                 worker_busy: busy,
                 paused_until: control.paused_until,
+                dispatch_paused: control.dispatch_paused,
             };
         });
     }
