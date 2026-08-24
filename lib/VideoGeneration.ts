@@ -220,15 +220,11 @@ async function fetchReferencedVideoMessage(msg: Message): Promise<Message | null
 
 function percentage(value: number | null): string {
     if (value === null) return '';
-    return ` (${Math.round(Math.max(0, Math.min(1, value)) * 100)}%)`;
+    return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 }
 
 function pauseText(until: number | null): string {
     return until ? ` Video generation resumes ${formatDiscordDateAndRelative(until)}.` : '';
-}
-
-function sentence(value: string): string {
-    return `${value.trim().replace(/[.!?]+$/, '')}.`;
 }
 
 export function formatVideoJob(job: VideoJobView): string {
@@ -241,27 +237,30 @@ export function formatVideoJob(job: VideoJobView): string {
         const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)}`;
         if (job.dispatch_paused) {
-            return `${head}\n${position} Dispatch is temporarily paused; expected start and finish times will appear when dispatch resumes.`;
+            return `${head}\n${position} Dispatch is temporarily paused; estimated completion will appear when dispatch resumes.`;
         }
         if (!job.worker_online) return `${head}\n${position} Desktop worker is offline; ETA will appear after it reconnects.`;
-        if (!job.estimate_ready) return `${head}\n**Accepted and processing.** ${position} Screenplay planning is in progress; the ETA is being calculated from its duration and scene count.`;
-        const timing = job.expected_start_at && job.expected_finish_at
-            ? ` Expected start ${formatDiscordDateAndRelative(job.expected_start_at)}; expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
+        if (!job.estimate_ready) return `${head}\n**Accepted.** ${position} Estimating completion time now.`;
+        const timing = job.expected_finish_at
+            ? ` Estimated completion ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
-        return `${head}\n**Accepted and processing.** ${position}${timing}`;
+        return `${head}\n**Accepted.** ${position}${timing}`;
     }
     if (job.status === 'running_disconnected') {
         return `${head}\nThe desktop connection was lost during generation. The job is preserved and will resume or retry after reconnecting.`;
     }
     if (['leased', 'planning', 'running', 'uploading', 'pausing', 'cancelling'].includes(job.status)) {
-        const stage = sanitizeVideoWorkerText(job.stage, job.status.replace('_', ' '));
         const timing = job.estimate_ready && job.worker_online && !job.paused_until && job.expected_finish_at
-            ? ` Expected finish ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
+            ? ` Estimated completion ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
         const etaPending = !timing && !job.paused_until
-            ? ' ETA is still being calculated.'
+            ? ' Estimating completion time now.'
             : '';
-        return `${head}\n**Processing:** ${sentence(`${stage}${percentage(job.progress)}`)}${timing}${etaPending}${pauseText(job.paused_until)}`;
+        const progress = percentage(job.progress);
+        const processing = progress
+            ? `**Processing — roughly ${progress} complete.**`
+            : '**Processing your video.**';
+        return `${head}\n${processing}${timing}${etaPending}${pauseText(job.paused_until)}`;
     }
     if (job.status === 'ready') return `${head}\nGeneration complete; delivering the video…`;
     if (job.status === 'delivered') return `${head}\nDelivered.`;
@@ -602,10 +601,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
-    const speedLabel = model.endsWith('fast') || model.endsWith('draft')
-        ? 'fast-preview'
-        : 'maximum-quality';
-    const pending = await msg.reply(`**Processing your video request now.** Submitting ${VIDEO_MODELS[model].displayName} (${speedLabel}); queue position and ETA calculation will appear here next.`);
+    const pending = await msg.reply(`**Video request received.** Preparing ${VIDEO_MODELS[model].displayName}; queue position and estimated completion will appear shortly.`);
     try {
         const response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
             method: 'POST',

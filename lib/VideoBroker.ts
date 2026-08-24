@@ -2295,8 +2295,10 @@ export class VideoBroker {
                     : null;
                 await this.run(
                     `UPDATE video_jobs SET status = 'planning', stage = ?,
-                     estimate_low_seconds = COALESCE(?, estimate_low_seconds),
-                     estimate_high_seconds = COALESCE(?, estimate_high_seconds),
+                     estimate_low_seconds = CASE WHEN estimate_ready = 0
+                        THEN COALESCE(?, estimate_low_seconds) ELSE estimate_low_seconds END,
+                     estimate_high_seconds = CASE WHEN estimate_ready = 0
+                        THEN COALESCE(?, estimate_high_seconds) ELSE estimate_high_seconds END,
                      estimate_ready = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL
                         THEN 1 ELSE estimate_ready END,
                      initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
