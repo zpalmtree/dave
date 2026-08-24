@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import fetch, { RequestInit, Response } from 'node-fetch';
-import { Client, Message } from 'discord.js';
+import { Client, Message, PermissionFlagsBits } from 'discord.js';
 
 import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
@@ -105,6 +105,12 @@ export function singleVideoResponderGate(msg: Message): { canAccess: boolean; er
     return msg.client.user?.id === singleResponderBotId()
         ? { canAccess: true }
         : { canAccess: false };
+}
+
+export function canViewGlobalVideoQueue(msg: Message): boolean {
+    if (msg.channel.id !== singleResponderChannelId()) return false;
+    if (msg.author.id === config.god) return true;
+    return Boolean(msg.member?.permissions.has(PermissionFlagsBits.ManageMessages));
 }
 
 export function formatVideoRuntime(seconds: number | null | undefined): string | null {
@@ -669,8 +675,11 @@ export async function handleMinimaxFastVideo(msg: Message, prompt: string): Prom
 
 export async function handleVideoQueue(msg: Message, args: string): Promise<void> {
     const guildId = msg.guild?.id || '';
+    const queueScope = canViewGlobalVideoQueue(msg)
+        ? ''
+        : `?guild_id=${encodeURIComponent(guildId)}`;
     const response = await brokerRequest<JobsResponse>(
-        `/v1/queue?guild_id=${encodeURIComponent(guildId)}`,
+        `/v1/queue${queueScope}`,
     );
     const [action, requestedId] = args.trim().split(/\s+/, 2);
     if (action?.toLowerCase() === 'cancel') {
