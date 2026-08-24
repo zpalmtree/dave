@@ -216,7 +216,16 @@ export interface VideoWorkerHello {
     capabilities: VideoModelId[];
     current_job: string | null;
     warm_model?: VideoGeneratorModelId | null;
+    current_lease?: string | null;
+    scheduler?: VideoWorkerSchedulerState;
     estimates?: Partial<Record<VideoModelId, { low: number; high: number }>>;
+}
+
+export interface VideoWorkerSchedulerState {
+    available: boolean;
+    mode?: 'normal' | 'draining' | 'enteringGaming' | 'gaming' | null;
+    gaming_ready?: boolean;
+    health?: 'healthy' | 'recovering' | 'probing' | 'externalBusy' | null;
 }
 
 export function isVideoModel(value: unknown): value is VideoModelId {
