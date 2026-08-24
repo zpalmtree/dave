@@ -66,8 +66,11 @@ Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
 local startup path pins and verifies that runtime before starting ComfyUI. The
 server asks `gpt-5.6-sol` at high reasoning effort for a strict
 structured screenplay only after the job reaches the desktop. The API key never
-leaves the server, successful plans are cached per job, and the local Qwen planner
-is the automatic offline fallback. The worker optionally anchors the video with a
+leaves the server, successful plans are cached per job, and the desktop's local
+uncensored HauhauCS Qwen 3.8 27B Q4_K_P planner is the automatic offline fallback.
+It runs through llama.cpp with full GPU offload, 8K context, embedded MTP, and a
+vision projector for supplied reference images, then releases its VRAM before
+rendering. The worker optionally anchors the video with a
 generated first frame and reports model stages and percentages when ComfyUI
 exposes them.
 
