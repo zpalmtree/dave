@@ -233,6 +233,9 @@ export function formatVideoJob(job: VideoJobView): string {
     if (job.status === 'queued') {
         const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)}`;
+        if (job.dispatch_paused) {
+            return `${head}\n${position} Dispatch is temporarily paused; expected start and finish times will appear when dispatch resumes.`;
+        }
         if (!job.worker_online) return `${head}\n${position} Desktop worker is offline; ETA will appear after it reconnects.`;
         if (!job.estimate_ready) return `${head}\n**Accepted and processing.** ${position} Screenplay planning is in progress; the ETA is being calculated from its duration and scene count.`;
         const timing = job.expected_start_at && job.expected_finish_at

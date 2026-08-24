@@ -182,6 +182,7 @@ test('offline queue messages omit fake ETAs', () => {
         worker_online: false,
         worker_busy: false,
         paused_until: null,
+        dispatch_paused: false,
     });
     assert.match(text, /Queue position: \*\*2\*\*/);
     assert.match(text, /offline/);
@@ -221,6 +222,7 @@ test('global video queue identifies same-server requesters without exposing cros
         worker_online: true,
         worker_busy: true,
         paused_until: null,
+        dispatch_paused: false,
     };
     const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
     assert.match(formatted, /Queue position: \*\*2\*\*/);
@@ -243,6 +245,46 @@ test('global video queue identifies same-server requesters without exposing cros
     assert.ok(chunks.length > 1);
     assert.ok(chunks.every(chunk => chunk.length <= 700));
     assert.deepEqual(globalVideoQueueChunks([], 'guild-a'), ['The server video queue is empty.']);
+});
+
+test('drained queue messages explain why start and finish times are unavailable', () => {
+    const text = formatVideoJob({
+        id: '12345678-1234-1234-1234-123456789abc',
+        model: 'minimax',
+        prompt: 'test',
+        requester_id: 'u',
+        origin_bot_id: 'b',
+        channel_id: 'c',
+        guild_id: null,
+        command_message_id: 'm',
+        status_message_id: 's',
+        status: 'queued',
+        queue_position: 1,
+        estimate_low_seconds: 10,
+        estimate_high_seconds: 20,
+        estimate_ready: false,
+        expected_start_at: null,
+        expected_finish_at: null,
+        stage: null,
+        progress: null,
+        error: null,
+        result_path: null,
+        result_bytes: null,
+        has_source_image: false,
+        created_at: 1,
+        updated_at: 1,
+        started_at: null,
+        completed_at: null,
+        runtime_seconds: null,
+        delivered_at: null,
+        worker_online: true,
+        worker_busy: true,
+        paused_until: null,
+        dispatch_paused: true,
+    });
+    assert.match(text, /Dispatch is temporarily paused/);
+    assert.match(text, /expected start and finish times will appear/);
+    assert.doesNotMatch(text, /Accepted and processing/);
 });
 
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
