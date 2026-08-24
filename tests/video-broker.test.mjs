@@ -250,6 +250,23 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             prepared.body.job.expected_finish_at - prepared.body.job.expected_start_at,
             127,
         );
+        socket.send(JSON.stringify({ type: 'ready', warm_model: 'h3' }));
+        const learnedLease = await take(value => value.type === 'job');
+        assert.equal(learnedLease.job.id, learned.body.job.id);
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'plan',
+            job_id: learned.body.job.id,
+            stage: 'Screenplay ready',
+            estimate_low_seconds: 500,
+            estimate_high_seconds: 900,
+        }));
+        const stableEstimate = await eventually(
+            () => botFetch('/v1/users/runtime-user-2/jobs'),
+            value => value.body.jobs[0].status === 'planning',
+        );
+        assert.equal(stableEstimate.body.jobs[0].estimate_low_seconds, 57);
+        assert.equal(stableEstimate.body.jobs[0].estimate_high_seconds, 197);
         const otherRequester = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({

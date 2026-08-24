@@ -226,6 +226,8 @@ test('global video queue identifies same-server requesters without exposing cros
     };
     const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
     assert.match(formatted, /Queue position: \*\*2\*\*/);
+    assert.match(formatted, /Estimated completion/);
+    assert.doesNotMatch(formatted, /Expected start|estimate.*-/i);
     assert.match(formatted, /<@483470443001413675>/);
     assert.match(formatted, /Three racers approach a neon finish line/);
 
@@ -247,7 +249,47 @@ test('global video queue identifies same-server requesters without exposing cros
     assert.deepEqual(globalVideoQueueChunks([], 'guild-a'), ['The server video queue is empty.']);
 });
 
-test('drained queue messages explain why start and finish times are unavailable', () => {
+test('active video status shows only rough progress and one completion ETA', () => {
+    const text = formatVideoJob({
+        id: '12345678-1234-1234-1234-123456789abc',
+        model: 'minimaxfast',
+        prompt: 'A concise test video.',
+        requester_id: 'u',
+        origin_bot_id: 'b',
+        channel_id: 'c',
+        guild_id: null,
+        command_message_id: 'm',
+        status_message_id: 's',
+        status: 'running',
+        queue_position: null,
+        estimate_low_seconds: 120,
+        estimate_high_seconds: 300,
+        estimate_ready: true,
+        expected_start_at: 2_000_000_000,
+        expected_finish_at: 2_000_000_210,
+        stage: 'Sampling [##########----------] 50.0% | ETA 2m-5m',
+        progress: 0.426,
+        error: null,
+        result_path: null,
+        result_bytes: null,
+        has_source_image: false,
+        created_at: 1,
+        updated_at: 1,
+        started_at: 2,
+        completed_at: null,
+        runtime_seconds: null,
+        delivered_at: null,
+        worker_online: true,
+        worker_busy: true,
+        paused_until: null,
+        dispatch_paused: false,
+    });
+    assert.match(text, /roughly 43% complete/);
+    assert.match(text, /Estimated completion/);
+    assert.doesNotMatch(text, /Sampling|2m-5m|Expected start/);
+});
+
+test('drained queue messages explain why completion time is unavailable', () => {
     const text = formatVideoJob({
         id: '12345678-1234-1234-1234-123456789abc',
         model: 'minimax',
@@ -283,7 +325,7 @@ test('drained queue messages explain why start and finish times are unavailable'
         dispatch_paused: true,
     });
     assert.match(text, /Dispatch is temporarily paused/);
-    assert.match(text, /expected start and finish times will appear/);
+    assert.match(text, /estimated completion will appear/);
     assert.doesNotMatch(text, /Accepted and processing/);
 });
 
