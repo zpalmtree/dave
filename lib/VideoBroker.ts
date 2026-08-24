@@ -32,6 +32,7 @@ import {
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
 import {
+    FrontierPlannerRejectedError,
     VIDEO_PLANNER_MODEL,
     VideoPlanSourceImage,
     createFrontierVideoPlan,
@@ -234,6 +235,13 @@ function generationNotice(row: JobRow): string | null {
     } catch {
         return null;
     }
+}
+
+const FRONTIER_REJECTION_PREFIX = 'local-fallback:';
+
+function cachedFrontierRejection(plannerModel: string | null): string | null {
+    if (!plannerModel?.startsWith(FRONTIER_REJECTION_PREFIX)) return null;
+    return plannerModel.slice(FRONTIER_REJECTION_PREFIX.length).trim() || 'other';
 }
 
 function nowSeconds(): number {
@@ -1738,6 +1746,13 @@ export class VideoBroker {
                 plannerModel: job.planner_model || VIDEO_PLANNER_MODEL,
             };
         }
+        const cachedRejection = cachedFrontierRejection(job.planner_model);
+        if (cachedRejection) {
+            throw new FrontierPlannerRejectedError(
+                cachedRejection,
+                `Frontier planner previously classified this request for local fallback (${cachedRejection}).`,
+            );
+        }
         let planning = this.plannerInFlight.get(job.public_id);
         if (!planning) {
             planning = (async () => {
@@ -1783,6 +1798,18 @@ export class VideoBroker {
                     );
                     status = 'ok';
                     return { plan, plannerModel: VIDEO_PLANNER_MODEL };
+                } catch (error) {
+                    if (error instanceof FrontierPlannerRejectedError) {
+                        const reasonCode = /^[a-z_]+$/.test(error.reasonCode)
+                            ? error.reasonCode
+                            : 'other';
+                        await this.run(
+                            `UPDATE video_jobs SET planner_model = ?, updated_at = ?
+                             WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                            [`${FRONTIER_REJECTION_PREFIX}${reasonCode}`, nowSeconds(), job.public_id],
+                        );
+                    }
+                    throw error;
                 } finally {
                     try {
                         await this.recordMetricSpan(job.public_id, {
@@ -1946,7 +1973,13 @@ export class VideoBroker {
                 if (!refreshed || !ACTIVE_VIDEO_STATUSES.includes(refreshed.status)) return;
                 await this.ensureKeyframe(refreshed, plan, criticalPath);
             } catch (error) {
-                console.warn(`Queued video preparation failed for ${publicId}; the worker will retry on demand.`, error);
+                if (error instanceof FrontierPlannerRejectedError) {
+                    console.log(
+                        `Frontier planner routed ${publicId} to the local planner (${error.reasonCode}).`,
+                    );
+                } else {
+                    console.warn(`Queued video preparation failed for ${publicId}; the worker will retry on demand.`, error);
+                }
             } finally {
                 this.preparationQueued.delete(publicId);
             }
@@ -2501,10 +2534,20 @@ export class VideoBroker {
                     cached: false,
                 });
             } catch (error) {
-                console.warn(`Frontier planning failed for ${job.public_id}`, error);
+                if (error instanceof FrontierPlannerRejectedError) {
+                    console.log(
+                        `Frontier planner routed ${job.public_id} to the local planner (${error.reasonCode}).`,
+                    );
+                } else {
+                    console.warn(`Frontier planning failed for ${job.public_id}`, error);
+                }
                 writeJson(res, 502, {
                     error: error instanceof Error ? error.message : String(error),
                     fallback: 'local',
+                    ...(error instanceof FrontierPlannerRejectedError ? {
+                        disposition: 'reject',
+                        reason_code: error.reasonCode,
+                    } : {}),
                 });
             }
             return;

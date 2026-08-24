@@ -28,6 +28,7 @@ import {
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_MODEL,
+    FrontierPlannerRejectedError,
     compileBestEffortFrontierVideoPlan,
     createFrontierVideoPlan,
     validateFrontierVideoPlanForKeyframe,
@@ -319,6 +320,11 @@ function frontierAnalysis(dialogueMode = 'none') {
         dialogue_contract: { mode: dialogueMode, lines: [] },
         prohibited_substitutions: [],
         resolved_intent: 'A dog runs through a park.',
+        frontier_handling: {
+            disposition: 'fulfill',
+            reason_code: 'none',
+            reason: 'N/A',
+        },
     };
 }
 
@@ -439,6 +445,65 @@ test('frontier planner compiles the second invalid completed screenplay instead 
     }
 });
 
+test('frontier analysis can explicitly route a rejected request to local planning', async () => {
+    const analysis = frontierAnalysis();
+    analysis.frontier_handling = {
+        disposition: 'reject',
+        reason_code: 'provider_policy',
+        reason: 'This frontier path cannot preserve the request faithfully.',
+    };
+    const replies = [
+        { status: 'completed', output_text: JSON.stringify(analysis), model: VIDEO_PLANNER_MODEL },
+    ];
+    const attempts = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse(replies.shift());
+    try {
+        await assert.rejects(
+            () => createFrontierVideoPlan(
+                'A request routed locally.', 'minimaxfast', 'requester-rejected', undefined,
+                { onAttempt: attempt => attempts.push(attempt) },
+            ),
+            error => error instanceof FrontierPlannerRejectedError
+                && error.reasonCode === 'provider_policy',
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+    assert.equal(replies.length, 0);
+    assert.ok(attempts.some(attempt =>
+        attempt.stage === 'prompt_analysis_decision' && attempt.outcome === 'rejected'));
+});
+
+test('two protected-dialogue fidelity failures route local instead of compiling counter-speech', async () => {
+    const analysis = frontierAnalysis('verbatim');
+    analysis.request_form = 'verbatim_utterance';
+    analysis.dialogue_contract.lines = [{
+        speaker_hint: 'speaker', text: 'Hello there.', verbatim: true,
+    }];
+    const counterSpeech = [{
+        speaker_id: 'speaker', language: 'English', delivery: 'firm', text: 'I will say something else.',
+    }];
+    const replies = [
+        { status: 'completed', output_text: JSON.stringify(analysis), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan(counterSpeech)), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan(counterSpeech)), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse(replies.shift());
+    try {
+        await assert.rejects(
+            () => createFrontierVideoPlan(
+                'Say exactly: Hello there.', 'minimaxfast', 'requester-counter-speech', undefined,
+            ),
+            error => error instanceof FrontierPlannerRejectedError
+                && error.reasonCode === 'cannot_faithfully_fulfill',
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('best-effort compiler truncates automatic screenplays to 30 seconds', () => {
     const plan = frontierPlan();
     plan.segments = [0, 1, 2].map(index => ({
@@ -519,10 +584,15 @@ test('frontier prompt analysis classifies intent independently before screenplay
         'rigid_artifact',
         'motion_graphic',
     ]);
+    assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.frontier_handling.properties.disposition.enum, [
+        'fulfill',
+        'reject',
+    ]);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Classify these axes independently/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /prompt can itself be an utterance/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Copy every user-supplied spoken line exactly/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /production directions, not speakers/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Never disguise a rejection/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /generic reinterpretations/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative affordances/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative_montage/);
