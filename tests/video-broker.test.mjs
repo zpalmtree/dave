@@ -1399,12 +1399,27 @@ test('dispatch drain leaves an active render running and blocks the next lease',
         });
         const lease = await take(value => value.type === 'job');
         assert.equal(lease.job.id, submitted.body.job.id);
+        socket.send(JSON.stringify({
+            type: 'event', event: 'plan', job_id: lease.job.id,
+            estimate_low_seconds: 120, estimate_high_seconds: 240,
+            stage: 'Screenplay ready',
+        }));
+        const estimated = await eventually(
+            () => botFetch('/v1/users/drain-user/jobs'),
+            value => value.body.jobs[0].estimate_ready
+                && value.body.jobs[0].expected_finish_at !== null,
+        );
+        assert.equal(estimated.body.jobs[0].dispatch_paused, false);
         const drained = await botFetch('/v1/control/drain', {
             method: 'POST', body: JSON.stringify({ actor_id: 'deploy-test' }),
         });
         assert.equal(drained.body.state.dispatch_paused, true);
         assert.equal(drained.body.state.current_job, lease.job.id);
         assert.equal(drained.body.state.worker_busy, true);
+        const stillEstimated = await botFetch('/v1/users/drain-user/jobs');
+        assert.equal(stillEstimated.body.jobs[0].dispatch_paused, true);
+        assert.equal(stillEstimated.body.jobs[0].estimate_ready, true);
+        assert.ok(stillEstimated.body.jobs[0].expected_finish_at > 0);
     } finally {
         if (socket) socket.close();
         await broker.stop();
