@@ -244,12 +244,19 @@ export function formatVideoJob(job: VideoJobView): string {
         const timing = job.expected_finish_at
             ? ` Estimated completion ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';
-        return `${head}\n**Accepted.** ${position}${timing}`;
+        const etaPending = timing ? '' : ' ETA will appear after this job reserves and reaches the GPU.';
+        return `${head}\n**Accepted.** ${position}${timing}${etaPending}`;
     }
     if (job.status === 'running_disconnected') {
         return `${head}\nThe desktop connection was lost during generation. The job is preserved and will resume or retry after reconnecting.`;
     }
     if (['leased', 'planning', 'running', 'uploading', 'pausing', 'cancelling'].includes(job.status)) {
+        if (job.gpu_queue_state === 'submitting') {
+            return `${head}\n**Reserving this video's GPU queue position.** Planning and rendering will run under the same reservation.`;
+        }
+        if (job.gpu_queue_state === 'queued') {
+            return `${head}\n**Waiting in the GPU queue.** Its position is reserved; estimated completion will include this wait once GPU work begins.`;
+        }
         const timing = job.estimate_ready && job.worker_online && !job.paused_until && job.expected_finish_at
             ? ` Estimated completion ${formatDiscordDateAndRelative(job.expected_finish_at)}.`
             : '';

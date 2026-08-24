@@ -250,7 +250,7 @@ test('global video queue identifies same-server requesters without exposing cros
 });
 
 test('active video status shows only rough progress and one completion ETA', () => {
-    const text = formatVideoJob({
+    const job = {
         id: '12345678-1234-1234-1234-123456789abc',
         model: 'minimaxfast',
         prompt: 'A concise test video.',
@@ -283,10 +283,31 @@ test('active video status shows only rough progress and one completion ETA', () 
         worker_busy: true,
         paused_until: null,
         dispatch_paused: false,
-    });
+        gpu_queue_state: 'admitted',
+        gpu_queue_submitted_at: 1_999_999_900,
+        gpu_admitted_at: 2_000_000_000,
+        gpu_queue_wait_seconds: 100,
+    };
+    const text = formatVideoJob(job);
     assert.match(text, /roughly 43% complete/);
     assert.match(text, /Estimated completion/);
     assert.doesNotMatch(text, /Sampling|2m-5m|Expected start/);
+
+    const waiting = formatVideoJob({
+        ...job,
+        status: 'leased',
+        estimate_ready: false,
+        expected_start_at: null,
+        expected_finish_at: null,
+        progress: null,
+        gpu_queue_state: 'queued',
+        gpu_admitted_at: null,
+        gpu_queue_wait_seconds: null,
+    });
+    assert.match(waiting, /Waiting in the GPU queue/);
+    assert.match(waiting, /position is reserved/);
+    assert.match(waiting, /include this wait/);
+    assert.doesNotMatch(waiting, /Estimated completion <t:/);
 });
 
 test('drained queue messages explain why completion time is unavailable', () => {

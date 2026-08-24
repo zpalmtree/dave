@@ -207,6 +207,10 @@ export interface VideoJobView {
     worker_busy: boolean;
     paused_until: number | null;
     dispatch_paused: boolean;
+    gpu_queue_state?: 'submitting' | 'queued' | 'admitted' | null;
+    gpu_queue_submitted_at?: number | null;
+    gpu_admitted_at?: number | null;
+    gpu_queue_wait_seconds?: number | null;
 }
 
 export interface VideoWorkerHello {

@@ -74,6 +74,14 @@ rendering. The worker optionally anchors the video with a
 generated first frame and reports model stages and percentages when ComfyUI
 exposes them.
 
+As soon as a job reaches the desktop, the worker submits one durable `gpuq`
+reservation. That reservation may wait behind other desktop GPU work, then owns
+the complete local pipeline from screenplay preparation through rendering. The
+worker runs local-planner and generator child processes inside the same
+gpuq-owned process tree. Discord omits a render-only completion time while the
+reservation is waiting and anchors the ETA to GPU admission afterward, so the
+reported completion includes time already spent in the desktop GPU queue.
+
 Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
 24 hours; complete desktop generation directories expire after seven days.
 
