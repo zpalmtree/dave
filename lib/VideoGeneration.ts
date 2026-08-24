@@ -121,8 +121,17 @@ export function formatVideoRuntime(seconds: number | null | undefined): string |
     return parts.join(' ');
 }
 
+function displayedVideoPrompt(prompt: string): string {
+    const legacyPrefix = 'Context from the replied message:\n';
+    const legacyMarker = '\n\nCurrent instruction (takes priority):\n';
+    if (!prompt.startsWith(legacyPrefix)) return prompt;
+    const instructionAt = prompt.lastIndexOf(legacyMarker);
+    if (instructionAt < 0) return prompt;
+    return prompt.slice(instructionAt + legacyMarker.length).trim() || prompt;
+}
+
 export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_intent'>): string {
-    if (job.prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT) return job.prompt;
+    if (job.prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT) return displayedVideoPrompt(job.prompt);
     const intent = sanitizeVideoWorkerText(job.planned_intent, '', 1000).trim();
     return intent ? `Auto-direction: ${intent}` : 'Auto-directing the attached image.';
 }
