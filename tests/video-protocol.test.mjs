@@ -600,6 +600,10 @@ test('image-only jobs show the inferred direction instead of an internal fallbac
         prompt: 'Make the dog run.',
         planned_intent: 'Ignored for explicit prompts.',
     }), 'Make the dog run.');
+    assert.equal(videoJobDirection({
+        prompt: 'Context from the replied message:\nOld context.\n\nCurrent instruction (takes priority):\nMake the dog run.',
+        planned_intent: null,
+    }), 'Make the dog run.');
 });
 
 test('frontier prompt analysis classifies intent independently before screenplay planning', () => {
