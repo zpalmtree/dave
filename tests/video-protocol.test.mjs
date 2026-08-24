@@ -674,7 +674,7 @@ test('video commands accept exactly one supported attached start frame', () => {
     );
 });
 
-test('video commands inherit prompt and image context from a replied-to message', () => {
+test('video commands use the current prompt while inheriting a replied-to image', () => {
     const replyAttachment = {
         url: 'https://cdn.discordapp.com/attachments/1/2/reply.png',
         contentType: 'image/png',
@@ -698,7 +698,7 @@ test('video commands inherit prompt and image context from a replied-to message'
     );
     assert.equal(
         videoPromptFromMessages('Make it rainy.', reply),
-        'Context from the replied message:\nThree racers approach a neon finish line.\n\nCurrent instruction (takes priority):\nMake it rainy.',
+        'Make it rainy.',
     );
     assert.equal(
         videoSourceImageFromMessages(commandWithoutImage, reply).url,
