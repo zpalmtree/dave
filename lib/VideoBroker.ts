@@ -37,6 +37,7 @@ import {
     VIDEO_PLANNER_MODEL,
     VideoPlanSourceImage,
     createFrontierVideoPlan,
+    validateFrontierVideoPlanForKeyframe,
 } from './VideoFrontierPlanner.js';
 import {
     VIDEO_KEYFRAME_MAX_BYTES,
@@ -60,6 +61,7 @@ import {
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
+const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 
 interface VideoSourceImageDescriptor {
     url: string;
@@ -2527,6 +2529,7 @@ export class VideoBroker {
                 model: row.model,
                 prompt: row.prompt,
                 profile: 'maximum',
+                has_source_image: Boolean(row.source_image_path),
                 lease_id: leaseId,
             },
         });
@@ -2607,6 +2610,57 @@ export class VideoBroker {
                         disposition: 'reject',
                         reason_code: error.reasonCode,
                     } : {}),
+                });
+            }
+            return;
+        }
+        const localPlanning = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/local-plan$/.exec(url.pathname);
+        if (localPlanning && req.method === 'POST') {
+            let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [localPlanning[1]]);
+            if (!job || job.worker_id !== this.worker?.id || localPlanning[1] !== this.worker.currentJob
+                || !this.workerLeaseMatches(req, job)) {
+                writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+                return;
+            }
+            if (job.planner_json && !cachedFrontierRejection(job.planner_model)) {
+                writeJson(res, 409, { error: 'A completed screenplay is already stored for this job.' });
+                return;
+            }
+            try {
+                const body = await readJson(req, 512 * 1024);
+                const plan = body?.plan;
+                validateFrontierVideoPlanForKeyframe(plan, job.model, job.prompt);
+                const estimate = await this.plannedRuntimeEstimate(job, plan);
+                const now = nowSeconds();
+                await this.run(
+                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?,
+                     estimate_low_seconds = ?, estimate_high_seconds = ?, estimate_ready = 1,
+                     initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
+                     initial_estimate_high_seconds = COALESCE(initial_estimate_high_seconds, ?),
+                     initial_estimate_recorded_at = COALESCE(initial_estimate_recorded_at, ?),
+                     updated_at = ? WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                    [
+                        JSON.stringify(plan),
+                        LOCAL_VIDEO_PLANNER_MODEL,
+                        estimate.low,
+                        estimate.high,
+                        estimate.low,
+                        estimate.high,
+                        now,
+                        now,
+                        job.public_id,
+                    ],
+                );
+                job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [localPlanning[1]]) || job;
+                writeJson(res, 200, {
+                    ok: true,
+                    planner_model: LOCAL_VIDEO_PLANNER_MODEL,
+                    job: (await this.views([job]))[0],
+                });
+            } catch (error) {
+                console.warn(`Local screenplay upload failed for ${job.public_id}`, error);
+                writeJson(res, 400, {
+                    error: error instanceof Error ? error.message : String(error),
                 });
             }
             return;
