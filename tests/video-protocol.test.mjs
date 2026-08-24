@@ -113,6 +113,23 @@ test('failed video post is a standalone sanitized reply', () => {
     assert.doesNotMatch(text, /D:\\|private|video\.plan/);
 });
 
+test('generic worker failures include the last reported pipeline stage', () => {
+    const job = {
+        id: 'e2b81b99-1f4f-42ae-9ac1-0a350f991aef',
+        model: 'minimaxfast',
+        runtime_seconds: null,
+        prompt: 'A test video',
+        error: 'Generator exited with code 1.',
+        stage: 'First frame ready from gemini / gemini-3-pro-image',
+        status: 'failed',
+    };
+    assert.match(
+        failedVideoPost(job),
+        /Generator exited with code 1\. Last reported stage: First frame ready from gemini \/ gemini-3-pro-image\./,
+    );
+    assert.match(formatVideoJob(job), /Last reported stage: First frame ready from gemini/);
+});
+
 test('worker progress never exposes local filesystem paths', () => {
     assert.equal(
         sanitizeVideoWorkerText(
