@@ -272,6 +272,11 @@ test('global video queue identifies same-server requesters without exposing cros
     assert.match(formatted, /<@483470443001413675>/);
     assert.match(formatted, /Three racers approach a neon finish line/);
 
+    const fullPrompt = `A complete queue prompt ${'with every requested detail '.repeat(12)}`;
+    const fullPromptChunks = globalVideoQueueChunks([{ ...queued, prompt: fullPrompt }], 'guild-a', 700);
+    assert.equal(fullPromptChunks.length, 1);
+    assert.match(fullPromptChunks[0], new RegExp(fullPrompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
     const crossServer = formatGlobalVideoQueueJob({
         ...queued,
         requester_id: '975310864209753108',
@@ -287,6 +292,13 @@ test('global video queue identifies same-server requesters without exposing cros
     })), 'guild-a', 700);
     assert.ok(chunks.length > 1);
     assert.ok(chunks.every(chunk => chunk.length <= 700));
+    const oversized = globalVideoQueueChunks([{
+        ...queued,
+        prompt: `An oversized prompt ${'x'.repeat(2000)}`,
+    }], 'guild-a', 700);
+    assert.equal(oversized.length, 1);
+    assert.ok(oversized[0].length <= 700);
+    assert.match(oversized[0], /…$/);
     assert.deepEqual(globalVideoQueueChunks([], 'guild-a'), ['The server video queue is empty.']);
 });
 

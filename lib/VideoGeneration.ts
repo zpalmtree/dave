@@ -289,13 +289,21 @@ export function formatVideoJob(job: VideoJobView): string {
     return `${head}\nFailed: ${videoFailureDetail(job, 1800)}`;
 }
 
-export function formatGlobalVideoQueueJob(job: VideoJobView, viewerGuildId: string | null): string {
+export function formatGlobalVideoQueueJob(
+    job: VideoJobView,
+    viewerGuildId: string | null,
+    promptLength?: number,
+): string {
     const [head, ...details] = formatVideoJob(job).split('\n');
     const sameServer = viewerGuildId !== null && job.guild_id === viewerGuildId;
     const requester = sameServer && /^\d+$/.test(job.requester_id)
         ? `<@${job.requester_id}>`
         : sameServer ? 'unknown requester' : 'requester hidden';
-    return `${head} · ${requester}\n${details.join('\n')}\n> ${truncatePrompt(videoJobDirection(job), 100)}`;
+    const direction = videoJobDirection(job);
+    const displayedDirection = promptLength === undefined
+        ? direction
+        : truncatePrompt(direction, promptLength);
+    return `${head} · ${requester}\n${details.join('\n')}\n> ${displayedDirection}`;
 }
 
 export function globalVideoQueueChunks(jobs: VideoJobView[], viewerGuildId: string | null, limit = 1900): string[] {
@@ -304,13 +312,20 @@ export function globalVideoQueueChunks(jobs: VideoJobView[], viewerGuildId: stri
     const chunks: string[] = [];
     let current = header;
     for (const job of jobs) {
-        const block = formatGlobalVideoQueueJob(job, viewerGuildId);
+        let block = formatGlobalVideoQueueJob(job, viewerGuildId);
         if (`${current}\n\n${block}`.length > limit && current !== header) {
             chunks.push(current);
-            current = `${header} (continued)\n\n${block}`;
-        } else {
-            current += `\n\n${block}`;
+            current = `${header} (continued)`;
         }
+        if (`${current}\n\n${block}`.length > limit) {
+            const withoutPrompt = formatGlobalVideoQueueJob(job, viewerGuildId, 1);
+            const availablePromptLength = Math.max(
+                1,
+                limit - `${current}\n\n${withoutPrompt}`.length + 1,
+            );
+            block = formatGlobalVideoQueueJob(job, viewerGuildId, availablePromptLength);
+        }
+        current += `\n\n${block}`;
     }
     chunks.push(current);
     return chunks;
