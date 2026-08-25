@@ -361,18 +361,24 @@ export function globalVideoQueueChunks(
 class VideoGenerationService {
     private timer: NodeJS.Timeout | null = null;
     private polling = false;
+    private nextPollMs = 15_000;
     private readonly rendered = new Map<string, string>();
 
     constructor(private readonly client: Client) {}
 
     start(): void {
         if (this.timer) return;
-        void this.poll();
-        this.timer = setInterval(() => void this.poll(), 15_000);
+        this.timer = setTimeout(() => void this.tick(), 0);
     }
 
     async refresh(): Promise<void> {
         await this.poll();
+    }
+
+    private async tick(): Promise<void> {
+        this.timer = null;
+        await this.poll();
+        if (!this.timer) this.timer = setTimeout(() => void this.tick(), this.nextPollMs);
     }
 
     private async statusMessage(job: VideoJobView): Promise<any | null> {
@@ -504,10 +510,10 @@ class VideoGenerationService {
         if (!settings.botToken) return;
         this.polling = true;
         try {
-            await syncVideoUsageForBot(this.client.user.id);
             const response = await brokerRequest<JobsResponse>(
                 `/v1/bots/${encodeURIComponent(this.client.user.id)}/jobs`,
             );
+            this.nextPollMs = videoPollDelayMs(response.jobs, response.state);
             for (const job of response.jobs) {
                 try {
                     await this.updateJob(job);
@@ -515,13 +521,22 @@ class VideoGenerationService {
                     console.warn(`[Video] Could not update ${job.id}: ${String(error)}`);
                 }
             }
-            await syncVideoUsageForBot(this.client.user.id);
+            void syncVideoUsageForBot(this.client.user.id);
         } catch (error) {
             console.warn(`[Video] Broker poll failed: ${String(error)}`);
         } finally {
             this.polling = false;
         }
     }
+}
+
+export function videoPollDelayMs(jobs: VideoJobView[], state: BrokerState): number {
+    const active = jobs.length > 0
+        || state.queued > 0
+        || Boolean(state.active_jobs)
+        || state.worker_busy
+        || Boolean(state.preparation_busy);
+    return active ? 3_000 : 15_000;
 }
 
 const services = new Map<string, VideoGenerationService>();

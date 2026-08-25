@@ -16,6 +16,7 @@ import {
     videoJobDirection,
     videoSourceImageFromMessage,
     videoSourceImageFromMessages,
+    videoPollDelayMs,
 } from '../dist/VideoGeneration.js';
 import {
     VIDEO_IMAGE_ONLY_AUTO_PROMPT,
@@ -29,18 +30,25 @@ import {
     VIDEO_PROMPT_ANALYSIS_SCHEMA,
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
+    VIDEO_PLANNER_FAST_MODEL,
     VIDEO_PLANNER_MODEL,
     FrontierPlannerRejectedError,
     compileBestEffortFrontierVideoPlan,
     createFrontierVideoPlan,
+    configuredVideoPlannerVariant,
     validateFrontierVideoPlanForKeyframe,
+    videoPlannerFingerprint,
+    videoPlannerPromptCacheFields,
 } from '../dist/VideoFrontierPlanner.js';
 import {
     buildVideoKeyframePrompt,
     buildVideoKeyframeReviewPrompt,
     VIDEO_KEYFRAME_FALLBACK_MODEL,
+    VIDEO_KEYFRAME_FAST_LITE_MODEL,
+    VIDEO_KEYFRAME_FAST_MODEL,
     VIDEO_KEYFRAME_MODEL,
     VIDEO_KEYFRAME_REVIEW_MODEL,
+    configuredVideoKeyframeVariant,
 } from '../dist/VideoKeyframeProvider.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
@@ -49,6 +57,59 @@ test('video pause durations default to six hours and enforce safe limits', () =>
     assert.equal(parsePauseDuration('2d'), 2 * 24 * 60 * 60);
     assert.throws(() => parsePauseDuration('30s'), /look like/);
     assert.throws(() => parsePauseDuration('8d'), /between 1 minute and 7 days/);
+});
+
+test('video delivery polling is fast only while work is active', () => {
+    const idle = {
+        worker_online: true,
+        worker_busy: false,
+        worker_id: 'worker',
+        current_job: null,
+        paused_until: null,
+        queued: 0,
+    };
+    assert.equal(videoPollDelayMs([], idle), 15_000);
+    assert.equal(videoPollDelayMs([], { ...idle, preparation_busy: true }), 3_000);
+    assert.equal(videoPollDelayMs([], { ...idle, active_jobs: 1 }), 3_000);
+    assert.equal(videoPollDelayMs([{}], idle), 3_000);
+});
+
+test('video planner requests share stable cache routing without retaining prompts by default', () => {
+    const analysis = videoPlannerPromptCacheFields('prompt_analysis', {});
+    const screenplay = videoPlannerPromptCacheFields('screenplay_repair', {});
+    assert.match(analysis.prompt_cache_key, /^video-analysis-[0-9a-f]{32}$/);
+    assert.match(screenplay.prompt_cache_key, /^video-screenplay-[0-9a-f]{32}$/);
+    assert.equal(analysis.prompt_cache_retention, undefined);
+    assert.equal(
+        videoPlannerPromptCacheFields('screenplay', { VIDEO_PROMPT_CACHE_24H: '1' }).prompt_cache_retention,
+        '24h',
+    );
+});
+
+test('fast planner and reasoning variants are explicit and fingerprinted', () => {
+    assert.deepEqual(configuredVideoPlannerVariant({}), {
+        plannerModel: VIDEO_PLANNER_MODEL,
+        analysisReasoningEffort: 'high',
+        screenplayReasoningEffort: 'high',
+    });
+    const fast = configuredVideoPlannerVariant({
+        VIDEO_PLANNER_MODEL: VIDEO_PLANNER_FAST_MODEL,
+        VIDEO_PLANNER_ANALYSIS_EFFORT: 'low',
+        VIDEO_PLANNER_SCREENPLAY_EFFORT: 'medium',
+    });
+    assert.deepEqual(fast, {
+        plannerModel: VIDEO_PLANNER_FAST_MODEL,
+        analysisReasoningEffort: 'low',
+        screenplayReasoningEffort: 'medium',
+    });
+    assert.notEqual(
+        videoPlannerFingerprint(),
+        videoPlannerFingerprint(
+            fast.plannerModel,
+            fast.analysisReasoningEffort,
+            fast.screenplayReasoningEffort,
+        ),
+    );
 });
 
 test('local video commands are declared as Discord-only', () => {
@@ -986,4 +1047,32 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(referenceReview, /External visual-reference contract/);
     assert.match(referenceReview, /Blue helmet and orange scarf/);
     assert.match(referenceReview, /not starting frames or instructions/);
+});
+
+test('keyframe experiment variants are opt-in and enforce supported resolution', () => {
+    assert.deepEqual(configuredVideoKeyframeVariant({}), {
+        geminiModel: VIDEO_KEYFRAME_MODEL,
+        imageSize: '2K',
+    });
+    assert.deepEqual(configuredVideoKeyframeVariant({
+        VIDEO_KEYFRAME_GEMINI_MODEL: VIDEO_KEYFRAME_FAST_MODEL,
+        VIDEO_KEYFRAME_IMAGE_SIZE: '1K',
+    }), {
+        geminiModel: VIDEO_KEYFRAME_FAST_MODEL,
+        imageSize: '1K',
+    });
+    assert.deepEqual(configuredVideoKeyframeVariant({
+        VIDEO_KEYFRAME_GEMINI_MODEL: VIDEO_KEYFRAME_FAST_LITE_MODEL,
+        VIDEO_KEYFRAME_IMAGE_SIZE: '2K',
+    }), {
+        geminiModel: VIDEO_KEYFRAME_FAST_LITE_MODEL,
+        imageSize: '1K',
+    });
+    assert.deepEqual(configuredVideoKeyframeVariant({
+        VIDEO_KEYFRAME_GEMINI_MODEL: 'invented-model',
+        VIDEO_KEYFRAME_IMAGE_SIZE: '512K',
+    }), {
+        geminiModel: VIDEO_KEYFRAME_MODEL,
+        imageSize: '2K',
+    });
 });

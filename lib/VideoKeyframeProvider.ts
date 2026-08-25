@@ -11,6 +11,8 @@ import {
 } from './VideoUsage.js';
 
 export const VIDEO_KEYFRAME_MODEL = AI_MODELS.geminiImage;
+export const VIDEO_KEYFRAME_FAST_MODEL = 'gemini-3.1-flash-image';
+export const VIDEO_KEYFRAME_FAST_LITE_MODEL = 'gemini-3.1-flash-lite-image';
 export const VIDEO_KEYFRAME_PROVIDER = 'gemini';
 export const VIDEO_KEYFRAME_FALLBACK_MODEL = AI_MODELS.openAIImage;
 export const VIDEO_KEYFRAME_REVIEW_MODEL = AI_MODELS.openAIChat;
@@ -19,6 +21,10 @@ export const VIDEO_KEYFRAME_ASPECT_RATIOS = [
     '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9',
 ] as const;
 export type VideoKeyframeAspectRatio = typeof VIDEO_KEYFRAME_ASPECT_RATIOS[number];
+export type VideoKeyframeGeminiModel = typeof VIDEO_KEYFRAME_MODEL
+    | typeof VIDEO_KEYFRAME_FAST_MODEL
+    | typeof VIDEO_KEYFRAME_FAST_LITE_MODEL;
+export type VideoKeyframeImageSize = '1K' | '2K';
 
 export interface VideoKeyframeResult {
     bytes: Buffer;
@@ -39,6 +45,25 @@ export type VideoKeyframeStrategy = 'serial-v1' | 'conditional-v2';
 export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     strategy?: VideoKeyframeStrategy;
     aspectRatio?: VideoKeyframeAspectRatio;
+    geminiModel?: VideoKeyframeGeminiModel;
+    imageSize?: VideoKeyframeImageSize;
+}
+
+export function configuredVideoKeyframeVariant(environment: NodeJS.ProcessEnv = process.env): {
+    geminiModel: VideoKeyframeGeminiModel;
+    imageSize: VideoKeyframeImageSize;
+} {
+    const requestedModel = String(environment.VIDEO_KEYFRAME_GEMINI_MODEL || '');
+    const geminiModel: VideoKeyframeGeminiModel = (
+        requestedModel === VIDEO_KEYFRAME_FAST_MODEL
+        || requestedModel === VIDEO_KEYFRAME_FAST_LITE_MODEL
+        || requestedModel === VIDEO_KEYFRAME_MODEL
+    ) ? requestedModel : VIDEO_KEYFRAME_MODEL;
+    const requestedSize = String(environment.VIDEO_KEYFRAME_IMAGE_SIZE || '');
+    const imageSize: VideoKeyframeImageSize = geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL
+        ? '1K'
+        : requestedSize === '1K' ? '1K' : '2K';
+    return { geminiModel, imageSize };
 }
 
 function keyframeString(value: unknown, fallback: string): string {
@@ -123,6 +148,10 @@ async function generateGeminiKeyframe(
     attempt: number,
     options: VideoKeyframeOptions,
 ): Promise<VideoKeyframeResult> {
+    const geminiModel = options.geminiModel || VIDEO_KEYFRAME_MODEL;
+    const imageSize = geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL
+        ? '1K'
+        : options.imageSize || '2K';
     const started = Date.now();
     let outcome: 'success' | 'error' = 'error';
     let detail: string | undefined;
@@ -143,7 +172,7 @@ async function generateGeminiKeyframe(
     ]));
     try {
         const generation = client.models.generateContent({
-            model: VIDEO_KEYFRAME_MODEL,
+            model: geminiModel,
             contents: [{
                 role: 'user',
                 parts: [
@@ -158,7 +187,7 @@ async function generateGeminiKeyframe(
                 responseModalities: ['IMAGE'],
                 imageConfig: {
                     aspectRatio: options.aspectRatio || '16:9',
-                    imageSize: '2K',
+                    imageSize,
                 },
             },
         });
@@ -175,16 +204,28 @@ async function generateGeminiKeyframe(
             ?.flatMap(candidate => candidate.content?.parts || [])
             .find(part => part.inlineData?.mimeType?.startsWith('image/') && part.inlineData?.data);
         const usage = response.usageMetadata;
+        const inputTokens = Number(usage?.promptTokenCount || 0);
+        const thoughtTokens = Number(usage?.thoughtsTokenCount || 0);
+        const flashImagePrice = geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL
+            ? 0.0336
+            : imageSize === '1K' ? 0.067 : 0.101;
         await options.onUsage?.({
             stage: 'keyframe_candidate_gemini',
             attempt,
             outcome: imagePart?.inlineData?.data ? 'success' : 'error',
             provider: 'google',
-            model: VIDEO_KEYFRAME_MODEL,
+            model: geminiModel,
             serviceTier: 'default',
-            inputTokens: Number(usage?.promptTokenCount || 0),
-            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
+            inputTokens,
+            outputTokens: geminiModel === VIDEO_KEYFRAME_MODEL
+                ? Number(usage?.candidatesTokenCount || 0) + thoughtTokens
+                : thoughtTokens,
             images: imagePart?.inlineData?.data ? 1 : 0,
+            costOverride: imagePart?.inlineData?.data && geminiModel !== VIDEO_KEYFRAME_MODEL
+                ? inputTokens * (geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL ? 0.25 : 0.5) / 1_000_000
+                    + thoughtTokens * (geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL ? 1.5 : 3) / 1_000_000
+                    + flashImagePrice
+                : undefined,
         });
         if (!imagePart?.inlineData?.data) {
             throw new Error('Gemini returned no first-frame image.');
@@ -194,7 +235,7 @@ async function generateGeminiKeyframe(
             Buffer.from(imagePart.inlineData.data, 'base64'),
             imagePart.inlineData.mimeType || '',
             VIDEO_KEYFRAME_PROVIDER,
-            VIDEO_KEYFRAME_MODEL,
+            geminiModel,
         );
     } catch (error) {
         detail = error instanceof Error ? error.message : String(error);
@@ -205,7 +246,7 @@ async function generateGeminiKeyframe(
             attempt,
             outcome,
             provider: 'google',
-            model: VIDEO_KEYFRAME_MODEL,
+            model: geminiModel,
             serviceTier: 'default',
             durationSeconds: (Date.now() - started) / 1000,
             detail,

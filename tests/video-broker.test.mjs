@@ -7,7 +7,11 @@ import test from 'node:test';
 
 import { WebSocket } from 'ws';
 
-import { VideoBroker } from '../dist/VideoBroker.js';
+import {
+    VideoBroker,
+    duplicateVideoTerminalEventMatches,
+    videoFailureDisposition,
+} from '../dist/VideoBroker.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 
 function socketInbox(socket) {
@@ -38,6 +42,39 @@ function socketInbox(socket) {
         });
     };
 }
+
+test('video failure policy waits on readiness and suppresses identical render retries', () => {
+    assert.equal(
+        videoFailureDisposition('Timed out waiting for ComfyUI readiness.', true, 0, 0, null),
+        'wait-readiness',
+    );
+    assert.equal(
+        videoFailureDisposition('Timed out waiting for ComfyUI readiness.', true, 0, 6, null),
+        'fail',
+    );
+    assert.equal(videoFailureDisposition('Sampler crashed.', true, 0, 0, null), 'retry');
+    assert.equal(videoFailureDisposition('Sampler crashed.', true, 1, 0, 'Sampler crashed.'), 'fail');
+    assert.equal(videoFailureDisposition('Invalid screenplay.', false, 0, 0, null), 'fail');
+});
+
+test('terminal replay acknowledgements cover retry and pause requeues without accepting stale leases', () => {
+    const base = { lease_token: 'lease-1', error: null, stage: null };
+    assert.equal(duplicateVideoTerminalEventMatches({
+        event: 'failed', lease_id: 'lease-1', error: 'ComfyUI timed out',
+    }, {
+        ...base, status: 'queued', error: 'ComfyUI timed out', stage: 'Waiting for GPU/Comfy readiness',
+    }), true);
+    assert.equal(duplicateVideoTerminalEventMatches({
+        event: 'cancelled', lease_id: 'lease-1', reason: 'pause',
+    }, {
+        ...base, status: 'queued', stage: 'Paused for desktop use',
+    }), true);
+    assert.equal(duplicateVideoTerminalEventMatches({
+        event: 'failed', lease_id: 'stale-lease', error: 'ComfyUI timed out',
+    }, {
+        ...base, status: 'queued', error: 'ComfyUI timed out',
+    }), false);
+});
 
 test('broker keeps the measured end-to-end runtime on the completed job', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-runtime-'));
@@ -235,7 +272,9 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             body: '{}',
         });
         assert.equal(beforeReservation.status, 200);
-        assert.equal(beforeReservation.body.job.estimate_ready, false);
+        assert.equal(beforeReservation.body.job.estimate_ready, true);
+        assert.equal(beforeReservation.body.job.estimate_low_seconds, 57);
+        assert.equal(beforeReservation.body.job.estimate_high_seconds, 197);
         socket.send(JSON.stringify({ type: 'ready', warm_model: 'h3' }));
         const learnedLease = await take(value => value.type === 'job');
         assert.equal(learnedLease.job.id, learned.body.job.id);
@@ -332,6 +371,57 @@ async function eventually(callback, predicate, timeoutMs = 2000) {
     }
     throw new Error('Timed out waiting for broker state.');
 }
+
+test('source-image download does not hold the enqueue write lock', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-source-lock-'));
+    let releaseDownload;
+    let announceDownload;
+    const downloadStarted = new Promise(resolve => { announceDownload = resolve; });
+    const downloadReleased = new Promise(resolve => { releaseDownload = resolve; });
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret',
+        sourceImageDownloader: async (_descriptor, targetDirectory) => {
+            announceDownload();
+            await downloadReleased;
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'source.png');
+            writeFileSync(path, Buffer.from('source'));
+            return { path, mimeType: 'image/png', bytes: 6 };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const submit = (message, source_image) => fetch(`${base}/v1/jobs`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({
+            model: 'minimax', prompt: message, requester_id: message,
+            origin_bot_id: 'bot-1', channel_id: 'channel-1',
+            command_message_id: message, status_message_id: `status-${message}`,
+            ...(source_image ? { source_image } : {}),
+        }),
+    });
+    try {
+        const slow = submit('slow-source', {
+            url: 'https://cdn.discordapp.com/attachments/1/2/source.png',
+            mime_type: 'image/png', bytes: 6, name: 'source.png',
+        });
+        await downloadStarted;
+        const fast = await Promise.race([
+            submit('fast-no-source'),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('enqueue remained locked')), 500)),
+        ]);
+        assert.equal(fast.status, 201);
+        releaseDownload();
+        assert.equal((await slow).status, 201);
+    } finally {
+        releaseDownload?.();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
 
 test('broker preserves an interrupted job at the front while paused', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-broker-'));
@@ -659,7 +749,7 @@ test('broker may reuse a warm model once without starving the oldest queued job'
     }
 });
 
-test('broker defers screenplay and keyframe work until the gpuq reservation is admitted', async () => {
+test('broker prepares the next screenplay and keyframe before gpuq admission', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-preplan-'));
     const plannerCalls = [];
     const keyframeCalls = [];
@@ -671,6 +761,7 @@ test('broker defers screenplay and keyframe work until the gpuq reservation is a
         botToken: 'bot-secret',
         workerToken: 'worker-secret',
         heartbeatTimeoutMs: 5000,
+        preplanQueuedJobs: true,
         frontierPlanner: async prompt => {
             plannerCalls.push(prompt);
             return {
@@ -688,11 +779,21 @@ test('broker defers screenplay and keyframe work until the gpuq reservation is a
                         first_second_action: 'continue right',
                     },
                 },
-                segments: [],
+                segments: [{
+                    title: 'Opening', transition: 'start', target_seconds: 5, music: 'N/A',
+                    shots: [{
+                        duration_seconds: 5, visual: `${prompt} begins`, camera: 'wide', audio: 'room tone', dialogue: [],
+                    }],
+                }, {
+                    title: 'New location', transition: 'cut', target_seconds: 5, music: 'N/A',
+                    shots: [{
+                        duration_seconds: 5, visual: `${prompt} continues elsewhere`, camera: 'medium', audio: 'room tone', dialogue: [],
+                    }],
+                }],
             };
         },
         keyframeGenerator: async plan => {
-            keyframeCalls.push(plan.intent);
+            keyframeCalls.push(`${plan.intent}:${plan.segments?.[0]?.transition || 'none'}`);
             return {
                 bytes: Buffer.from(`keyframe:${plan.intent}`),
                 mimeType: 'image/png',
@@ -760,12 +861,12 @@ test('broker defers screenplay and keyframe work until the gpuq reservation is a
         const firstLease = await take(value => value.type === 'job');
         assert.equal(firstLease.job.id, first.id);
         const second = await submit('Prepared while busy', 'message-2');
-        const premature = await botFetch(`/v1/jobs/${second.id}/prepare`, {
-            method: 'POST', body: '{}',
-        });
-        assert.equal(premature.status, 200);
-        assert.equal(plannerCalls.includes('Prepared while busy'), false);
-        assert.equal(keyframeCalls.includes('Prepared while busy'), false);
+        await eventually(
+            async () => ({ plannerCalls: [...plannerCalls], keyframeCalls: [...keyframeCalls] }),
+            value => value.plannerCalls.includes('Prepared while busy')
+                && value.keyframeCalls.includes('Prepared while busy:start')
+                && value.keyframeCalls.includes('Prepared while busy:cut'),
+        );
 
         socket.send(JSON.stringify({
             type: 'event',
@@ -784,12 +885,18 @@ test('broker defers screenplay and keyframe work until the gpuq reservation is a
         }));
         const planResponse = await workerFetch(`/v1/worker/jobs/${second.id}/plan`);
         assert.equal(planResponse.status, 200);
-        assert.equal((await planResponse.json()).cached, false);
+        assert.equal((await planResponse.json()).cached, true);
         const frameResponse = await workerFetch(`/v1/worker/jobs/${second.id}/keyframe`);
         assert.equal(frameResponse.status, 200);
         assert.equal(frameResponse.headers.get('x-video-keyframe-provider'), 'test-provider');
+        assert.equal(frameResponse.headers.get('x-video-keyframe-cached'), 'true');
+        const segmentFrameResponse = await workerFetch(
+            `/v1/worker/jobs/${second.id}/keyframe?segment=2&aspect=16:9`,
+        );
+        assert.equal(segmentFrameResponse.status, 200);
+        assert.equal(segmentFrameResponse.headers.get('x-video-keyframe-cached'), 'true');
         assert.equal(plannerCalls.filter(prompt => prompt === 'Prepared while busy').length, 1);
-        assert.equal(keyframeCalls.filter(prompt => prompt === 'Prepared while busy').length, 1);
+        assert.equal(keyframeCalls.filter(value => value.startsWith('Prepared while busy:')).length, 2);
     } finally {
         if (socket) socket.close();
         await broker.stop();
@@ -1621,6 +1728,15 @@ test('desktop reserves gpuq during gaming, anchors ETA to admission, and fences 
             value => value.body.jobs[0].status === 'failed',
         );
         assert.equal(terminal.body.jobs[0].error, 'expected test failure');
+        socket.send(JSON.stringify({
+            type: 'event', event: 'failed', event_id: 'current-event',
+            job_id: lease.job.id, lease_id: lease.job.lease_id,
+            error: 'must not be applied twice', retryable: false,
+        }));
+        const duplicateAcknowledgement = await take(value => value.type === 'event_ack');
+        assert.equal(duplicateAcknowledgement.event_id, 'current-event');
+        const unchanged = await botFetch(`/v1/users/gpuq-user/jobs`);
+        assert.equal(unchanged.body.jobs[0].error, 'expected test failure');
     } finally {
         if (socket) socket.close();
         await broker.stop();

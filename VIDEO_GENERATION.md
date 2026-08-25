@@ -65,8 +65,9 @@ at most twice. MiniMax H3 requires `comfy-aimdo` 0.4.14 or newer for the expande
 Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
 local startup path pins and verifies that runtime before starting ComfyUI. The
 server asks `gpt-5.6-sol` at high reasoning effort for a strict
-structured screenplay only after the job reaches the desktop. The API key never
-leaves the server, successful plans are cached per job, and the desktop's local
+structured screenplay. It prepares the next queued job one position ahead while
+the desktop is rendering, without reserving the GPU. The API key never leaves
+the server, successful plans and generated frames are cached per job, and the desktop's local
 uncensored HauhauCS Qwen 3.8 27B Q4_K_P planner is the automatic offline fallback.
 It runs through llama.cpp with full GPU offload, 16K context, embedded MTP, and a
 vision projector for supplied reference images, then releases its VRAM before
@@ -82,13 +83,43 @@ the desktop renders that segment as I2V. Physically continuous `continue`
 segments still inherit the preceding segment's final frame. If a derived frame
 is unavailable or rejected by a provider, only that segment falls back to T2V.
 
-As soon as a job reaches the desktop, the worker submits one durable `gpuq`
-reservation. That reservation may wait behind other desktop GPU work, then owns
-the complete local pipeline from screenplay preparation through rendering. The
-worker runs local-planner and generator child processes inside the same
-gpuq-owned process tree. Discord omits a render-only completion time while the
+The worker downloads any already-generated screenplay and frames before it asks
+for a durable `gpuq` reservation. Cloud preparation therefore overlaps the
+previous render and never occupies GPU queue time. If cloud planning is rejected
+or unavailable, the worker reserves the GPU before starting the local Qwen
+fallback. The reservation may wait behind other desktop GPU work and then owns
+every local model process through rendering. Discord omits a render-only completion time while the
 reservation is waiting and anchors the ETA to GPU admission afterward, so the
 reported completion includes time already spent in the desktop GPU queue.
+
+## Optimization experiments
+
+Production remains on Sol, Gemini 3 Pro Image at 2K, and the established serial
+visual review path unless an experiment variable is explicitly set. Each job
+records its experiment, pipeline variant, planner fingerprint, keyframe strategy,
+provider timings, queue wait, and end-to-end latency so alternatives can be
+compared without mixing cohorts.
+
+- `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
+- `VIDEO_PLANNER_MODEL=gemini-3.7-flash` enables the Flash planner adapter.
+- `VIDEO_PLANNER_ANALYSIS_EFFORT` and `VIDEO_PLANNER_SCREENPLAY_EFFORT` accept
+  `low`, `medium`, or `high`.
+- `VIDEO_KEYFRAME_GEMINI_MODEL` accepts `gemini-3-pro-image`,
+  `gemini-3.1-flash-image`, or `gemini-3.1-flash-lite-image`.
+- `VIDEO_KEYFRAME_IMAGE_SIZE` accepts `1K` or `2K`; Flash Lite is always 1K.
+- `VIDEO_KEYFRAME_STRATEGY` accepts `serial-v1` or `conditional-v2`.
+- `VIDEO_PREPLAN_QUEUED=0` disables one-job-ahead preparation for rollback.
+- `VIDEO_PROMPT_CACHE_24H=1` opts into 24-hour OpenAI prompt-cache retention;
+  stable cache routing is used without extended retention by default.
+
+Run `yarn benchmark:video-planners --limit=2` for a short, render-free comparison.
+It runs Sol and two Gemini Flash reasoning variants concurrently per prompt, then
+uses a blinded Sol quality judge to score fidelity, creative development,
+specificity, continuity, and audio/dialogue. Reports and only the fast plans that
+clear the teacher gate are written under `artifacts/video-planner-benchmarks/`.
+Pass a prior report with `--examples=/path/to/report.json` to feed up to three
+teacher-approved Sol plans to the Flash candidates. Use `--full` only after the
+quick candidate set is satisfactory.
 
 Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
 24 hours; complete desktop generation directories expire after seven days.
