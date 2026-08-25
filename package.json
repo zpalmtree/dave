@@ -10,7 +10,8 @@
     "build": "./node_modules/.bin/tsc",
     "test": "yarn build && node --test tests/*.test.mjs",
     "benchmark:video-planners": "yarn build && node scripts/benchmark-video-planners.mjs",
-    "benchmark:video-keyframes": "yarn build && node scripts/benchmark-video-keyframes.mjs"
+    "benchmark:video-keyframes": "yarn build && node scripts/benchmark-video-keyframes.mjs",
+    "benchmark:video-renders": "yarn build && node scripts/benchmark-video-renders.mjs"
   },
   "files": [
     "dist/*"

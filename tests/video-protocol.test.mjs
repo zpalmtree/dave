@@ -50,6 +50,7 @@ import {
     VIDEO_KEYFRAME_FAST_MODEL,
     VIDEO_KEYFRAME_MODEL,
     VIDEO_KEYFRAME_REVIEW_MODEL,
+    configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
 } from '../dist/VideoKeyframeProvider.js';
 
@@ -1132,4 +1133,18 @@ test('keyframe experiment variants are opt-in and enforce supported resolution',
         geminiModel: VIDEO_KEYFRAME_MODEL,
         imageSize: '2K',
     });
+});
+
+test('fast keyframes are gated in canary channels and every override is reversible', () => {
+    assert.equal(configuredVideoKeyframeStrategy('483470443001413675', {}), 'fast-gated-v3');
+    assert.equal(configuredVideoKeyframeStrategy('other-channel', {}), 'serial-v1');
+    assert.equal(configuredVideoKeyframeStrategy('other-channel', {
+        VIDEO_KEYFRAME_STRATEGY: 'conditional-v2',
+    }), 'conditional-v2');
+    assert.equal(configuredVideoKeyframeStrategy('483470443001413675', {
+        VIDEO_KEYFRAME_STRATEGY: 'serial-v1',
+    }), 'serial-v1');
+    assert.equal(configuredVideoKeyframeStrategy('canary-two', {
+        VIDEO_KEYFRAME_CANARY_CHANNELS: 'canary-one, canary-two',
+    }), 'fast-gated-v3');
 });

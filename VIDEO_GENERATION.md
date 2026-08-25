@@ -95,10 +95,12 @@ reported completion includes time already spent in the desktop GPU queue.
 ## Optimization experiments
 
 Production remains on Sol, Gemini 3 Pro Image at 2K, and the established serial
-visual review path unless an experiment variable is explicitly set. Each job
-records its experiment, pipeline variant, planner fingerprint, keyframe strategy,
-provider timings, queue wait, and end-to-end latency so alternatives can be
-compared without mixing cohorts.
+visual review path outside the configured canary channels. Canary jobs first try
+Gemini Flash Lite at 1K and keep it only when the same GPT-5.6 visual gate accepts
+it; a rejection, generation error, or unavailable reviewer runs the unchanged Pro
+2K serial pipeline. Each job records its experiment, pipeline variant, planner
+fingerprint, keyframe strategy, provider timings, queue wait, and end-to-end
+latency so alternatives can be compared without mixing cohorts.
 
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
 - `VIDEO_PLANNER_MODEL=gemini-3.7-flash` enables the Flash planner adapter.
@@ -107,7 +109,9 @@ compared without mixing cohorts.
 - `VIDEO_KEYFRAME_GEMINI_MODEL` accepts `gemini-3-pro-image`,
   `gemini-3.1-flash-image`, or `gemini-3.1-flash-lite-image`.
 - `VIDEO_KEYFRAME_IMAGE_SIZE` accepts `1K` or `2K`; Flash Lite is always 1K.
-- `VIDEO_KEYFRAME_STRATEGY` accepts `serial-v1` or `conditional-v2`.
+- `VIDEO_KEYFRAME_STRATEGY` accepts `serial-v1`, `conditional-v2`, or
+  `fast-gated-v3`. Without an override, configured canary channels use the fast
+  gate and other channels use `serial-v1`.
 - `VIDEO_PREPLAN_QUEUED=0` disables one-job-ahead preparation for rollback.
 - `VIDEO_PROMPT_CACHE_24H=1` opts into 24-hour OpenAI prompt-cache retention;
   stable cache routing is used without extended retention by default.
@@ -132,6 +136,14 @@ same approved plans. Images and a scored report are saved below
 `--resume=/path/to/run-directory`; completed images are content-stable inputs
 and are not regenerated. Use `--no-judge` only to export/cache plan and image
 artifacts. Reports include aggregate latency, acceptance, failure, and win counts.
+
+Run `yarn benchmark:video-renders --spec=/path/to/render-comparison.json` after a
+small controlled set of expensive renders completes. It transcribes each output,
+measures frame-zero similarity and obvious freeze/black intervals, extracts a
+16-frame timeline, and asks the strong judge twice with reversed candidate order.
+The report promotes nothing unless one candidate receives a majority of acceptable
+votes; missing literal dialogue or another hard requirement therefore blocks an
+otherwise attractive speed result.
 
 Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
 24 hours; complete desktop generation directories expire after seven days.
