@@ -5,6 +5,7 @@ import { Commands } from '../dist/CommandDeclarations.js';
 import {
     canViewGlobalVideoQueue,
     formatVideoJob,
+    formatVideoStatusPost,
     formatGlobalVideoQueueJob,
     formatVideoRuntime,
     globalVideoQueueChunks,
@@ -122,6 +123,35 @@ test('video runtime is formatted for the delivered post', () => {
         prompt: 'An anime family battle',
         generation_notice: 'The screenplay was truncated.',
     }), /\*\*Note:\*\* The screenplay was truncated\./);
+});
+
+test('video replies preserve the full accepted prompt', () => {
+    const prompt = `Opening scene. ${'Keep this exact requested detail. '.repeat(50)}Final instruction.`;
+    const job = {
+        id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
+        model: 'minimax',
+        runtime_seconds: 65.6,
+        prompt,
+        generation_notice: 'The screenplay was prepared successfully.',
+        error: 'A detailed worker failure occurred while preparing the requested video. '.repeat(20),
+        status: 'queued',
+        queue_position: 2,
+        paused_until: null,
+        dispatch_paused: false,
+        worker_online: true,
+        estimate_ready: true,
+        expected_finish_at: 2_000_000_450,
+        has_source_image: false,
+    };
+
+    for (const reply of [
+        formatVideoStatusPost(job),
+        completedVideoPost(job),
+        failedVideoPost(job),
+    ]) {
+        assert.ok(reply.length <= 1999);
+        assert.ok(reply.endsWith(`> ${prompt}`));
+    }
 });
 
 test('failed video post is a standalone sanitized reply', () => {
