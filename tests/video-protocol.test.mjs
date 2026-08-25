@@ -133,14 +133,14 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
     );
     assert.equal(VIDEO_PLANNER_GEMINI_SCHEMA_MODE, 'compatible-structured-v1');
     assert.equal(configuredVideoPlannerStrategy('483470443001413675', {}), 'single-pass');
-    assert.equal(configuredVideoPlannerStrategy('other-channel', {}), 'two-pass');
+    assert.equal(configuredVideoPlannerStrategy('other-channel', {}), 'single-pass');
     assert.equal(configuredVideoPlannerStrategy('other-channel', {
         VIDEO_PLANNER_STRATEGY: 'single-pass',
     }), 'single-pass');
     assert.equal(configuredVideoPlannerStrategy('483470443001413675', {
         VIDEO_PLANNER_STRATEGY: 'two-pass',
     }), 'two-pass');
-    assert.equal(configuredVideoPlannerStrategy('canary-two', {
+    assert.equal(configuredVideoPlannerStrategy('outside-old-canary', {
         VIDEO_PLANNER_CANARY_CHANNELS: 'canary-one, canary-two',
     }), 'single-pass');
 });
@@ -236,10 +236,16 @@ test('video runtime is formatted for the delivered post', () => {
     assert.equal(formatVideoRuntime(3661), '1h 1m 1s');
     assert.match(completedVideoPost({
         id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
-        model: 'minimaxdraft',
+        model: 'minimax',
         runtime_seconds: 65.6,
         prompt: 'An anime family battle',
     }), /a1869ead.*completed in \*\*1m 6s\*\*/);
+    assert.match(completedVideoPost({
+        id: 'legacy-draft-job',
+        model: 'minimaxdraft',
+        runtime_seconds: 65.6,
+        prompt: 'A historical completed request',
+    }), /^Retired video model video/);
     assert.match(completedVideoPost({
         id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
         model: 'minimaxfast',
@@ -335,13 +341,9 @@ test('fast video commands map to explicit quality tradeoffs', () => {
         VIDEO_MODELS.minimaxfast.generatorArgs,
         ['--model', 'h3', '--quality', 'final', '--fast'],
     );
-    assert.deepEqual(
-        VIDEO_MODELS.minimaxdraft.generatorArgs,
-        ['--model', 'h3', '--quality', 'draft', '--turbo4'],
-    );
     assert.equal(isVideoModel('ltxfast'), true);
     assert.equal(isVideoModel('minimaxfast'), true);
-    assert.equal(isVideoModel('minimaxdraft'), true);
+    assert.equal(isVideoModel('minimaxdraft'), false);
 });
 
 test('offline queue messages omit fake ETAs', () => {
