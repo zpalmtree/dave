@@ -13,6 +13,7 @@ import {
 
 export const VIDEO_PLANNER_MODEL = 'gpt-5.6-sol';
 export const VIDEO_PLANNER_FAST_MODEL = AI_MODELS.geminiChat;
+export const VIDEO_PLANNER_GEMINI_SCHEMA_MODE = 'compatible-structured-v1';
 
 export function configuredVideoPlannerVariant(environment: NodeJS.ProcessEnv = process.env): {
     plannerModel: string;
@@ -296,6 +297,7 @@ export function videoPlannerFingerprint(
     model = VIDEO_PLANNER_MODEL,
     analysisReasoningEffort: 'low' | 'medium' | 'high' = 'high',
     screenplayReasoningEffort: 'low' | 'medium' | 'high' = 'high',
+    plannerGuidance = '',
 ): string {
     return createHash('sha256').update(JSON.stringify({
         model,
@@ -305,6 +307,10 @@ export function videoPlannerFingerprint(
         plannerInstructions: VIDEO_PLANNER_INSTRUCTIONS,
         analysisSchema: VIDEO_PROMPT_ANALYSIS_SCHEMA,
         planSchema: VIDEO_PLAN_SCHEMA,
+        ...(plannerGuidance ? { plannerGuidance } : {}),
+        ...(model.startsWith('gemini-')
+            ? { geminiSchemaMode: VIDEO_PLANNER_GEMINI_SCHEMA_MODE }
+            : {}),
     })).digest('hex');
 }
 
@@ -847,6 +853,22 @@ function geminiPlannerContents(input: any[]): any[] {
     })).filter(message => message.parts.length);
 }
 
+export function geminiCompatibleResponseSchema(schema: Record<string, any>): Record<string, any> {
+    const unsupportedForComplexSchemas = new Set([
+        'additionalProperties',
+        'minItems',
+        'maxItems',
+    ]);
+    const simplify = (value: any): any => {
+        if (Array.isArray(value)) return value.map(simplify);
+        if (!value || typeof value !== 'object') return value;
+        return Object.fromEntries(Object.entries(value)
+            .filter(([key]) => !unsupportedForComplexSchemas.has(key))
+            .map(([key, nested]) => [key, simplify(nested)]));
+    };
+    return simplify(schema);
+}
+
 async function requestGeminiPlannerResponse(
     payload: Record<string, any>,
     signal: AbortSignal,
@@ -872,7 +894,7 @@ async function requestGeminiPlannerResponse(
                     ].filter(Boolean).join('\n\n'),
                     responseMimeType: 'application/json',
                     ...(includeSchema && payload.text?.format?.schema
-                        ? { responseJsonSchema: payload.text.format.schema }
+                        ? { responseJsonSchema: geminiCompatibleResponseSchema(payload.text.format.schema) }
                         : {}),
                     maxOutputTokens: Number(payload.max_output_tokens || 16_000),
                     thinkingConfig: {
@@ -1079,6 +1101,9 @@ async function analyzePromptWithPlanner(
             imageOnly
                 ? 'The request text is an internal orchestration marker; analyze the image itself.'
                 : 'Analyze the user request and use any source image as supporting context.',
+            ...(options.plannerGuidance
+                ? [`Additional binding planning guidance: ${options.plannerGuidance}`]
+                : []),
             `User request: ${prompt}`,
         ].join('\n'),
     }];
@@ -1164,6 +1189,7 @@ export async function createFrontierVideoPlan(
         plannerModel,
         analysisReasoningEffort,
         screenplayReasoningEffort,
+        options.plannerGuidance,
     );
     const attributed = <T extends Record<string, any>>(plan: T): T => {
         (plan as any)._planner_model = plannerModel;
@@ -1221,6 +1247,9 @@ export async function createFrontierVideoPlan(
                 dialogueMode === 'none'
                     ? 'Dialogue requirement: the independent analysis found no speech; do not add it.'
                     : 'Dialogue requirement: obey dialogue_contract exactly. Preserve every verbatim line and write concise natural wording for generated turns.',
+                ...(options.plannerGuidance
+                    ? [`Additional binding planning guidance: ${options.plannerGuidance}`]
+                    : []),
                 `User request: ${prompt}`,
             ].join('\n'),
         }];

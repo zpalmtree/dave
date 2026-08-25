@@ -31,10 +31,12 @@ import {
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_FAST_MODEL,
+    VIDEO_PLANNER_GEMINI_SCHEMA_MODE,
     VIDEO_PLANNER_MODEL,
     FrontierPlannerRejectedError,
     compileBestEffortFrontierVideoPlan,
     createFrontierVideoPlan,
+    geminiCompatibleResponseSchema,
     configuredVideoPlannerVariant,
     validateFrontierVideoPlanForKeyframe,
     videoPlannerFingerprint,
@@ -110,6 +112,37 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
             fast.screenplayReasoningEffort,
         ),
     );
+    assert.equal(VIDEO_PLANNER_GEMINI_SCHEMA_MODE, 'compatible-structured-v1');
+});
+
+test('Gemini planner schema keeps nested types while removing complexity constraints', () => {
+    const schema = geminiCompatibleResponseSchema({
+        type: 'object',
+        additionalProperties: false,
+        required: ['items'],
+        properties: {
+            items: {
+                type: 'array', minItems: 1, maxItems: 4,
+                items: {
+                    type: 'object', additionalProperties: false, required: ['score'],
+                    properties: { score: { type: 'number', minimum: 1, maximum: 10 } },
+                },
+            },
+        },
+    });
+    assert.deepEqual(schema, {
+        type: 'object',
+        required: ['items'],
+        properties: {
+            items: {
+                type: 'array',
+                items: {
+                    type: 'object', required: ['score'],
+                    properties: { score: { type: 'number', minimum: 1, maximum: 10 } },
+                },
+            },
+        },
+    });
 });
 
 test('local video commands are declared as Discord-only', () => {
@@ -669,6 +702,30 @@ test('frontier planner retries incomplete structured output with a larger token 
     assert.equal(requests[0].max_output_tokens, 8000);
     assert.equal(requests[1].max_output_tokens, 16000);
     assert.equal(requests[2].max_output_tokens, 16000);
+});
+
+test('frontier planner applies experimental guidance to both passes and fingerprints it', async () => {
+    const requests = [];
+    const replies = [
+        { status: 'completed', output_text: JSON.stringify(frontierAnalysis()), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return jsonResponse(replies.shift());
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.', 'minimaxfast', 'requester-guidance', undefined,
+            { plannerGuidance: 'Keep the dog visible.' },
+        );
+        assert.match(requests[0].input[0].content[0].text, /Keep the dog visible/);
+        assert.match(requests[1].input[0].content[0].text, /Keep the dog visible/);
+        assert.notEqual(result._planner_fingerprint, videoPlannerFingerprint());
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
 });
 
 test('frontier planner repairs a complete screenplay that violates its dialogue contract', async () => {

@@ -839,3 +839,17 @@ export async function createFrontierVideoKeyframe(
         ? createConditionalKeyframe(plan, references, options)
         : createSerialKeyframe(plan, references, options);
 }
+
+export async function generateFrontierVideoKeyframeCandidate(
+    plan: Record<string, any>,
+    references: VideoKeyframeReference[] = [],
+    options: VideoKeyframeOptions = {},
+): Promise<VideoKeyframeResult> {
+    return generateWithRetry(
+        'gemini',
+        buildVideoKeyframePrompt(plan),
+        references,
+        1,
+        options,
+    );
+}

@@ -9,6 +9,13 @@ import {
     VIDEO_PLANNER_MODEL,
     createFrontierVideoPlan,
 } from '../dist/VideoFrontierPlanner.js';
+import {
+    mapWithConcurrency,
+    reportCandidate,
+    selectTeacherExamples,
+    summarizeBenchmarkCases,
+    teacherExamplesFromReport,
+} from './video-planner-benchmark-lib.mjs';
 
 const QUICK_PROMPTS = [
     'A duck becomes mayor.',
@@ -29,6 +36,8 @@ const FULL_PROMPTS = [
     'A cheerful local-news segment about a pothole that residents have turned into a tiny beach.',
 ];
 
+const FOCUSED_FLASH_GUIDANCE = 'Preserve state transitions: when the request describes a change, frame zero must show the relevant state before that change, not the achieved result. Preserve temporal facts exactly; for example, overdue means already late. Make required abstract facts visually verifiable. Keep each short shot physically achievable, including a visible route for tiny subjects. Give each dialogue turn one visible speaker and stage its delivery in the same shot.';
+
 const CANDIDATES = [
     {
         id: 'sol-high-high',
@@ -48,18 +57,40 @@ const CANDIDATES = [
         analysisReasoningEffort: 'low',
         screenplayReasoningEffort: 'medium',
     },
+    {
+        id: 'gemini-flash-low-medium-focused',
+        experimental: true,
+        plannerModel: VIDEO_PLANNER_FAST_MODEL,
+        analysisReasoningEffort: 'low',
+        screenplayReasoningEffort: 'medium',
+        plannerGuidance: FOCUSED_FLASH_GUIDANCE,
+    },
 ];
 
 function args() {
     const values = new Set(process.argv.slice(2));
     const limitArgument = process.argv.find(value => value.startsWith('--limit='));
     const examplesArgument = process.argv.find(value => value.startsWith('--examples='));
+    const baselineArgument = process.argv.find(value => value.startsWith('--baseline='));
+    const candidatesArgument = process.argv.find(value => value.startsWith('--candidates='));
+    const concurrencyArgument = process.argv.find(value => value.startsWith('--concurrency='));
     const limit = limitArgument ? Number(limitArgument.split('=')[1]) : undefined;
+    const concurrency = concurrencyArgument ? Number(concurrencyArgument.split('=')[1]) : 1;
+    const candidateIds = candidatesArgument
+        ? candidatesArgument.slice('--candidates='.length).split(',').map(value => value.trim()).filter(Boolean)
+        : CANDIDATES.filter(candidate => !candidate.experimental).map(candidate => candidate.id);
+    const unknownCandidates = candidateIds.filter(id => !CANDIDATES.some(candidate => candidate.id === id));
+    if (unknownCandidates.length) {
+        throw new Error(`Unknown candidates: ${unknownCandidates.join(', ')}.`);
+    }
     return {
         full: values.has('--full'),
         noJudge: values.has('--no-judge'),
         limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
+        concurrency: Number.isInteger(concurrency) && concurrency > 0 ? Math.min(concurrency, 4) : 1,
+        candidateIds,
         examplesPath: examplesArgument ? examplesArgument.slice('--examples='.length) : undefined,
+        baselinePath: baselineArgument ? baselineArgument.slice('--baseline='.length) : undefined,
     };
 }
 
@@ -84,7 +115,11 @@ async function generateCandidate(prompt, candidate, plannerExamples) {
             plannerModel: candidate.plannerModel,
             analysisReasoningEffort: candidate.analysisReasoningEffort,
             screenplayReasoningEffort: candidate.screenplayReasoningEffort,
-            plannerExamples: candidate.plannerModel === VIDEO_PLANNER_FAST_MODEL ? plannerExamples : undefined,
+            plannerGuidance: candidate.plannerGuidance,
+            plannerExamples: candidate.plannerModel === VIDEO_PLANNER_FAST_MODEL
+                ? plannerExamples.filter(example => example.prompt.trim().toLocaleLowerCase()
+                    !== prompt.trim().toLocaleLowerCase()).slice(0, 3)
+                : undefined,
             onUsage: event => usage.push(event),
             onAttempt: event => attempts.push(event),
         });
@@ -192,33 +227,35 @@ async function main() {
     const options = args();
     const source = options.full ? FULL_PROMPTS : QUICK_PROMPTS;
     const prompts = source.slice(0, options.limit || source.length);
-    let plannerExamples = [];
+    const activeCandidates = CANDIDATES.filter(candidate => options.candidateIds.includes(candidate.id));
+    let examplesReport = null;
     if (options.examplesPath) {
-        const previous = JSON.parse(await readFile(resolve(options.examplesPath), 'utf8'));
-        const storedExamples = Array.isArray(previous.teacher_examples) && previous.teacher_examples.length
-            ? previous.teacher_examples
-            : (previous.cases || []).flatMap(testCase => {
-                const rating = (testCase.judgment?.ratings || [])
-                    .find(candidate => candidate.candidate === 'sol-high-high');
-                const result = (testCase.generated || [])
-                    .find(candidate => candidate.candidate === 'sol-high-high');
-                return rating?.overall >= 9 && !rating.critical_failures.length && result?.ok
-                    ? [{ prompt: testCase.prompt, plan: result.plan }]
-                    : [];
-            });
-        plannerExamples = storedExamples
-            .slice(0, 3)
-            .map(example => ({ prompt: example.prompt, plan: example.plan }));
-        process.stdout.write(`Loaded ${plannerExamples.length} teacher examples.\n`);
+        examplesReport = JSON.parse(await readFile(resolve(options.examplesPath), 'utf8'));
+        process.stdout.write(`Loaded ${teacherExamplesFromReport(examplesReport).length} teacher examples.\n`);
     }
-    const cases = [];
-    for (const prompt of prompts) {
+    let baselineReport = null;
+    const baselinePath = options.baselinePath ? resolve(options.baselinePath) : null;
+    if (baselinePath) {
+        baselineReport = JSON.parse(await readFile(baselinePath, 'utf8'));
+    }
+    const cases = await mapWithConcurrency(prompts, options.concurrency, async prompt => {
         process.stdout.write(`Planning: ${prompt}\n`);
-        const generated = await Promise.all(CANDIDATES.map(candidate =>
-            generateCandidate(prompt, candidate, plannerExamples)));
+        const plannerExamples = examplesReport ? selectTeacherExamples(examplesReport, prompt) : [];
+        const generated = await Promise.all(activeCandidates.map(async candidate => {
+            const reusable = candidate.id === 'sol-high-high'
+                ? reportCandidate(baselineReport, prompt, candidate.id)
+                : null;
+            if (!reusable) return generateCandidate(prompt, candidate, plannerExamples);
+            process.stdout.write(`Reused ${candidate.id}: ${prompt}\n`);
+            return {
+                ...structuredClone(reusable),
+                reused: true,
+                source_report: baselinePath,
+            };
+        }));
         const judgment = options.noJudge ? null : await judgeCandidates(prompt, generated);
-        cases.push({ prompt, generated, judgment });
-    }
+        return { prompt, generated, judgment };
+    });
     const studentExamples = cases.flatMap(testCase => {
         const ratings = testCase.judgment?.ratings || [];
         return ratings
@@ -230,19 +267,18 @@ async function main() {
                 plan: testCase.generated.find(result => result.candidate === rating.candidate)?.plan,
             }));
     });
-    const teacherExamples = cases.flatMap(testCase => {
-        const rating = (testCase.judgment?.ratings || [])
-            .find(candidate => candidate.candidate === 'sol-high-high');
-        const result = testCase.generated.find(candidate => candidate.candidate === 'sol-high-high');
-        return rating?.overall >= 9 && !rating.critical_failures.length && result?.ok
-            ? [{ prompt: testCase.prompt, rating, plan: result.plan }]
-            : [];
-    });
+    const teacherExamples = teacherExamplesFromReport({ cases });
     const report = {
         created_at: new Date().toISOString(),
         mode: options.full ? 'full' : 'quick',
-        candidates: CANDIDATES,
+        benchmark_options: {
+            prompt_concurrency: options.concurrency,
+            baseline_report: baselinePath,
+            examples_report: options.examplesPath ? resolve(options.examplesPath) : null,
+        },
+        candidates: activeCandidates,
         cases,
+        summary: summarizeBenchmarkCases(cases),
         teacher_examples: teacherExamples,
         student_examples: studentExamples,
     };
