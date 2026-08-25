@@ -4,6 +4,7 @@ Config.d.ts
 node_modules
 /artifacts/video-planner-benchmarks/
 /artifacts/video-keyframe-benchmarks/
+/artifacts/video-render-benchmarks/
 yarn-error.log
 dist/
 *.sqlite3

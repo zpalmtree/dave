@@ -47,6 +47,7 @@ import {
     VideoKeyframeAspectRatio,
     VideoKeyframeOptions,
     VideoKeyframeResult,
+    configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
 } from './VideoKeyframeProvider.js';
@@ -1965,18 +1966,8 @@ export class VideoBroker {
         };
     }
 
-    private keyframeStrategy(job: JobRow): 'serial-v1' | 'conditional-v2' {
-        const globalStrategy = process.env.VIDEO_KEYFRAME_STRATEGY;
-        if (globalStrategy === 'serial-v1' || globalStrategy === 'conditional-v2') {
-            return globalStrategy;
-        }
-        const canaryChannels = new Set(
-            (process.env.VIDEO_KEYFRAME_CANARY_CHANNELS || '483470443001413675')
-                .split(',')
-                .map(value => value.trim())
-                .filter(Boolean),
-        );
-        return canaryChannels.has(job.channel_id) ? 'conditional-v2' : 'serial-v1';
+    private keyframeStrategy(job: JobRow): 'serial-v1' | 'conditional-v2' | 'fast-gated-v3' {
+        return configuredVideoKeyframeStrategy(job.channel_id);
     }
 
     private async ensurePlan(

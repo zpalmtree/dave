@@ -40,7 +40,7 @@ export interface VideoKeyframeReview {
     correction_prompt: string;
 }
 
-export type VideoKeyframeStrategy = 'serial-v1' | 'conditional-v2';
+export type VideoKeyframeStrategy = 'serial-v1' | 'conditional-v2' | 'fast-gated-v3';
 
 export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     strategy?: VideoKeyframeStrategy;
@@ -64,6 +64,23 @@ export function configuredVideoKeyframeVariant(environment: NodeJS.ProcessEnv = 
         ? '1K'
         : requestedSize === '1K' ? '1K' : '2K';
     return { geminiModel, imageSize };
+}
+
+export function configuredVideoKeyframeStrategy(
+    channelId: string,
+    environment: NodeJS.ProcessEnv = process.env,
+): VideoKeyframeStrategy {
+    const globalStrategy = environment.VIDEO_KEYFRAME_STRATEGY;
+    if (globalStrategy === 'serial-v1' || globalStrategy === 'conditional-v2' || globalStrategy === 'fast-gated-v3') {
+        return globalStrategy;
+    }
+    const canaryChannels = new Set(
+        (environment.VIDEO_KEYFRAME_CANARY_CHANNELS || '483470443001413675')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean),
+    );
+    return canaryChannels.has(channelId) ? 'fast-gated-v3' : 'serial-v1';
 }
 
 function keyframeString(value: unknown, fallback: string): string {
@@ -830,14 +847,52 @@ async function createConditionalKeyframe(
     throw new Error(`All frontier first-frame candidates failed visual review: ${finalReview.issues.join('; ')}`);
 }
 
+async function createFastGatedKeyframe(
+    plan: Record<string, any>,
+    references: VideoKeyframeReference[],
+    options: VideoKeyframeOptions,
+): Promise<VideoKeyframeResult> {
+    let reviewAttempt = 0;
+    const nextReview = () => ++reviewAttempt;
+    const fastOptions: VideoKeyframeOptions = {
+        ...options,
+        geminiModel: VIDEO_KEYFRAME_FAST_LITE_MODEL,
+        imageSize: '1K',
+    };
+    try {
+        const candidate = await generateWithRetry(
+            'gemini',
+            buildVideoKeyframePrompt(plan),
+            references,
+            1,
+            fastOptions,
+        );
+        const review = await optionalReview(plan, candidate, references, fastOptions, nextReview);
+        if (review?.acceptable) return accepted(candidate, true);
+        console.log(
+            review
+                ? '[Video keyframe fast gate] Flash Lite candidate rejected; running the unchanged baseline pipeline.'
+                : '[Video keyframe fast gate] Reviewer unavailable; running the unchanged baseline pipeline.',
+        );
+    } catch (error) {
+        if (error instanceof VideoUsagePersistenceError) throw error;
+        console.warn('[Video keyframe fast gate] Flash Lite candidate failed; running the unchanged baseline pipeline.', error);
+    }
+    return createSerialKeyframe(plan, references, options);
+}
+
 export async function createFrontierVideoKeyframe(
     plan: Record<string, any>,
     references: VideoKeyframeReference[] = [],
     options: VideoKeyframeOptions = {},
 ): Promise<VideoKeyframeResult> {
-    return options.strategy === 'conditional-v2'
-        ? createConditionalKeyframe(plan, references, options)
-        : createSerialKeyframe(plan, references, options);
+    if (options.strategy === 'fast-gated-v3') {
+        return createFastGatedKeyframe(plan, references, options);
+    }
+    if (options.strategy === 'conditional-v2') {
+        return createConditionalKeyframe(plan, references, options);
+    }
+    return createSerialKeyframe(plan, references, options);
 }
 
 export async function generateFrontierVideoKeyframeCandidate(
