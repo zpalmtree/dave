@@ -458,6 +458,8 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /rigid_artifact/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat visible language as quoted source material/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /first-person confession/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Unquoted third-person narrative or scene prose is visual direction/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /does not ask a narrator to recite that sentence/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not sanitize, rehabilitate, moralize/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /counterfactual fidelity check/);
     assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /Never invent dialogue/);
@@ -496,6 +498,15 @@ test('broker-side frontier validation rejects plans the desktop would reject bef
     );
     plan.segments[0].shots[0].audio = 'Quiet room tone under the clear voice.';
     assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'));
+    plan.prompt_analysis = { dialogue_contract: { mode: 'none', lines: [] } };
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(
+            plan,
+            'minimaxfast',
+            'And there she was, the captain herself leading the fleet into a better tomorrow.',
+        ),
+        /added dialogue.*found no speech/,
+    );
 });
 
 function frontierAnalysis(dialogueMode = 'none') {
@@ -612,6 +623,38 @@ test('frontier planner repairs a complete screenplay that violates its dialogue 
     }
     assert.equal(requests.length, 3);
     assert.match(requests[2].input[1].content[0].text, /omitted dialogue required/);
+});
+
+test('frontier planner removes invented narration from third-person scene prose', async () => {
+    const requests = [];
+    const inventedNarration = [{
+        speaker_id: 'narrator', language: 'English', delivery: 'dramatic',
+        text: 'And there she was, the captain herself leading the fleet into a better tomorrow.',
+    }];
+    const replies = [
+        { status: 'completed', output_text: JSON.stringify(frontierAnalysis()), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan(inventedNarration)), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return jsonResponse(replies.shift());
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'And there she was, the captain herself leading the fleet into a better tomorrow.',
+            'minimaxfast',
+            'requester-visual-prose',
+            undefined,
+        );
+        assert.equal(result.planner_metrics.screenplay_attempts, 2);
+        assert.deepEqual(result.segments[0].shots[0].dialogue, []);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+    assert.equal(requests.length, 3);
+    assert.match(requests[2].input[1].content[0].text, /added dialogue.*found no speech/);
 });
 
 test('frontier planner compiles the second invalid completed screenplay instead of failing', async () => {
