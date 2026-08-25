@@ -82,8 +82,13 @@ export function summarizeBenchmarkCases(cases) {
         const liveDurations = generated
             .filter(value => value.ok && !value.reused && Number.isFinite(value.duration_seconds))
             .map(value => Number(value.duration_seconds));
-        const ratings = cases.flatMap(testCase =>
-            (testCase?.judgment?.ratings || []).filter(value => value?.candidate === candidate));
+        const ratings = cases.flatMap(testCase => {
+            const judgments = Array.isArray(testCase?.judgments) && testCase.judgments.length
+                ? testCase.judgments
+                : testCase?.judgment ? [testCase.judgment] : [];
+            return judgments.flatMap(judgment =>
+                (judgment?.ratings || []).filter(value => value?.candidate === candidate));
+        });
         const overall = ratings.map(value => Number(value.overall)).filter(Number.isFinite);
         const acceptanceRatings = ratings.filter(value => typeof value.acceptable === 'boolean');
         return {
@@ -105,9 +110,19 @@ export function summarizeBenchmarkCases(cases) {
                 (sum, value) => sum + (Array.isArray(value.critical_failures) ? value.critical_failures.length : 0),
                 0,
             ),
-            wins: cases.filter(testCase => testCase?.judgment?.winner_candidate === candidate).length,
+            wins: cases.reduce((sum, testCase) => {
+                const judgments = Array.isArray(testCase?.judgments) && testCase.judgments.length
+                    ? testCase.judgments
+                    : testCase?.judgment ? [testCase.judgment] : [];
+                return sum + judgments.filter(judgment => judgment?.winner_candidate === candidate).length;
+            }, 0),
             repairs: generated.reduce(
                 (sum, value) => sum + (value.attempts || []).filter(attempt => attempt.stage === 'screenplay_repair').length,
+                0,
+            ),
+            single_pass_fallbacks: generated.reduce(
+                (sum, value) => sum + (value.attempts || [])
+                    .filter(attempt => attempt.stage === 'single_pass_fallback').length,
                 0,
             ),
         };

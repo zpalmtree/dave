@@ -8,6 +8,8 @@ import {
     VIDEO_PLANNER_FAST_MODEL,
     VIDEO_PLANNER_MODEL,
     createFrontierVideoPlan,
+    reconcileFrontierKeyframeMotionGeometry,
+    stageFrontierDialogueVisually,
 } from '../dist/VideoFrontierPlanner.js';
 import {
     mapWithConcurrency,
@@ -46,6 +48,30 @@ const CANDIDATES = [
         screenplayReasoningEffort: 'high',
     },
     {
+        id: 'sol-single-high',
+        experimental: true,
+        plannerModel: VIDEO_PLANNER_MODEL,
+        plannerStrategy: 'single-pass',
+        analysisReasoningEffort: 'high',
+        screenplayReasoningEffort: 'high',
+    },
+    {
+        id: 'sol-single-medium',
+        experimental: true,
+        plannerModel: VIDEO_PLANNER_MODEL,
+        plannerStrategy: 'single-pass',
+        analysisReasoningEffort: 'medium',
+        screenplayReasoningEffort: 'medium',
+    },
+    {
+        id: 'sol-low-high',
+        experimental: true,
+        plannerModel: VIDEO_PLANNER_MODEL,
+        plannerStrategy: 'two-pass',
+        analysisReasoningEffort: 'low',
+        screenplayReasoningEffort: 'high',
+    },
+    {
         id: 'gemini-flash-medium-medium',
         plannerModel: VIDEO_PLANNER_FAST_MODEL,
         analysisReasoningEffort: 'medium',
@@ -74,8 +100,10 @@ function args() {
     const baselineArgument = process.argv.find(value => value.startsWith('--baseline='));
     const candidatesArgument = process.argv.find(value => value.startsWith('--candidates='));
     const concurrencyArgument = process.argv.find(value => value.startsWith('--concurrency='));
+    const judgeRunsArgument = process.argv.find(value => value.startsWith('--judge-runs='));
     const limit = limitArgument ? Number(limitArgument.split('=')[1]) : undefined;
     const concurrency = concurrencyArgument ? Number(concurrencyArgument.split('=')[1]) : 1;
+    const judgeRuns = judgeRunsArgument ? Number(judgeRunsArgument.split('=')[1]) : 1;
     const candidateIds = candidatesArgument
         ? candidatesArgument.slice('--candidates='.length).split(',').map(value => value.trim()).filter(Boolean)
         : CANDIDATES.filter(candidate => !candidate.experimental).map(candidate => candidate.id);
@@ -88,6 +116,7 @@ function args() {
         noJudge: values.has('--no-judge'),
         limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
         concurrency: Number.isInteger(concurrency) && concurrency > 0 ? Math.min(concurrency, 4) : 1,
+        judgeRuns: Number.isInteger(judgeRuns) && judgeRuns > 0 ? Math.min(judgeRuns, 4) : 1,
         candidateIds,
         examplesPath: examplesArgument ? examplesArgument.slice('--examples='.length) : undefined,
         baselinePath: baselineArgument ? baselineArgument.slice('--baseline='.length) : undefined,
@@ -113,6 +142,7 @@ async function generateCandidate(prompt, candidate, plannerExamples) {
     try {
         const plan = await createFrontierVideoPlan(prompt, 'minimax', `benchmark-${candidate.id}`, undefined, {
             plannerModel: candidate.plannerModel,
+            plannerStrategy: candidate.plannerStrategy,
             analysisReasoningEffort: candidate.analysisReasoningEffort,
             screenplayReasoningEffort: candidate.screenplayReasoningEffort,
             plannerGuidance: candidate.plannerGuidance,
@@ -143,8 +173,9 @@ async function generateCandidate(prompt, candidate, plannerExamples) {
     }
 }
 
-async function judgeCandidates(prompt, generated) {
-    const successful = generated.filter(result => result.ok);
+async function judgeCandidates(prompt, generated, runIndex = 0) {
+    const available = generated.filter(result => result.ok);
+    const successful = runIndex % 2 ? [...available].reverse() : available;
     if (!successful.length) return null;
     const labels = successful.map((result, index) => ({
         label: String.fromCharCode(65 + index),
@@ -214,6 +245,7 @@ async function judgeCandidates(prompt, generated) {
     const judgment = JSON.parse(outputText(body));
     return {
         ...judgment,
+        run: runIndex + 1,
         ratings: judgment.ratings.map(rating => ({
             ...rating,
             candidate: labels.find(value => value.label === rating.label)?.candidate,
@@ -242,22 +274,28 @@ async function main() {
         process.stdout.write(`Planning: ${prompt}\n`);
         const plannerExamples = examplesReport ? selectTeacherExamples(examplesReport, prompt) : [];
         const generated = await Promise.all(activeCandidates.map(async candidate => {
-            const reusable = candidate.id === 'sol-high-high'
-                ? reportCandidate(baselineReport, prompt, candidate.id)
-                : null;
+            const reusable = reportCandidate(baselineReport, prompt, candidate.id);
             if (!reusable) return generateCandidate(prompt, candidate, plannerExamples);
             process.stdout.write(`Reused ${candidate.id}: ${prompt}\n`);
+            const reused = structuredClone(reusable);
+            stageFrontierDialogueVisually(reused.plan);
+            reconcileFrontierKeyframeMotionGeometry(reused.plan);
             return {
-                ...structuredClone(reusable),
+                ...reused,
                 reused: true,
                 source_report: baselinePath,
             };
         }));
-        const judgment = options.noJudge ? null : await judgeCandidates(prompt, generated);
-        return { prompt, generated, judgment };
+        const judgments = [];
+        if (!options.noJudge) {
+            for (let runIndex = 0; runIndex < options.judgeRuns; runIndex += 1) {
+                judgments.push(await judgeCandidates(prompt, generated, runIndex));
+            }
+        }
+        return { prompt, generated, judgment: judgments[0] || null, judgments };
     });
     const studentExamples = cases.flatMap(testCase => {
-        const ratings = testCase.judgment?.ratings || [];
+        const ratings = (testCase.judgments || []).flatMap(judgment => judgment.ratings || []);
         return ratings
             .filter(rating => rating.candidate?.startsWith('gemini-flash')
                 && rating.overall >= 8.5 && !rating.critical_failures.length)
@@ -273,6 +311,7 @@ async function main() {
         mode: options.full ? 'full' : 'quick',
         benchmark_options: {
             prompt_concurrency: options.concurrency,
+            judge_runs: options.noJudge ? 0 : options.judgeRuns,
             baseline_report: baselinePath,
             examples_report: options.examplesPath ? resolve(options.examplesPath) : null,
         },

@@ -95,10 +95,32 @@ test('benchmark summaries separate cached baselines from live latency', () => {
     assert.deepEqual(summarizeBenchmarkCases(cases), [{
         candidate: 'teacher', samples: 1, successful: 1, reused: 1,
         mean_generation_seconds: null, mean_overall: 9.2, minimum_overall: 9.2,
-        acceptable: null, critical_failures: 0, wins: 0, repairs: 0,
+        acceptable: null, critical_failures: 0, wins: 0, repairs: 0, single_pass_fallbacks: 0,
     }, {
         candidate: 'student', samples: 1, successful: 1, reused: 0,
         mean_generation_seconds: 12, mean_overall: 9, minimum_overall: 9,
-        acceptable: 1, critical_failures: 1, wins: 1, repairs: 1,
+        acceptable: 1, critical_failures: 1, wins: 1, repairs: 1, single_pass_fallbacks: 0,
     }]);
+});
+
+test('benchmark summaries aggregate reversed-order judge runs and single-pass fallbacks', () => {
+    const cases = [{
+        generated: [{
+            candidate: 'single', ok: true, duration_seconds: 20,
+            attempts: [{ stage: 'single_pass_fallback' }],
+        }],
+        judgments: [{
+            winner_candidate: 'single',
+            ratings: [{ candidate: 'single', overall: 9, critical_failures: [] }],
+        }, {
+            winner_candidate: 'tie',
+            ratings: [{ candidate: 'single', overall: 8, critical_failures: ['miss'] }],
+        }],
+    }];
+    const [summary] = summarizeBenchmarkCases(cases);
+    assert.equal(summary.mean_overall, 8.5);
+    assert.equal(summary.minimum_overall, 8);
+    assert.equal(summary.critical_failures, 1);
+    assert.equal(summary.wins, 1);
+    assert.equal(summary.single_pass_fallbacks, 1);
 });

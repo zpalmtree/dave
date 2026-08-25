@@ -36,6 +36,7 @@ import {
     FrontierPlannerRejectedError,
     VIDEO_PLANNER_MODEL,
     VideoPlanSourceImage,
+    configuredVideoPlannerStrategy,
     configuredVideoPlannerVariant,
     createFrontierVideoPlan,
     validateFrontierVideoPlanForKeyframe,
@@ -1959,9 +1960,11 @@ export class VideoBroker {
     }
 
     private frontierOptions(job: JobRow, criticalPath: boolean): VideoFrontierCallOptions {
+        const plannerStrategy = configuredVideoPlannerStrategy(job.channel_id);
         return {
             serviceTier: criticalPath ? 'fast' : 'default',
-            ...configuredVideoPlannerVariant(),
+            ...configuredVideoPlannerVariant(process.env, plannerStrategy),
+            plannerStrategy,
             ...this.providerHooks(job),
         };
     }
@@ -2020,12 +2023,16 @@ export class VideoBroker {
                             plannerModel,
                             plannerOptions.analysisReasoningEffort,
                             plannerOptions.screenplayReasoningEffort,
+                            plannerOptions.plannerGuidance,
+                            plannerOptions.plannerStrategy,
                         );
                     const plannerMetrics = (plan as any).planner_metrics;
                     if (plannerMetrics && typeof plannerMetrics === 'object') {
                         for (const [name, seconds] of [
                             ['frontier_prompt_analysis', Number(plannerMetrics.prompt_analysis_seconds)],
                             ['frontier_screenplay', Number(plannerMetrics.screenplay_seconds)],
+                            ['frontier_single_pass', Number(plannerMetrics.single_pass_seconds)],
+                            ['frontier_single_pass_fallback', Number(plannerMetrics.single_pass_fallback_seconds)],
                         ] as const) {
                             if (Number.isFinite(seconds) && seconds >= 0) {
                                 await this.recordMetricSpan(job.public_id, {
@@ -2048,15 +2055,22 @@ export class VideoBroker {
                         const reasonCode = /^[a-z_]+$/.test(error.reasonCode)
                             ? error.reasonCode
                             : 'other';
+                        const rejectionStrategy = configuredVideoPlannerStrategy(job.channel_id);
+                        const rejectionVariant = configuredVideoPlannerVariant(
+                            process.env,
+                            rejectionStrategy,
+                        );
                         await this.run(
                             `UPDATE video_jobs SET planner_model = ?, planner_fingerprint = ?, updated_at = ?
                              WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
                             [
                                 `${FRONTIER_REJECTION_PREFIX}${reasonCode}`,
                                 videoPlannerFingerprint(
-                                    configuredVideoPlannerVariant().plannerModel,
-                                    configuredVideoPlannerVariant().analysisReasoningEffort,
-                                    configuredVideoPlannerVariant().screenplayReasoningEffort,
+                                    rejectionVariant.plannerModel,
+                                    rejectionVariant.analysisReasoningEffort,
+                                    rejectionVariant.screenplayReasoningEffort,
+                                    '',
+                                    rejectionStrategy,
                                 ),
                                 nowSeconds(),
                                 job.public_id,
