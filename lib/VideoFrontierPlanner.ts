@@ -267,7 +267,7 @@ Treat every content-bearing word in the request as material. Preserve every expl
 
 Choose the shortest natural finished duration that makes the idea legible, capped by the supplied total and per-segment limits. A segment is one independently generated clip, while shots inside a segment are directions that one generative pass must perform itself. Keep ordinary camera-angle, framing, or lens changes within the same continuous location, cast, lighting, and action as shots in one segment. Every hard scene change involving a different location, time, cast, environment, independent action, or deliberately discontinuous visual state must begin a new segment even when the total duration fits one model generation. Use transition=continue only when the next segment should inherit the preceding final frame and can physically continue from it; use cut for a fresh scene and dissolve only for an intentional soft transition. Do not split a continuous action merely to add another camera angle. The sum of shot durations within each segment should equal target_seconds.
 
-Treat explicit speaking intent as authority to write speech. First distinguish production direction from diegetic wording. A request that itself reads like something a character would say—including a first-person confession, direct address, greeting, plea, boast, rant, chant, catchphrase, or speaker-name colon line—is spoken wording even without quotation marks or a verb such as "says." This requires evidence of a speech act in the wording, such as first person, direct address, an explicit vocal cue, or a speaker label. Unquoted third-person narrative or scene prose is visual direction even when it is emotional, inflammatory, slogan-like, or written in a dramatic voice. For example, "and there she was, the captain herself leading the fleet into a better tomorrow" describes a scene; it does not ask a narrator to recite that sentence. Do not invent a narrator or visible speaker merely to read the creative brief aloud. Preserve actual supplied spoken wording verbatim in dialogue and infer a visible speaker whose mouth movement and performance match it. Terse labels such as sound:, audio:, ambience:, music:, style:, scene:, and shot: are production directions, not speakers. When the user asks subjects to speak, talk, discuss, converse, argue, debate, interview, narrate, announce, shout, sing, or otherwise vocalize but leaves some or all wording unspecified, write the shortest natural original dialogue or lyrics needed to express the requested topic and interaction. You may also add concise original in-world dialogue when it improves a character-driven, narrative, confrontational, absurd, or comedic screenplay, even if the user did not explicitly request speech. Prefer a memorable line, reaction, or brief exchange that advances the scene; never use dialogue merely to have a narrator recite or closely paraphrase the creative brief. Give distinct participants concise turn-taking lines, identify the correct speaker and language, and make the corresponding shot.visual describe visible speaking or singing with synchronized mouth movement. If the user supplies quoted spoken wording, reproduce that wording verbatim for its intended turn: never paraphrase, censor, translate, extend, or pad a quoted line. Respect explicit requests for silence or no dialogue. The shot.audio field contains only ambience, sound effects, and non-speech sound; all words belong in dialogue.
+Treat explicit speaking intent as authority to write speech. First distinguish production direction from diegetic wording. A request that itself reads like something a character would say—including a first-person confession, direct address, greeting, plea, boast, rant, chant, catchphrase, or speaker-name colon line—is spoken wording even without quotation marks or a verb such as "says." This requires evidence of a speech act in the wording, such as first person, direct address, an explicit vocal cue, or a speaker label. Unquoted third-person narrative or scene prose is visual direction even when it is emotional, inflammatory, slogan-like, or written in a dramatic voice. For example, "and there she was, the captain herself leading the fleet into a better tomorrow" describes a scene; it does not ask a narrator to recite that sentence. Do not invent a narrator or visible speaker merely to read the creative brief aloud. Preserve actual supplied spoken wording verbatim in dialogue and infer a visible speaker whose mouth movement and performance match it. Terse labels such as sound:, audio:, ambience:, music:, style:, scene:, and shot: are production directions, not speakers. When the user asks subjects to speak, talk, discuss, converse, argue, debate, interview, narrate, announce, shout, sing, or otherwise vocalize but leaves some or all wording unspecified, write the shortest natural original dialogue or lyrics needed to express the requested topic and interaction. You may also add concise original in-world dialogue when it improves a character-driven, narrative, confrontational, absurd, or comedic screenplay, even if the user did not explicitly request speech. Prefer a memorable line, reaction, or brief exchange that advances the scene; never use dialogue merely to have a narrator recite or closely paraphrase the creative brief. Give distinct participants concise turn-taking lines, identify the correct speaker and language, and make the corresponding shot.visual describe visible speaking or singing with synchronized mouth movement. If the user supplies quoted spoken wording, reproduce that wording verbatim for its intended turn: never paraphrase, censor, translate, extend, or pad a quoted line. For MiniMax H3, put a single short user-supplied line in the first shot of its segment and make it begin immediately; retain later placement only when the user explicitly sequences or delays the line. This priority does not apply to generated punchlines or multi-turn dialogue whose timing serves the story. Respect explicit requests for silence or no dialogue. The shot.audio field contains only ambience, sound effects, and non-speech sound; all words belong in dialogue.
 
 Preserve eccentric, crude, obsessive, fetishistic, confrontational, absurd, or comedic intent at the same semantic intensity supplied by the user. Do not sanitize, rehabilitate, moralize, euphemize, or replace it with a tasteful generic adjacent activity such as fitness, lifestyle footage, smiling stock imagery, or an abstract mood. When staging is underspecified, choose the most literal entertaining audiovisual reading supported by the wording. For an utterance-dominant prompt, make the delivery itself the main event: keep the speaker's face and mouth readable, use expressive performance, and choose concrete staging, wardrobe, props, and environment that unmistakably reinforce the distinctive premise instead of merely displaying its nouns.
 
@@ -337,6 +337,27 @@ function planHasDialogue(plan: any): boolean {
 
 function spokenWords(value: string): string {
     return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+const EXPLICIT_DIALOGUE_DELAY = /\b(?:after|before|then|later|finally|eventually|once|until|when|as soon as|at\s+(?:the\s+end|\d+(?:\.\d+)?\s*(?:s|sec|secs|second|seconds)))\b/i;
+
+function promptExplicitlyDelaysDialogue(prompt: string): boolean {
+    return EXPLICIT_DIALOGUE_DELAY.test(prompt);
+}
+
+function dialogueLineShotIndexes(plan: any, requiredLine: string): number[] {
+    const required = spokenWords(requiredLine);
+    if (!required) return [];
+    const indexes: number[] = [];
+    for (const segment of plan?.segments || []) {
+        for (const [shotIndex, shot] of (segment?.shots || []).entries()) {
+            if ((shot?.dialogue || []).some((line: any) =>
+                spokenWords(String(line?.text || '')).includes(required))) {
+                indexes.push(shotIndex);
+            }
+        }
+    }
+    return indexes;
 }
 
 function planPreservesDialogueLine(plan: any, requiredLine: string): boolean {
@@ -771,6 +792,18 @@ export function validateFrontierVideoPlanForKeyframe(
         }
         if (!protectedLines.length && planRecitesCreativeBrief(plan, rawPrompt)) {
             throw new Error('GPT-5.6 Sol recited the visual creative brief as dialogue.');
+        }
+        if (VIDEO_MODELS[model].generatorModel === 'h3'
+            && protectedLines.length === 1
+            && (String(protectedLines[0].text).match(/[\p{L}\p{N}_'-]+/gu) || []).length <= 12
+            && !promptExplicitlyDelaysDialogue(rawPrompt)) {
+            const shotIndexes = dialogueLineShotIndexes(plan, String(protectedLines[0].text));
+            if (shotIndexes.some(shotIndex => shotIndex > 0)) {
+                throw new Error(
+                    'GPT-5.6 Sol placed one short verbatim H3 line after the first shot; '
+                    + 'move it to the beginning unless the user explicitly delays it.',
+                );
+            }
         }
         const semantic = semanticPlanText(plan);
         const missingQuotes = quotedRequirements(rawPrompt).filter(quote => !semantic.includes(quote));

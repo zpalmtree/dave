@@ -7,9 +7,11 @@ import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 
 import { AI_MODELS } from '../dist/AIModels.js';
 import { config } from '../dist/Config.js';
+import { evaluateDialogueContract } from './video-render-dialogue-contract.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +57,7 @@ async function extractVisualEvidence(candidate, outputDirectory) {
     await mkdir(candidateDirectory, { recursive: true });
     const frameZeroPath = resolve(candidateDirectory, 'frame-zero.jpg');
     const timelinePath = resolve(candidateDirectory, 'timeline-2fps.jpg');
+    const audioPath = resolve(candidateDirectory, 'audio.wav');
     await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-y',
         '-i', candidate.video_path,
@@ -67,7 +70,11 @@ async function extractVisualEvidence(candidate, outputDirectory) {
         '-vf', 'fps=2,scale=448:256,tile=4x4',
         '-frames:v', '1', '-q:v', '2', timelinePath,
     ]);
-    return { frameZeroPath, timelinePath };
+    await run('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', candidate.video_path, '-vn', '-ac', '1', '-ar', '16000', audioPath,
+    ]);
+    return { frameZeroPath, timelinePath, audioPath };
 }
 
 function metricValue(text, pattern) {
@@ -100,14 +107,54 @@ async function detectTimelineProblems(videoPath) {
     };
 }
 
-async function transcribeVideo(openai, videoPath) {
-    const result = await openai.audio.transcriptions.create({
-        file: createReadStream(videoPath),
-        model: AI_MODELS.openAITranscription,
+async function transcribeGemini(gemini, audioPath, model) {
+    const data = (await readFile(audioPath)).toString('base64');
+    const result = await gemini.models.generateContent({
+        model,
+        contents: [{
+            role: 'user',
+            parts: [
+                {
+                    text: 'Transcribe every intelligible spoken human word in this audio exactly. Do not describe sounds. If there are no intelligible spoken words, reply exactly [NO SPEECH].',
+                },
+                { inlineData: { mimeType: 'audio/wav', data } },
+            ],
+        }],
+        config: { temperature: 0 },
     });
+    const text = String(result.text || '').trim();
     return {
-        text: result.text.trim(),
-        usage: result.usage || null,
+        text: /^\[NO SPEECH\]$/i.test(text) ? '' : text,
+        usage: result.usageMetadata || null,
+    };
+}
+
+async function transcribeVideo(openai, gemini, videoPath, audioPath, dialogueContract) {
+    const models = dialogueContract?.transcription_models?.length
+        ? dialogueContract.transcription_models
+        : [AI_MODELS.openAITranscription];
+    const runsPerModel = dialogueContract
+        ? Math.max(1, Math.min(4, Number(dialogueContract.transcription_runs_per_model) || 2))
+        : 1;
+    const observations = await Promise.all(models.flatMap(model =>
+        Array.from({ length: runsPerModel }, async (_, index) => {
+            const result = model.startsWith('gemini-')
+                ? await transcribeGemini(gemini, audioPath, model)
+                : await openai.audio.transcriptions.create({
+                    file: createReadStream(videoPath),
+                    model,
+                });
+            return {
+                model,
+                run: index + 1,
+                text: result.text.trim(),
+                usage: result.usage || null,
+            };
+        })));
+    const distinctText = [...new Set(observations.map(observation => observation.text).filter(Boolean))];
+    return {
+        text: distinctText.join(' | '),
+        observations,
     };
 }
 
@@ -177,7 +224,12 @@ async function judge(openai, spec, evidence, runIndex) {
             type: 'input_text',
             text: [
                 `CANDIDATE ${candidate.label}`,
-                `ASR TRANSCRIPT: ${candidate.transcript.text || '[no recognizable speech]'}`,
+                `ASR OBSERVATIONS: ${candidate.transcript.observations
+                    .map(observation => `${observation.model} run ${observation.run}: ${observation.text || '[no recognizable speech]'}`)
+                    .join(' | ')}`,
+                `DETERMINISTIC DIALOGUE CONTRACT: ${candidate.dialogue_verification
+                    ? JSON.stringify(candidate.dialogue_verification)
+                    : '[not configured]'}`,
                 `FRAME-ZERO SSIM: ${candidate.frame_zero.ssim ?? 'unavailable'}`,
                 `FREEZE EVENTS: ${JSON.stringify(candidate.timeline.freeze_events)}`,
                 `BLACK EVENTS: ${JSON.stringify(candidate.timeline.black_events)}`,
@@ -241,16 +293,22 @@ function aggregateJudgments(evidence, judgments) {
             total_votes: ratings.length,
             critical_failures: [...new Set(ratings.flatMap(rating => rating.critical_failures))],
             winner_votes: judgments.filter(judgment => judgment.winner_candidate === candidate.id).length,
+            dialogue_verification: candidate.dialogue_verification,
         };
     });
     const eligible = candidates
-        .filter(candidate => candidate.acceptable_votes > candidate.total_votes / 2)
+        .filter(candidate => candidate.acceptable_votes > candidate.total_votes / 2
+            && (!candidate.dialogue_verification || candidate.dialogue_verification.status === 'passed'))
         .sort((left, right) => right.averages.overall - left.averages.overall);
+    const dialogueBlocked = candidates.some(candidate => candidate.acceptable_votes > candidate.total_votes / 2
+        && candidate.dialogue_verification && candidate.dialogue_verification.status !== 'passed');
     return {
         candidates,
         promotion: eligible[0]?.candidate || 'none',
         promotion_reason: eligible.length
             ? 'Candidate received a majority of acceptable votes; inspect critical failures before rollout.'
+            : dialogueBlocked
+                ? 'A visually acceptable candidate failed or could not conclusively pass the deterministic dialogue contract. Do not promote.'
             : 'No candidate received a majority of acceptable votes. Do not promote from this comparison.',
     };
 }
@@ -268,6 +326,7 @@ async function main() {
     const judgeRuns = Math.max(1, Math.min(4, Number(argument('judge-runs', '2')) || 2));
     await mkdir(outputDirectory, { recursive: true });
     const openai = new OpenAI({ apiKey: config.openaiApiKey });
+    const gemini = new GoogleGenAI({ apiKey: config.geminiApiKey, apiVersion: 'v1alpha' });
 
     const evidence = [];
     for (const candidate of spec.candidates) {
@@ -279,9 +338,27 @@ async function main() {
         const [frameZero, timeline, transcript] = await Promise.all([
             frameZeroMetrics(candidate.keyframe_path, visuals.frameZeroPath, videoStream.width, videoStream.height),
             detectTimelineProblems(candidate.video_path),
-            transcribeVideo(openai, candidate.video_path),
+            transcribeVideo(
+                openai,
+                gemini,
+                candidate.video_path,
+                visuals.audioPath,
+                spec.dialogue_contract,
+            ),
         ]);
-        evidence.push({ ...candidate, probe, visuals, frame_zero: frameZero, timeline, transcript });
+        const dialogueVerification = evaluateDialogueContract(
+            spec.dialogue_contract,
+            transcript.observations,
+        );
+        evidence.push({
+            ...candidate,
+            probe,
+            visuals,
+            frame_zero: frameZero,
+            timeline,
+            transcript,
+            dialogue_verification: dialogueVerification,
+        });
     }
 
     const judgments = [];
@@ -295,6 +372,7 @@ async function main() {
         prompt: spec.prompt,
         intent: spec.intent || null,
         expected_dialogue: spec.expected_dialogue || null,
+        dialogue_contract: spec.dialogue_contract || null,
         judge_model: AI_MODELS.openAIChat,
         judge_runs: judgeRuns,
         evidence,
