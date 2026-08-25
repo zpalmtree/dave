@@ -9,7 +9,8 @@
     "prepublish": "yarn build",
     "build": "./node_modules/.bin/tsc",
     "test": "yarn build && node --test tests/*.test.mjs",
-    "benchmark:video-planners": "yarn build && node scripts/benchmark-video-planners.mjs"
+    "benchmark:video-planners": "yarn build && node scripts/benchmark-video-planners.mjs",
+    "benchmark:video-keyframes": "yarn build && node scripts/benchmark-video-keyframes.mjs"
   },
   "files": [
     "dist/*"

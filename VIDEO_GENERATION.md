@@ -118,8 +118,20 @@ uses a blinded Sol quality judge to score fidelity, creative development,
 specificity, continuity, and audio/dialogue. Reports and only the fast plans that
 clear the teacher gate are written under `artifacts/video-planner-benchmarks/`.
 Pass a prior report with `--examples=/path/to/report.json` to feed up to three
-teacher-approved Sol plans to the Flash candidates. Use `--full` only after the
+teacher-approved Sol plans to the Flash candidates. Pass it with
+`--baseline=/path/to/report.json` to reuse matching successful Sol outputs,
+instead of regenerating the slow baseline. Same-prompt teacher examples are
+automatically excluded. `--candidates=id,id` narrows a run and
+`--concurrency=2` bounds prompt-level parallelism. Use `--full` only after the
 quick candidate set is satisfactory.
+
+Run `yarn benchmark:video-keyframes --plans=/path/to/planner-report.json` for a
+blinded comparison of Gemini Pro 2K, Flash 2K, and Flash Lite 1K on the exact
+same approved plans. Images and a scored report are saved below
+`artifacts/video-keyframe-benchmarks/`. A failed judge run can be continued with
+`--resume=/path/to/run-directory`; completed images are content-stable inputs
+and are not regenerated. Use `--no-judge` only to export/cache plan and image
+artifacts. Reports include aggregate latency, acceptance, failure, and win counts.
 
 Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
 24 hours; complete desktop generation directories expire after seven days.
