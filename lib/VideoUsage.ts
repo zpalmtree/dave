@@ -47,6 +47,7 @@ export interface VideoProviderHooks {
 export interface VideoFrontierCallOptions extends VideoProviderHooks {
     serviceTier?: VideoServiceTier;
     plannerModel?: string;
+    plannerStrategy?: 'two-pass' | 'single-pass';
     analysisReasoningEffort?: 'low' | 'medium' | 'high';
     screenplayReasoningEffort?: 'low' | 'medium' | 'high';
     plannerGuidance?: string;

@@ -29,6 +29,8 @@ import {
     VIDEO_PLAN_SCHEMA,
     VIDEO_PROMPT_ANALYSIS_SCHEMA,
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
+    VIDEO_SINGLE_PASS_INSTRUCTIONS,
+    VIDEO_SINGLE_PASS_SCHEMA,
     VIDEO_PLANNER_INSTRUCTIONS,
     VIDEO_PLANNER_FAST_MODEL,
     VIDEO_PLANNER_GEMINI_SCHEMA_MODE,
@@ -37,7 +39,10 @@ import {
     compileBestEffortFrontierVideoPlan,
     createFrontierVideoPlan,
     geminiCompatibleResponseSchema,
+    configuredVideoPlannerStrategy,
     configuredVideoPlannerVariant,
+    reconcileFrontierKeyframeMotionGeometry,
+    stageFrontierDialogueVisually,
     validateFrontierVideoPlanForKeyframe,
     videoPlannerFingerprint,
     videoPlannerPromptCacheFields,
@@ -95,6 +100,19 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
         analysisReasoningEffort: 'high',
         screenplayReasoningEffort: 'high',
     });
+    assert.deepEqual(configuredVideoPlannerVariant({}, 'single-pass'), {
+        plannerModel: VIDEO_PLANNER_MODEL,
+        analysisReasoningEffort: 'medium',
+        screenplayReasoningEffort: 'medium',
+    });
+    assert.deepEqual(configuredVideoPlannerVariant({
+        VIDEO_PLANNER_ANALYSIS_EFFORT: 'high',
+        VIDEO_PLANNER_SCREENPLAY_EFFORT: 'high',
+    }, 'single-pass'), {
+        plannerModel: VIDEO_PLANNER_MODEL,
+        analysisReasoningEffort: 'high',
+        screenplayReasoningEffort: 'high',
+    });
     const fast = configuredVideoPlannerVariant({
         VIDEO_PLANNER_MODEL: VIDEO_PLANNER_FAST_MODEL,
         VIDEO_PLANNER_ANALYSIS_EFFORT: 'low',
@@ -114,6 +132,17 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
         ),
     );
     assert.equal(VIDEO_PLANNER_GEMINI_SCHEMA_MODE, 'compatible-structured-v1');
+    assert.equal(configuredVideoPlannerStrategy('483470443001413675', {}), 'single-pass');
+    assert.equal(configuredVideoPlannerStrategy('other-channel', {}), 'two-pass');
+    assert.equal(configuredVideoPlannerStrategy('other-channel', {
+        VIDEO_PLANNER_STRATEGY: 'single-pass',
+    }), 'single-pass');
+    assert.equal(configuredVideoPlannerStrategy('483470443001413675', {
+        VIDEO_PLANNER_STRATEGY: 'two-pass',
+    }), 'two-pass');
+    assert.equal(configuredVideoPlannerStrategy('canary-two', {
+        VIDEO_PLANNER_CANARY_CHANNELS: 'canary-one, canary-two',
+    }), 'single-pass');
 });
 
 test('Gemini planner schema keeps nested types while removing complexity constraints', () => {
@@ -567,6 +596,8 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     };
     visit(VIDEO_PLAN_SCHEMA);
     visit(VIDEO_PROMPT_ANALYSIS_SCHEMA);
+    visit(VIDEO_SINGLE_PASS_SCHEMA);
+    assert.match(VIDEO_SINGLE_PASS_INSTRUCTIONS, /binding contract/);
 });
 
 test('broker-side frontier validation rejects plans the desktop would reject before making a keyframe', () => {
@@ -615,6 +646,58 @@ test('broker-side frontier validation rejects plans the desktop would reject bef
     assert.doesNotThrow(
         () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast', creativeBrief),
     );
+});
+
+test('frontier dialogue staging makes every speaking shot visually explicit without a model call', () => {
+    const plan = {
+        segments: [{
+            shots: [{
+                visual: 'The worker takes a sip and faces the monitor.',
+                dialogue: [{
+                    speaker_id: 'office_worker',
+                    language: 'English',
+                    delivery: 'dry',
+                    text: 'Okay, Monday. You get one cup.',
+                }],
+            }, {
+                visual: 'Two racers cross the line.',
+                dialogue: [
+                    { speaker_id: 'red_racer', text: 'Not today!' },
+                    { speaker_id: 'blue-racer', text: 'Next time.' },
+                ],
+            }],
+        }],
+    };
+    assert.equal(stageFrontierDialogueVisually(plan), 2);
+    assert.match(plan.segments[0].shots[0].visual, /office worker remains visible/);
+    assert.match(plan.segments[0].shots[0].visual, /synchronized mouth movement/);
+    assert.match(plan.segments[0].shots[1].visual, /red racer and blue racer/);
+    assert.equal(stageFrontierDialogueVisually(plan), 0);
+});
+
+test('frontier keyframe geometry deterministically follows an unambiguous motion contract', () => {
+    const plan = {
+        keyframe: {
+            prompt: 'A left-facing knight moves screen right while a dragon watches from screen left.',
+            motion_contract: {
+                subject_orientation: 'The knight is pointed screen right.',
+            },
+        },
+    };
+    assert.equal(reconcileFrontierKeyframeMotionGeometry(plan), 1);
+    assert.match(plan.keyframe.prompt, /right-facing knight moves screen right/);
+    assert.match(plan.keyframe.prompt, /dragon watches from screen left/);
+    assert.equal(reconcileFrontierKeyframeMotionGeometry(plan), 0);
+
+    const opposedCast = {
+        keyframe: {
+            prompt: 'One racer faces screen left and another faces screen right.',
+            motion_contract: {
+                subject_orientation: 'One racer faces screen left; another faces screen right.',
+            },
+        },
+    };
+    assert.equal(reconcileFrontierKeyframeMotionGeometry(opposedCast), 0);
 });
 
 function frontierAnalysis(dialogueMode = 'none') {
@@ -724,6 +807,84 @@ test('frontier planner applies experimental guidance to both passes and fingerpr
         assert.match(requests[0].input[0].content[0].text, /Keep the dog visible/);
         assert.match(requests[1].input[0].content[0].text, /Keep the dog visible/);
         assert.notEqual(result._planner_fingerprint, videoPlannerFingerprint());
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('single-pass frontier planner returns validated analysis and screenplay from one call', async () => {
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return jsonResponse({
+            status: 'completed',
+            output_text: JSON.stringify({
+                prompt_analysis: frontierAnalysis(),
+                plan: frontierPlan(),
+            }),
+            model: VIDEO_PLANNER_MODEL,
+        });
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.',
+            'minimaxfast',
+            'requester-single-pass',
+            undefined,
+            { plannerStrategy: 'single-pass' },
+        );
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0].text.format.name, 'local_video_analysis_and_screenplay');
+        assert.equal(result.planner_metrics.single_pass, true);
+        assert.equal(result.planner_metrics.screenplay_attempts, 1);
+        assert.deepEqual(result.prompt_analysis, frontierAnalysis());
+        assert.notEqual(result._planner_fingerprint, videoPlannerFingerprint());
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('invalid single-pass output falls back to the unchanged two-pass planner', async () => {
+    const requests = [];
+    const replies = [
+        {
+            status: 'completed',
+            output_text: JSON.stringify({
+                prompt_analysis: frontierAnalysis('generated'),
+                plan: frontierPlan(),
+            }),
+            model: VIDEO_PLANNER_MODEL,
+        },
+        { status: 'completed', output_text: JSON.stringify(frontierAnalysis()), model: VIDEO_PLANNER_MODEL },
+        { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return jsonResponse(replies.shift());
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.',
+            'minimaxfast',
+            'requester-single-fallback',
+            undefined,
+            {
+                plannerStrategy: 'single-pass',
+                analysisReasoningEffort: 'medium',
+                screenplayReasoningEffort: 'medium',
+            },
+        );
+        assert.equal(requests.length, 3);
+        assert.equal(requests[0].text.format.name, 'local_video_analysis_and_screenplay');
+        assert.equal(requests[1].text.format.name, 'local_video_prompt_analysis');
+        assert.equal(requests[2].text.format.name, 'local_video_screenplay');
+        assert.equal(requests[0].reasoning.effort, 'medium');
+        assert.equal(requests[1].reasoning.effort, 'high');
+        assert.equal(requests[2].reasoning.effort, 'high');
+        assert.ok(result.planner_metrics.single_pass_fallback_seconds >= 0);
+        assert.equal(result.planner_metrics.single_pass, undefined);
     } finally {
         globalThis.fetch = originalFetch;
     }
