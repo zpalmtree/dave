@@ -921,6 +921,42 @@ test('broker validation catches long H3 dialogue and literal omissions before de
     );
 });
 
+test('broker validation requires one short verbatim H3 line in the first shot', () => {
+    const analysis = frontierAnalysis('verbatim');
+    analysis.dialogue_contract.lines = [{
+        speaker_hint: 'racer',
+        text: 'Not today!',
+        verbatim: true,
+    }];
+    const plan = frontierPlan([]);
+    plan.prompt_analysis = analysis;
+    plan.segments[0].shots.push({
+        duration_seconds: 2,
+        visual: 'The racer glances at a rival and speaks.',
+        camera: 'Cockpit close-up.',
+        audio: 'Low engine hum.',
+        dialogue: [{
+            speaker_id: 'racer',
+            language: 'English',
+            delivery: 'defiant',
+            text: 'Not today!',
+        }],
+    });
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(
+            plan,
+            'minimax',
+            'A racer says "Not today!"',
+        ),
+        /move it to the beginning/,
+    );
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(
+        plan,
+        'minimax',
+        'After crossing the finish line, a racer says "Not today!"',
+    ));
+});
+
 test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {
     assert.equal(videoJobDirection({
         prompt: VIDEO_IMAGE_ONLY_AUTO_PROMPT,
