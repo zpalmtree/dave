@@ -1765,13 +1765,14 @@ export class VideoBroker {
         const filter = model ? 'WHERE m.model = ?' : '';
         if (model) params.push(model);
         params.push(limit);
-        const rows = await this.all<VideoJobMetricRow>(
+        const storedRows = await this.all<VideoJobMetricRow>(
             `SELECT m.*, j.planner_model, j.keyframe_provider, j.keyframe_model
              FROM video_job_metrics m
              JOIN video_jobs j ON j.public_id = m.job_public_id
              ${filter} ORDER BY m.recorded_at DESC LIMIT ?`,
             params,
         );
+        const rows = storedRows.filter(row => isVideoModel(row.model));
         if (!rows.length) {
             return { generated_at: nowSeconds(), filter: model || 'all', samples: 0, models: [] };
         }

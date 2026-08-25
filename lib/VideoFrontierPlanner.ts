@@ -17,18 +17,12 @@ export const VIDEO_PLANNER_GEMINI_SCHEMA_MODE = 'compatible-structured-v1';
 export type VideoPlannerStrategy = 'two-pass' | 'single-pass';
 
 export function configuredVideoPlannerStrategy(
-    channelId: string,
+    _channelId: string,
     environment: NodeJS.ProcessEnv = process.env,
 ): VideoPlannerStrategy {
     const globalStrategy = environment.VIDEO_PLANNER_STRATEGY;
     if (globalStrategy === 'two-pass' || globalStrategy === 'single-pass') return globalStrategy;
-    const canaryChannels = new Set(
-        (environment.VIDEO_PLANNER_CANARY_CHANNELS || '483470443001413675')
-            .split(',')
-            .map(value => value.trim())
-            .filter(Boolean),
-    );
-    return canaryChannels.has(channelId) ? 'single-pass' : 'two-pass';
+    return 'single-pass';
 }
 
 export function configuredVideoPlannerVariant(

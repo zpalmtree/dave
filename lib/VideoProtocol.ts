@@ -7,7 +7,7 @@ export const VIDEO_RESULT_MAX_BYTES = 10 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
-export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast' | 'minimaxdraft';
+export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast';
 export type VideoGeneratorModelId = 'ltx' | 'h3';
 
 export interface VideoMetricSpan {
@@ -162,15 +162,6 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
         fallbackLowSeconds: 360,
         fallbackHighSeconds: 1200,
     },
-    minimaxdraft: {
-        id: 'minimaxdraft',
-        command: 'minimaxdraft',
-        displayName: 'MiniMax H3 4-Step Draft',
-        generatorModel: 'h3',
-        generatorArgs: ['--model', 'h3', '--quality', 'draft', '--turbo4'],
-        fallbackLowSeconds: 180,
-        fallbackHighSeconds: 720,
-    },
 };
 
 export interface VideoJobView {
@@ -240,8 +231,7 @@ export function isVideoModel(value: unknown): value is VideoModelId {
     return value === 'ltx'
         || value === 'ltxfast'
         || value === 'minimax'
-        || value === 'minimaxfast'
-        || value === 'minimaxdraft';
+        || value === 'minimaxfast';
 }
 
 export function sanitizeVideoWorkerText(

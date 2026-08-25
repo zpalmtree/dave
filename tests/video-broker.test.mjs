@@ -127,7 +127,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         const submitted = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({
-                model: 'minimaxdraft',
+                model: 'minimax',
                 prompt: 'Runtime tracking test',
                 requester_id: 'runtime-user',
                 origin_bot_id: 'bot-1',
@@ -149,7 +149,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             type: 'hello',
             protocol: 1,
             worker_id: 'runtime-worker',
-            capabilities: ['minimaxdraft'],
+            capabilities: ['minimax'],
             current_job: null,
         }));
         await take(value => value.type === 'hello_ack');
@@ -175,7 +175,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             },
             body: JSON.stringify({
                 schema_version: 1,
-                model: 'minimaxdraft',
+                model: 'minimax',
                 generator_model: 'h3',
                 total_seconds: 65.625,
                 output: {
@@ -213,7 +213,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                     warm_model_before: null,
                     warm_model_after: 'h3',
                 },
-                flags: { quality: 'draft', turbo4: true },
+                flags: { quality: 'final' },
                 spans: [
                     { source: 'worker', name: 'generator_process', duration_seconds: 55 },
                     { source: 'worker', name: 'result_upload', duration_seconds: 2 },
@@ -238,10 +238,10 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             body: JSON.stringify({ duration_seconds: 1.25 }),
         });
         assert.equal(delivered.status, 200);
-        const stats = await botFetch('/v1/stats?model=minimaxdraft');
+        const stats = await botFetch('/v1/stats?model=minimax');
         assert.equal(stats.status, 200);
         assert.equal(stats.body.samples, 1);
-        assert.equal(stats.body.models[0].model, 'minimaxdraft');
+        assert.equal(stats.body.models[0].model, 'minimax');
         assert.equal(stats.body.models[0].total_seconds.median, 65.625);
         assert.equal(stats.body.models[0].phases.generator, 55);
         assert.equal(stats.body.models[0].phases.discord_delivery, 1.25);
@@ -254,7 +254,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         const learned = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({
-                model: 'minimaxdraft',
+                model: 'minimax',
                 prompt: 'Sparse runtime estimate test',
                 requester_id: 'runtime-user-2',
                 origin_bot_id: 'bot-1',
@@ -339,7 +339,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         const otherRequester = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({
-                model: 'minimaxdraft',
+                model: 'minimax',
                 prompt: 'Another requester queue test',
                 requester_id: 'runtime-user-3',
                 origin_bot_id: 'bot-1',

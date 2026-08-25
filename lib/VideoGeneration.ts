@@ -145,6 +145,11 @@ function displayedVideoPrompt(prompt: string): string {
     return prompt.slice(instructionAt + legacyMarker.length).trim() || prompt;
 }
 
+function videoModelDisplayName(model: unknown): string {
+    return (VIDEO_MODELS as Record<string, { displayName: string }>)[String(model)]?.displayName
+        || 'Retired video model';
+}
+
 export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_intent'>): string {
     if (job.prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT) return displayedVideoPrompt(job.prompt);
     const intent = sanitizeVideoWorkerText(job.planned_intent, '', 1000).trim();
@@ -154,7 +159,7 @@ export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_in
 export function completedVideoPost(job: VideoJobView): string {
     const runtime = formatVideoRuntime(job.runtime_seconds);
     const notice = sanitizeVideoWorkerText(job.generation_notice, '', 1000).trim();
-    const result = `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
+    const result = `${videoModelDisplayName(job.model)} video **${shortJobId(job.id)}** is ready${
         runtime ? ` — completed in **${runtime}**` : ''
     }.${notice ? `\n**Note:** ${notice}` : ''}`;
     return formatVideoReplyWithFullPrompt(result, job);
@@ -171,7 +176,7 @@ function videoFailureDetail(job: VideoJobView, maxLength: number): string {
 export function failedVideoPost(job: VideoJobView): string {
     const error = videoFailureDetail(job, 1500);
     return formatVideoReplyWithFullPrompt(
-        `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** failed.\n${error}`,
+        `${videoModelDisplayName(job.model)} video **${shortJobId(job.id)}** failed.\n${error}`,
         job,
     );
 }
@@ -253,7 +258,7 @@ function pauseText(until: number | null): string {
 }
 
 export function formatVideoJob(job: VideoJobView): string {
-    const name = VIDEO_MODELS[job.model].displayName;
+    const name = videoModelDisplayName(job.model);
     const imageLabel = job.has_source_image
         ? (job.prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT ? ' · auto-directed image' : ' · user start frame')
         : '';
@@ -477,7 +482,7 @@ class VideoGenerationService {
             const delivery = await this.postDelivery(job, message);
             const deliverySeconds = (Date.now() - deliveryStarted) / 1000;
             await message.edit({
-                content: `**${VIDEO_MODELS[job.model].displayName} · ${shortJobId(job.id)}**\nDelivered in ${delivery.url}.`,
+                content: `**${videoModelDisplayName(job.model)} · ${shortJobId(job.id)}**\nDelivered in ${delivery.url}.`,
                 attachments: [],
             });
             await this.acknowledge(job, 'delivered', deliverySeconds);
@@ -487,7 +492,7 @@ class VideoGenerationService {
         if (job.status === 'failed') {
             const failure = await this.postFailure(job, message);
             await message.edit({
-                content: `**${VIDEO_MODELS[job.model].displayName} · ${shortJobId(job.id)}**\nFailed. See ${failure.url}.`,
+                content: `**${videoModelDisplayName(job.model)} · ${shortJobId(job.id)}**\nFailed. See ${failure.url}.`,
                 attachments: [],
             });
             await this.acknowledge(job, 'notified');
