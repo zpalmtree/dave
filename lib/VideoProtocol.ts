@@ -65,6 +65,10 @@ export interface VideoWorkerMetrics {
         comfy_aimdo_version?: string;
         warm_model_before?: VideoGeneratorModelId | null;
         warm_model_after?: VideoGeneratorModelId | null;
+        experiment_id?: string | null;
+        variant_id?: string;
+        planner_fingerprint?: string | null;
+        keyframe_strategy?: string | null;
     };
     failure?: {
         kind: 'nvidia_driver_reset' | 'generator_failure';

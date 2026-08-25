@@ -46,6 +46,13 @@ export interface VideoProviderHooks {
 
 export interface VideoFrontierCallOptions extends VideoProviderHooks {
     serviceTier?: VideoServiceTier;
+    plannerModel?: string;
+    analysisReasoningEffort?: 'low' | 'medium' | 'high';
+    screenplayReasoningEffort?: 'low' | 'medium' | 'high';
+    plannerExamples?: Array<{
+        prompt: string;
+        plan: Record<string, unknown>;
+    }>;
 }
 
 export interface VideoUsageEvent {
@@ -89,6 +96,11 @@ export function videoUsageCost(usage: VideoProviderUsage): number {
         return input * (priority ? 8 : 5) / 1_000_000
             + output * (priority ? 40 : 30) / 1_000_000
             + cacheRead * (priority ? 0.8 : 0.5) / 1_000_000;
+    }
+    if (usage.model.startsWith('gemini-3.7-flash')) {
+        return input * 0.75 / 1_000_000
+            + output * 3.75 / 1_000_000
+            + cacheRead * 0.075 / 1_000_000;
     }
     if (usage.model.startsWith('gemini-3-pro-image')) {
         return input * 2 / 1_000_000 + output * 12 / 1_000_000 + images * 0.12;

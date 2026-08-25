@@ -36,8 +36,10 @@ import {
     FrontierPlannerRejectedError,
     VIDEO_PLANNER_MODEL,
     VideoPlanSourceImage,
+    configuredVideoPlannerVariant,
     createFrontierVideoPlan,
     validateFrontierVideoPlanForKeyframe,
+    videoPlannerFingerprint,
 } from './VideoFrontierPlanner.js';
 import {
     VIDEO_KEYFRAME_ASPECT_RATIOS,
@@ -45,6 +47,7 @@ import {
     VideoKeyframeAspectRatio,
     VideoKeyframeOptions,
     VideoKeyframeResult,
+    configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
 } from './VideoKeyframeProvider.js';
 import {
@@ -86,6 +89,7 @@ interface BrokerOptions {
     botToken: string;
     workerToken: string;
     heartbeatTimeoutMs?: number;
+    preplanQueuedJobs?: boolean;
     frontierPlanner?: typeof createFrontierVideoPlan;
     keyframeGenerator?: (
         plan: Record<string, any>,
@@ -129,6 +133,11 @@ interface JobRow {
     status_message_id: string;
     status: VideoJobStatus;
     attempt: number;
+    readiness_retries: number;
+    experiment_id: string | null;
+    variant_id: string;
+    planner_fingerprint: string | null;
+    keyframe_strategy: string | null;
     estimate_low_seconds: number;
     estimate_high_seconds: number;
     estimate_ready: number;
@@ -219,6 +228,10 @@ interface VideoJobMetricRow {
     planner_model: string | null;
     keyframe_provider: string | null;
     keyframe_model: string | null;
+    experiment_id: string | null;
+    variant_id: string;
+    planner_fingerprint: string | null;
+    keyframe_strategy: string | null;
 }
 
 interface VideoJobSpanRow {
@@ -286,8 +299,52 @@ function cachedFrontierRejection(plannerModel: string | null): string | null {
     return plannerModel.slice(FRONTIER_REJECTION_PREFIX.length).trim() || 'other';
 }
 
+export type VideoFailureDisposition = 'fail' | 'retry' | 'wait-readiness';
+
+export function duplicateVideoTerminalEventMatches(
+    message: Record<string, any>,
+    job: { status: VideoJobStatus; lease_token: string | null; error?: string | null; stage?: string | null },
+): boolean {
+    const leaseMatches = !job.lease_token || message.lease_id === undefined
+        || message.lease_id === job.lease_token;
+    if (!leaseMatches) return false;
+    if (message.event === 'complete') return job.status === 'ready' || job.status === 'delivered';
+    if (message.event === 'cancelled') {
+        return job.status === 'cancelled'
+            || (message.reason === 'pause' && job.status === 'queued' && job.stage === 'Paused for desktop use');
+    }
+    if (message.event === 'failed') {
+        return job.status === 'failed'
+            || (job.status === 'queued'
+                && job.error === sanitizeVideoWorkerText(message.error, 'Worker failure', 2000));
+    }
+    return false;
+}
+
+export function videoFailureDisposition(
+    error: string,
+    retryable: boolean,
+    attempt: number,
+    readinessRetries: number,
+    previousError: string | null,
+): VideoFailureDisposition {
+    if (!retryable) return 'fail';
+    const normalized = error.trim().toLowerCase().replace(/\s+/g, ' ');
+    const readiness = /(?:gpuq|gpu reservation|comfyui|comfy).*(?:ready|readiness|start|respond|timeout|timed out)/.test(normalized)
+        || /(?:timeout|timed out).*(?:gpuq|gpu reservation|comfyui|comfy)/.test(normalized);
+    if (readiness) return readinessRetries < 6 ? 'wait-readiness' : 'fail';
+    if (previousError?.trim() === error.trim() && attempt > 0) return 'fail';
+    return attempt < 2 ? 'retry' : 'fail';
+}
+
 function nowSeconds(): number {
     return Math.floor(Date.now() / 1000);
+}
+
+function experimentLabel(value: unknown, fallback: string | null): string | null {
+    const text = String(value || '').trim();
+    if (!text) return fallback;
+    return /^[a-zA-Z0-9._:-]{1,80}$/.test(text) ? text : fallback;
 }
 
 function statusPlaceholders(values: readonly string[]): string {
@@ -443,6 +500,10 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
         comfy_aimdo_version: boundedMetricText(value.environment.comfy_aimdo_version, 80) ?? undefined,
         warm_model_before: optionalGeneratorModel(value.environment.warm_model_before),
         warm_model_after: optionalGeneratorModel(value.environment.warm_model_after),
+        experiment_id: boundedMetricText(value.environment.experiment_id, 80) ?? undefined,
+        variant_id: boundedMetricText(value.environment.variant_id, 80) ?? undefined,
+        planner_fingerprint: boundedMetricText(value.environment.planner_fingerprint, 80) ?? undefined,
+        keyframe_strategy: boundedMetricText(value.environment.keyframe_strategy, 80) ?? undefined,
     } : undefined;
     for (const hash of [environment?.worker_sha256, environment?.generator_sha256]) {
         if (hash && !/^[0-9a-f]{64}$/.test(hash)) throw new Error('Invalid environment fingerprint.');
@@ -499,6 +560,14 @@ function median(values: Array<number | null | undefined>): number | null {
     if (!finite.length) return null;
     const middle = Math.floor(finite.length / 2);
     return finite.length % 2 ? finite[middle] : (finite[middle - 1] + finite[middle]) / 2;
+}
+
+function percentile(values: Array<number | null | undefined>, fraction: number): number | null {
+    const finite = values
+        .filter((value): value is number => Number.isFinite(value))
+        .sort((a, b) => a - b);
+    if (!finite.length) return null;
+    return finite[Math.min(finite.length - 1, Math.max(0, Math.ceil(finite.length * fraction) - 1))];
 }
 
 function minimum(values: Array<number | null | undefined>): number | null {
@@ -655,6 +724,8 @@ export class VideoBroker {
     private readonly wsServer = new WebSocketServer({ noServer: true });
     private worker: WorkerConnection | null = null;
     private writeChain: Promise<unknown> = Promise.resolve();
+    private readonly preparationQueued = new Set<string>();
+    private readonly preparationAttempted = new Set<string>();
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
     private readonly segmentKeyframeInFlight = new Map<string, Promise<void>>();
@@ -734,6 +805,11 @@ export class VideoBroker {
             status_message_id TEXT NOT NULL,
             status TEXT NOT NULL,
             attempt INTEGER NOT NULL DEFAULT 0,
+            readiness_retries INTEGER NOT NULL DEFAULT 0,
+            experiment_id TEXT,
+            variant_id TEXT NOT NULL DEFAULT 'production-v1',
+            planner_fingerprint TEXT,
+            keyframe_strategy TEXT,
             estimate_low_seconds INTEGER NOT NULL,
             estimate_high_seconds INTEGER NOT NULL,
             estimate_ready INTEGER NOT NULL DEFAULT 0,
@@ -781,6 +857,19 @@ export class VideoBroker {
         }
         if (!columnNames.has('affinity_bypasses')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN affinity_bypasses INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!columnNames.has('readiness_retries')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN readiness_retries INTEGER NOT NULL DEFAULT 0');
+        }
+        for (const [name, definition] of [
+            ['experiment_id', 'TEXT'],
+            ['variant_id', "TEXT NOT NULL DEFAULT 'production-v1'"],
+            ['planner_fingerprint', 'TEXT'],
+            ['keyframe_strategy', 'TEXT'],
+        ] as const) {
+            if (!columnNames.has(name)) {
+                await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
+            }
         }
         if (!columnNames.has('runtime_seconds')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN runtime_seconds REAL');
@@ -904,6 +993,10 @@ export class VideoBroker {
             fast INTEGER NOT NULL DEFAULT 0,
             turbo4 INTEGER NOT NULL DEFAULT 0,
             ltx_one_stage INTEGER NOT NULL DEFAULT 0,
+            experiment_id TEXT,
+            variant_id TEXT NOT NULL DEFAULT 'production-v1',
+            planner_fingerprint TEXT,
+            keyframe_strategy TEXT,
             recorded_at INTEGER NOT NULL
         )`);
         const metricColumns = new Set(
@@ -919,6 +1012,10 @@ export class VideoBroker {
             ['thermal_slowdown_samples', 'INTEGER'],
             ['power_brake_slowdown_samples', 'INTEGER'],
             ['comfy_aimdo_version', 'TEXT'],
+            ['experiment_id', 'TEXT'],
+            ['variant_id', "TEXT NOT NULL DEFAULT 'production-v1'"],
+            ['planner_fingerprint', 'TEXT'],
+            ['keyframe_strategy', 'TEXT'],
         ] as const) {
             if (!metricColumns.has(name)) {
                 await this.run(`ALTER TABLE video_job_metrics ADD COLUMN ${name} ${definition}`);
@@ -1269,17 +1366,48 @@ export class VideoBroker {
         } catch (error) {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
         }
-        return this.withWriteLock(async () => {
+        const existingBeforeDownload = await this.get<JobRow>(
+            'SELECT * FROM video_jobs WHERE idempotency_key = ?',
+            [String(body.command_message_id)],
+        );
+        if (existingBeforeDownload) {
+            return { status: 200, body: { job: (await this.views([existingBeforeDownload]))[0], duplicate: true } };
+        }
+        const publicId = randomUUID();
+        const directory = resolve(this.options.resultsDir, publicId);
+        let sourceImage: StoredVideoSourceImage | null = null;
+        let sourceImageDownloadSeconds: number | null = null;
+        if (sourceDescriptor) {
+            const sourceImageStarted = Date.now();
+            try {
+                sourceImage = await (this.options.sourceImageDownloader || downloadDiscordSourceImage)(
+                    sourceDescriptor,
+                    directory,
+                );
+                sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
+            } catch (error) {
+                rmSync(directory, { recursive: true, force: true });
+                return {
+                    status: 400,
+                    body: { error: `Could not use the attached starting image: ${error instanceof Error ? error.message : String(error)}` },
+                };
+            }
+        }
+        const result = await this.withWriteLock(async () => {
             const existing = await this.get<JobRow>(
                 'SELECT * FROM video_jobs WHERE idempotency_key = ?',
                 [String(body.command_message_id)],
             );
-            if (existing) return { status: 200, body: { job: (await this.views([existing]))[0], duplicate: true } };
+            if (existing) {
+                if (sourceImage) rmSync(directory, { recursive: true, force: true });
+                return { status: 200, body: { job: (await this.views([existing]))[0], duplicate: true } };
+            }
             const global = await this.get<{ count: number }>(
                 `SELECT COUNT(*) AS count FROM video_jobs WHERE status IN (${statusPlaceholders(UNFINISHED_VIDEO_STATUSES)})`,
                 UNFINISHED_VIDEO_STATUSES,
             );
             if ((global?.count || 0) >= VIDEO_MAX_GLOBAL_JOBS) {
+                if (sourceImage) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `The video queue is full (${VIDEO_MAX_GLOBAL_JOBS} jobs).` } };
             }
             const user = await this.get<{ count: number }>(
@@ -1288,38 +1416,20 @@ export class VideoBroker {
                 [String(body.requester_id), ...UNFINISHED_VIDEO_STATUSES],
             );
             if ((user?.count || 0) >= VIDEO_MAX_USER_JOBS) {
+                if (sourceImage) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
             }
             const estimate = await this.runtimeEstimate(body.model as VideoModelId);
-            const publicId = randomUUID();
             const now = nowSeconds();
-            const directory = resolve(this.options.resultsDir, publicId);
-            let sourceImage: StoredVideoSourceImage | null = null;
-            let sourceImageDownloadSeconds: number | null = null;
-            if (sourceDescriptor) {
-                const sourceImageStarted = Date.now();
-                try {
-                    sourceImage = await (this.options.sourceImageDownloader || downloadDiscordSourceImage)(
-                        sourceDescriptor,
-                        directory,
-                    );
-                    sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
-                } catch (error) {
-                    rmSync(directory, { recursive: true, force: true });
-                    return {
-                        status: 400,
-                        body: { error: `Could not use the attached starting image: ${error instanceof Error ? error.message : String(error)}` },
-                    };
-                }
-            }
             try {
                 await this.run(
                     `INSERT INTO video_jobs(
                         public_id, idempotency_key, model, prompt, requester_id, origin_bot_id,
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
-                        source_image_path, source_image_mime, source_image_bytes
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                        source_image_path, source_image_mime, source_image_bytes,
+                        experiment_id, variant_id
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -1339,6 +1449,8 @@ export class VideoBroker {
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
+                        experimentLabel(process.env.VIDEO_EXPERIMENT_ID, null),
+                        experimentLabel(process.env.VIDEO_PIPELINE_VARIANT, 'production-v1'),
                     ],
                 );
                 if (sourceImageDownloadSeconds !== null) {
@@ -1354,9 +1466,13 @@ export class VideoBroker {
                 throw error;
             }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-            await this.dispatchNext();
             return { status: 201, body: { job: (await this.views([row!]))[0], duplicate: false } };
         });
+        if (result.status === 201) {
+            if (this.worker?.currentJob) await this.scheduleNextQueuedPreparation();
+            await this.dispatchNext();
+        }
+        return result;
     }
 
     private async runtimeEstimate(model: VideoModelId): Promise<{ low: number; high: number }> {
@@ -1449,9 +1565,6 @@ export class VideoBroker {
     private async prepareInitialEstimate(publicId: string): Promise<VideoJobView | null> {
         let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
         if (!job) return null;
-        if (job.gpu_queue_state !== 'admitted') {
-            return (await this.views([job]))[0] || null;
-        }
         if (ACTIVE_VIDEO_STATUSES.includes(job.status)) {
             try {
                 const { plan } = await this.ensurePlan(job, true);
@@ -1527,8 +1640,9 @@ export class VideoBroker {
                     hardware_slowdown_samples, thermal_slowdown_samples, power_brake_slowdown_samples,
                     gpu_samples, worker_sha256, generator_sha256,
                     python_version, comfy_aimdo_version, warm_model_before, warm_model_after, quality, fast,
-                    turbo4, ltx_one_stage, recorded_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    turbo4, ltx_one_stage, experiment_id, variant_id, planner_fingerprint,
+                    keyframe_strategy, recorded_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(job_public_id) DO UPDATE SET
                     model = excluded.model,
                     generator_model = excluded.generator_model,
@@ -1566,6 +1680,10 @@ export class VideoBroker {
                     fast = excluded.fast,
                     turbo4 = excluded.turbo4,
                     ltx_one_stage = excluded.ltx_one_stage,
+                    experiment_id = excluded.experiment_id,
+                    variant_id = excluded.variant_id,
+                    planner_fingerprint = excluded.planner_fingerprint,
+                    keyframe_strategy = excluded.keyframe_strategy,
                     recorded_at = excluded.recorded_at`,
                 [
                     job.public_id,
@@ -1605,6 +1723,10 @@ export class VideoBroker {
                     flags.fast ? 1 : 0,
                     flags.turbo4 ? 1 : 0,
                     flags.ltx_one_stage ? 1 : 0,
+                    job.experiment_id,
+                    job.variant_id,
+                    job.planner_fingerprint,
+                    job.keyframe_strategy,
                     nowSeconds(),
                 ],
             );
@@ -1690,6 +1812,8 @@ export class VideoBroker {
                 total_seconds: {
                     average: average(modelRows.map(row => row.total_seconds)),
                     median: median(modelRows.map(row => row.total_seconds)),
+                    p90: percentile(modelRows.map(row => row.total_seconds), 0.9),
+                    p95: percentile(modelRows.map(row => row.total_seconds), 0.95),
                     minimum: Math.min(...modelRows.map(row => row.total_seconds)),
                     maximum: Math.max(...modelRows.map(row => row.total_seconds)),
                 },
@@ -1716,6 +1840,21 @@ export class VideoBroker {
                     temperature_peak_c: maximum(modelRows.map(row => row.temperature_peak_c)),
                 },
                 cold_starts: modelRows.filter(row => row.warm_model_before !== row.generator_model).length,
+                variants: [...new Set(modelRows.map(row => row.variant_id || 'production-v1'))]
+                    .map(variantId => {
+                        const variantRows = modelRows.filter(
+                            row => (row.variant_id || 'production-v1') === variantId,
+                        );
+                        return {
+                            experiment_id: variantRows[0]?.experiment_id || null,
+                            variant_id: variantId,
+                            samples: variantRows.length,
+                            median_seconds: median(variantRows.map(row => row.total_seconds)),
+                            p90_seconds: percentile(variantRows.map(row => row.total_seconds), 0.9),
+                            planner_fingerprint: variantRows[0]?.planner_fingerprint || null,
+                            keyframe_strategy: variantRows[0]?.keyframe_strategy || null,
+                        };
+                    }),
                 bottlenecks,
                 latest_environment: {
                     gpu_name: modelRows[0].gpu_name,
@@ -1821,6 +1960,7 @@ export class VideoBroker {
     private frontierOptions(job: JobRow, criticalPath: boolean): VideoFrontierCallOptions {
         return {
             serviceTier: criticalPath ? 'fast' : 'default',
+            ...configuredVideoPlannerVariant(),
             ...this.providerHooks(job),
         };
     }
@@ -1872,13 +2012,24 @@ export class VideoBroker {
                             data: readFileSync(job.source_image_path),
                         };
                     }
+                    const plannerOptions = this.frontierOptions(job, criticalPath);
                     const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
                         job.prompt,
                         job.model,
                         job.requester_id,
                         sourceImage,
-                        this.frontierOptions(job, criticalPath),
+                        plannerOptions,
                     );
+                    const plannerModel = typeof (plan as any)._planner_model === 'string'
+                        ? (plan as any)._planner_model
+                        : plannerOptions.plannerModel || VIDEO_PLANNER_MODEL;
+                    const plannerFingerprint = typeof (plan as any)._planner_fingerprint === 'string'
+                        ? (plan as any)._planner_fingerprint
+                        : videoPlannerFingerprint(
+                            plannerModel,
+                            plannerOptions.analysisReasoningEffort,
+                            plannerOptions.screenplayReasoningEffort,
+                        );
                     const plannerMetrics = (plan as any).planner_metrics;
                     if (plannerMetrics && typeof plannerMetrics === 'object') {
                         for (const [name, seconds] of [
@@ -1895,21 +2046,30 @@ export class VideoBroker {
                         }
                     }
                     await this.run(
-                        `UPDATE video_jobs SET planner_json = ?, planner_model = ?, updated_at = ?
+                        `UPDATE video_jobs SET planner_json = ?, planner_model = ?, planner_fingerprint = ?, updated_at = ?
                          WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
-                        [JSON.stringify(plan), VIDEO_PLANNER_MODEL, nowSeconds(), job.public_id],
+                        [JSON.stringify(plan), plannerModel, plannerFingerprint, nowSeconds(), job.public_id],
                     );
                     status = 'ok';
-                    return { plan, plannerModel: VIDEO_PLANNER_MODEL };
+                    return { plan, plannerModel };
                 } catch (error) {
                     if (error instanceof FrontierPlannerRejectedError) {
                         const reasonCode = /^[a-z_]+$/.test(error.reasonCode)
                             ? error.reasonCode
                             : 'other';
                         await this.run(
-                            `UPDATE video_jobs SET planner_model = ?, updated_at = ?
+                            `UPDATE video_jobs SET planner_model = ?, planner_fingerprint = ?, updated_at = ?
                              WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
-                            [`${FRONTIER_REJECTION_PREFIX}${reasonCode}`, nowSeconds(), job.public_id],
+                            [
+                                `${FRONTIER_REJECTION_PREFIX}${reasonCode}`,
+                                videoPlannerFingerprint(
+                                    configuredVideoPlannerVariant().plannerModel,
+                                    configuredVideoPlannerVariant().analysisReasoningEffort,
+                                    configuredVideoPlannerVariant().screenplayReasoningEffort,
+                                ),
+                                nowSeconds(),
+                                job.public_id,
+                            ],
                         );
                     }
                     throw error;
@@ -1986,12 +2146,19 @@ export class VideoBroker {
                             console.warn(`Could not store first-frame reference timing for ${job.public_id}`, error);
                         }
                     }
+                    const strategy = this.keyframeStrategy(job);
+                    await this.run(
+                        `UPDATE video_jobs SET keyframe_strategy = ?, updated_at = ?
+                         WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                        [strategy, nowSeconds(), job.public_id],
+                    );
                     const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
                         plan,
                         references,
                         {
                             ...this.frontierOptions(job, criticalPath),
-                            strategy: this.keyframeStrategy(job),
+                            ...configuredVideoKeyframeVariant(),
+                            strategy,
                         },
                     );
                     if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {
@@ -2109,6 +2276,7 @@ export class VideoBroker {
         plan: Record<string, any>,
         segmentIndex: number,
         aspectRatio: VideoKeyframeAspectRatio,
+        criticalPath = true,
     ): Promise<void> {
         const derivedPlan = derivedSegmentKeyframePlan(plan, segmentIndex);
         if (!derivedPlan) return;
@@ -2140,8 +2308,9 @@ export class VideoBroker {
                         derivedPlan,
                         [identity],
                         {
-                            serviceTier: 'fast',
+                            serviceTier: criticalPath ? 'fast' : 'default',
                             ...hooks,
+                            ...configuredVideoKeyframeVariant(),
                             strategy: this.keyframeStrategy(job),
                             aspectRatio,
                         },
@@ -2224,6 +2393,103 @@ export class VideoBroker {
         }
     }
 
+    private async ensureQueuedSegmentKeyframes(
+        job: JobRow,
+        plan: Record<string, any>,
+        criticalPath: boolean,
+    ): Promise<void> {
+        // Generated primary frames are always 16:9. User attachments can have
+        // arbitrary aspect ratios, so those remain a worker-side preparation
+        // where the decoded dimensions are already known.
+        if (!job.keyframe_path || job.source_image_path || !existsSync(job.keyframe_path)) return;
+        const indexes = (Array.isArray(plan?.segments) ? plan.segments : [])
+            .map((_segment: unknown, index: number) => index + 1)
+            .filter((index: number) => index > 1 && derivedSegmentKeyframePlan(plan, index));
+        let cursor = 0;
+        const worker = async () => {
+            while (cursor < indexes.length) {
+                const index = indexes[cursor++];
+                await this.ensureSegmentKeyframe(job, plan, index, '16:9', criticalPath);
+            }
+        };
+        await Promise.allSettled(Array.from({ length: Math.min(2, indexes.length) }, () => worker()));
+    }
+
+    private preparationComplete(job: JobRow): boolean {
+        if (cachedFrontierRejection(job.planner_model)) return true;
+        if (!job.planner_json) return false;
+        if (job.source_image_path || (job.keyframe_path && job.keyframe_mime)) return true;
+        try {
+            return JSON.parse(job.planner_json)?.keyframe?.recommended !== true;
+        } catch {
+            return false;
+        }
+    }
+
+    private schedulePreparation(publicId: string, criticalPath: boolean): void {
+        if (!this.options.preplanQueuedJobs
+            || this.preparationQueued.has(publicId) || this.preparationAttempted.has(publicId)
+            || this.preparationQueued.size >= 1) return;
+        this.preparationQueued.add(publicId);
+        const task = (async () => {
+            try {
+                const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+                if (!job || job.status !== 'queued') return;
+                const { plan } = await this.ensurePlan(job, criticalPath);
+                await this.storePlanEstimate(job, plan);
+                const refreshed = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+                if (!refreshed || refreshed.status !== 'queued') return;
+                await this.ensureKeyframe(refreshed, plan, criticalPath);
+                const withKeyframe = await this.get<JobRow>(
+                    'SELECT * FROM video_jobs WHERE public_id = ?',
+                    [publicId],
+                );
+                if (withKeyframe?.status === 'queued') {
+                    await this.ensureQueuedSegmentKeyframes(withKeyframe, plan, criticalPath);
+                }
+            } catch (error) {
+                if (error instanceof FrontierPlannerRejectedError) {
+                    console.log(
+                        `Frontier planner routed ${publicId} to the local planner (${error.reasonCode}).`,
+                    );
+                } else {
+                    console.warn(`Queued video preparation failed for ${publicId}; the worker will retry on demand.`, error);
+                }
+            } finally {
+                this.preparationQueued.delete(publicId);
+                const current = await this.get<{ status: VideoJobStatus }>(
+                    'SELECT status FROM video_jobs WHERE public_id = ?',
+                    [publicId],
+                );
+                if (current?.status === 'queued') this.preparationAttempted.add(publicId);
+                else this.preparationAttempted.delete(publicId);
+                await this.dispatchNext();
+                await this.scheduleNextQueuedPreparation();
+            }
+        })();
+        this.trackBackground(task);
+    }
+
+    private async scheduleNextQueuedPreparation(): Promise<void> {
+        if (!this.options.preplanQueuedJobs || !this.worker?.currentJob || this.preparationQueued.size >= 1) return;
+        const placeholders = this.worker.capabilities.map(() => '?').join(',');
+        if (!placeholders) return;
+        const candidates = await this.all<JobRow>(
+            `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
+             ORDER BY id ASC LIMIT 2`,
+            this.worker.capabilities,
+        );
+        if (!candidates.length) return;
+        let row = candidates[0];
+        if (candidates.length > 1 && this.worker.warmModel
+            && VIDEO_MODELS[row.model].generatorModel !== this.worker.warmModel
+            && row.affinity_bypasses < 1
+            && VIDEO_MODELS[candidates[1].model].generatorModel === this.worker.warmModel) {
+            row = candidates[1];
+        }
+        if (!this.preparationComplete(row)) this.schedulePreparation(row.public_id, false);
+    }
+
     private async cancelJob(id: string, requesterId: string, isAdmin: boolean): Promise<any> {
         const matches = await this.all<JobRow>(
             'SELECT * FROM video_jobs WHERE public_id LIKE ? ORDER BY id DESC LIMIT 2',
@@ -2274,7 +2540,8 @@ export class VideoBroker {
             scheduler: this.worker?.scheduler || null,
             queued: queued?.count || 0,
             active_jobs: active?.count || 0,
-            preparation_busy: this.plannerInFlight.size > 0 || this.keyframeInFlight.size > 0,
+            preparation_busy: this.plannerInFlight.size > 0 || this.keyframeInFlight.size > 0
+                || this.preparationQueued.size > 0,
         };
     }
 
@@ -2525,7 +2792,19 @@ export class VideoBroker {
             return;
         }
         const jobId = String(message.job_id || '');
-        if (!jobId || jobId !== this.worker.currentJob) return;
+        if (!jobId) return;
+        if (message.type === 'event' && ['cancelled', 'failed', 'complete'].includes(String(message.event || ''))
+            && typeof message.event_id === 'string' && message.event_id) {
+            const terminal = await this.get<Pick<JobRow, 'status' | 'lease_token' | 'error' | 'stage'>>(
+                'SELECT status, lease_token, error, stage FROM video_jobs WHERE public_id = ?',
+                [jobId],
+            );
+            if (terminal && duplicateVideoTerminalEventMatches(message, terminal)) {
+                this.sendWorker({ type: 'event_ack', job_id: jobId, event_id: message.event_id });
+                return;
+            }
+        }
+        if (jobId !== this.worker.currentJob) return;
         if (this.worker.leaseId && message.lease_id !== undefined
             && message.lease_id !== this.worker.leaseId) return;
         if (message.type === 'event') {
@@ -2557,7 +2836,7 @@ export class VideoBroker {
                         queueWait,
                         sanitizeVideoWorkerText(
                             message.stage,
-                            state === 'admitted' ? 'GPU admitted; planning screenplay' : 'Waiting for GPU queue admission',
+                            state === 'admitted' ? 'GPU admitted; starting video render' : 'Waiting for GPU queue admission',
                         ),
                         now + 60,
                         now,
@@ -2644,8 +2923,15 @@ export class VideoBroker {
                     this.worker.ready = false;
                     return;
                 }
-                const retry = Boolean(message.retryable) && (row?.attempt || 0) < 2;
                 const publicError = sanitizeVideoWorkerText(message.error, 'Worker failure', 2000);
+                const disposition = videoFailureDisposition(
+                    publicError,
+                    Boolean(message.retryable),
+                    row.attempt || 0,
+                    row.readiness_retries || 0,
+                    row.error,
+                );
+                const retry = disposition !== 'fail';
                 if (message.metrics && typeof message.metrics === 'object') {
                     try {
                         await this.storeWorkerAttemptMetrics(row, message.metrics, publicError);
@@ -2664,7 +2950,8 @@ export class VideoBroker {
                 }
                 await this.run(
                     retry
-                        ? `UPDATE video_jobs SET status = 'queued', attempt = attempt + 1, stage = ?,
+                        ? `UPDATE video_jobs SET status = 'queued',
+                           attempt = attempt + ?, readiness_retries = readiness_retries + ?, stage = ?,
                            progress = NULL, worker_id = NULL, lease_expires_at = NULL,
                            gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
                            gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
@@ -2674,7 +2961,13 @@ export class VideoBroker {
                            WHERE public_id = ?`,
                     retry
                         ? [
-                            safetyPauseSeconds === null ? 'Retrying' : 'Paused after GPU driver reset',
+                            disposition === 'retry' ? 1 : 0,
+                            disposition === 'wait-readiness' ? 1 : 0,
+                            safetyPauseSeconds !== null
+                                ? 'Paused after GPU driver reset'
+                                : disposition === 'wait-readiness'
+                                    ? 'Waiting for GPU/Comfy readiness'
+                                    : 'Retrying',
                             publicError,
                             nowSeconds(),
                             jobId,
@@ -2750,6 +3043,11 @@ export class VideoBroker {
                 [nowSeconds(), oldest.public_id],
             );
         }
+        if (this.options.preplanQueuedJobs
+            && !this.preparationComplete(row) && !this.preparationAttempted.has(row.public_id)) {
+            this.schedulePreparation(row.public_id, true);
+            return;
+        }
         const leaseId = randomUUID();
         const result = await this.run(
             `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
@@ -2761,6 +3059,7 @@ export class VideoBroker {
         );
         if (result.changes !== 1) return;
         this.worker.ready = false;
+        this.preparationAttempted.delete(row.public_id);
         this.worker.currentJob = row.public_id;
         this.worker.leaseId = leaseId;
         this.worker.warmModel = VIDEO_MODELS[row.model].generatorModel;
@@ -2774,8 +3073,13 @@ export class VideoBroker {
                 profile: 'maximum',
                 has_source_image: Boolean(row.source_image_path),
                 lease_id: leaseId,
+                experiment_id: row.experiment_id,
+                variant_id: row.variant_id,
+                planner_fingerprint: row.planner_fingerprint,
+                keyframe_strategy: row.keyframe_strategy,
             },
         });
+        await this.scheduleNextQueuedPreparation();
     }
 
     private sendWorker(message: unknown): void {
@@ -2876,7 +3180,7 @@ export class VideoBroker {
                 const estimate = await this.plannedRuntimeEstimate(job, plan);
                 const now = nowSeconds();
                 await this.run(
-                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?,
+                    `UPDATE video_jobs SET planner_json = ?, planner_model = ?, planner_fingerprint = ?,
                      estimate_low_seconds = ?, estimate_high_seconds = ?, estimate_ready = 1,
                      initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
                      initial_estimate_high_seconds = COALESCE(initial_estimate_high_seconds, ?),
@@ -2884,6 +3188,7 @@ export class VideoBroker {
                      updated_at = ? WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
                     [
                         JSON.stringify(plan),
+                        LOCAL_VIDEO_PLANNER_MODEL,
                         LOCAL_VIDEO_PLANNER_MODEL,
                         estimate.low,
                         estimate.high,
@@ -2950,6 +3255,7 @@ export class VideoBroker {
                             plan,
                             segmentIndex,
                             aspectValue as VideoKeyframeAspectRatio,
+                            true,
                         );
                         stored = await this.get<SegmentKeyframeRow>(
                             'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
@@ -3138,6 +3444,7 @@ export function videoBrokerOptionsFromEnvironment(): BrokerOptions {
         resultsDir: settings.resultsDir,
         botToken,
         workerToken,
+        preplanQueuedJobs: process.env.VIDEO_PREPLAN_QUEUED !== '0',
     };
 }
 

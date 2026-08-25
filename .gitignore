@@ -2,6 +2,7 @@ Config.ts
 Config.js
 Config.d.ts
 node_modules
+/artifacts/video-planner-benchmarks/
 yarn-error.log
 dist/
 *.sqlite3
