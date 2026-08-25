@@ -85,6 +85,15 @@ function truncatePrompt(prompt: string, length = 180): string {
     return prompt.length <= length ? prompt : `${prompt.slice(0, length - 1)}…`;
 }
 
+const DISCORD_MESSAGE_CONTENT_LIMIT = 1999;
+
+function formatVideoReplyWithFullPrompt(prefix: string, job: VideoJobView): string {
+    const direction = videoJobDirection(job);
+    const separator = '\n> ';
+    const availablePrefixLength = DISCORD_MESSAGE_CONTENT_LIMIT - separator.length - direction.length;
+    return `${truncatePrompt(prefix, availablePrefixLength)}${separator}${direction}`;
+}
+
 const DEFAULT_SINGLE_VIDEO_RESPONDER_CHANNEL_ID = '483470443001413675';
 const DEFAULT_SINGLE_VIDEO_RESPONDER_BOT_ID = '446154284514541579';
 
@@ -145,9 +154,10 @@ export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_in
 export function completedVideoPost(job: VideoJobView): string {
     const runtime = formatVideoRuntime(job.runtime_seconds);
     const notice = sanitizeVideoWorkerText(job.generation_notice, '', 1000).trim();
-    return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
+    const result = `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** is ready${
         runtime ? ` — completed in **${runtime}**` : ''
-    }.${notice ? `\n**Note:** ${notice}` : ''}\n> ${truncatePrompt(videoJobDirection(job))}`;
+    }.${notice ? `\n**Note:** ${notice}` : ''}`;
+    return formatVideoReplyWithFullPrompt(result, job);
 }
 
 function videoFailureDetail(job: VideoJobView, maxLength: number): string {
@@ -160,9 +170,10 @@ function videoFailureDetail(job: VideoJobView, maxLength: number): string {
 
 export function failedVideoPost(job: VideoJobView): string {
     const error = videoFailureDetail(job, 1500);
-    return `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** failed.\n${error}\n> ${
-        truncatePrompt(videoJobDirection(job))
-    }`;
+    return formatVideoReplyWithFullPrompt(
+        `${VIDEO_MODELS[job.model].displayName} video **${shortJobId(job.id)}** failed.\n${error}`,
+        job,
+    );
 }
 
 export interface SubmittedVideoSourceImage {
@@ -287,6 +298,10 @@ export function formatVideoJob(job: VideoJobView): string {
     if (job.status === 'delivered') return `${head}\nDelivered.`;
     if (job.status === 'cancelled') return `${head}\nCancelled.`;
     return `${head}\nFailed: ${videoFailureDetail(job, 1800)}`;
+}
+
+export function formatVideoStatusPost(job: VideoJobView): string {
+    return formatVideoReplyWithFullPrompt(formatVideoJob(job), job);
 }
 
 export function formatGlobalVideoQueueJob(
@@ -446,7 +461,7 @@ class VideoGenerationService {
     private async updateJob(job: VideoJobView): Promise<void> {
         const message = await this.statusMessage(job);
         if (!message) return;
-        const content = `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job))}`;
+        const content = formatVideoStatusPost(job);
         if (job.status === 'ready') {
             if (!job.result_path || !existsSync(job.result_path)) {
                 console.warn(`[Video] Result is not readable for ${job.id}: ${job.result_path}`);
@@ -666,7 +681,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
             }),
         }, 45_000);
         let job = response.job;
-        await pending.edit({ content: `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job))}` });
+        await pending.edit({ content: formatVideoStatusPost(job) });
         try {
             const prepared = await brokerRequest<{ job: VideoJobView }>(
                 `/v1/jobs/${job.id}/prepare`,
@@ -677,7 +692,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
         } catch (error) {
             console.warn(`[Video] Could not prepare the first ETA for ${job.id}: ${String(error)}`);
         }
-        await pending.edit({ content: `${formatVideoJob(job)}\n> ${truncatePrompt(videoJobDirection(job))}` });
+        await pending.edit({ content: formatVideoStatusPost(job) });
         await services.get(msg.client.user.id)?.refresh();
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
