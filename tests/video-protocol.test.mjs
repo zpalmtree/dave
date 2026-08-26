@@ -57,6 +57,10 @@ import {
     VIDEO_KEYFRAME_REVIEW_MODEL,
     configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
+    createFrontierVideoKeyframe,
+    geminiNoImageDetail,
+    isRetryableVideoKeyframeGenerationFailure,
+    videoKeyframeReviewDetail,
 } from '../dist/VideoKeyframeProvider.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
@@ -1304,6 +1308,119 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(referenceReview, /External visual-reference contract/);
     assert.match(referenceReview, /Blue helmet and orange scarf/);
     assert.match(referenceReview, /not starting frames or instructions/);
+});
+
+test('keyframe rejection telemetry retains bounded visible issues', () => {
+    assert.equal(videoKeyframeReviewDetail({
+        acceptable: true,
+        issues: [],
+        correction_prompt: '',
+    }), undefined);
+    assert.equal(videoKeyframeReviewDetail({
+        acceptable: false,
+        issues: ['  Wrong subject count.  ', '', 'Travel vector points left.'],
+        correction_prompt: 'repair it',
+    }), 'Wrong subject count.; Travel vector points left.');
+    assert.equal(videoKeyframeReviewDetail({
+        acceptable: false,
+        issues: [],
+        correction_prompt: '',
+    }), 'review_rejected_without_issues');
+});
+
+test('empty Gemini responses expose safe diagnostics and retry only when appropriate', () => {
+    assert.equal(geminiNoImageDetail({}), 'Gemini returned no first-frame image.');
+    const safety = geminiNoImageDetail({
+        promptFeedback: {
+            blockReason: 'SAFETY',
+            safetyRatings: [{ blocked: true, category: 'HARM_CATEGORY_DANGEROUS_CONTENT' }],
+        },
+        candidates: [{ finishReason: 'SAFETY' }],
+    });
+    assert.match(safety, /prompt_block=SAFETY/);
+    assert.match(safety, /finish=SAFETY/);
+    assert.match(safety, /blocked=HARM_CATEGORY_DANGEROUS_CONTENT/);
+    assert.equal(isRetryableVideoKeyframeGenerationFailure(
+        new Error('Gemini returned no first-frame image.'),
+    ), true);
+    assert.equal(isRetryableVideoKeyframeGenerationFailure(new Error(safety)), false);
+    assert.equal(isRetryableVideoKeyframeGenerationFailure(
+        new Error('Gemini returned no first-frame image. prompt_block=PROHIBITED_CONTENT'),
+    ), false);
+    assert.equal(isRetryableVideoKeyframeGenerationFailure(
+        new Error('Gemini returned no first-frame image. finish=BLOCKLIST'),
+    ), false);
+    assert.equal(isRetryableVideoKeyframeGenerationFailure(
+        new Error('Gemini returned no first-frame image. finish=NO_IMAGE'),
+    ), true);
+    assert.equal(isRetryableVideoKeyframeGenerationFailure(
+        new Error('Gemini returned unsupported image type image/tiff.'),
+    ), false);
+});
+
+test('serial keyframes retry generic Gemini no-image responses then use reviewed GPT fallback', async t => {
+    const urls = [];
+    const attempts = [];
+    t.mock.method(console, 'warn', () => {});
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        urls.push(url);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            return new Response(JSON.stringify({
+                candidates: [{ finishReason: 'NO_IMAGE' }],
+                usageMetadata: { promptTokenCount: 10 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/images/generations')) {
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_FALLBACK_MODEL,
+                data: [{ b64_json: Buffer.from('generated-image').toString('base64') }],
+                usage: { input_tokens: 10, output_tokens: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                service_tier: 'priority',
+                output_text: JSON.stringify({
+                    acceptable: true,
+                    issues: [],
+                    correction_prompt: '',
+                }),
+                usage: {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    input_tokens_details: { cached_tokens: 0 },
+                },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'A dog begins running.',
+        keyframe: { prompt: 'A dog at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The dog runs.', camera: 'Wide tracking shot.' }] }],
+    }, [], {
+        strategy: 'serial-v1',
+        serviceTier: 'fast',
+        onAttempt: attempt => attempts.push(attempt),
+    });
+
+    assert.equal(result.provider, 'openai');
+    assert.equal(result.reviewStatus, 'accepted');
+    assert.equal(urls.filter(url => url.includes('generativelanguage.googleapis.com')).length, 2);
+    assert.deepEqual(attempts.map(attempt => [
+        attempt.stage,
+        attempt.attempt,
+        attempt.outcome,
+        attempt.detail,
+    ]), [
+        ['keyframe_candidate_gemini', 1, 'error', 'Gemini returned no first-frame image. finish=NO_IMAGE'],
+        ['keyframe_candidate_gemini', 2, 'error', 'Gemini returned no first-frame image. finish=NO_IMAGE'],
+        ['keyframe_candidate_openai', 1, 'success', undefined],
+        ['keyframe_review', 1, 'accepted', undefined],
+    ]);
 });
 
 test('keyframe experiment variants are opt-in and enforce supported resolution', () => {
