@@ -62,6 +62,10 @@ import {
     isRetryableVideoKeyframeGenerationFailure,
     videoKeyframeReviewDetail,
 } from '../dist/VideoKeyframeProvider.js';
+import {
+    VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL,
+    videoSegmentKeyframeTargetIndexes,
+} from '../dist/VideoSegmentKeyframePlanner.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
     assert.equal(parsePauseDuration(undefined), 6 * 60 * 60);
@@ -69,6 +73,18 @@ test('video pause durations default to six hours and enforce safe limits', () =>
     assert.equal(parsePauseDuration('2d'), 2 * 24 * 60 * 60);
     assert.throws(() => parsePauseDuration('30s'), /look like/);
     assert.throws(() => parsePauseDuration('8d'), /between 1 minute and 7 days/);
+});
+
+test('fast segment frame planning targets only independently generated hard cuts', () => {
+    assert.equal(VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL, 'gemini-3.7-flash');
+    assert.deepEqual(videoSegmentKeyframeTargetIndexes({
+        segments: [
+            { transition: 'start' },
+            { transition: 'continue' },
+            { transition: 'cut' },
+            { transition: 'dissolve' },
+        ],
+    }), [3, 4]);
 });
 
 test('video delivery polling is fast only while work is active', () => {
