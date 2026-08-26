@@ -67,20 +67,14 @@ export function configuredVideoKeyframeVariant(environment: NodeJS.ProcessEnv = 
 }
 
 export function configuredVideoKeyframeStrategy(
-    channelId: string,
+    _channelId: string,
     environment: NodeJS.ProcessEnv = process.env,
 ): VideoKeyframeStrategy {
     const globalStrategy = environment.VIDEO_KEYFRAME_STRATEGY;
     if (globalStrategy === 'serial-v1' || globalStrategy === 'conditional-v2' || globalStrategy === 'fast-gated-v3') {
         return globalStrategy;
     }
-    const canaryChannels = new Set(
-        (environment.VIDEO_KEYFRAME_CANARY_CHANNELS || '483470443001413675')
-            .split(',')
-            .map(value => value.trim())
-            .filter(Boolean),
-    );
-    return canaryChannels.has(channelId) ? 'fast-gated-v3' : 'serial-v1';
+    return 'fast-gated-v3';
 }
 
 function keyframeString(value: unknown, fallback: string): string {

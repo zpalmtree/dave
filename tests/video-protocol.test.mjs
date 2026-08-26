@@ -1334,16 +1334,16 @@ test('keyframe experiment variants are opt-in and enforce supported resolution',
     });
 });
 
-test('fast keyframes are gated in canary channels and every override is reversible', () => {
+test('review-gated fast keyframes default globally and every override is reversible', () => {
     assert.equal(configuredVideoKeyframeStrategy('483470443001413675', {}), 'fast-gated-v3');
-    assert.equal(configuredVideoKeyframeStrategy('other-channel', {}), 'serial-v1');
+    assert.equal(configuredVideoKeyframeStrategy('other-channel', {}), 'fast-gated-v3');
     assert.equal(configuredVideoKeyframeStrategy('other-channel', {
         VIDEO_KEYFRAME_STRATEGY: 'conditional-v2',
     }), 'conditional-v2');
     assert.equal(configuredVideoKeyframeStrategy('483470443001413675', {
         VIDEO_KEYFRAME_STRATEGY: 'serial-v1',
     }), 'serial-v1');
-    assert.equal(configuredVideoKeyframeStrategy('canary-two', {
+    assert.equal(configuredVideoKeyframeStrategy('outside-old-canary', {
         VIDEO_KEYFRAME_CANARY_CHANNELS: 'canary-one, canary-two',
     }), 'fast-gated-v3');
 });
