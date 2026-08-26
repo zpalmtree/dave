@@ -65,6 +65,11 @@ import {
     VideoUsagePersistenceError,
     videoUsageCost,
 } from './VideoUsage.js';
+import {
+    VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL,
+    createVideoSegmentKeyframeContracts,
+    videoSegmentKeyframeTargetIndexes,
+} from './VideoSegmentKeyframePlanner.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
@@ -93,6 +98,7 @@ interface BrokerOptions {
     heartbeatTimeoutMs?: number;
     preplanQueuedJobs?: boolean;
     frontierPlanner?: typeof createFrontierVideoPlan;
+    segmentContractPlanner?: typeof createVideoSegmentKeyframeContracts;
     keyframeGenerator?: (
         plan: Record<string, any>,
         references?: VideoKeyframeReference[],
@@ -445,6 +451,11 @@ function normalizedMetricSpan(value: any): VideoMetricSpan {
             boundedNumber(value.metadata.references_resolved, 0, 4, false)!,
         );
     }
+    if (value.metadata?.contracts !== undefined) {
+        metadata.contracts = Math.round(
+            boundedNumber(value.metadata.contracts, 0, 7, false)!,
+        );
+    }
     return {
         source: value.source,
         name,
@@ -596,13 +607,24 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
     const visual = String(firstShot.visual || '').trim();
     const camera = String(firstShot.camera || '').trim();
     if (!visual || !camera) return null;
+    const explicit = (Array.isArray(plan?.segment_keyframes) ? plan.segment_keyframes : [])
+        .find((candidate: any) => Number(candidate?.segment_index) === segmentIndex);
+    const explicitPrompt = String(explicit?.prompt || '').trim();
+    const explicitMotion = explicit?.motion_contract;
+    const hasExplicitContract = Boolean(explicitPrompt && [
+        'subject_orientation',
+        'gaze_direction',
+        'travel_direction',
+        'camera_relation',
+        'first_second_action',
+    ].every(field => String(explicitMotion?.[field] || '').trim()));
     return {
         intent: String(plan.intent || visual),
         continuity_bible: String(plan.continuity_bible || ''),
         keyframe: {
             recommended: true,
             reason: `Preserve the recurring cast across the ${segment.transition} into ${title}.`,
-            prompt: [
+            prompt: hasExplicitContract ? explicitPrompt : [
                 `Opening still for segment ${segmentIndex}, ${title}: ${visual}`,
                 `Camera and framing: ${camera}.`,
                 'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
@@ -610,7 +632,13 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
                 'Show one frozen, motion-ready instant at 0.00 seconds of this segment.',
             ].join(' '),
             reference_requirements: [],
-            motion_contract: {
+            motion_contract: hasExplicitContract ? {
+                subject_orientation: String(explicitMotion.subject_orientation).trim(),
+                gaze_direction: String(explicitMotion.gaze_direction).trim(),
+                travel_direction: String(explicitMotion.travel_direction).trim(),
+                camera_relation: String(explicitMotion.camera_relation).trim(),
+                first_second_action: String(explicitMotion.first_second_action).trim(),
+            } : {
                 subject_orientation: 'Orient each recurring subject for the opening action described by this segment.',
                 gaze_direction: 'Direct each subject gaze toward the focus of the opening action.',
                 travel_direction: 'Show the travel vector implied by the opening action and composition.',
@@ -729,6 +757,7 @@ export class VideoBroker {
     private readonly preparationQueued = new Set<string>();
     private readonly preparationAttempted = new Set<string>();
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
+    private readonly segmentContractInFlight = new Map<string, Promise<void>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
     private readonly segmentKeyframeInFlight = new Map<string, Promise<void>>();
     private readonly backgroundTasks = new Set<Promise<void>>();
@@ -1974,13 +2003,113 @@ export class VideoBroker {
         return configuredVideoKeyframeStrategy(job.channel_id);
     }
 
+    private hasSegmentKeyframeContracts(plan: Record<string, any>): boolean {
+        const targets = videoSegmentKeyframeTargetIndexes(plan);
+        const contracts = Array.isArray(plan?.segment_keyframes) ? plan.segment_keyframes : [];
+        return targets.length > 0 && targets.every(index => contracts.some((contract: any) =>
+            Number(contract?.segment_index) === index
+            && String(contract?.prompt || '').trim()
+            && [
+                'subject_orientation',
+                'gaze_direction',
+                'travel_direction',
+                'camera_relation',
+                'first_second_action',
+            ].every(field => String(contract?.motion_contract?.[field] || '').trim())));
+    }
+
+    private scheduleSegmentKeyframeContracts(job: JobRow, plan: Record<string, any>): void {
+        const contractPlanner = this.options.segmentContractPlanner
+            || (this.options.frontierPlanner ? null : createVideoSegmentKeyframeContracts);
+        if ((!job.source_image_path && plan?.keyframe?.recommended !== true)
+            || !videoSegmentKeyframeTargetIndexes(plan).length
+            || this.hasSegmentKeyframeContracts(plan)
+            || this.segmentContractInFlight.has(job.public_id)
+            || !contractPlanner) return;
+        const started = Date.now();
+        const generation = (async () => {
+            let status: 'ok' | 'error' | 'skipped' = 'error';
+            let contractCount = 0;
+            try {
+                const contracts = await contractPlanner(
+                    job.prompt,
+                    plan,
+                    this.providerHooks(job),
+                );
+                contractCount = contracts.length;
+                const current = await this.get<Pick<JobRow, 'planner_json' | 'status'>>(
+                    'SELECT planner_json, status FROM video_jobs WHERE public_id = ?',
+                    [job.public_id],
+                );
+                if (!current?.planner_json || !ACTIVE_VIDEO_STATUSES.includes(current.status)) {
+                    status = 'skipped';
+                    return;
+                }
+                const storedPlan = JSON.parse(current.planner_json);
+                if (this.hasSegmentKeyframeContracts(storedPlan)) {
+                    status = 'skipped';
+                    return;
+                }
+                storedPlan.segment_keyframes = contracts;
+                storedPlan._segment_keyframe_planner_model = VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL;
+                plan.segment_keyframes = contracts;
+                plan._segment_keyframe_planner_model = VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL;
+                await this.run(
+                    `UPDATE video_jobs SET planner_json = ?, updated_at = ?
+                     WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
+                    [JSON.stringify(storedPlan), nowSeconds(), job.public_id],
+                );
+                status = 'ok';
+            } catch (error) {
+                console.warn(
+                    `Segment frame-zero planning failed for ${job.public_id}; using deterministic derivation.`,
+                    error,
+                );
+            } finally {
+                this.segmentContractInFlight.delete(job.public_id);
+                try {
+                    await this.recordMetricSpan(job.public_id, {
+                        source: 'broker',
+                        name: 'segment_keyframe_contracts',
+                        duration_seconds: (Date.now() - started) / 1000,
+                        metadata: { status, contracts: contractCount },
+                    });
+                } catch (error) {
+                    console.warn(`Could not store segment frame-zero planning timing for ${job.public_id}`, error);
+                }
+            }
+        })();
+        this.segmentContractInFlight.set(job.public_id, generation);
+        this.trackBackground(generation);
+    }
+
+    private async enrichedSegmentKeyframePlan(
+        job: JobRow,
+        fallback: Record<string, any>,
+    ): Promise<Record<string, any>> {
+        this.scheduleSegmentKeyframeContracts(job, fallback);
+        await this.segmentContractInFlight.get(job.public_id);
+        const current = await this.get<Pick<JobRow, 'planner_json'>>(
+            'SELECT planner_json FROM video_jobs WHERE public_id = ?',
+            [job.public_id],
+        );
+        if (!current?.planner_json) return fallback;
+        try {
+            return JSON.parse(current.planner_json);
+        } catch {
+            return fallback;
+        }
+    }
+
     private async ensurePlan(
         job: JobRow,
         criticalPath = false,
     ): Promise<{ plan: Record<string, any>; plannerModel: string }> {
         if (job.planner_json) {
+            const plan = JSON.parse(job.planner_json);
+            this.scheduleSegmentKeyframeContracts(job, plan);
             return {
-                plan: JSON.parse(job.planner_json),
+                plan,
                 plannerModel: job.planner_model || VIDEO_PLANNER_MODEL,
             };
         }
@@ -2049,6 +2178,7 @@ export class VideoBroker {
                          WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
                         [JSON.stringify(plan), plannerModel, plannerFingerprint, nowSeconds(), job.public_id],
                     );
+                    this.scheduleSegmentKeyframeContracts(job, plan);
                     status = 'ok';
                     return { plan, plannerModel };
                 } catch (error) {
@@ -2284,6 +2414,7 @@ export class VideoBroker {
         aspectRatio: VideoKeyframeAspectRatio,
         criticalPath = true,
     ): Promise<void> {
+        plan = await this.enrichedSegmentKeyframePlan(job, plan);
         const derivedPlan = derivedSegmentKeyframePlan(plan, segmentIndex);
         if (!derivedPlan) return;
         const existing = await this.get<SegmentKeyframeRow>(

@@ -23,6 +23,7 @@ export interface VideoMetricSpan {
         transition?: 'start' | 'cut' | 'continue' | 'dissolve';
         references_requested?: number;
         references_resolved?: number;
+        contracts?: number;
     };
 }
 

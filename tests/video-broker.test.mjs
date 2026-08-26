@@ -1070,6 +1070,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
     const attachedBytes = Buffer.from('attached-keyframe');
     let keyframeCalls = 0;
     let referenceResolverCalls = 0;
+    let segmentContractPlannerCalls = 0;
     const plannerSawSource = [];
     const derivedAspects = [];
     const plan = {
@@ -1093,18 +1094,29 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
                 first_second_action: 'accelerate right',
             },
         },
-        segments: [{
-            title: 'Opening', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
-                duration_seconds: 5, visual: 'A racer waits at the starting line.',
-                camera: 'Rear three-quarter view.', audio: 'Track ambience.', dialogue: [],
-            }],
-        }, {
-            title: 'Podium', transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
-                duration_seconds: 5, visual: 'The same racer celebrates on the podium.',
-                camera: 'Low frontal view.', audio: 'Crowd cheers.', dialogue: [],
-            }],
-        }],
     };
+    const segmentContracts = [{
+        segment_index: 2,
+        prompt: 'The same racer waits below the podium steps before the celebration begins.',
+        motion_contract: {
+            subject_orientation: 'The racer faces the podium steps.',
+            gaze_direction: 'The racer looks toward the top step.',
+            travel_direction: 'The racer will move forward and upward.',
+            camera_relation: 'Low frontal view from the podium side.',
+            first_second_action: 'The racer takes the first step toward the podium.',
+        },
+    }];
+    plan.segments = [{
+        title: 'Opening', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
+            duration_seconds: 5, visual: 'A racer waits at the starting line.',
+            camera: 'Rear three-quarter view.', audio: 'Track ambience.', dialogue: [],
+        }],
+    }, {
+        title: 'Podium', transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
+            duration_seconds: 5, visual: 'The same racer celebrates on the podium.',
+            camera: 'Low frontal view.', audio: 'Crowd cheers.', dialogue: [],
+        }],
+    }];
     const broker = new VideoBroker({
         host: '127.0.0.1',
         port: 0,
@@ -1115,7 +1127,11 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         heartbeatTimeoutMs: 5000,
         frontierPlanner: async (_prompt, _model, _requester, sourceImage) => {
             plannerSawSource.push(Boolean(sourceImage));
-            return plan;
+            return structuredClone(plan);
+        },
+        segmentContractPlanner: async () => {
+            segmentContractPlannerCalls += 1;
+            return segmentContracts;
         },
         keyframeGenerator: async (planned, references, options) => {
             keyframeCalls += 1;
@@ -1123,7 +1139,11 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
                 assert.equal(references.length, 1);
                 assert.equal(references[0].label, 'Recurring cast identity from frame zero');
                 assert.deepEqual(references[0].bytes, attachedBytes);
-                assert.match(planned.keyframe.prompt, /same racer celebrates on the podium/i);
+                assert.match(planned.keyframe.prompt, /waits below the podium steps/i);
+                assert.equal(
+                    planned.keyframe.motion_contract.first_second_action,
+                    'The racer takes the first step toward the podium.',
+                );
                 derivedAspects.push(options.aspectRatio);
                 return {
                     bytes: derivedBytes,
@@ -1290,6 +1310,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.deepEqual(derivedAspects, ['3:4']);
         assert.equal(keyframeCalls, 2);
         assert.equal(referenceResolverCalls, 1);
+        assert.equal(segmentContractPlannerCalls, 2);
         socket.send(JSON.stringify({
             type: 'event',
             event: 'failed',
