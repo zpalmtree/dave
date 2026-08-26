@@ -137,6 +137,14 @@ same approved plans. Images and a scored report are saved below
 and are not regenerated. Use `--no-judge` only to export/cache plan and image
 artifacts. Reports include aggregate latency, acceptance, failure, and win counts.
 
+Run `yarn benchmark:video-keyframe-reviewers
+--report=/path/to/keyframe-report.json --candidates=sol-low,gemini-flash-low
+--stop-on-false-accept` to screen faster visual gates against saved, strongly
+judged images without generating new images or videos. A candidate must have
+zero false accepts before a larger repeatability run; false rejects and latency
+are reported separately. OpenAI candidates use the same priority tier as the
+production critical path.
+
 Run `yarn benchmark:video-renders --spec=/path/to/render-comparison.json` after a
 small controlled set of expensive renders completes. It transcribes each output,
 measures frame-zero similarity and obvious freeze/black intervals, extracts a

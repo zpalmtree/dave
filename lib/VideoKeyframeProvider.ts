@@ -740,8 +740,9 @@ async function createSerialKeyframe(
     plan: Record<string, any>,
     references: VideoKeyframeReference[],
     options: VideoKeyframeOptions,
+    initialReviewAttempt = 0,
 ): Promise<VideoKeyframeResult> {
-    let reviewAttempt = 0;
+    let reviewAttempt = initialReviewAttempt;
     const nextReview = () => ++reviewAttempt;
     const basePrompt = buildVideoKeyframePrompt(plan);
     const first = await generateWithRetry('gemini', basePrompt, references, 1, options);
@@ -872,7 +873,7 @@ async function createFastGatedKeyframe(
         if (error instanceof VideoUsagePersistenceError) throw error;
         console.warn('[Video keyframe fast gate] Flash Lite candidate failed; running the unchanged baseline pipeline.', error);
     }
-    return createSerialKeyframe(plan, references, options);
+    return createSerialKeyframe(plan, references, options, reviewAttempt);
 }
 
 export async function createFrontierVideoKeyframe(
