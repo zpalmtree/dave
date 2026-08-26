@@ -11,6 +11,7 @@
     "test": "yarn build && node --test tests/*.test.mjs",
     "benchmark:video-planners": "yarn build && node scripts/benchmark-video-planners.mjs",
     "benchmark:video-keyframes": "yarn build && node scripts/benchmark-video-keyframes.mjs",
+    "benchmark:video-keyframe-reviewers": "yarn build && node scripts/benchmark-video-keyframe-reviewers.mjs",
     "benchmark:video-renders": "yarn build && node scripts/benchmark-video-renders.mjs"
   },
   "files": [
