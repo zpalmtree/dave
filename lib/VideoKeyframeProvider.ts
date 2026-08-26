@@ -40,6 +40,42 @@ export interface VideoKeyframeReview {
     correction_prompt: string;
 }
 
+export function videoKeyframeReviewDetail(review: VideoKeyframeReview): string | undefined {
+    if (review.acceptable) return undefined;
+    const issues = review.issues
+        .map(issue => String(issue || '').trim())
+        .filter(Boolean)
+        .slice(0, 8);
+    return issues.length ? issues.join('; ').slice(0, 1000) : 'review_rejected_without_issues';
+}
+
+function diagnosticEnum(value: unknown): string | null {
+    const token = String(value || '').trim();
+    return /^[A-Z][A-Z0-9_:-]{0,79}$/.test(token) ? token : null;
+}
+
+export function geminiNoImageDetail(response: Partial<GenerateContentResponse>): string {
+    const diagnostics: string[] = [];
+    const blockReason = diagnosticEnum(response.promptFeedback?.blockReason);
+    if (blockReason) diagnostics.push(`prompt_block=${blockReason}`);
+    const finishReasons = [...new Set(
+        (response.candidates || [])
+            .map(candidate => diagnosticEnum(candidate.finishReason))
+            .filter((value): value is string => Boolean(value)),
+    )];
+    if (finishReasons.length) diagnostics.push(`finish=${finishReasons.join(',')}`);
+    const blockedCategories = [...new Set([
+        ...(response.promptFeedback?.safetyRatings || []),
+        ...(response.candidates || []).flatMap(candidate => candidate.safetyRatings || []),
+    ]
+        .filter(rating => rating.blocked)
+        .map(rating => diagnosticEnum(rating.category))
+        .filter((value): value is string => Boolean(value)))];
+    if (blockedCategories.length) diagnostics.push(`blocked=${blockedCategories.join(',')}`);
+    return 'Gemini returned no first-frame image.'
+        + (diagnostics.length ? ` ${diagnostics.join('; ')}` : '');
+}
+
 export type VideoKeyframeStrategy = 'serial-v1' | 'conditional-v2' | 'fast-gated-v3';
 
 export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
@@ -239,7 +275,7 @@ async function generateGeminiKeyframe(
                 : undefined,
         });
         if (!imagePart?.inlineData?.data) {
-            throw new Error('Gemini returned no first-frame image.');
+            throw new Error(geminiNoImageDetail(response));
         }
         outcome = 'success';
         return checkedImageResult(
@@ -509,6 +545,7 @@ export async function reviewVideoKeyframe(
             throw error;
         }
         outcome = review.acceptable ? 'accepted' : 'rejected';
+        detail = videoKeyframeReviewDetail(review);
         if (usage) {
             const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
             await options.onUsage?.({
@@ -677,6 +714,9 @@ async function compareVideoKeyframes(
             throw error;
         }
         outcome = comparison.acceptable && comparison.selected !== 'none' ? 'accepted' : 'rejected';
+        detail = outcome === 'rejected'
+            ? videoKeyframeReviewDetail(comparison as VideoKeyframeReview)
+            : undefined;
         if (usage) {
             const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
             await options.onUsage?.({
@@ -701,13 +741,19 @@ async function compareVideoKeyframes(
 }
 
 function isModerationFailure(error: unknown): boolean {
-    return /moderation|safety|policy|content filter|blocked/i.test(error instanceof Error ? error.message : String(error));
+    const detail = error instanceof Error ? error.message : String(error);
+    return /moderation|safety|policy|content filter|blocked|blocklist|prompt_block=/.test(detail.toLowerCase())
+        || /prohibited[_ ]content|jailbreak|model[_ ]armor|\bspii\b|recitation/i.test(detail);
 }
 
 function isTransientFailure(error: unknown): boolean {
-    return /timed out|timeout|aborted|fetch|network|socket|econn|HTTP (408|409|429|5\d\d)/i.test(
+    return /timed out|timeout|aborted|fetch|network|socket|econn|HTTP (408|409|429|5\d\d)|returned no first-frame image/i.test(
         error instanceof Error ? error.message : String(error),
     );
+}
+
+export function isRetryableVideoKeyframeGenerationFailure(error: unknown): boolean {
+    return !isModerationFailure(error) && isTransientFailure(error);
 }
 
 async function generateWithRetry(
@@ -726,7 +772,7 @@ async function generateWithRetry(
         } catch (error) {
             lastError = error;
             if (error instanceof VideoUsagePersistenceError) throw error;
-            if (isModerationFailure(error) || !isTransientFailure(error)) break;
+            if (!isRetryableVideoKeyframeGenerationFailure(error)) break;
         }
     }
     throw lastError instanceof Error ? lastError : new Error(`${provider} first-frame generation failed.`);
@@ -734,6 +780,33 @@ async function generateWithRetry(
 
 function accepted(image: VideoKeyframeResult, reviewed: boolean): VideoKeyframeResult {
     return { ...image, reviewStatus: reviewed ? 'accepted' : 'unreviewed' };
+}
+
+async function createReviewedOpenAIFallback(
+    plan: Record<string, any>,
+    references: VideoKeyframeReference[],
+    options: VideoKeyframeOptions,
+    nextReview: () => number,
+    prompt: string,
+): Promise<VideoKeyframeResult> {
+    const fallback = await generateWithRetry('openai', prompt, references, 1, options);
+    const review = await optionalReview(plan, fallback, references, options, nextReview);
+    if (!review || review.acceptable) return accepted(fallback, Boolean(review));
+    const repairPrompt = [
+        prompt,
+        '',
+        'Regenerate the image using this positive-only quality-control correction:',
+        keyframeString(
+            review.correction_prompt,
+            'Strictly align every subject with the declared motion contract and keep every requested identity clearly visible.',
+        ),
+    ].join('\n');
+    const repaired = await generateWithRetry('openai', repairPrompt, references, 3, options);
+    const repairedReview = await optionalReview(plan, repaired, references, options, nextReview);
+    if (!repairedReview || repairedReview.acceptable) {
+        return accepted(repaired, Boolean(repairedReview));
+    }
+    throw new Error(`Fallback first frames failed visual review: ${repairedReview.issues.join('; ')}`);
 }
 
 async function createSerialKeyframe(
@@ -745,12 +818,26 @@ async function createSerialKeyframe(
     let reviewAttempt = initialReviewAttempt;
     const nextReview = () => ++reviewAttempt;
     const basePrompt = buildVideoKeyframePrompt(plan);
-    const first = await generateWithRetry('gemini', basePrompt, references, 1, options);
+    let first: VideoKeyframeResult;
+    try {
+        first = await generateWithRetry('gemini', basePrompt, references, 1, options);
+    } catch (error) {
+        if (error instanceof VideoUsagePersistenceError) throw error;
+        console.warn('Initial Gemini first-frame generation failed; trying reviewed GPT Image fallback.', error);
+        return createReviewedOpenAIFallback(plan, references, options, nextReview, basePrompt);
+    }
     const firstReview = await optionalReview(plan, first, references, options, nextReview);
     if (!firstReview || firstReview.acceptable) return accepted(first, Boolean(firstReview));
     const retryPrompt = [basePrompt, '', 'Regenerate the image using this positive-only quality-control correction:',
         keyframeString(firstReview.correction_prompt, 'Strictly align every subject with the declared motion contract and keep every requested identity clearly visible.')].join('\n');
-    const second = await generateWithRetry('gemini', retryPrompt, references, 3, options);
+    let second: VideoKeyframeResult;
+    try {
+        second = await generateWithRetry('gemini', retryPrompt, references, 3, options);
+    } catch (error) {
+        if (error instanceof VideoUsagePersistenceError) throw error;
+        console.warn('Corrected Gemini first-frame generation failed; trying reviewed GPT Image fallback.', error);
+        return createReviewedOpenAIFallback(plan, references, options, nextReview, retryPrompt);
+    }
     const secondReview = await optionalReview(plan, second, references, options, nextReview);
     if (!secondReview || secondReview.acceptable) return accepted(second, Boolean(secondReview));
     const fallbackPrompt = [retryPrompt, '', 'Final quality-control correction:',
@@ -775,19 +862,7 @@ async function createConditionalKeyframe(
     } catch (geminiError) {
         if (geminiError instanceof VideoUsagePersistenceError) throw geminiError;
         console.warn('Initial Gemini first-frame generation failed; isolating that provider and trying GPT Image.', geminiError);
-        const fallback = await generateWithRetry('openai', basePrompt, references, 1, options);
-        const review = await optionalReview(plan, fallback, references, options, nextReview);
-        if (!review || review.acceptable) return accepted(fallback, Boolean(review));
-        const repairPrompt = [
-            basePrompt,
-            '',
-            'Regenerate the image using this positive-only quality-control correction:',
-            keyframeString(review.correction_prompt, 'Strictly align every subject with the declared motion contract and keep every requested identity clearly visible.'),
-        ].join('\n');
-        const repaired = await generateWithRetry('openai', repairPrompt, references, 3, options);
-        const repairedReview = await optionalReview(plan, repaired, references, options, nextReview);
-        if (!repairedReview || repairedReview.acceptable) return accepted(repaired, Boolean(repairedReview));
-        throw new Error(`Fallback first frames failed visual review: ${repairedReview.issues.join('; ')}`);
+        return createReviewedOpenAIFallback(plan, references, options, nextReview, basePrompt);
     }
     const firstReview = await optionalReview(plan, first, references, options, nextReview);
     if (!firstReview || firstReview.acceptable) return accepted(first, Boolean(firstReview));
