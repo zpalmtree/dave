@@ -456,6 +456,10 @@ function normalizedMetricSpan(value: any): VideoMetricSpan {
             boundedNumber(value.metadata.contracts, 0, 7, false)!,
         );
     }
+    if (['prefetch', 'on_demand'].includes(value.metadata?.origin)) {
+        metadata.origin = value.metadata.origin;
+    }
+    if (typeof value.metadata?.joined === 'boolean') metadata.joined = value.metadata.joined;
     return {
         source: value.source,
         name,
@@ -760,6 +764,12 @@ export class VideoBroker {
     private readonly segmentContractInFlight = new Map<string, Promise<void>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
     private readonly segmentKeyframeInFlight = new Map<string, Promise<void>>();
+    private segmentKeyframeSlots = 0;
+    private readonly segmentKeyframeWaiters: Array<{
+        key: string;
+        origin: 'prefetch' | 'on_demand';
+        resolve: (release: () => void) => void;
+    }> = [];
     private readonly backgroundTasks = new Set<Promise<void>>();
     private heartbeatTimer: NodeJS.Timeout | null = null;
     private cleanupTimer: NodeJS.Timeout | null = null;
@@ -817,6 +827,31 @@ export class VideoBroker {
                 console.error('Video broker background task failed', error);
             },
         );
+    }
+
+    private acquireSegmentKeyframeSlot(
+        key: string,
+        origin: 'prefetch' | 'on_demand',
+    ): Promise<() => void> {
+        const release = () => {
+            const onDemand = this.segmentKeyframeWaiters.findIndex(waiter => waiter.origin === 'on_demand');
+            const nextIndex = onDemand >= 0 ? onDemand : 0;
+            const next = this.segmentKeyframeWaiters.splice(nextIndex, 1)[0];
+            if (next) next.resolve(release);
+            else this.segmentKeyframeSlots = Math.max(0, this.segmentKeyframeSlots - 1);
+        };
+        if (this.segmentKeyframeSlots < 2) {
+            this.segmentKeyframeSlots += 1;
+            return Promise.resolve(release);
+        }
+        return new Promise(resolvePromise => {
+            this.segmentKeyframeWaiters.push({ key, origin, resolve: resolvePromise });
+        });
+    }
+
+    private promoteSegmentKeyframeSlot(key: string): void {
+        const waiting = this.segmentKeyframeWaiters.find(waiter => waiter.key === key);
+        if (waiting) waiting.origin = 'on_demand';
     }
 
     async initialize(): Promise<void> {
@@ -2413,6 +2448,7 @@ export class VideoBroker {
         segmentIndex: number,
         aspectRatio: VideoKeyframeAspectRatio,
         criticalPath = true,
+        origin: 'prefetch' | 'on_demand' = 'on_demand',
     ): Promise<void> {
         plan = await this.enrichedSegmentKeyframePlan(job, plan);
         const derivedPlan = derivedSegmentKeyframePlan(plan, segmentIndex);
@@ -2433,8 +2469,22 @@ export class VideoBroker {
         if (!generation) {
             generation = (async () => {
                 const started = Date.now();
+                const slotStarted = Date.now();
+                let slotWaitSeconds = 0;
                 let status: 'ok' | 'error' | 'skipped' = 'error';
+                let releaseSlot: (() => void) | null = null;
                 try {
+                    releaseSlot = await this.acquireSegmentKeyframeSlot(inflightKey, origin);
+                    slotWaitSeconds = (Date.now() - slotStarted) / 1000;
+                    const currentBeforeGeneration = await this.get<Pick<JobRow, 'status'>>(
+                        'SELECT status FROM video_jobs WHERE public_id = ?',
+                        [job.public_id],
+                    );
+                    if (this.stopping || !currentBeforeGeneration
+                        || !ACTIVE_VIDEO_STATUSES.includes(currentBeforeGeneration.status)) {
+                        status = 'skipped';
+                        return;
+                    }
                     const identity = await this.segmentIdentityReference(job, plan);
                     if (!identity) {
                         status = 'skipped';
@@ -2464,11 +2514,11 @@ export class VideoBroker {
                         serviceTier: 'priority',
                         durationSeconds: 0,
                     });
-                    const current = await this.get<JobRow>(
+                    const currentAfterGeneration = await this.get<JobRow>(
                         'SELECT status FROM video_jobs WHERE public_id = ?',
                         [job.public_id],
                     );
-                    if (!current || !ACTIVE_VIDEO_STATUSES.includes(current.status)) {
+                    if (!currentAfterGeneration || !ACTIVE_VIDEO_STATUSES.includes(currentAfterGeneration.status)) {
                         status = 'skipped';
                         return;
                     }
@@ -2506,13 +2556,21 @@ export class VideoBroker {
                     );
                     status = 'ok';
                 } finally {
+                    releaseSlot?.();
                     try {
+                        await this.recordMetricSpan(job.public_id, {
+                            source: 'broker',
+                            name: 'segment_keyframe_slot_wait',
+                            segment_index: segmentIndex,
+                            duration_seconds: slotWaitSeconds,
+                            metadata: { status, origin },
+                        });
                         await this.recordMetricSpan(job.public_id, {
                             source: 'broker',
                             name: 'frontier_segment_keyframe',
                             segment_index: segmentIndex,
                             duration_seconds: (Date.now() - started) / 1000,
-                            metadata: { status },
+                            metadata: { status, origin },
                         });
                     } catch (error) {
                         console.warn(`Could not store segment-frame timing for ${job.public_id}`, error);
@@ -2520,6 +2578,8 @@ export class VideoBroker {
                 }
             })();
             this.segmentKeyframeInFlight.set(inflightKey, generation);
+        } else if (origin === 'on_demand') {
+            this.promoteSegmentKeyframeSlot(inflightKey);
         }
         try {
             await generation;
@@ -2546,7 +2606,12 @@ export class VideoBroker {
         const worker = async () => {
             while (cursor < indexes.length) {
                 const index = indexes[cursor++];
-                await this.ensureSegmentKeyframe(job, plan, index, '16:9', criticalPath);
+                const current = await this.get<Pick<JobRow, 'status'>>(
+                    'SELECT status FROM video_jobs WHERE public_id = ?',
+                    [job.public_id],
+                );
+                if (this.stopping || !current || !ACTIVE_VIDEO_STATUSES.includes(current.status)) return;
+                await this.ensureSegmentKeyframe(job, plan, index, '16:9', criticalPath, 'prefetch');
             }
         };
         await Promise.allSettled(Array.from({ length: Math.min(2, indexes.length) }, () => worker()));
@@ -2582,7 +2647,16 @@ export class VideoBroker {
                     [publicId],
                 );
                 if (withKeyframe?.status === 'queued') {
-                    await this.ensureQueuedSegmentKeyframes(withKeyframe, plan, criticalPath);
+                    const segmentPrefetch = this.ensureQueuedSegmentKeyframes(
+                        withKeyframe,
+                        plan,
+                        criticalPath,
+                    );
+                    // On an idle worker, dispatch as soon as the screenplay and
+                    // primary frame are ready. Later cut frames then overlap GPU
+                    // startup and segment one instead of delaying the lease.
+                    if (criticalPath) await this.dispatchNext();
+                    await segmentPrefetch;
                 }
             } catch (error) {
                 if (error instanceof FrontierPlannerRejectedError) {
@@ -3381,11 +3455,14 @@ export class VideoBroker {
                     return;
                 }
                 try {
+                    const deliveryStarted = Date.now();
                     let stored = await this.get<SegmentKeyframeRow>(
                         'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
                         [job.public_id, segmentIndex],
                     );
                     const cached = Boolean(stored?.path && existsSync(stored.path));
+                    const joined = !cached && this.segmentKeyframeInFlight.has(`${job.public_id}:${segmentIndex}`);
+                    let deliveryStatus: 'ok' | 'error' | 'skipped' = 'skipped';
                     if (!cached) {
                         await this.ensureSegmentKeyframe(
                             job,
@@ -3393,6 +3470,7 @@ export class VideoBroker {
                             segmentIndex,
                             aspectValue as VideoKeyframeAspectRatio,
                             true,
+                            'on_demand',
                         );
                         stored = await this.get<SegmentKeyframeRow>(
                             'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
@@ -3400,10 +3478,31 @@ export class VideoBroker {
                         );
                     }
                     if (!stored?.path || !stored.mime_type || !existsSync(stored.path)) {
+                        await this.recordMetricSpan(keyframe[1], {
+                            source: 'broker',
+                            name: 'segment_keyframe_delivery_wait',
+                            segment_index: segmentIndex,
+                            duration_seconds: (Date.now() - deliveryStarted) / 1000,
+                            metadata: { cached, joined, status: deliveryStatus },
+                        }).catch(error => console.warn(
+                            `Could not store segment-frame delivery timing for ${keyframe[1]}`,
+                            error,
+                        ));
                         res.writeHead(204, { 'cache-control': 'no-store' });
                         res.end();
                         return;
                     }
+                    deliveryStatus = 'ok';
+                    await this.recordMetricSpan(keyframe[1], {
+                        source: 'broker',
+                        name: 'segment_keyframe_delivery_wait',
+                        segment_index: segmentIndex,
+                        duration_seconds: (Date.now() - deliveryStarted) / 1000,
+                        metadata: { cached, joined, status: deliveryStatus },
+                    }).catch(error => console.warn(
+                        `Could not store segment-frame delivery timing for ${keyframe[1]}`,
+                        error,
+                    ));
                     writeImage(res, stored.path, stored.mime_type, {
                         'x-video-keyframe-provider': stored.provider || 'frontier-image',
                         'x-video-keyframe-model': stored.model || 'unknown',
