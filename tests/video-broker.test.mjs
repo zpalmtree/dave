@@ -904,6 +904,232 @@ test('broker prepares the next screenplay and keyframe before gpuq admission', a
     }
 });
 
+test('broker overlaps idle-job segment prefetch with rendering and joins the in-flight frame', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-segment-prefetch-'));
+    let releaseSegment;
+    let announceSegment;
+    const segmentStarted = new Promise(resolve => { announceSegment = resolve; });
+    const segmentReleased = new Promise(resolve => { releaseSegment = resolve; });
+    const keyframeCalls = [];
+    const plan = {
+        intent: 'Prefetch overlap test',
+        continuity_bible: 'The same racer appears in both shots.',
+        keyframe: {
+            recommended: true,
+            reason: 'Identity anchor.',
+            prompt: 'The racer at the starting line.',
+            motion_contract: {
+                subject_orientation: 'right', gaze_direction: 'right', travel_direction: 'right',
+                camera_relation: 'side view', first_second_action: 'accelerate right',
+            },
+        },
+        segments: [{
+            title: 'Start', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
+                duration_seconds: 5, visual: 'The racer starts.', camera: 'wide', audio: 'engine', dialogue: [],
+            }],
+        }, {
+            title: 'Finish', transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
+                duration_seconds: 5, visual: 'The racer crosses the finish.', camera: 'medium', audio: 'cheers', dialogue: [],
+            }],
+        }],
+    };
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', heartbeatTimeoutMs: 5000,
+        preplanQueuedJobs: true,
+        frontierPlanner: async () => structuredClone(plan),
+        keyframeGenerator: async planned => {
+            const transition = planned.segments?.[0]?.transition || 'none';
+            keyframeCalls.push(transition);
+            if (transition === 'cut') {
+                announceSegment();
+                await segmentReleased;
+            }
+            return {
+                bytes: Buffer.from(`keyframe-${transition}`), mimeType: 'image/png',
+                provider: 'test-provider', model: 'test-image-model',
+            };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const fetchWith = (token, path, init = {}) => fetch(base + path, {
+        ...init,
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    });
+    let socket;
+    try {
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'prefetch-worker',
+            capabilities: ['minimax'], current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const submitted = await fetchWith('bot-secret', '/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimax', prompt: 'Race through two locations', requester_id: 'prefetch-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1', command_message_id: 'prefetch-message',
+                status_message_id: 'prefetch-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        const job = (await submitted.json()).job;
+        const lease = await take(value => value.type === 'job');
+        assert.equal(lease.job.id, job.id);
+        await segmentStarted;
+
+        const joinedResponse = fetchWith(
+            'worker-secret',
+            `/v1/worker/jobs/${job.id}/keyframe?segment=2&aspect=16:9`,
+            { method: 'POST', body: '{}' },
+        );
+        await new Promise(resolve => setTimeout(resolve, 25));
+        assert.deepEqual(keyframeCalls, ['start', 'cut']);
+        releaseSegment();
+        const frame = await joinedResponse;
+        assert.equal(frame.status, 200);
+        assert.equal(frame.headers.get('x-video-keyframe-cached'), 'false');
+        assert.deepEqual(Buffer.from(await frame.arrayBuffer()), Buffer.from('keyframe-cut'));
+        assert.deepEqual(keyframeCalls, ['start', 'cut']);
+
+        const cached = await fetchWith(
+            'worker-secret',
+            `/v1/worker/jobs/${job.id}/keyframe?segment=2&aspect=16:9`,
+            { method: 'POST', body: '{}' },
+        );
+        assert.equal(cached.status, 200);
+        assert.equal(cached.headers.get('x-video-keyframe-cached'), 'true');
+        assert.deepEqual(keyframeCalls, ['start', 'cut']);
+    } finally {
+        releaseSegment?.();
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('segment prefetch stays at two requests and stops advancing after cancellation', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-segment-prefetch-cancel-'));
+    let releaseCuts;
+    let announceTwoCuts;
+    const cutsReleased = new Promise(resolve => { releaseCuts = resolve; });
+    const twoCutsStarted = new Promise(resolve => { announceTwoCuts = resolve; });
+    const startedCuts = [];
+    let activeCuts = 0;
+    let maximumActiveCuts = 0;
+    const cut = (title, visual) => ({
+        title, transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
+            duration_seconds: 5, visual, camera: 'medium', audio: 'room tone', dialogue: [],
+        }],
+    });
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', heartbeatTimeoutMs: 5000,
+        preplanQueuedJobs: true,
+        frontierPlanner: async () => ({
+            intent: 'Cancellation prefetch test', continuity_bible: 'Same subject throughout.',
+            keyframe: {
+                recommended: true, reason: 'Identity anchor.', prompt: 'Opening subject.',
+                motion_contract: {
+                    subject_orientation: 'right', gaze_direction: 'right', travel_direction: 'right',
+                    camera_relation: 'side', first_second_action: 'move right',
+                },
+            },
+            segments: [{
+                title: 'Opening', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
+                    duration_seconds: 5, visual: 'The subject enters.', camera: 'wide', audio: 'room tone', dialogue: [],
+                }],
+            }, cut('Cut two', 'The subject reaches a bridge.'),
+            cut('Cut three', 'The subject reaches a tower.'),
+            cut('Cut four', 'The subject reaches a harbor.')],
+        }),
+        keyframeGenerator: async planned => {
+            const segment = planned.segments?.[0];
+            if (segment?.transition === 'cut') {
+                startedCuts.push(segment.title);
+                activeCuts += 1;
+                maximumActiveCuts = Math.max(maximumActiveCuts, activeCuts);
+                if (startedCuts.length === 2) announceTwoCuts();
+                try {
+                    await cutsReleased;
+                } finally {
+                    activeCuts -= 1;
+                }
+            }
+            return {
+                bytes: Buffer.from(`keyframe-${segment?.title || 'opening'}`), mimeType: 'image/png',
+                provider: 'test-provider', model: 'test-image-model',
+            };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    let socket;
+    try {
+        socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'cancel-prefetch-worker',
+            capabilities: ['minimax'], current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const submitted = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimax', prompt: 'Cross four places', requester_id: 'cancel-prefetch-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: 'cancel-prefetch-message', status_message_id: 'cancel-prefetch-status',
+            }),
+        });
+        const lease = await take(value => value.type === 'job');
+        assert.equal(lease.job.id, submitted.body.job.id);
+        await twoCutsStarted;
+        assert.equal(maximumActiveCuts, 2);
+        assert.deepEqual(new Set(startedCuts), new Set(['Cut two', 'Cut three']));
+
+        socket.send(JSON.stringify({
+            type: 'event', event: 'failed', job_id: lease.job.id,
+            error: 'cancel prefetch test', retryable: false,
+        }));
+        await eventually(
+            () => botFetch('/v1/users/cancel-prefetch-user/jobs'),
+            value => value.body.jobs[0].status === 'failed',
+        );
+        releaseCuts();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        assert.equal(maximumActiveCuts, 2);
+        assert.deepEqual(new Set(startedCuts), new Set(['Cut two', 'Cut three']));
+    } finally {
+        releaseCuts?.();
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('broker caches an explicit frontier rejection so the desktop consistently plans locally', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-frontier-rejection-'));
     let plannerCalls = 0;
