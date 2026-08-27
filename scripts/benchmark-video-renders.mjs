@@ -234,10 +234,12 @@ async function judge(openai, spec, evidence, runIndex) {
                 `FRAME-ZERO SSIM: ${candidate.frame_zero.ssim ?? 'unavailable'}`,
                 `FREEZE EVENTS: ${JSON.stringify(candidate.timeline.freeze_events)}`,
                 `BLACK EVENTS: ${JSON.stringify(candidate.timeline.black_events)}`,
-                'SOURCE KEYFRAME:',
+                candidate.keyframe_path
+                    ? 'SOURCE KEYFRAME:'
+                    : 'SOURCE KEYFRAME: [none; this is a text-to-video candidate]',
             ].join('\n'),
         });
-        content.push(await imageInput(candidate.keyframe_path));
+        if (candidate.keyframe_path) content.push(await imageInput(candidate.keyframe_path));
         content.push({ type: 'input_text', text: 'GENERATED FRAME ZERO:' });
         content.push(await imageInput(candidate.visuals.frameZeroPath));
         content.push({ type: 'input_text', text: 'GENERATED TIMELINE:' });
@@ -341,7 +343,9 @@ async function main() {
             Number(probe.format?.duration),
         );
         const [frameZero, timeline, transcript] = await Promise.all([
-            frameZeroMetrics(candidate.keyframe_path, visuals.frameZeroPath, videoStream.width, videoStream.height),
+            candidate.keyframe_path
+                ? frameZeroMetrics(candidate.keyframe_path, visuals.frameZeroPath, videoStream.width, videoStream.height)
+                : Promise.resolve({ ssim: null }),
             detectTimelineProblems(candidate.video_path),
             transcribeVideo(
                 openai,
