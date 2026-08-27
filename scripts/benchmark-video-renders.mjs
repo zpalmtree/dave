@@ -52,7 +52,7 @@ async function probeVideo(videoPath) {
     return JSON.parse(stdout);
 }
 
-async function extractVisualEvidence(candidate, outputDirectory) {
+async function extractVisualEvidence(candidate, outputDirectory, durationSeconds) {
     const candidateDirectory = resolve(outputDirectory, candidate.id);
     await mkdir(candidateDirectory, { recursive: true });
     const frameZeroPath = resolve(candidateDirectory, 'frame-zero.jpg');
@@ -64,10 +64,11 @@ async function extractVisualEvidence(candidate, outputDirectory) {
         '-vf', 'select=eq(n\\,0)',
         '-frames:v', '1', '-q:v', '2', frameZeroPath,
     ]);
+    const timelineRate = 16 / Math.max(0.001, Number(durationSeconds));
     await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-y',
         '-i', candidate.video_path,
-        '-vf', 'fps=2,scale=448:256,tile=4x4',
+        '-vf', `fps=${timelineRate},scale=448:256,tile=4x4`,
         '-frames:v', '1', '-q:v', '2', timelinePath,
     ]);
     await run('ffmpeg', [
@@ -213,7 +214,7 @@ async function judge(openai, spec, evidence, runIndex) {
                 `PLANNED INTENT: ${spec.intent || 'Not supplied.'}`,
                 `EXPECTED DIALOGUE OR AUDIO: ${spec.expected_dialogue || 'No explicit dialogue requirement supplied.'}`,
                 '',
-                'Each timeline sheet contains sixteen chronological samples at 0.5-second intervals, left-to-right then top-to-bottom.',
+                'Each timeline sheet contains sixteen evenly spaced chronological samples spanning the complete candidate, left-to-right then top-to-bottom.',
                 'Judge only supplied evidence. Treat wrong counts, missing literal constraints, absent required dialogue, broken physical continuity, severe morphing, and failure to creatively develop a vague request as critical.',
                 'A candidate is acceptable only if it could be delivered without correction. Do not infer provider, source resolution, or candidate identity.',
             ].join('\n'),
@@ -334,7 +335,11 @@ async function main() {
         const probe = await probeVideo(candidate.video_path);
         const videoStream = probe.streams.find(stream => stream.codec_type === 'video');
         if (!videoStream?.width || !videoStream?.height) throw new Error(`No video stream in ${candidate.video_path}.`);
-        const visuals = await extractVisualEvidence(candidate, outputDirectory);
+        const visuals = await extractVisualEvidence(
+            candidate,
+            outputDirectory,
+            Number(probe.format?.duration),
+        );
         const [frameZero, timeline, transcript] = await Promise.all([
             frameZeroMetrics(candidate.keyframe_path, visuals.frameZeroPath, videoStream.width, videoStream.height),
             detectTimelineProblems(candidate.video_path),
