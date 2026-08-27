@@ -929,21 +929,50 @@ async function createFastGatedKeyframe(
         geminiModel: VIDEO_KEYFRAME_FAST_LITE_MODEL,
         imageSize: '1K',
     };
+    const basePrompt = buildVideoKeyframePrompt(plan);
     try {
         const candidate = await generateWithRetry(
             'gemini',
-            buildVideoKeyframePrompt(plan),
+            basePrompt,
             references,
             1,
             fastOptions,
         );
         const review = await optionalReview(plan, candidate, references, fastOptions, nextReview);
         if (review?.acceptable) return accepted(candidate, true);
-        console.log(
-            review
-                ? '[Video keyframe fast gate] Flash Lite candidate rejected; running the unchanged baseline pipeline.'
-                : '[Video keyframe fast gate] Reviewer unavailable; running the unchanged baseline pipeline.',
-        );
+        if (review) {
+            const repairPrompt = [
+                basePrompt,
+                '',
+                'Regenerate the image using this positive-only quality-control correction:',
+                keyframeString(
+                    review.correction_prompt,
+                    'Strictly align every subject with the declared motion contract and keep every requested identity clearly visible.',
+                ),
+            ].join('\n');
+            try {
+                const repaired = await generateWithRetry(
+                    'gemini', repairPrompt, references, 3, fastOptions,
+                );
+                const repairedReview = await optionalReview(
+                    plan, repaired, references, fastOptions, nextReview,
+                );
+                if (repairedReview?.acceptable) return accepted(repaired, true);
+                console.log(
+                    repairedReview
+                        ? '[Video keyframe fast gate] Corrected Flash Lite candidate rejected; running the unchanged baseline pipeline.'
+                        : '[Video keyframe fast gate] Corrected-candidate reviewer unavailable; running the unchanged baseline pipeline.',
+                );
+            } catch (error) {
+                if (error instanceof VideoUsagePersistenceError) throw error;
+                console.warn(
+                    '[Video keyframe fast gate] Corrected Flash Lite candidate failed; running the unchanged baseline pipeline.',
+                    error,
+                );
+            }
+        } else {
+            console.log('[Video keyframe fast gate] Reviewer unavailable; running the unchanged baseline pipeline.');
+        }
     } catch (error) {
         if (error instanceof VideoUsagePersistenceError) throw error;
         console.warn('[Video keyframe fast gate] Flash Lite candidate failed; running the unchanged baseline pipeline.', error);

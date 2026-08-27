@@ -1439,6 +1439,149 @@ test('serial keyframes retry generic Gemini no-image responses then use reviewed
     ]);
 });
 
+test('fast keyframes retry one reviewed Flash Lite correction before the baseline pipeline', async t => {
+    const attempts = [];
+    const geminiBodies = [];
+    let geminiCalls = 0;
+    let reviewCalls = 0;
+    t.mock.method(console, 'log', () => {});
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        const url = String(input);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            geminiCalls += 1;
+            geminiBodies.push(String(init?.body || ''));
+            return new Response(JSON.stringify({
+                candidates: [{
+                    content: { parts: [{
+                        inlineData: {
+                            mimeType: 'image/png',
+                            data: Buffer.from(`flash-lite-${geminiCalls}`).toString('base64'),
+                        },
+                    }] },
+                }],
+                usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            const acceptable = reviewCalls === 2;
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                service_tier: 'priority',
+                output_text: JSON.stringify({
+                    acceptable,
+                    issues: acceptable ? [] : ['The podium path has no usable ramp.'],
+                    correction_prompt: acceptable
+                        ? ''
+                        : 'Show a shallow ramp directly ahead of the right-facing duck.',
+                }),
+                usage: {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    input_tokens_details: { cached_tokens: 0 },
+                },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'A duck walks up to a podium.',
+        keyframe: { prompt: 'A right-facing duck on a path.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The duck walks up a ramp.', camera: 'Wide tracking shot.' }] }],
+    }, [], {
+        strategy: 'fast-gated-v3',
+        serviceTier: 'fast',
+        onAttempt: attempt => attempts.push(attempt),
+    });
+
+    assert.equal(result.provider, 'gemini');
+    assert.equal(result.model, VIDEO_KEYFRAME_FAST_LITE_MODEL);
+    assert.equal(result.bytes.toString(), 'flash-lite-2');
+    assert.equal(result.reviewStatus, 'accepted');
+    assert.equal(geminiCalls, 2);
+    assert.equal(reviewCalls, 2);
+    assert.match(geminiBodies[1], /shallow ramp directly ahead/);
+    assert.deepEqual(attempts.map(attempt => [
+        attempt.stage,
+        attempt.attempt,
+        attempt.outcome,
+    ]), [
+        ['keyframe_candidate_gemini', 1, 'success'],
+        ['keyframe_review', 1, 'rejected'],
+        ['keyframe_candidate_gemini', 3, 'success'],
+        ['keyframe_review', 2, 'accepted'],
+    ]);
+});
+
+test('rejected fast correction preserves the reviewed full-quality fallback', async t => {
+    const attempts = [];
+    let geminiCalls = 0;
+    let reviewCalls = 0;
+    t.mock.method(console, 'log', () => {});
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            geminiCalls += 1;
+            return new Response(JSON.stringify({
+                candidates: [{
+                    content: { parts: [{
+                        inlineData: {
+                            mimeType: 'image/png',
+                            data: Buffer.from(`candidate-${geminiCalls}`).toString('base64'),
+                        },
+                    }] },
+                }],
+                usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            const acceptable = reviewCalls === 3;
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                service_tier: 'priority',
+                output_text: JSON.stringify({
+                    acceptable,
+                    issues: acceptable ? [] : ['The frame still contradicts the motion contract.'],
+                    correction_prompt: acceptable ? '' : 'Show all subjects aligned with the forward path.',
+                }),
+                usage: {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    input_tokens_details: { cached_tokens: 0 },
+                },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'Three racers accelerate forward.',
+        keyframe: { prompt: 'Exactly three racers at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'They accelerate.', camera: 'Rear tracking shot.' }] }],
+    }, [], {
+        strategy: 'fast-gated-v3',
+        serviceTier: 'fast',
+        onAttempt: attempt => attempts.push(attempt),
+    });
+
+    assert.equal(result.model, VIDEO_KEYFRAME_MODEL);
+    assert.equal(result.bytes.toString(), 'candidate-3');
+    assert.equal(result.reviewStatus, 'accepted');
+    assert.equal(geminiCalls, 3);
+    assert.equal(reviewCalls, 3);
+    assert.deepEqual(
+        attempts.filter(attempt => attempt.stage === 'keyframe_candidate_gemini')
+            .map(attempt => [attempt.model, attempt.attempt]),
+        [
+            [VIDEO_KEYFRAME_FAST_LITE_MODEL, 1],
+            [VIDEO_KEYFRAME_FAST_LITE_MODEL, 3],
+            [VIDEO_KEYFRAME_MODEL, 1],
+        ],
+    );
+});
+
 test('keyframe experiment variants are opt-in and enforce supported resolution', () => {
     assert.deepEqual(configuredVideoKeyframeVariant({}), {
         geminiModel: VIDEO_KEYFRAME_MODEL,
