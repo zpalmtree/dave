@@ -485,7 +485,7 @@ const NUMBER_WORDS = [
     'eighteen', 'nineteen', 'twenty',
 ];
 
-const AUTO_TOTAL_LIMIT_SECONDS = 30;
+const AUTO_TOTAL_LIMIT_SECONDS = 2 * 60;
 const SAFE_NONSPEECH_AUDIO = 'Natural environmental ambience and synchronized action sound effects.';
 const SPEECH_IN_AUDIO = /\b(?:voice|speaker|character|person|man|woman)\s+(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|announces?|narrates?|sings?)\b|\b(?:dialogue|speech|spoken words?|vocals?)\s*:|\b(?:lip[- ]?sync|mouth movement)\b/i;
 
@@ -759,7 +759,7 @@ export function compileBestEffortFrontierVideoPlan(
     const notices: string[] = [];
     if (durationTruncated) {
         notices.push(
-            'The screenplay exceeded the 30-second generation budget and was truncated; '
+            `The screenplay exceeded the ${AUTO_TOTAL_LIMIT_SECONDS}-second generation budget and was truncated; `
             + 'later beats or dialogue may be omitted.',
         );
     }
@@ -883,9 +883,11 @@ export function validateFrontierVideoPlanForKeyframe(
         minimumTotal += floor;
         dialogueMinimumTotal += dialogueFloor;
     }
-    if (minimumTotal > 30 + 1e-6 && dialogueMinimumTotal <= 30 + 1e-6) {
+    if (minimumTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6
+        && dialogueMinimumTotal <= AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
-            `GPT-5.6 Sol screenplay needs at least ${minimumTotal.toFixed(1)}s, above the 30s automatic limit.`,
+            `GPT-5.6 Sol screenplay needs at least ${minimumTotal.toFixed(1)}s, `
+            + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,
         );
     }
     if (rawPrompt) {
@@ -1413,7 +1415,7 @@ export async function createFrontierVideoPlan(
                             : 'Aspect ratio: 16:9.',
                         `Target video model: ${definition.displayName}.`,
                         `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                        'Choose an automatic total duration no longer than 30 seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.',
+                        `Choose an automatic total duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.`,
                         `A source image is present: ${sourceImage ? 'yes' : 'no'}.`,
                         sourceImage
                             ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
@@ -1554,7 +1556,7 @@ export async function createFrontierVideoPlan(
                     : 'Aspect ratio: 16:9.',
                 `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                'Choose an automatic total duration no longer than 30 seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.',
+                `Choose an automatic total duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.`,
                 sourceImage
                     ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
                     : 'No user-supplied starting image is present.',

@@ -1063,27 +1063,27 @@ test('two protected-dialogue fidelity failures route local instead of compiling 
     }
 });
 
-test('best-effort compiler truncates automatic screenplays to 30 seconds', () => {
+test('best-effort compiler truncates automatic screenplays to two minutes', () => {
     const plan = frontierPlan();
-    plan.segments = [0, 1, 2].map(index => ({
+    plan.segments = Array.from({ length: 8 }, (_, index) => ({
         ...structuredClone(plan.segments[0]),
         title: `Beat ${index + 1}`,
         transition: index === 0 ? 'start' : 'cut',
-        target_seconds: 15,
-        shots: [{ ...structuredClone(plan.segments[0].shots[0]), duration_seconds: 15 }],
+        target_seconds: 20,
+        shots: [{ ...structuredClone(plan.segments[0].shots[0]), duration_seconds: 20 }],
     }));
     const compiled = compileBestEffortFrontierVideoPlan(
         plan,
         frontierAnalysis(),
         'A dog runs through three stages.',
-        'minimaxfast',
+        'ltxfast',
     );
-    assert.equal(compiled.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 30);
-    assert.equal(compiled.segments.length, 2);
-    assert.match(compiled.generation_notice, /30-second generation budget.*truncated/);
+    assert.equal(compiled.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 120);
+    assert.equal(compiled.segments.length, 6);
+    assert.match(compiled.generation_notice, /120-second generation budget.*truncated/);
     assert.doesNotThrow(
         () => validateFrontierVideoPlanForKeyframe(
-            compiled, 'minimaxfast', 'A dog runs through three stages.',
+            compiled, 'ltxfast', 'A dog runs through three stages.',
         ),
     );
 });
