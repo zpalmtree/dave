@@ -1,5 +1,4 @@
 export const VIDEO_PROTOCOL_VERSION = 1;
-export const VIDEO_PROMPT_MAX_LENGTH = 1800;
 export const VIDEO_IMAGE_ONLY_AUTO_PROMPT = 'Image-only auto-direction: inspect the supplied image and create the most natural short motion continuation.';
 export const VIDEO_MAX_USER_JOBS = 3;
 export const VIDEO_MAX_GLOBAL_JOBS = 20;

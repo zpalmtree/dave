@@ -372,6 +372,34 @@ async function eventually(callback, predicate, timeoutMs = 2000) {
     throw new Error('Timed out waiting for broker state.');
 }
 
+test('broker accepts prompts beyond the former Discord-sized character cap', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-long-prompt-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret',
+    });
+    await broker.start();
+    const prompt = 'A'.repeat(5000);
+    try {
+        const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax', prompt, requester_id: 'long-prompt-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: 'long-prompt-message', status_message_id: 'long-prompt-status',
+            }),
+        });
+        const body = await response.json();
+        assert.equal(response.status, 201);
+        assert.equal(body.job.prompt, prompt);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('source-image download does not hold the enqueue write lock', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-source-lock-'));
     let releaseDownload;

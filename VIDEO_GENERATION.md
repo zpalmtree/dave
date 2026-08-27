@@ -7,8 +7,8 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 
 ## Discord commands
 
-- `$ltx <prompt>` queues an automatic-length, maximum-quality LTX 2.5 video.
-- `$minimax <prompt>` queues an automatic-length, maximum-quality MiniMax H3 video.
+- `$ltx <prompt>` queues an automatic-length, maximum-quality LTX 2.5 video of up to two minutes.
+- `$minimax <prompt>` queues an automatic-length, maximum-quality MiniMax H3 video of up to two minutes.
 - `$videoqueue` shows the caller's unfinished jobs, positions, progress, and ETA.
 - `$videoqueue cancel <short-id>` cancels one of the caller's jobs.
 - `$videogen status` is owner-only.

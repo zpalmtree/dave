@@ -15,7 +15,6 @@ import {
     VIDEO_MAX_GLOBAL_JOBS,
     VIDEO_MAX_USER_JOBS,
     VIDEO_MODELS,
-    VIDEO_PROMPT_MAX_LENGTH,
     VIDEO_PROTOCOL_VERSION,
     VIDEO_RESULT_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
@@ -1419,9 +1418,7 @@ export class VideoBroker {
     private async enqueue(body: any): Promise<{ status: number; body: any }> {
         if (!isVideoModel(body.model)) return { status: 400, body: { error: 'Unknown video model.' } };
         const prompt = String(body.prompt || '').trim();
-        if (!prompt || prompt.length > VIDEO_PROMPT_MAX_LENGTH) {
-            return { status: 400, body: { error: `Prompt must be 1-${VIDEO_PROMPT_MAX_LENGTH} characters.` } };
-        }
+        if (!prompt) return { status: 400, body: { error: 'Prompt must not be empty.' } };
         const required = ['requester_id', 'origin_bot_id', 'channel_id', 'command_message_id', 'status_message_id'];
         if (required.some(key => !String(body[key] || '').trim())) {
             return { status: 400, body: { error: 'Missing Discord job identity.' } };

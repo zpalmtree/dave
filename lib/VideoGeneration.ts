@@ -6,7 +6,6 @@ import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
     VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MODELS,
-    VIDEO_PROMPT_MAX_LENGTH,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VideoJobView,
@@ -676,10 +675,6 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     }
     if (!prompt) {
         await msg.reply(`Usage: \`${config.prefix}${VIDEO_MODELS[model].command} <prompt>\` (or reply to a message containing a prompt or image).`);
-        return;
-    }
-    if (prompt.length > VIDEO_PROMPT_MAX_LENGTH) {
-        await msg.reply(`Video prompts are limited to ${VIDEO_PROMPT_MAX_LENGTH} characters.`);
         return;
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
