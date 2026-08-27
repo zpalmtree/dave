@@ -1582,6 +1582,166 @@ test('rejected fast correction preserves the reviewed full-quality fallback', as
     );
 });
 
+test('slow rejected fast review overlaps the unchanged full-quality candidate', async t => {
+    const events = [];
+    let fastCalls = 0;
+    let reviewCalls = 0;
+    let releaseSecondReview;
+    const reviewResponse = acceptable => new Response(JSON.stringify({
+        model: VIDEO_KEYFRAME_REVIEW_MODEL,
+        service_tier: 'priority',
+        output_text: JSON.stringify({
+            acceptable,
+            issues: acceptable ? [] : ['The frame contradicts the motion contract.'],
+            correction_prompt: acceptable ? '' : 'Align every racer with the forward path.',
+        }),
+        usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            input_tokens_details: { cached_tokens: 0 },
+        },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    t.mock.method(console, 'log', () => {});
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            if (url.includes(VIDEO_KEYFRAME_MODEL)) {
+                events.push('full-quality-started');
+                releaseSecondReview();
+                return new Response(JSON.stringify({
+                    candidates: [{ content: { parts: [{
+                        inlineData: {
+                            mimeType: 'image/png',
+                            data: Buffer.from('full-quality').toString('base64'),
+                        },
+                    }] } }],
+                    usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+                }), { status: 200, headers: { 'content-type': 'application/json' } });
+            }
+            fastCalls += 1;
+            return new Response(JSON.stringify({
+                candidates: [{ content: { parts: [{
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: Buffer.from(`fast-${fastCalls}`).toString('base64'),
+                    },
+                }] } }],
+                usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            if (reviewCalls === 2) {
+                events.push('second-review-started');
+                return new Promise(resolve => {
+                    releaseSecondReview = () => {
+                        events.push('second-review-rejected');
+                        resolve(reviewResponse(false));
+                    };
+                });
+            }
+            return reviewResponse(reviewCalls === 3);
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'Three racers accelerate forward.',
+        keyframe: { prompt: 'Exactly three racers at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'They accelerate.', camera: 'Rear tracking shot.' }] }],
+    }, [], {
+        strategy: 'fast-gated-v3',
+        serviceTier: 'fast',
+        fastGateHedgeDelayMs: 0,
+    });
+
+    assert.equal(result.model, VIDEO_KEYFRAME_MODEL);
+    assert.equal(result.bytes.toString(), 'full-quality');
+    assert.deepEqual(events, [
+        'second-review-started',
+        'full-quality-started',
+        'second-review-rejected',
+    ]);
+    assert.equal(reviewCalls, 3);
+});
+
+test('accepted corrected fast review aborts its delayed full-quality hedge', async t => {
+    const attempts = [];
+    let fastCalls = 0;
+    let reviewCalls = 0;
+    let releaseSecondReview;
+    const reviewResponse = acceptable => new Response(JSON.stringify({
+        model: VIDEO_KEYFRAME_REVIEW_MODEL,
+        service_tier: 'priority',
+        output_text: JSON.stringify({
+            acceptable,
+            issues: acceptable ? [] : ['The path is blocked.'],
+            correction_prompt: acceptable ? '' : 'Show a clear forward path.',
+        }),
+        usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            input_tokens_details: { cached_tokens: 0 },
+        },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    t.mock.method(console, 'log', () => {});
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        const url = String(input);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            if (url.includes(VIDEO_KEYFRAME_MODEL)) {
+                releaseSecondReview();
+                return new Promise((_resolve, reject) => {
+                    init.signal.addEventListener('abort', () => {
+                        reject(new DOMException('The operation was aborted.', 'AbortError'));
+                    }, { once: true });
+                });
+            }
+            fastCalls += 1;
+            return new Response(JSON.stringify({
+                candidates: [{ content: { parts: [{
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: Buffer.from(`fast-${fastCalls}`).toString('base64'),
+                    },
+                }] } }],
+                usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            if (reviewCalls === 2) {
+                return new Promise(resolve => {
+                    releaseSecondReview = () => resolve(reviewResponse(true));
+                });
+            }
+            return reviewResponse(false);
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'A duck walks toward a podium.',
+        keyframe: { prompt: 'A duck at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The duck advances.', camera: 'Wide shot.' }] }],
+    }, [], {
+        strategy: 'fast-gated-v3',
+        serviceTier: 'fast',
+        fastGateHedgeDelayMs: 0,
+        onAttempt: attempt => attempts.push(attempt),
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(result.model, VIDEO_KEYFRAME_FAST_LITE_MODEL);
+    assert.equal(result.bytes.toString(), 'fast-2');
+    assert.equal(result.reviewStatus, 'accepted');
+    assert.ok(attempts.some(attempt => (
+        attempt.stage === 'keyframe_candidate_gemini'
+        && attempt.model === VIDEO_KEYFRAME_MODEL
+        && attempt.outcome === 'cancelled'
+        && attempt.detail === 'Speculative full-quality candidate was no longer needed.'
+    )));
+});
+
 test('keyframe experiment variants are opt-in and enforce supported resolution', () => {
     assert.deepEqual(configuredVideoKeyframeVariant({}), {
         geminiModel: VIDEO_KEYFRAME_MODEL,

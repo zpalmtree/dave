@@ -10,7 +10,7 @@ export class VideoUsagePersistenceError extends Error {
     }
 }
 
-export type VideoProviderOutcome = 'success' | 'accepted' | 'rejected' | 'error' | 'unreviewed';
+export type VideoProviderOutcome = 'success' | 'accepted' | 'rejected' | 'error' | 'unreviewed' | 'cancelled';
 
 export interface VideoProviderUsage {
     stage: string;
