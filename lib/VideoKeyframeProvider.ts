@@ -83,6 +83,8 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     aspectRatio?: VideoKeyframeAspectRatio;
     geminiModel?: VideoKeyframeGeminiModel;
     imageSize?: VideoKeyframeImageSize;
+    abortSignal?: AbortSignal;
+    fastGateHedgeDelayMs?: number;
 }
 
 export function configuredVideoKeyframeVariant(environment: NodeJS.ProcessEnv = process.env): {
@@ -200,7 +202,7 @@ async function generateGeminiKeyframe(
         ? '1K'
         : options.imageSize || '2K';
     const started = Date.now();
-    let outcome: 'success' | 'error' = 'error';
+    let outcome: 'success' | 'error' | 'cancelled' = 'error';
     let detail: string | undefined;
     const client = new GoogleGenAI({
         apiKey: config.geminiApiKey,
@@ -231,6 +233,7 @@ async function generateGeminiKeyframe(
                 ],
             }],
             config: {
+                abortSignal: options.abortSignal,
                 responseModalities: ['IMAGE'],
                 imageConfig: {
                     aspectRatio: options.aspectRatio || '16:9',
@@ -285,7 +288,12 @@ async function generateGeminiKeyframe(
             geminiModel,
         );
     } catch (error) {
-        detail = error instanceof Error ? error.message : String(error);
+        if (options.abortSignal?.aborted) {
+            outcome = 'cancelled';
+            detail = 'Speculative full-quality candidate was no longer needed.';
+        } else {
+            detail = error instanceof Error ? error.message : String(error);
+        }
         throw error;
     } finally {
         await options.onAttempt?.({
@@ -772,6 +780,7 @@ async function generateWithRetry(
         } catch (error) {
             lastError = error;
             if (error instanceof VideoUsagePersistenceError) throw error;
+            if (options.abortSignal?.aborted) break;
             if (!isRetryableVideoKeyframeGenerationFailure(error)) break;
         }
     }
@@ -814,13 +823,15 @@ async function createSerialKeyframe(
     references: VideoKeyframeReference[],
     options: VideoKeyframeOptions,
     initialReviewAttempt = 0,
+    initialCandidate?: Promise<VideoKeyframeResult>,
 ): Promise<VideoKeyframeResult> {
     let reviewAttempt = initialReviewAttempt;
     const nextReview = () => ++reviewAttempt;
     const basePrompt = buildVideoKeyframePrompt(plan);
     let first: VideoKeyframeResult;
     try {
-        first = await generateWithRetry('gemini', basePrompt, references, 1, options);
+        first = await (initialCandidate
+            || generateWithRetry('gemini', basePrompt, references, 1, options));
     } catch (error) {
         if (error instanceof VideoUsagePersistenceError) throw error;
         console.warn('Initial Gemini first-frame generation failed; trying reviewed GPT Image fallback.', error);
@@ -954,14 +965,53 @@ async function createFastGatedKeyframe(
                 const repaired = await generateWithRetry(
                     'gemini', repairPrompt, references, 3, fastOptions,
                 );
-                const repairedReview = await optionalReview(
-                    plan, repaired, references, fastOptions, nextReview,
-                );
-                if (repairedReview?.acceptable) return accepted(repaired, true);
+                let baselineController: AbortController | null = null;
+                let baselineCandidate: Promise<VideoKeyframeResult> | null = null;
+                const startBaseline = (): Promise<VideoKeyframeResult> => {
+                    if (baselineCandidate) return baselineCandidate;
+                    baselineController = new AbortController();
+                    baselineCandidate = generateWithRetry(
+                        'gemini', basePrompt, references, 1,
+                        { ...options, abortSignal: baselineController.signal },
+                    );
+                    // A rejected speculative request remains handled even when the
+                    // corrected fast candidate wins and this path no longer awaits it.
+                    void baselineCandidate.catch(() => undefined);
+                    return baselineCandidate;
+                };
+                const abortBaseline = (): void => {
+                    if (baselineController) baselineController.abort();
+                };
+                const hedgeDelayMs = Math.max(0, options.fastGateHedgeDelayMs ?? 8_000);
+                const hedgeTimer = setTimeout(() => {
+                    void startBaseline();
+                }, hedgeDelayMs);
+                let repairedReview: VideoKeyframeReview | null;
+                try {
+                    repairedReview = await optionalReview(
+                        plan, repaired, references, fastOptions, nextReview,
+                    );
+                } catch (error) {
+                    clearTimeout(hedgeTimer);
+                    abortBaseline();
+                    throw error;
+                }
+                clearTimeout(hedgeTimer);
+                if (repairedReview?.acceptable) {
+                    abortBaseline();
+                    return accepted(repaired, true);
+                }
                 console.log(
                     repairedReview
                         ? '[Video keyframe fast gate] Corrected Flash Lite candidate rejected; running the unchanged baseline pipeline.'
                         : '[Video keyframe fast gate] Corrected-candidate reviewer unavailable; running the unchanged baseline pipeline.',
+                );
+                return createSerialKeyframe(
+                    plan,
+                    references,
+                    options,
+                    reviewAttempt,
+                    baselineCandidate || startBaseline(),
                 );
             } catch (error) {
                 if (error instanceof VideoUsagePersistenceError) throw error;
