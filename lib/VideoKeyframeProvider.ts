@@ -17,6 +17,7 @@ export const VIDEO_KEYFRAME_PROVIDER = 'gemini';
 export const VIDEO_KEYFRAME_FALLBACK_MODEL = AI_MODELS.openAIImage;
 export const VIDEO_KEYFRAME_REVIEW_MODEL = AI_MODELS.openAIChat;
 export const VIDEO_KEYFRAME_MAX_BYTES = 25 * 1024 * 1024;
+export const VIDEO_KEYFRAME_FAST_GATE_HEDGE_DELAY_MS = 12_000;
 export const VIDEO_KEYFRAME_ASPECT_RATIOS = [
     '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9',
 ] as const;
@@ -982,7 +983,10 @@ async function createFastGatedKeyframe(
                 const abortBaseline = (): void => {
                     if (baselineController) baselineController.abort();
                 };
-                const hedgeDelayMs = Math.max(0, options.fastGateHedgeDelayMs ?? 8_000);
+                const hedgeDelayMs = Math.max(
+                    0,
+                    options.fastGateHedgeDelayMs ?? VIDEO_KEYFRAME_FAST_GATE_HEDGE_DELAY_MS,
+                );
                 const hedgeTimer = setTimeout(() => {
                     void startBaseline();
                 }, hedgeDelayMs);

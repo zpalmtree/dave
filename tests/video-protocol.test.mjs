@@ -51,6 +51,7 @@ import {
     buildVideoKeyframePrompt,
     buildVideoKeyframeReviewPrompt,
     VIDEO_KEYFRAME_FALLBACK_MODEL,
+    VIDEO_KEYFRAME_FAST_GATE_HEDGE_DELAY_MS,
     VIDEO_KEYFRAME_FAST_LITE_MODEL,
     VIDEO_KEYFRAME_FAST_MODEL,
     VIDEO_KEYFRAME_MODEL,
@@ -1771,6 +1772,7 @@ test('keyframe experiment variants are opt-in and enforce supported resolution',
 });
 
 test('review-gated fast keyframes default globally and every override is reversible', () => {
+    assert.equal(VIDEO_KEYFRAME_FAST_GATE_HEDGE_DELAY_MS, 12_000);
     assert.equal(configuredVideoKeyframeStrategy('483470443001413675', {}), 'fast-gated-v3');
     assert.equal(configuredVideoKeyframeStrategy('other-channel', {}), 'fast-gated-v3');
     assert.equal(configuredVideoKeyframeStrategy('other-channel', {
