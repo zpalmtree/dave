@@ -27,6 +27,7 @@ import {
     buildCImageGenerationTool,
     type CImageGenerationTool,
 } from './CImageGeneration.js';
+import { classifyPromptTease } from './PromptTease.js';
 
 // Polyfill File for environments running on Node < 20 so OpenAI uploads work.
 void (async () => {
@@ -1567,6 +1568,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
         return;
     }
 
+    const promptTease = classifyPromptTease(prompt);
     await withTyping(msg.channel, async () => {
         const username = await getUsername(msg.author.id, msg.guild);
         const imageURLs = await gatherImageURLsForRequest(msg, referencedMessage);
@@ -1711,6 +1713,10 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             const messagePayload: any = {
                 embeds: [finalEmbed],
             };
+            const tease = await promptTease;
+            if (tease) {
+                messagePayload.content = tease;
+            }
 
             if (attachments.length > 0) {
                 messagePayload.files = attachments;

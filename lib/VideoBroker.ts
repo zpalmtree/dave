@@ -132,6 +132,7 @@ interface JobRow {
     idempotency_key: string;
     model: VideoModelId;
     prompt: string;
+    prompt_tease: string | null;
     requester_id: string;
     origin_bot_id: string;
     channel_id: string;
@@ -862,6 +863,7 @@ export class VideoBroker {
             idempotency_key TEXT NOT NULL UNIQUE,
             model TEXT NOT NULL,
             prompt TEXT NOT NULL,
+            prompt_tease TEXT,
             requester_id TEXT NOT NULL,
             origin_bot_id TEXT NOT NULL,
             channel_id TEXT NOT NULL,
@@ -925,6 +927,9 @@ export class VideoBroker {
         }
         if (!columnNames.has('readiness_retries')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN readiness_retries INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!columnNames.has('prompt_tease')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN prompt_tease TEXT');
         }
         for (const [name, definition] of [
             ['experiment_id', 'TEXT'],
@@ -1325,6 +1330,25 @@ export class VideoBroker {
                 return;
             }
             writeJson(res, 200, { job });
+            return;
+        }
+        const promptTease = /^\/v1\/jobs\/([0-9a-f-]+)\/prompt-tease$/.exec(url.pathname);
+        if (promptTease && req.method === 'POST') {
+            const body = await readJson(req);
+            const tease = sanitizeVideoWorkerText(body.prompt_tease, '', 120).trim() || null;
+            await this.run(
+                'UPDATE video_jobs SET prompt_tease = ?, updated_at = ? WHERE public_id = ?',
+                [tease, nowSeconds(), promptTease[1]],
+            );
+            const row = await this.get<JobRow>(
+                'SELECT * FROM video_jobs WHERE public_id = ?',
+                [promptTease[1]],
+            );
+            if (!row) {
+                writeJson(res, 404, { error: 'Unknown video job.' });
+                return;
+            }
+            writeJson(res, 200, { job: (await this.views([row]))[0] });
             return;
         }
         const cancel = /^\/v1\/jobs\/([0-9a-f-]+)\/cancel$/.exec(url.pathname);
@@ -2798,6 +2822,7 @@ export class VideoBroker {
                 id: row.public_id,
                 model: row.model,
                 prompt: row.prompt,
+                prompt_tease: row.prompt_tease,
                 planned_intent: plannedIntent(row),
                 generation_notice: generationNotice(row),
                 requester_id: row.requester_id,

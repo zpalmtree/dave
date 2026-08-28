@@ -109,6 +109,14 @@ test('broker projects a rough ETA immediately and includes earlier queued work',
         const first = (await submit('initial-eta-user-1', 'initial-eta-message-1')).job;
         const second = (await submit('initial-eta-user-2', 'initial-eta-message-2')).job;
 
+        const teaseResponse = await fetch(`${base}/v1/jobs/${first.id}/prompt-tease`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ prompt_tease: 'Pervert.' }),
+        });
+        assert.equal(teaseResponse.status, 200);
+        assert.equal((await teaseResponse.json()).job.prompt_tease, 'Pervert.');
+
         assert.equal(first.worker_online, false);
         assert.equal(first.estimate_ready, false);
         assert.equal(first.queue_position, 1);

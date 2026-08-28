@@ -6,6 +6,7 @@ export const AI_MODELS = {
     openAITranscription: 'gpt-transcribe',
     openAIImage: 'gpt-image-2',
     geminiChat: 'gemini-3.7-flash',
+    geminiPromptClassifier: 'gemini-3.5-flash-lite',
     geminiImage: 'gemini-3-pro-image',
     grokChat: 'grok-4.6',
     /* A/B testing found 4.5 faster and more natural for Discord recaps. */
