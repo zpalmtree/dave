@@ -614,10 +614,12 @@ test('broker preserves an interrupted job at the front while paused', async () =
             worker_id: 'test-worker',
             capabilities: ['ltx', 'minimax'],
             current_job: jobId,
+            current_lease: firstLease.job.lease_id,
         }));
+        const reconnectAck = await takeReconnected(value => value.type === 'hello_ack');
+        assert.equal(reconnectAck.resume_current_job, false);
         const repeatedCancel = await takeReconnected(value => value.type === 'cancel');
         assert.equal(repeatedCancel.reason, 'pause');
-        await takeReconnected(value => value.type === 'hello_ack');
 
         socket.send(JSON.stringify({ type: 'event', event: 'cancelled', job_id: jobId, reason: 'pause' }));
         socket.send(JSON.stringify({ type: 'ready' }));
@@ -667,6 +669,157 @@ test('broker preserves an interrupted job at the front while paused', async () =
             value => value.body.jobs[0].status === 'failed',
         );
         assert.equal(finished.body.jobs[0].status, 'failed');
+    } finally {
+        if (socket) socket.close();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('worker restarts reuse the stored frontier plan only after lease reconciliation', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-restart-plan-'));
+    let plannerCalls = 0;
+    const plan = {
+        intent: 'A restart-safe race through a neon city.',
+        continuity_bible: 'Keep the same red hovercar and rainy neon streets.',
+        keyframe: {
+            recommended: false,
+            reason: 'Text-to-video is sufficient for this test.',
+            prompt: 'A red hovercar on a rainy neon street.',
+            motion_contract: {
+                subject_orientation: 'Facing forward.',
+                gaze_direction: 'Forward.',
+                travel_direction: 'Forward.',
+                camera_relation: 'Rear tracking view.',
+                first_second_action: 'Accelerate forward.',
+            },
+        },
+        segments: [{
+            title: 'Neon sprint', transition: 'start', target_seconds: 5, music: 'Fast synth pulse.',
+            shots: [{
+                duration_seconds: 5,
+                visual: 'The same red hovercar accelerates through rain and neon reflections.',
+                camera: 'Low rear tracking shot.',
+                audio: 'Electric motor and rain.',
+                dialogue: [],
+            }],
+        }],
+    };
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+        frontierPlanner: async () => {
+            plannerCalls += 1;
+            return plan;
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async path => {
+        const response = await fetch(base + path, {
+            headers: { authorization: 'Bearer bot-secret' },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    const requestPlan = async (jobId, leaseId) => {
+        const response = await fetch(`${base}/v1/worker/jobs/${jobId}/plan`, {
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer worker-secret',
+                'content-type': 'application/json',
+                'x-video-lease': leaseId,
+            },
+            body: '{}',
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    const connect = async (currentJob = null, currentLease = null) => {
+        const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello',
+            protocol: 1,
+            worker_id: 'restart-worker',
+            capabilities: ['minimax'],
+            current_job: currentJob,
+            current_lease: currentLease,
+        }));
+        return { socket, take };
+    };
+
+    let socket;
+    try {
+        const submitted = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax',
+                prompt: 'A hovercar races through a neon city.',
+                requester_id: 'restart-user',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'restart-message',
+                status_message_id: 'restart-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        const jobId = (await submitted.json()).job.id;
+
+        let connection = await connect();
+        socket = connection.socket;
+        const initialAck = await connection.take(value => value.type === 'hello_ack');
+        assert.equal(initialAck.resume_current_job, false);
+        const firstLease = await connection.take(value => value.type === 'job');
+        const firstPlan = await requestPlan(jobId, firstLease.job.lease_id);
+        assert.equal(firstPlan.status, 200);
+        assert.equal(firstPlan.body.cached, false);
+        assert.deepEqual(firstPlan.body.plan, plan);
+
+        socket.close();
+        await eventually(
+            () => botFetch('/v1/users/restart-user/jobs'),
+            value => value.body.jobs[0].status === 'running_disconnected',
+        );
+        connection = await connect(jobId, firstLease.job.lease_id);
+        socket = connection.socket;
+        const resumedAck = await connection.take(value => value.type === 'hello_ack');
+        assert.equal(resumedAck.resume_current_job, true);
+        const resumedPlan = await requestPlan(jobId, firstLease.job.lease_id);
+        assert.equal(resumedPlan.status, 200);
+        assert.equal(resumedPlan.body.cached, true);
+        assert.deepEqual(resumedPlan.body.plan, plan);
+
+        socket.close();
+        await eventually(
+            () => botFetch('/v1/users/restart-user/jobs'),
+            value => value.body.jobs[0].status === 'running_disconnected',
+        );
+        connection = await connect(jobId, 'stale-lease');
+        socket = connection.socket;
+        const staleAck = await connection.take(value => value.type === 'hello_ack');
+        assert.equal(staleAck.resume_current_job, false);
+        const release = await connection.take(value => value.type === 'cancel');
+        assert.equal(release.reason, 'release');
+        socket.send(JSON.stringify({ type: 'ready' }));
+        const freshLease = await connection.take(value => value.type === 'job');
+        assert.equal(freshLease.job.id, jobId);
+        assert.notEqual(freshLease.job.lease_id, firstLease.job.lease_id);
+        const freshPlan = await requestPlan(jobId, freshLease.job.lease_id);
+        assert.equal(freshPlan.status, 200);
+        assert.equal(freshPlan.body.cached, true);
+        assert.deepEqual(freshPlan.body.plan, plan);
+        assert.equal(plannerCalls, 1);
     } finally {
         if (socket) socket.close();
         await broker.stop();
