@@ -814,9 +814,11 @@ test('broker may reuse a warm model once without starving the oldest queued job'
         assert.equal(reused.job.id, warm.id);
 
         const waiting = await botFetch('/v1/users/user-ltx/jobs');
-        assert.equal(waiting.body.jobs[0].queue_position, 1);
+        assert.equal(waiting.body.jobs[0].queue_position, 2);
         assert.ok(waiting.body.jobs[0].expected_start_at > 0);
         assert.ok(waiting.body.jobs[0].expected_finish_at > waiting.body.jobs[0].expected_start_at);
+        const waitingBehindIt = await botFetch('/v1/users/user-h3-b/jobs');
+        assert.equal(waitingBehindIt.body.jobs[0].queue_position, 3);
 
         socket.send(JSON.stringify({
             type: 'event',

@@ -2807,17 +2807,17 @@ export class VideoBroker {
         // later, and the Discord copy calls those assumptions out explicitly.
         let cursor = Math.max(now, control.paused_until || now);
         const projections = new Map<string, { position: number | null; start: number | null; finish: number | null }>();
-        let queuePosition = 0;
+        let pipelinePosition = 0;
         for (const row of allActive) {
+            pipelinePosition += 1;
             const expectedRuntime = Math.max(
                 1,
                 Math.round((row.estimate_low_seconds + row.estimate_high_seconds) / 2),
             );
             if (row.status === 'queued') {
-                queuePosition += 1;
                 const start = cursor;
                 cursor += expectedRuntime;
-                projections.set(row.public_id, { position: queuePosition, start, finish: cursor });
+                projections.set(row.public_id, { position: pipelinePosition, start, finish: cursor });
             } else {
                 const admitted = row.gpu_queue_state === 'admitted' || Boolean(row.gpu_admitted_at);
                 const estimatedAdmission = row.gpu_estimated_admission_low_at
