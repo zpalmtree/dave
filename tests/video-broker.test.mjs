@@ -2040,6 +2040,17 @@ test('desktop reserves gpuq during gaming, anchors ETA to admission, and fences 
         );
         assert.ok(waiting.body.jobs[0].expected_finish_at > waiting.body.jobs[0].expected_start_at);
 
+        const queuedBehindGpuWork = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimaxfast', prompt: 'Queued behind coordinator work',
+                requester_id: 'gpuq-user-behind', origin_bot_id: 'bot-1',
+                channel_id: 'channel-1', guild_id: 'guild-1',
+                command_message_id: 'gpuq-message-behind', status_message_id: 'gpuq-status-behind',
+            }),
+        });
+        assert.equal(queuedBehindGpuWork.body.job.queue_position, 3);
+
         const admittedAt = Math.floor(Date.now() / 1000);
         socket.send(JSON.stringify({
             type: 'event', event: 'gpu_queue', job_id: lease.job.id,
