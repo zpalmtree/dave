@@ -1127,13 +1127,16 @@ test('broker prepares the next screenplay and keyframe before gpuq admission', a
         }));
         const planResponse = await workerFetch(`/v1/worker/jobs/${second.id}/plan`);
         assert.equal(planResponse.status, 200);
-        assert.equal((await planResponse.json()).cached, true);
+        const planBody = await planResponse.json();
+        assert.equal(planBody.cached, true);
+        assert.match(planBody.plan_identity, /^[0-9a-f]{64}$/);
         const frameResponse = await workerFetch(`/v1/worker/jobs/${second.id}/keyframe`);
         assert.equal(frameResponse.status, 200);
         assert.equal(frameResponse.headers.get('x-video-keyframe-provider'), 'test-provider');
         assert.equal(frameResponse.headers.get('x-video-keyframe-cached'), 'true');
         const segmentFrameResponse = await workerFetch(
             `/v1/worker/jobs/${second.id}/keyframe?segment=2&aspect=16:9`,
+            { headers: { 'x-video-plan-identity': planBody.plan_identity } },
         );
         assert.equal(segmentFrameResponse.status, 200);
         assert.equal(segmentFrameResponse.headers.get('x-video-keyframe-cached'), 'true');
@@ -1198,7 +1201,11 @@ test('broker overlaps idle-job segment prefetch with rendering and joins the in-
     const base = `http://127.0.0.1:${broker.listeningPort()}`;
     const fetchWith = (token, path, init = {}) => fetch(base + path, {
         ...init,
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+            ...(init.headers || {}),
+        },
     });
     let socket;
     try {
@@ -1228,11 +1235,35 @@ test('broker overlaps idle-job segment prefetch with rendering and joins the in-
         const lease = await take(value => value.type === 'job');
         assert.equal(lease.job.id, job.id);
         await segmentStarted;
+        const planResponse = await fetchWith(
+            'worker-secret',
+            `/v1/worker/jobs/${job.id}/plan`,
+            { method: 'POST', body: '{}' },
+        );
+        assert.equal(planResponse.status, 200);
+        const planBody = await planResponse.json();
+        assert.match(planBody.plan_identity, /^[0-9a-f]{64}$/);
+
+        const mismatch = await fetchWith(
+            'worker-secret',
+            `/v1/worker/jobs/${job.id}/keyframe?segment=2&aspect=16:9`,
+            {
+                method: 'POST',
+                body: '{}',
+                headers: { 'x-video-plan-identity': '0'.repeat(64) },
+            },
+        );
+        assert.equal(mismatch.status, 409);
+        assert.equal((await mismatch.json()).reason_code, 'plan_mismatch');
 
         const joinedResponse = fetchWith(
             'worker-secret',
             `/v1/worker/jobs/${job.id}/keyframe?segment=2&aspect=16:9`,
-            { method: 'POST', body: '{}' },
+            {
+                method: 'POST',
+                body: '{}',
+                headers: { 'x-video-plan-identity': planBody.plan_identity },
+            },
         );
         await new Promise(resolve => setTimeout(resolve, 25));
         assert.deepEqual(keyframeCalls, ['start', 'cut']);
@@ -1246,7 +1277,11 @@ test('broker overlaps idle-job segment prefetch with rendering and joins the in-
         const cached = await fetchWith(
             'worker-secret',
             `/v1/worker/jobs/${job.id}/keyframe?segment=2&aspect=16:9`,
-            { method: 'POST', body: '{}' },
+            {
+                method: 'POST',
+                body: '{}',
+                headers: { 'x-video-plan-identity': planBody.plan_identity },
+            },
         );
         assert.equal(cached.status, 200);
         assert.equal(cached.headers.get('x-video-keyframe-cached'), 'true');
@@ -1757,12 +1792,15 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.equal(secondLease.job.has_source_image, true);
         const secondPlan = await workerFetch(`/v1/worker/jobs/${second.body.job.id}/plan`);
         assert.equal(secondPlan.status, 200);
+        const secondPlanBody = await secondPlan.json();
+        assert.match(secondPlanBody.plan_identity, /^[0-9a-f]{64}$/);
         const suppliedFrame = await workerFetch(`/v1/worker/jobs/${second.body.job.id}/keyframe`);
         assert.equal(suppliedFrame.status, 200);
         assert.equal(suppliedFrame.headers.get('x-video-keyframe-provider'), 'user-attachment');
         assert.deepEqual(Buffer.from(await suppliedFrame.arrayBuffer()), attachedBytes);
         const derivedFrame = await workerFetch(
             `/v1/worker/jobs/${second.body.job.id}/keyframe?segment=2&aspect=3:4`,
+            { headers: { 'x-video-plan-identity': secondPlanBody.plan_identity } },
         );
         assert.equal(derivedFrame.status, 200);
         assert.equal(derivedFrame.headers.get('x-video-keyframe-provider'), 'derived-provider');
@@ -1770,6 +1808,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
         assert.deepEqual(Buffer.from(await derivedFrame.arrayBuffer()), derivedBytes);
         const cachedDerivedFrame = await workerFetch(
             `/v1/worker/jobs/${second.body.job.id}/keyframe?segment=2&aspect=3:4`,
+            { headers: { 'x-video-plan-identity': secondPlanBody.plan_identity } },
         );
         assert.equal(cachedDerivedFrame.status, 200);
         assert.equal(cachedDerivedFrame.headers.get('x-video-keyframe-cached'), 'true');

@@ -607,6 +607,13 @@ function imageExtension(mimeType: string): string {
     return 'png';
 }
 
+function segmentKeyframePlanIdentity(plan: Record<string, any>): string {
+    const stablePlan = { ...plan };
+    delete stablePlan.segment_keyframes;
+    delete stablePlan._segment_keyframe_planner_model;
+    return createHash('sha256').update(JSON.stringify(stablePlan)).digest('hex');
+}
+
 function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: number): Record<string, any> | null {
     const segment = Array.isArray(plan?.segments) ? plan.segments[segmentIndex - 1] : null;
     const firstShot = Array.isArray(segment?.shots) ? segment.shots[0] : null;
@@ -3455,8 +3462,10 @@ export class VideoBroker {
                 return;
             }
             if (job.planner_json) {
+                const plan = JSON.parse(job.planner_json);
                 writeJson(res, 200, {
-                    plan: JSON.parse(job.planner_json),
+                    plan,
+                    plan_identity: segmentKeyframePlanIdentity(plan),
                     planner_model: job.planner_model || VIDEO_PLANNER_MODEL,
                     cached: true,
                 });
@@ -3467,6 +3476,7 @@ export class VideoBroker {
                 await this.storePlanEstimate(job, prepared.plan);
                 writeJson(res, 200, {
                     plan: prepared.plan,
+                    plan_identity: segmentKeyframePlanIdentity(prepared.plan),
                     planner_model: prepared.plannerModel,
                     cached: false,
                 });
@@ -3531,6 +3541,7 @@ export class VideoBroker {
                 writeJson(res, 200, {
                     ok: true,
                     planner_model: LOCAL_VIDEO_PLANNER_MODEL,
+                    plan_identity: segmentKeyframePlanIdentity(plan),
                     job: (await this.views([job]))[0],
                 });
             } catch (error) {
@@ -3566,6 +3577,14 @@ export class VideoBroker {
                     return;
                 }
                 const plan = JSON.parse(job.planner_json);
+                const suppliedPlanIdentity = req.headers['x-video-plan-identity'];
+                if (suppliedPlanIdentity !== segmentKeyframePlanIdentity(plan)) {
+                    writeJson(res, 409, {
+                        error: 'Worker screenplay does not match the broker-approved screenplay.',
+                        reason_code: 'plan_mismatch',
+                    });
+                    return;
+                }
                 if (!derivedSegmentKeyframePlan(plan, segmentIndex)) {
                     res.writeHead(204, { 'cache-control': 'no-store' });
                     res.end();
