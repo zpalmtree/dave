@@ -16,6 +16,7 @@ export const VIDEO_KEYFRAME_FAST_LITE_MODEL = 'gemini-3.1-flash-lite-image';
 export const VIDEO_KEYFRAME_PROVIDER = 'gemini';
 export const VIDEO_KEYFRAME_FALLBACK_MODEL = AI_MODELS.openAIImage;
 export const VIDEO_KEYFRAME_REVIEW_MODEL = AI_MODELS.openAIChat;
+export const VIDEO_KEYFRAME_REVIEW_TIMEOUT_MS = 75_000;
 export const VIDEO_KEYFRAME_MAX_BYTES = 25 * 1024 * 1024;
 export const VIDEO_KEYFRAME_FAST_GATE_HEDGE_DELAY_MS = 12_000;
 export const VIDEO_KEYFRAME_ASPECT_RATIOS = [
@@ -86,6 +87,7 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     imageSize?: VideoKeyframeImageSize;
     abortSignal?: AbortSignal;
     fastGateHedgeDelayMs?: number;
+    reviewTimeoutMs?: number;
 }
 
 export function configuredVideoKeyframeVariant(environment: NodeJS.ProcessEnv = process.env): {
@@ -454,7 +456,15 @@ export async function reviewVideoKeyframe(
     let detail: string | undefined;
     let resolvedTier = options.serviceTier === 'fast' ? 'priority' : 'default';
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
+    let timedOut = false;
+    const reviewTimeoutMs = Math.max(
+        1,
+        options.reviewTimeoutMs ?? VIDEO_KEYFRAME_REVIEW_TIMEOUT_MS,
+    );
+    const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, reviewTimeoutMs);
     try {
         const response = await fetch('https://api.openai.com/v1/responses', {
             method: 'POST',
@@ -520,6 +530,7 @@ export async function reviewVideoKeyframe(
             }),
         });
         const body: any = await response.json();
+        clearTimeout(timeout);
         resolvedTier = resolvedOpenAIServiceTier(body, options.serviceTier);
         if (!response.ok) {
             if (body?.usage) {
@@ -570,8 +581,11 @@ export async function reviewVideoKeyframe(
         );
         return review as VideoKeyframeReview;
     } catch (error) {
-        detail = error instanceof Error ? error.message : String(error);
-        throw error;
+        const reportedError = timedOut
+            ? new Error('First-frame visual review timed out.')
+            : error;
+        detail = reportedError instanceof Error ? reportedError.message : String(reportedError);
+        throw reportedError;
     } finally {
         clearTimeout(timeout);
         await options.onAttempt?.({

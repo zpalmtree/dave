@@ -57,6 +57,7 @@ import {
     VIDEO_KEYFRAME_FAST_MODEL,
     VIDEO_KEYFRAME_MODEL,
     VIDEO_KEYFRAME_REVIEW_MODEL,
+    VIDEO_KEYFRAME_REVIEW_TIMEOUT_MS,
     configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
@@ -1292,6 +1293,7 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.equal(VIDEO_KEYFRAME_MODEL, 'gemini-3-pro-image');
     assert.equal(VIDEO_KEYFRAME_FALLBACK_MODEL, 'gpt-image-2');
     assert.equal(VIDEO_KEYFRAME_REVIEW_MODEL, 'gpt-5.6-sol');
+    assert.equal(VIDEO_KEYFRAME_REVIEW_TIMEOUT_MS, 75_000);
     const prompt = buildVideoKeyframePrompt({
         keyframe: {
             prompt: 'Three named drivers race through a colorful arcade circuit.',
@@ -1452,6 +1454,75 @@ test('serial keyframes retry generic Gemini no-image responses then use reviewed
         ['keyframe_candidate_gemini', 2, 'error', 'Gemini returned no first-frame image. finish=NO_IMAGE'],
         ['keyframe_candidate_openai', 1, 'success', undefined],
         ['keyframe_review', 1, 'accepted', undefined],
+    ]);
+});
+
+test('keyframe review timeout retries the quality gate before accepting a candidate', async t => {
+    const attempts = [];
+    let reviewCalls = 0;
+    t.mock.method(console, 'log', () => {});
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        const url = String(input);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            return new Response(JSON.stringify({
+                candidates: [{ content: { parts: [{
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: Buffer.from('reviewed-after-timeout').toString('base64'),
+                    },
+                }] } }],
+                usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            if (reviewCalls === 1) {
+                return new Promise((_resolve, reject) => {
+                    init.signal.addEventListener('abort', () => {
+                        reject(new DOMException('The operation was aborted.', 'AbortError'));
+                    }, { once: true });
+                });
+            }
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                service_tier: 'priority',
+                output_text: JSON.stringify({
+                    acceptable: true,
+                    issues: [],
+                    correction_prompt: '',
+                }),
+                usage: {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    input_tokens_details: { cached_tokens: 0 },
+                },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'A dog begins running.',
+        keyframe: { prompt: 'A dog at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The dog runs.', camera: 'Wide tracking shot.' }] }],
+    }, [], {
+        strategy: 'serial-v1',
+        serviceTier: 'fast',
+        reviewTimeoutMs: 10,
+        onAttempt: attempt => attempts.push(attempt),
+    });
+
+    assert.equal(result.reviewStatus, 'accepted');
+    assert.equal(reviewCalls, 2);
+    assert.deepEqual(attempts.map(attempt => [
+        attempt.stage,
+        attempt.attempt,
+        attempt.outcome,
+        attempt.detail,
+    ]), [
+        ['keyframe_candidate_gemini', 1, 'success', undefined],
+        ['keyframe_review', 1, 'error', 'First-frame visual review timed out.'],
+        ['keyframe_review', 2, 'accepted', undefined],
     ]);
 });
 
