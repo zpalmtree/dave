@@ -2810,6 +2810,9 @@ export class VideoBroker {
         let pipelinePosition = 0;
         for (const row of allActive) {
             pipelinePosition += 1;
+            if (row.status !== 'queued' && row.gpu_queue_position) {
+                pipelinePosition = Math.max(pipelinePosition, row.gpu_queue_position);
+            }
             const expectedRuntime = Math.max(
                 1,
                 Math.round((row.estimate_low_seconds + row.estimate_high_seconds) / 2),
