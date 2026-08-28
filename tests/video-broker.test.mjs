@@ -76,6 +76,53 @@ test('terminal replay acknowledgements cover retry and pause requeues without ac
     }), false);
 });
 
+test('broker projects a rough ETA immediately and includes earlier queued work', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-initial-eta-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const submit = async (requester, message) => {
+        const response = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax',
+                prompt: `Initial ETA test ${message}`,
+                requester_id: requester,
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: message,
+                status_message_id: `status-${message}`,
+            }),
+        });
+        return response.json();
+    };
+    try {
+        const before = Math.floor(Date.now() / 1000);
+        const first = (await submit('initial-eta-user-1', 'initial-eta-message-1')).job;
+        const second = (await submit('initial-eta-user-2', 'initial-eta-message-2')).job;
+
+        assert.equal(first.worker_online, false);
+        assert.equal(first.estimate_ready, false);
+        assert.equal(first.queue_position, 1);
+        assert.ok(first.expected_start_at >= before);
+        assert.equal(first.expected_finish_at - first.expected_start_at, 1200);
+        assert.equal(second.queue_position, 2);
+        assert.equal(second.expected_start_at, first.expected_finish_at);
+        assert.equal(second.expected_finish_at - second.expected_start_at, 1200);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('broker keeps the measured end-to-end runtime on the completed job', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-runtime-'));
     const broker = new VideoBroker({
@@ -288,7 +335,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             () => botFetch('/v1/users/runtime-user-2/jobs'),
             value => value.body.jobs[0].gpu_queue_state === 'queued',
         );
-        assert.equal(waitingForGpu.body.jobs[0].expected_finish_at, null);
+        assert.ok(waitingForGpu.body.jobs[0].expected_finish_at > Math.floor(Date.now() / 1000));
         const admittedAt = Math.floor(Date.now() / 1000);
         socket.send(JSON.stringify({
             type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
@@ -493,7 +540,8 @@ test('broker preserves an interrupted job at the front while paused', async () =
         assert.equal(submitted.status, 201);
         assert.equal(submitted.body.job.queue_position, 1);
         assert.equal(submitted.body.job.worker_online, false);
-        assert.equal(submitted.body.job.expected_start_at, null);
+        assert.ok(submitted.body.job.expected_start_at > 0);
+        assert.ok(submitted.body.job.expected_finish_at > submitted.body.job.expected_start_at);
         const jobId = submitted.body.job.id;
 
         socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
@@ -570,8 +618,8 @@ test('broker preserves an interrupted job at the front while paused', async () =
         assert.equal(duringPause.body.jobs[0].status, 'queued');
         assert.equal(duringPause.body.jobs[0].queue_position, 1);
         assert.ok(duringPause.body.jobs[0].paused_until);
-        assert.equal(duringPause.body.jobs[0].expected_start_at, null);
-        assert.equal(duringPause.body.jobs[0].expected_finish_at, null);
+        assert.equal(duringPause.body.jobs[0].expected_start_at, duringPause.body.jobs[0].paused_until);
+        assert.ok(duringPause.body.jobs[0].expected_finish_at > duringPause.body.jobs[0].expected_start_at);
 
         const second = await botFetch('/v1/jobs', {
             method: 'POST',
@@ -757,7 +805,8 @@ test('broker may reuse a warm model once without starving the oldest queued job'
 
         const waiting = await botFetch('/v1/users/user-ltx/jobs');
         assert.equal(waiting.body.jobs[0].queue_position, 1);
-        assert.equal(waiting.body.jobs[0].expected_start_at, null);
+        assert.ok(waiting.body.jobs[0].expected_start_at > 0);
+        assert.ok(waiting.body.jobs[0].expected_finish_at > waiting.body.jobs[0].expected_start_at);
 
         socket.send(JSON.stringify({
             type: 'event',
@@ -1964,8 +2013,8 @@ test('desktop reserves gpuq during gaming, anchors ETA to admission, and fences 
             () => botFetch(`/v1/users/gpuq-user/jobs`),
             value => value.body.jobs[0].gpu_queue_state === 'queued',
         );
-        assert.equal(waiting.body.jobs[0].expected_start_at, null);
-        assert.equal(waiting.body.jobs[0].expected_finish_at, null);
+        assert.ok(waiting.body.jobs[0].expected_start_at > 0);
+        assert.ok(waiting.body.jobs[0].expected_finish_at > waiting.body.jobs[0].expected_start_at);
 
         const admittedAt = Math.floor(Date.now() / 1000);
         socket.send(JSON.stringify({

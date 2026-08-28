@@ -2761,11 +2761,15 @@ export class VideoBroker {
         );
         const control = await this.control();
         const online = Boolean(this.worker);
-        // A dispatch drain only blocks future leases. It must not erase the ETA
-        // of work the desktop is already rendering.
-        const canEstimateActive = online && !control.paused_until;
         const busy = Boolean(this.worker?.currentJob);
         const now = nowSeconds();
+        // Keep a deliberately rough projection available before planning and GPU
+        // admission. Runtime history gives every job a usable initial estimate;
+        // later plan-aware estimates and actual GPU admission refine the same
+        // timeline. Pauses with a known end anchor the projection there. An
+        // offline worker, a dispatch drain, or unrelated gpuq work can move it
+        // later, and the Discord copy calls those assumptions out explicitly.
+        let cursor = Math.max(now, control.paused_until || now);
         const projections = new Map<string, { position: number | null; start: number | null; finish: number | null }>();
         let queuePosition = 0;
         for (const row of allActive) {
@@ -2775,17 +2779,16 @@ export class VideoBroker {
             );
             if (row.status === 'queued') {
                 queuePosition += 1;
-                // Jobs that have not reached the desktop do not have a gpuq reservation yet.
-                // Projecting them would omit unrelated GPU work that can already be ahead.
-                projections.set(row.public_id, { position: queuePosition, start: null, finish: null });
+                const start = cursor;
+                cursor += expectedRuntime;
+                projections.set(row.public_id, { position: queuePosition, start, finish: cursor });
             } else {
-                if (!canEstimateActive || row.gpu_queue_state === 'submitting'
-                    || row.gpu_queue_state === 'queued') {
-                    projections.set(row.public_id, { position: null, start: null, finish: null });
-                    continue;
-                }
-                const start = row.gpu_admitted_at || row.started_at || now;
+                const admitted = row.gpu_queue_state === 'admitted' || Boolean(row.gpu_admitted_at);
+                const start = admitted
+                    ? row.gpu_admitted_at || row.started_at || now
+                    : cursor;
                 const finish = Math.max(now + 30, start + expectedRuntime);
+                cursor = Math.max(cursor, finish);
                 projections.set(row.public_id, { position: null, start, finish });
             }
         }

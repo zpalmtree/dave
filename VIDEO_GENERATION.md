@@ -18,9 +18,12 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 - `$videogen resume` resumes dispatch.
 - `$videogen cancel <short-id>` cancels any job as the owner.
 
-Jobs can be submitted while the desktop is offline or generation is paused. In
-those states Dave deliberately omits ETA. The queue accepts at most three
-unfinished jobs per user and twenty globally.
+Jobs can be submitted while the desktop is offline or generation is paused. Dave
+always shows a rough ETA from model history and current bot queue depth, including
+on the first acknowledgement. Plan-aware timing refines it later. Offline,
+dispatch-paused, and desktop GPU-queue states are labeled with the assumption
+behind the projection. The queue accepts at most three unfinished jobs per user
+and twenty globally.
 
 If Windows records an NVIDIA `nvlddmkm` recovery while a render fails, the
 desktop worker treats it as a GPU-driver reset rather than an ordinary retry.
@@ -88,9 +91,10 @@ for a durable `gpuq` reservation. Cloud preparation therefore overlaps the
 previous render and never occupies GPU queue time. If cloud planning is rejected
 or unavailable, the worker reserves the GPU before starting the local Qwen
 fallback. The reservation may wait behind other desktop GPU work and then owns
-every local model process through rendering. Discord omits a render-only completion time while the
-reservation is waiting and anchors the ETA to GPU admission afterward, so the
-reported completion includes time already spent in the desktop GPU queue.
+every local model process through rendering. Discord shows a rough historical
+completion projection while the reservation is waiting, with an explicit warning
+that unrelated GPU work can move it later. Once admitted, the ETA anchors to
+actual GPU admission and becomes more precise.
 
 ## Optimization experiments
 
