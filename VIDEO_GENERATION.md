@@ -153,7 +153,7 @@ The report promotes nothing unless one candidate receives a majority of acceptab
 votes; missing literal dialogue or another hard requirement therefore blocks an
 otherwise attractive speed result.
 
-Discord delivery copies are compressed below 9.5 MiB. Server copies expire after
+Discord delivery copies are compressed below 49.5 MiB. Server copies expire after
 24 hours; complete desktop generation directories expire after seven days.
 
 ## First-frame continuity

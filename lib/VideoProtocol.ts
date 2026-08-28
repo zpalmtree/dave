@@ -2,7 +2,7 @@ export const VIDEO_PROTOCOL_VERSION = 1;
 export const VIDEO_IMAGE_ONLY_AUTO_PROMPT = 'Image-only auto-direction: inspect the supplied image and create the most natural short motion continuation.';
 export const VIDEO_MAX_USER_JOBS = 3;
 export const VIDEO_MAX_GLOBAL_JOBS = 20;
-export const VIDEO_RESULT_MAX_BYTES = 10 * 1024 * 1024;
+export const VIDEO_RESULT_MAX_BYTES = 50 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
