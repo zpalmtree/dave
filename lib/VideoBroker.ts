@@ -2929,8 +2929,14 @@ export class VideoBroker {
                         scheduler: workerScheduler(hello.scheduler),
                     };
                     initialized = true;
-                    await this.reconcileWorker(hello);
-                    this.sendWorker({ type: 'hello_ack', protocol: VIDEO_PROTOCOL_VERSION, state: await this.brokerState() });
+                    const reconciliation = await this.reconcileWorker(hello);
+                    this.sendWorker({
+                        type: 'hello_ack',
+                        protocol: VIDEO_PROTOCOL_VERSION,
+                        state: await this.brokerState(),
+                        resume_current_job: reconciliation.resumeCurrentJob,
+                    });
+                    if (reconciliation.cancel) this.sendWorker(reconciliation.cancel);
                     if (!hello.current_job) {
                         const control = await this.control();
                         if (control.paused_until) {
@@ -2957,7 +2963,10 @@ export class VideoBroker {
         socket.on('error', error => console.error('Video worker socket error', error));
     }
 
-    private async reconcileWorker(hello: VideoWorkerHello): Promise<void> {
+    private async reconcileWorker(hello: VideoWorkerHello): Promise<{
+        resumeCurrentJob: boolean;
+        cancel?: { type: 'cancel'; job_id: string; reason: 'pause' | 'user' | 'release' | 'orphan' };
+    }> {
         if (hello.estimates) {
             for (const [model, estimate] of Object.entries(hello.estimates)) {
                 if (!isVideoModel(model) || !estimate) continue;
@@ -2970,30 +2979,56 @@ export class VideoBroker {
         }
         if (hello.current_job) {
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [hello.current_job]);
-            const leaseMatches = !row?.lease_token || !hello.current_lease
-                || row.lease_token === hello.current_lease;
+            const leaseMatches = Boolean(row)
+                && (row!.lease_token
+                    ? row!.lease_token === hello.current_lease
+                    : !hello.current_lease);
             if (row && ACTIVE_VIDEO_STATUSES.includes(row.status) && leaseMatches) {
                 if (row.status === 'pausing' || row.status === 'cancelling') {
-                    this.sendWorker({
-                        type: 'cancel',
-                        job_id: hello.current_job,
-                        reason: row.status === 'pausing' ? 'pause' : 'user',
-                    });
-                    return;
+                    return {
+                        resumeCurrentJob: false,
+                        cancel: {
+                            type: 'cancel',
+                            job_id: hello.current_job,
+                            reason: row.status === 'pausing' ? 'pause' : 'user',
+                        },
+                    };
                 }
                 await this.run(
                     `UPDATE video_jobs SET status = 'running', worker_id = ?, lease_expires_at = ?, updated_at = ?
                      WHERE public_id = ?`,
                     [hello.worker_id, nowSeconds() + 60, nowSeconds(), hello.current_job],
                 );
-                return;
+                return { resumeCurrentJob: true };
             }
-            this.sendWorker({
-                type: 'cancel',
-                job_id: hello.current_job,
-                reason: row ? 'release' : 'orphan',
-            });
-            return;
+            if (row && ACTIVE_VIDEO_STATUSES.includes(row.status)
+                && row.worker_id === hello.worker_id) {
+                await this.run(
+                    `UPDATE video_jobs SET status = 'queued', stage = 'Resuming with a fresh worker lease',
+                     progress = NULL, worker_id = NULL, lease_expires_at = NULL, lease_token = NULL,
+                     gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
+                     gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                     gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+                     gpu_estimated_admission_low_at = NULL,
+                     gpu_estimated_admission_high_at = NULL, updated_at = ?
+                     WHERE public_id = ? AND worker_id = ? AND lease_token = ?
+                     AND status IN (${ACTIVE_SQL})`,
+                    [
+                        nowSeconds(),
+                        hello.current_job,
+                        hello.worker_id,
+                        row.lease_token,
+                    ],
+                );
+            }
+            return {
+                resumeCurrentJob: false,
+                cancel: {
+                    type: 'cancel',
+                    job_id: hello.current_job,
+                    reason: row ? 'release' : 'orphan',
+                },
+            };
         }
         const disconnected = await this.get<JobRow>(
             `SELECT * FROM video_jobs WHERE status = 'running_disconnected' ORDER BY id ASC LIMIT 1`,
@@ -3009,6 +3044,7 @@ export class VideoBroker {
                 [nowSeconds(), disconnected.public_id],
             );
         }
+        return { resumeCurrentJob: false };
     }
 
     private async handleWorkerMessage(message: any): Promise<void> {
