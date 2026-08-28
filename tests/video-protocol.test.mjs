@@ -284,6 +284,7 @@ test('video replies preserve the full accepted prompt', () => {
         model: 'minimax',
         runtime_seconds: 65.6,
         prompt,
+        prompt_tease: 'Pervert.',
         generation_notice: 'The screenplay was prepared successfully.',
         error: 'A detailed worker failure occurred while preparing the requested video. '.repeat(20),
         status: 'queued',
@@ -302,6 +303,7 @@ test('video replies preserve the full accepted prompt', () => {
         failedVideoPost(job),
     ]) {
         assert.ok(reply.length <= 1999);
+        assert.match(reply, /Pervert\./);
         assert.ok(reply.endsWith(`> ${prompt}`));
     }
 });

@@ -109,6 +109,11 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         output: 3.75,
         cacheRead: 0.075,
     },
+    'gemini-3.5-flash-lite': {
+        input: 0.30,
+        output: 2.50,
+        cacheRead: 0.03,
+    },
     'gemini-3-pro-image': {
         input: 2,
         output: 12,

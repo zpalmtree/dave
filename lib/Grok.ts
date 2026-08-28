@@ -16,6 +16,7 @@ import {
 } from './GrokResponse.js';
 import { recordTokenSpend } from './TokenSpend.js';
 import { AI_MODELS, AI_REQUEST_TIMEOUTS } from './AIModels.js';
+import { classifyPromptTease } from './PromptTease.js';
 
 /* Handles both xAI usage shapes - the responses endpoint reports
  * input_tokens/output_tokens, chat/completions reports
@@ -548,6 +549,7 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
 
     const sourceImageURLs = getImageURLsFromMessage(msg, repliedMessage)
         .slice(0, MAX_GROK_IMAGE_EDIT_SOURCES);
+    const promptTease = classifyPromptTease(effectivePrompt);
 
     const response = await withTyping(msg.channel, async () => {
         return generateGrokImage(effectivePrompt, sourceImageURLs);
@@ -571,7 +573,11 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
         }
 
         const attachment = new AttachmentBuilder(buffer, { name: 'image.jpg' });
-        await msg.reply({ files: [attachment] });
+        const tease = await promptTease;
+        await msg.reply({
+            files: [attachment],
+            ...(tease ? { content: tease } : {}),
+        });
     } else if (response.error) {
         await msg.reply(response.error);
     }

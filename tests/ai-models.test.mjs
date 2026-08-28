@@ -14,6 +14,7 @@ test('uses the audited production model for each provider capability', () => {
         openAITranscription: 'gpt-transcribe',
         openAIImage: 'gpt-image-2',
         geminiChat: 'gemini-3.7-flash',
+        geminiPromptClassifier: 'gemini-3.5-flash-lite',
         geminiImage: 'gemini-3-pro-image',
         grokChat: 'grok-4.6',
         grokSummary: 'grok-4.5-latest',

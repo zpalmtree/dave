@@ -23,6 +23,7 @@ import {
 import { formatProviderApiError } from './ApiErrors.js';
 import { recordTokenSpend } from './TokenSpend.js';
 import { AI_MODELS } from './AIModels.js';
+import { classifyPromptTease } from './PromptTease.js';
 
 function recordGeminiUsage(
     model: string,
@@ -484,6 +485,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
 
         // Route image-only requests to the image model directly
         if (imageOnly) {
+            const promptTease = classifyPromptTease(fullPrompt);
             let sourceImages: ImageData[] | null = null;
             if (imageURLs.length > 0) {
                 const collectedImages: ImageData[] = [];
@@ -517,7 +519,11 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             const attachments = imagePaths.map((imagePath) => new AttachmentBuilder(imagePath)
                 .setName(imagePath.split('/').pop() || 'generated-image.png'));
 
-            await msg.reply({ files: attachments });
+            const tease = await promptTease;
+            await msg.reply({
+                files: attachments,
+                ...(tease ? { content: tease } : {}),
+            });
 
             for (const imagePath of imagePaths) {
                 const fs = await import('fs/promises');
@@ -885,6 +891,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
         if (contextMessage && contextMessage.content.trim()) {
             fullPrompt = contextMessage.content.trim() + '\n' + args;
         }
+        const promptTease = classifyPromptTease(fullPrompt);
 
         // Generate multiple images
         if (imageURLs.length > 0) {
@@ -943,8 +950,10 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
             attachments.push(attachment);
         }
 
+        const tease = await promptTease;
         await msg.reply({
             files: attachments,
+            ...(tease ? { content: tease } : {}),
         });
     } catch (error: unknown) {
         console.error("Error in Gemini image generation:", error);

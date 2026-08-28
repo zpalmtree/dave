@@ -17,6 +17,7 @@ import { loadVideoSettings } from './VideoSettings.js';
 import { config } from './Config.js';
 import { recordExternalTokenSpend } from './TokenSpend.js';
 import { VideoUsageEvent } from './VideoUsage.js';
+import { classifyPromptTease } from './PromptTease.js';
 
 interface BrokerState {
     worker_online: boolean;
@@ -89,8 +90,12 @@ const DISCORD_MESSAGE_CONTENT_LIMIT = 1999;
 function formatVideoReplyWithFullPrompt(prefix: string, job: VideoJobView): string {
     const direction = videoJobDirection(job);
     const separator = '\n> ';
-    const availablePrefixLength = DISCORD_MESSAGE_CONTENT_LIMIT - separator.length - direction.length;
-    return `${truncatePrompt(prefix, availablePrefixLength)}${separator}${direction}`;
+    const tease = job.prompt_tease ? `\n${job.prompt_tease}` : '';
+    const availablePrefixLength = DISCORD_MESSAGE_CONTENT_LIMIT
+        - separator.length
+        - direction.length
+        - tease.length;
+    return `${truncatePrompt(prefix, availablePrefixLength)}${tease}${separator}${direction}`;
 }
 
 const DEFAULT_SINGLE_VIDEO_RESPONDER_CHANNEL_ID = '483470443001413675';
@@ -701,6 +706,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
+    const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(initialVideoRequestStatus(model));
     try {
         const response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
@@ -719,6 +725,19 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
         }, 45_000);
         let job = response.job;
         await pending.edit({ content: formatVideoStatusPost(job) });
+        const tease = await promptTease;
+        if (tease) {
+            try {
+                const updated = await brokerRequest<{ job: VideoJobView }>(
+                    `/v1/jobs/${job.id}/prompt-tease`,
+                    { method: 'POST', body: JSON.stringify({ prompt_tease: tease }) },
+                );
+                job = updated.job;
+                await pending.edit({ content: formatVideoStatusPost(job) });
+            } catch (error) {
+                console.warn(`[Video] Could not attach prompt tease to ${job.id}: ${String(error)}`);
+            }
+        }
         try {
             const prepared = await brokerRequest<{ job: VideoJobView }>(
                 `/v1/jobs/${job.id}/prepare`,

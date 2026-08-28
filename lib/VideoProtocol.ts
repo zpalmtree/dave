@@ -170,6 +170,7 @@ export interface VideoJobView {
     id: string;
     model: VideoModelId;
     prompt: string;
+    prompt_tease?: string | null;
     planned_intent?: string | null;
     generation_notice?: string | null;
     requester_id: string;
