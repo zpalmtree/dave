@@ -321,7 +321,16 @@ export function formatVideoJob(job: VideoJobView): string {
             return `${head}\n**Reserving this video's GPU queue position.**${timing} Planning and rendering will run under the same reservation; admission can move the estimate later.`;
         }
         if (job.gpu_queue_state === 'queued') {
-            return `${head}\n**Waiting in the GPU queue.**${timing} Its position is reserved, but unrelated GPU work can move the estimate later.`;
+            const position = job.gpu_queue_position && job.gpu_queue_position > 0
+                ? ` GPU queue position: **${job.gpu_queue_position}**.`
+                : '';
+            const ahead = job.gpu_queue_jobs_ahead !== null && job.gpu_queue_jobs_ahead !== undefined
+                ? ` **${job.gpu_queue_jobs_ahead}** job${job.gpu_queue_jobs_ahead === 1 ? '' : 's'} ahead.`
+                : '';
+            const basis = job.gpu_estimated_admission_low_at || job.gpu_estimated_admission_high_at
+                ? ' The completion estimate includes the GPU work currently ahead; higher-priority submissions or external GPU pressure can still delay it.'
+                : ' The GPU coordinator has not provided a work-ahead estimate yet, so this currently assumes admission now.';
+            return `${head}\n**Waiting in the GPU queue.**${position}${ahead}${timing}${basis}`;
         }
         const progress = percentage(job.progress);
         const processing = progress

@@ -547,11 +547,17 @@ test('active video status shows only rough progress and one completion ETA', () 
         gpu_queue_state: 'queued',
         gpu_admitted_at: null,
         gpu_queue_wait_seconds: null,
+        gpu_queue_position: 3,
+        gpu_queue_jobs_ahead: 2,
+        gpu_estimated_admission_low_at: 2_000_000_120,
+        gpu_estimated_admission_high_at: 2_000_000_240,
     });
     assert.match(waiting, /Waiting in the GPU queue/);
-    assert.match(waiting, /position is reserved/);
+    assert.match(waiting, /GPU queue position: \*\*3\*\*/);
+    assert.match(waiting, /\*\*2\*\* jobs ahead/);
     assert.match(waiting, /Rough render ETA: \*\*2m–5m\*\*/);
-    assert.match(waiting, /unrelated GPU work can move/);
+    assert.match(waiting, /includes the GPU work currently ahead/);
+    assert.match(waiting, /higher-priority submissions or external GPU pressure/);
     assert.doesNotMatch(waiting, /Estimated completion <t:/);
 });
 

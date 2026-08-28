@@ -92,9 +92,11 @@ previous render and never occupies GPU queue time. If cloud planning is rejected
 or unavailable, the worker reserves the GPU before starting the local Qwen
 fallback. The reservation may wait behind other desktop GPU work and then owns
 every local model process through rendering. Discord shows a rough historical
-completion projection while the reservation is waiting, with an explicit warning
-that unrelated GPU work can move it later. Once admitted, the ETA anchors to
-actual GPU admission and becomes more precise.
+completion projection while the reservation is waiting. The desktop coordinator
+adds the declared or historically estimated duration of each job currently ahead
+and reports GPU queue position plus an admission window. Higher-priority future
+submissions and unmanaged GPU pressure remain explicit sources of uncertainty.
+Once admitted, the ETA anchors to actual GPU admission and becomes more precise.
 
 ## Optimization experiments
 
