@@ -889,6 +889,9 @@ test('single-pass frontier planner streams a complete provisional keyframe befor
         prompt_analysis: frontierAnalysis(),
         plan: frontierPlan(),
     };
+    combined.plan.keyframe.prompt = 'A left-facing brown dog poised to run screen right.';
+    const expectedKeyframe = structuredClone(combined.plan.keyframe);
+    reconcileFrontierKeyframeMotionGeometry({ keyframe: expectedKeyframe });
     const outputText = JSON.stringify(combined);
     const requests = [];
     const provisionalValues = [];
@@ -932,7 +935,7 @@ test('single-pass frontier planner streams a complete provisional keyframe befor
         assert.equal(requests[0].stream, true);
         assert.equal(provisionalValues.length, 1);
         assert.deepEqual(provisionalValues[0].promptAnalysis, combined.prompt_analysis);
-        assert.deepEqual(provisionalValues[0].keyframe, combined.plan.keyframe);
+        assert.deepEqual(provisionalValues[0].keyframe, expectedKeyframe);
         streamController.enqueue(new TextEncoder().encode(
             `event: response.completed\ndata: ${JSON.stringify({
                 type: 'response.completed',
@@ -952,7 +955,7 @@ test('single-pass frontier planner streams a complete provisional keyframe befor
         streamController.close();
         const result = await planning;
         assert.equal(result.planner_metrics.single_pass, true);
-        assert.deepEqual(result.keyframe, combined.plan.keyframe);
+        assert.deepEqual(result.keyframe, expectedKeyframe);
     } finally {
         globalThis.fetch = originalFetch;
         try {

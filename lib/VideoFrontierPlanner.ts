@@ -1191,6 +1191,10 @@ function provisionalKeyframeFromOutput(outputText: string): {
             'camera_relation',
             'first_second_action',
         ].every(field => typeof keyframe.motion_contract[field] === 'string')) return null;
+    // Finalized plans apply this same deterministic repair before keyframe
+    // generation. Applying it to the streamed object avoids throwing away an
+    // otherwise identical candidate without weakening the final identity gate.
+    reconcileFrontierKeyframeMotionGeometry({ keyframe });
     return { promptAnalysis, keyframe };
 }
 
