@@ -297,15 +297,16 @@ test('video replies preserve the full accepted prompt', () => {
         has_source_image: false,
     };
 
-    for (const reply of [
-        formatVideoStatusPost(job),
-        completedVideoPost(job),
-        failedVideoPost(job),
-    ]) {
+    const status = formatVideoStatusPost(job);
+    const completed = completedVideoPost(job);
+    const failed = failedVideoPost(job);
+    for (const reply of [status, completed, failed]) {
         assert.ok(reply.length <= 1999);
-        assert.match(reply, /Pervert\./);
         assert.ok(reply.endsWith(`> ${prompt}`));
     }
+    assert.doesNotMatch(status, /Pervert/);
+    assert.match(completed, /\nPervert\.\n> /);
+    assert.doesNotMatch(failed, /Pervert/);
 });
 
 test('failed video post is a standalone sanitized reply', () => {

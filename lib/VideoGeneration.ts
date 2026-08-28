@@ -87,10 +87,14 @@ function truncatePrompt(prompt: string, length = 180): string {
 
 const DISCORD_MESSAGE_CONTENT_LIMIT = 1999;
 
-function formatVideoReplyWithFullPrompt(prefix: string, job: VideoJobView): string {
+function formatVideoReplyWithFullPrompt(
+    prefix: string,
+    job: VideoJobView,
+    includePromptTease = false,
+): string {
     const direction = videoJobDirection(job);
     const separator = '\n> ';
-    const tease = job.prompt_tease ? `\n${job.prompt_tease}` : '';
+    const tease = includePromptTease && job.prompt_tease ? `\n${job.prompt_tease}` : '';
     const availablePrefixLength = DISCORD_MESSAGE_CONTENT_LIMIT
         - separator.length
         - direction.length
@@ -166,7 +170,7 @@ export function completedVideoPost(job: VideoJobView): string {
     const result = `${videoModelDisplayName(job.model)} video **${shortJobId(job.id)}** is ready${
         runtime ? ` — completed in **${runtime}**` : ''
     }.${notice ? `\n**Note:** ${notice}` : ''}`;
-    return formatVideoReplyWithFullPrompt(result, job);
+    return formatVideoReplyWithFullPrompt(result, job, true);
 }
 
 function videoFailureDetail(job: VideoJobView, maxLength: number): string {
