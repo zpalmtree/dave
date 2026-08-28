@@ -333,6 +333,8 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         socket.send(JSON.stringify({ type: 'ready', warm_model: 'h3' }));
         const learnedLease = await take(value => value.type === 'job');
         assert.equal(learnedLease.job.id, learned.body.job.id);
+        assert.equal(learnedLease.job.estimate_low_seconds, 57);
+        assert.equal(learnedLease.job.estimate_high_seconds, 197);
         const submittedAt = Math.floor(Date.now() / 1000) - 120;
         socket.send(JSON.stringify({
             type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
@@ -2012,16 +2014,28 @@ test('desktop reserves gpuq during gaming, anchors ETA to admission, and fences 
         assert.equal(lease.job.id, submitted.body.job.id);
         assert.match(lease.job.lease_id, /^[0-9a-f-]{36}$/);
         const submittedAt = Math.floor(Date.now() / 1000) - 90;
+        const estimatedAdmissionLow = Math.floor(Date.now() / 1000) + 300;
+        const estimatedAdmissionHigh = estimatedAdmissionLow + 300;
         socket.send(JSON.stringify({
             type: 'event', event: 'gpu_queue', job_id: lease.job.id,
             state: 'queued', submitted_at: submittedAt,
+            queue_position: 2, jobs_ahead: 1,
+            estimated_admission_low_at: estimatedAdmissionLow,
+            estimated_admission_high_at: estimatedAdmissionHigh,
             stage: 'Waiting for GPU queue admission',
         }));
         const waiting = await eventually(
             () => botFetch(`/v1/users/gpuq-user/jobs`),
             value => value.body.jobs[0].gpu_queue_state === 'queued',
         );
-        assert.ok(waiting.body.jobs[0].expected_start_at > 0);
+        assert.equal(waiting.body.jobs[0].gpu_queue_position, 2);
+        assert.equal(waiting.body.jobs[0].gpu_queue_jobs_ahead, 1);
+        assert.equal(waiting.body.jobs[0].gpu_estimated_admission_low_at, estimatedAdmissionLow);
+        assert.equal(waiting.body.jobs[0].gpu_estimated_admission_high_at, estimatedAdmissionHigh);
+        assert.equal(
+            waiting.body.jobs[0].expected_start_at,
+            Math.round((estimatedAdmissionLow + estimatedAdmissionHigh) / 2),
+        );
         assert.ok(waiting.body.jobs[0].expected_finish_at > waiting.body.jobs[0].expected_start_at);
 
         const admittedAt = Math.floor(Date.now() / 1000);

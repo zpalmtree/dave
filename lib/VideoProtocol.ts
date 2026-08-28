@@ -209,6 +209,10 @@ export interface VideoJobView {
     gpu_queue_submitted_at?: number | null;
     gpu_admitted_at?: number | null;
     gpu_queue_wait_seconds?: number | null;
+    gpu_queue_position?: number | null;
+    gpu_queue_jobs_ahead?: number | null;
+    gpu_estimated_admission_low_at?: number | null;
+    gpu_estimated_admission_high_at?: number | null;
 }
 
 export interface VideoWorkerHello {

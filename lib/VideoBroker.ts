@@ -161,6 +161,10 @@ interface JobRow {
     gpu_queue_submitted_at: number | null;
     gpu_admitted_at: number | null;
     gpu_queue_wait_seconds: number | null;
+    gpu_queue_position: number | null;
+    gpu_queue_jobs_ahead: number | null;
+    gpu_estimated_admission_low_at: number | null;
+    gpu_estimated_admission_high_at: number | null;
     result_path: string | null;
     result_sha256: string | null;
     result_bytes: number | null;
@@ -892,6 +896,10 @@ export class VideoBroker {
             gpu_queue_submitted_at INTEGER,
             gpu_admitted_at INTEGER,
             gpu_queue_wait_seconds INTEGER,
+            gpu_queue_position INTEGER,
+            gpu_queue_jobs_ahead INTEGER,
+            gpu_estimated_admission_low_at INTEGER,
+            gpu_estimated_admission_high_at INTEGER,
             result_path TEXT,
             result_sha256 TEXT,
             result_bytes INTEGER,
@@ -957,6 +965,10 @@ export class VideoBroker {
             ['gpu_queue_submitted_at', 'INTEGER'],
             ['gpu_admitted_at', 'INTEGER'],
             ['gpu_queue_wait_seconds', 'INTEGER'],
+            ['gpu_queue_position', 'INTEGER'],
+            ['gpu_queue_jobs_ahead', 'INTEGER'],
+            ['gpu_estimated_admission_low_at', 'INTEGER'],
+            ['gpu_estimated_admission_high_at', 'INTEGER'],
         ] as const) {
             if (!columnNames.has(name)) {
                 await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
@@ -2808,9 +2820,13 @@ export class VideoBroker {
                 projections.set(row.public_id, { position: queuePosition, start, finish: cursor });
             } else {
                 const admitted = row.gpu_queue_state === 'admitted' || Boolean(row.gpu_admitted_at);
+                const estimatedAdmission = row.gpu_estimated_admission_low_at
+                    && row.gpu_estimated_admission_high_at
+                    ? Math.round((row.gpu_estimated_admission_low_at + row.gpu_estimated_admission_high_at) / 2)
+                    : row.gpu_estimated_admission_high_at || row.gpu_estimated_admission_low_at;
                 const start = admitted
                     ? row.gpu_admitted_at || row.started_at || now
-                    : cursor;
+                    : Math.max(cursor, estimatedAdmission || cursor);
                 const finish = Math.max(now + 30, start + expectedRuntime);
                 cursor = Math.max(cursor, finish);
                 projections.set(row.public_id, { position: null, start, finish });
@@ -2861,6 +2877,10 @@ export class VideoBroker {
                 gpu_queue_submitted_at: row.gpu_queue_submitted_at,
                 gpu_admitted_at: row.gpu_admitted_at,
                 gpu_queue_wait_seconds: row.gpu_queue_wait_seconds,
+                gpu_queue_position: row.gpu_queue_position,
+                gpu_queue_jobs_ahead: row.gpu_queue_jobs_ahead,
+                gpu_estimated_admission_low_at: row.gpu_estimated_admission_low_at,
+                gpu_estimated_admission_high_at: row.gpu_estimated_admission_high_at,
             };
         });
     }
@@ -2980,6 +3000,8 @@ export class VideoBroker {
                 `UPDATE video_jobs SET status = 'queued', stage = 'Resuming after reconnect', progress = NULL,
                  worker_id = NULL, lease_expires_at = NULL, gpu_queue_state = NULL,
                  gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                 gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+                 gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
                  updated_at = ? WHERE public_id = ?`,
                 [nowSeconds(), disconnected.public_id],
             );
@@ -3059,17 +3081,40 @@ export class VideoBroker {
                 const queueWait = admittedAt === null
                     ? null
                     : Math.max(0, Math.round(Number(message.queue_wait_seconds) || admittedAt - submittedAt));
+                const queuePosition = state === 'queued' && Number.isFinite(Number(message.queue_position))
+                    ? Math.max(1, Math.min(10_000, Math.round(Number(message.queue_position))))
+                    : null;
+                const jobsAhead = state === 'queued' && Number.isFinite(Number(message.jobs_ahead))
+                    ? Math.max(0, Math.min(9_999, Math.round(Number(message.jobs_ahead))))
+                    : null;
+                const latestEstimate = now + 365 * 24 * 60 * 60;
+                const admissionLow = state === 'queued' && Number.isFinite(Number(message.estimated_admission_low_at))
+                    ? Math.max(now - 60, Math.min(latestEstimate, Math.round(Number(message.estimated_admission_low_at))))
+                    : null;
+                const admissionHighCandidate = state === 'queued'
+                    && Number.isFinite(Number(message.estimated_admission_high_at))
+                    ? Math.max(now - 60, Math.min(latestEstimate, Math.round(Number(message.estimated_admission_high_at))))
+                    : null;
+                const admissionHigh = admissionHighCandidate === null
+                    ? null
+                    : Math.max(admissionLow || now - 60, admissionHighCandidate);
                 await this.run(
                     `UPDATE video_jobs SET gpu_queue_state = ?,
                      gpu_queue_submitted_at = COALESCE(gpu_queue_submitted_at, ?),
                      gpu_admitted_at = COALESCE(gpu_admitted_at, ?),
                      gpu_queue_wait_seconds = COALESCE(gpu_queue_wait_seconds, ?),
+                     gpu_queue_position = ?, gpu_queue_jobs_ahead = ?,
+                     gpu_estimated_admission_low_at = ?, gpu_estimated_admission_high_at = ?,
                      stage = ?, lease_expires_at = ?, updated_at = ? WHERE public_id = ?`,
                     [
                         state,
                         submittedAt,
                         admittedAt,
                         queueWait,
+                        queuePosition,
+                        jobsAhead,
+                        admissionLow,
+                        admissionHigh,
                         sanitizeVideoWorkerText(
                             message.stage,
                             state === 'admitted' ? 'GPU admitted; starting video render' : 'Waiting for GPU queue admission',
@@ -3145,6 +3190,8 @@ export class VideoBroker {
                         ? `UPDATE video_jobs SET status = 'queued', stage = 'Paused for desktop use', progress = NULL,
                            worker_id = NULL, lease_expires_at = NULL, gpu_queue_state = NULL,
                            gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                           gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+                           gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
                            updated_at = ? WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'cancelled', stage = NULL, progress = NULL,
                            completed_at = ?, updated_at = ? WHERE public_id = ?`,
@@ -3191,6 +3238,8 @@ export class VideoBroker {
                            progress = NULL, worker_id = NULL, lease_expires_at = NULL,
                            gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
                            gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+                           gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+                           gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
                            error = ?, updated_at = ?
                            WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
@@ -3289,6 +3338,8 @@ export class VideoBroker {
             `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
              lease_token = ?, gpu_queue_state = 'submitting', gpu_queue_submitted_at = NULL,
              gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+             gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+             gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
              started_at = COALESCE(started_at, ?), stage = 'Reserving GPU queue position', updated_at = ?
              WHERE public_id = ? AND status = 'queued'`,
             [this.worker.id, nowSeconds() + 60, leaseId, nowSeconds(), nowSeconds(), row.public_id],
@@ -3309,6 +3360,8 @@ export class VideoBroker {
                 profile: 'maximum',
                 has_source_image: Boolean(row.source_image_path),
                 lease_id: leaseId,
+                estimate_low_seconds: row.estimate_low_seconds,
+                estimate_high_seconds: row.estimate_high_seconds,
                 experiment_id: row.experiment_id,
                 variant_id: row.variant_id,
                 planner_fingerprint: row.planner_fingerprint,
