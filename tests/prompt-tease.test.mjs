@@ -16,6 +16,7 @@ test('parses only the classifier JSON boolean', () => {
 });
 
 test('selects a bounded random tease', () => {
+    assert.deepEqual(PROMPT_TEASES, ['Pervert.']);
     assert.equal(pickPromptTease(() => 0), PROMPT_TEASES[0]);
     assert.equal(pickPromptTease(() => 0.9999), PROMPT_TEASES.at(-1));
     assert.equal(pickPromptTease(() => 1), PROMPT_TEASES.at(-1));

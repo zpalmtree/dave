@@ -13,11 +13,6 @@ import { recordTokenSpend } from './TokenSpend.js';
 export const PROMPT_TEASE_TIMEOUT_MS = 1_000;
 export const PROMPT_TEASES = [
     'Pervert.',
-    'Bonk. Go to horny jail.',
-    'Down catastrophic.',
-    'Absolutely shameless.',
-    'Gooner detected.',
-    'Caught in 4K.',
 ] as const;
 
 const MAX_CLASSIFIED_PROMPT_LENGTH = 8_000;
