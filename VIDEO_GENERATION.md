@@ -67,8 +67,8 @@ loss, sends a heartbeat every 15 seconds, and retries transient render failures
 at most twice. MiniMax H3 requires `comfy-aimdo` 0.4.14 or newer for the expanded
 Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
 local startup path pins and verifies that runtime before starting ComfyUI. The
-server asks `gpt-5.6-sol` at high reasoning effort for a strict
-structured screenplay. It prepares the next queued job one position ahead while
+server asks `gpt-5.6-sol` at medium reasoning effort for one strict combined
+prompt analysis and structured screenplay. It prepares the next queued job one position ahead while
 the desktop is rendering, without reserving the GPU. The API key never leaves
 the server, successful plans and generated frames are cached per job, and the desktop's local
 uncensored HauhauCS Qwen 3.8 27B Q4_K_P planner is the automatic offline fallback.
@@ -77,6 +77,15 @@ vision projector for supplied reference images, then releases its VRAM before
 rendering. The worker optionally anchors the video with a
 generated first frame and reports model stages and percentages when ComfyUI
 exposes them.
+
+For an eligible generated-frame job, the server reads that single-pass planner
+response as a stream. Once both a `fulfill` decision and the complete frame-zero
+contract have arrived, reference retrieval and the Flash Lite candidate start
+while Sol finishes the remaining screenplay. The candidate is reusable only when
+the final validated and geometry-reconciled keyframe object has the exact same
+SHA-256 identity. A mismatch, rejected/fallback plan, source image, or shutdown
+aborts and discards the speculative work. Full-plan validation and the existing
+visual review gate still finish before any frame is accepted.
 
 When a screenplay uses a hard cut or dissolve after an anchored first segment,
 the broker uses that original frame as identity-only visual evidence to create a
@@ -100,11 +109,10 @@ Once admitted, the ETA anchors to actual GPU admission and becomes more precise.
 
 ## Optimization experiments
 
-Production remains on Sol, Gemini 3 Pro Image at 2K, and the established serial
-visual review path outside the configured canary channels. Canary jobs first try
-Gemini Flash Lite at 1K and keep it only when the same GPT-5.6 visual gate accepts
-it; a rejection, generation error, or unavailable reviewer runs the unchanged Pro
-2K serial pipeline. Each job records its experiment, pipeline variant, planner
+Production remains on Sol and uses the review-gated `fast-gated-v3` first-frame
+path. Jobs first try Gemini Flash Lite at 1K and keep it only when the same GPT-5.6
+visual gate accepts it; a rejection, generation error, or unavailable reviewer
+runs the unchanged Pro 2K serial pipeline. Each job records its experiment, pipeline variant, planner
 fingerprint, keyframe strategy, provider timings, queue wait, and end-to-end
 latency so alternatives can be compared without mixing cohorts.
 
@@ -116,8 +124,7 @@ latency so alternatives can be compared without mixing cohorts.
   `gemini-3.1-flash-image`, or `gemini-3.1-flash-lite-image`.
 - `VIDEO_KEYFRAME_IMAGE_SIZE` accepts `1K` or `2K`; Flash Lite is always 1K.
 - `VIDEO_KEYFRAME_STRATEGY` accepts `serial-v1`, `conditional-v2`, or
-  `fast-gated-v3`. Without an override, configured canary channels use the fast
-  gate and other channels use `serial-v1`.
+  `fast-gated-v3`. Without an override, the review-gated fast strategy is used.
 - `VIDEO_PREPLAN_QUEUED=0` disables one-job-ahead preparation for rollback.
 - `VIDEO_PROMPT_CACHE_24H=1` opts into 24-hour OpenAI prompt-cache retention;
   stable cache routing is used without extended retention by default.

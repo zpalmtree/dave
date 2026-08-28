@@ -1113,6 +1113,146 @@ async function requestGeminiPlannerResponse(
     throw lastError instanceof Error ? lastError : new Error('Gemini planner request failed.');
 }
 
+function completeJsonObjectProperty(source: string, property: string): Record<string, any> | null {
+    for (let index = 0; index < source.length; index += 1) {
+        if (source[index] !== '"') continue;
+        const tokenStart = index;
+        index += 1;
+        let escaped = false;
+        while (index < source.length) {
+            const character = source[index];
+            if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') break;
+            index += 1;
+        }
+        if (index >= source.length) return null;
+        let token: unknown;
+        try {
+            token = JSON.parse(source.slice(tokenStart, index + 1));
+        } catch {
+            continue;
+        }
+        if (token !== property) continue;
+        let valueStart = index + 1;
+        while (/\s/.test(source[valueStart] || '')) valueStart += 1;
+        if (source[valueStart] !== ':') continue;
+        valueStart += 1;
+        while (/\s/.test(source[valueStart] || '')) valueStart += 1;
+        if (source[valueStart] !== '{') continue;
+        let depth = 0;
+        let inString = false;
+        let valueEscaped = false;
+        for (let cursor = valueStart; cursor < source.length; cursor += 1) {
+            const character = source[cursor];
+            if (inString) {
+                if (valueEscaped) valueEscaped = false;
+                else if (character === '\\') valueEscaped = true;
+                else if (character === '"') inString = false;
+                continue;
+            }
+            if (character === '"') {
+                inString = true;
+                continue;
+            }
+            if (character === '{') depth += 1;
+            else if (character === '}') {
+                depth -= 1;
+                if (depth === 0) {
+                    try {
+                        const value = JSON.parse(source.slice(valueStart, cursor + 1));
+                        return value && typeof value === 'object' ? value : null;
+                    } catch {
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    return null;
+}
+
+function provisionalKeyframeFromOutput(outputText: string): {
+    promptAnalysis: Record<string, any>;
+    keyframe: Record<string, any>;
+} | null {
+    const promptAnalysis = completeJsonObjectProperty(outputText, 'prompt_analysis');
+    const keyframe = completeJsonObjectProperty(outputText, 'keyframe');
+    if (promptAnalysis?.frontier_handling?.disposition !== 'fulfill'
+        || keyframe?.recommended !== true
+        || typeof keyframe.prompt !== 'string'
+        || !Array.isArray(keyframe.reference_requirements)
+        || !keyframe.motion_contract
+        || ![
+            'subject_orientation',
+            'gaze_direction',
+            'travel_direction',
+            'camera_relation',
+            'first_second_action',
+        ].every(field => typeof keyframe.motion_contract[field] === 'string')) return null;
+    return { promptAnalysis, keyframe };
+}
+
+async function readStreamingSolResponse(
+    response: Response,
+    options: VideoFrontierCallOptions,
+): Promise<Record<string, any>> {
+    if (!response.body) throw new Error('OpenAI returned an empty streaming response.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    let outputText = '';
+    let completedResponse: Record<string, any> | null = null;
+    let provisionalEmitted = false;
+
+    const handleEvent = (block: string) => {
+        const data = block.split(/\r?\n/)
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trimStart())
+            .join('\n');
+        if (!data || data === '[DONE]') return;
+        let event: any;
+        try {
+            event = JSON.parse(data);
+        } catch {
+            return;
+        }
+        if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+            outputText += event.delta;
+            if (!provisionalEmitted) {
+                const provisional = provisionalKeyframeFromOutput(outputText);
+                if (provisional) {
+                    provisionalEmitted = true;
+                    try {
+                        options.onProvisionalKeyframe?.(provisional);
+                    } catch (error) {
+                        console.warn('Could not start provisional first-frame generation.', error);
+                    }
+                }
+            }
+        }
+        if (['response.completed', 'response.failed', 'response.incomplete'].includes(event?.type)
+            && event.response && typeof event.response === 'object') {
+            completedResponse = event.response;
+        }
+    };
+
+    while (true) {
+        const { done, value } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        const blocks = pending.split(/\r?\n\r?\n/);
+        pending = blocks.pop() || '';
+        for (const block of blocks) handleEvent(block);
+        if (done) break;
+    }
+    if (pending.trim()) handleEvent(pending);
+    if (completedResponse) return completedResponse;
+    throw new Error(outputText
+        ? 'OpenAI streaming planner response ended before completion.'
+        : 'OpenAI returned no streaming planner output.');
+}
+
 async function requestSolResponse(
     payload: Record<string, any>,
     signal: AbortSignal,
@@ -1134,6 +1274,8 @@ async function requestSolResponse(
             const attemptPayload = expandOutputBudget && baseMaximum > 0
                 ? { ...payload, max_output_tokens: Math.min(128_000, Math.max(12_000, baseMaximum * 2)) }
                 : payload;
+            const streamProvisionalKeyframe = stage === 'single_pass'
+                && Boolean(options.onProvisionalKeyframe);
             const response = await fetch('https://api.openai.com/v1/responses', {
                 method: 'POST',
                 signal,
@@ -1145,9 +1287,12 @@ async function requestSolResponse(
                     ...attemptPayload,
                     ...videoPlannerPromptCacheFields(stage),
                     ...(requestedTier ? { service_tier: requestedTier } : {}),
+                    ...(streamProvisionalKeyframe ? { stream: true } : {}),
                 }),
             });
-            const body: any = await response.json();
+            const body: any = streamProvisionalKeyframe && response.ok
+                ? await readStreamingSolResponse(response, options)
+                : await response.json();
             serviceTier = resolvedOpenAIServiceTier(body, options.serviceTier);
             const responseStatus = String(body?.status || 'completed');
             const incomplete = response.ok && responseStatus === 'incomplete';

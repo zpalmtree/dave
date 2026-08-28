@@ -1149,6 +1149,151 @@ test('broker prepares the next screenplay and keyframe before gpuq admission', a
     }
 });
 
+test('broker overlaps planning with a provisional keyframe and reuses only an exact final match', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-planner-keyframe-overlap-'));
+    const baseKeyframe = {
+        recommended: true,
+        reason: 'Anchor frame zero.',
+        prompt: 'A right-facing dog poised to run through a sunny park.',
+        reference_requirements: [],
+        motion_contract: {
+            subject_orientation: 'The dog faces screen right.',
+            gaze_direction: 'The dog looks down the path.',
+            travel_direction: 'The dog travels screen right.',
+            camera_relation: 'Side profile at dog height.',
+            first_second_action: 'The dog begins running screen right.',
+        },
+    };
+    let releaseMatchingPlanner;
+    let announceMatchingCandidate;
+    const matchingPlannerReleased = new Promise(resolve => { releaseMatchingPlanner = resolve; });
+    const matchingCandidateStarted = new Promise(resolve => { announceMatchingCandidate = resolve; });
+    const candidatePrompts = [];
+    const keyframeUses = [];
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        preplanQueuedJobs: false,
+        frontierPlanner: async (prompt, _model, _requester, _source, options) => {
+            const provisional = structuredClone(baseKeyframe);
+            options.onProvisionalKeyframe?.({
+                promptAnalysis: { frontier_handling: { disposition: 'fulfill' } },
+                keyframe: provisional,
+            });
+            if (prompt.includes('exact match')) await matchingPlannerReleased;
+            const finalKeyframe = structuredClone(baseKeyframe);
+            if (prompt.includes('changed geometry')) {
+                finalKeyframe.prompt = 'A left-facing dog poised at the opposite side of the park.';
+            }
+            return {
+                intent: prompt,
+                continuity_bible: 'The same dog remains in the same park.',
+                keyframe: finalKeyframe,
+                segments: [{
+                    title: 'Run', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
+                        duration_seconds: 5,
+                        visual: 'The dog runs through the park.',
+                        camera: 'Side-profile tracking shot.',
+                        audio: 'Paws and park ambience.',
+                        dialogue: [],
+                    }],
+                }],
+            };
+        },
+        keyframeReferenceResolver: async () => [],
+        keyframeCandidateGenerator: async plan => {
+            candidatePrompts.push(plan.keyframe.prompt);
+            if (candidatePrompts.length === 1) announceMatchingCandidate();
+            return {
+                bytes: Buffer.from(`prefetched:${plan.keyframe.prompt}`),
+                mimeType: 'image/png',
+                provider: 'gemini',
+                model: 'gemini-3.1-flash-lite-image',
+            };
+        },
+        keyframeGenerator: async (plan, _references, options) => {
+            keyframeUses.push({
+                prompt: plan.keyframe.prompt,
+                prefetched: Boolean(options.initialCandidate),
+            });
+            return options.initialCandidate
+                ? await options.initialCandidate
+                : {
+                    bytes: Buffer.from(`baseline:${plan.keyframe.prompt}`),
+                    mimeType: 'image/png',
+                    provider: 'baseline-provider',
+                    model: 'baseline-image-model',
+                };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const submit = async (prompt, suffix) => {
+        const response = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax', prompt, requester_id: `overlap-user-${suffix}`,
+                origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: `overlap-message-${suffix}`,
+                status_message_id: `overlap-status-${suffix}`,
+            }),
+        });
+        assert.equal(response.status, 201);
+        return (await response.json()).job;
+    };
+    try {
+        const matching = await submit('Planner/keyframe exact match', 'match');
+        const matchingRow = await broker.get(
+            'SELECT * FROM video_jobs WHERE public_id = ?',
+            [matching.id],
+        );
+        let matchingPlanningComplete = false;
+        const matchingPlanning = broker.ensurePlan(matchingRow, true).then(value => {
+            matchingPlanningComplete = true;
+            return value;
+        });
+        await matchingCandidateStarted;
+        assert.equal(matchingPlanningComplete, false);
+        releaseMatchingPlanner();
+        const matchingPlan = (await matchingPlanning).plan;
+        const matchingPreparedRow = await broker.get(
+            'SELECT * FROM video_jobs WHERE public_id = ?',
+            [matching.id],
+        );
+        await broker.ensureKeyframe(matchingPreparedRow, matchingPlan, true);
+
+        const changed = await submit('Planner changed geometry', 'changed');
+        const changedRow = await broker.get(
+            'SELECT * FROM video_jobs WHERE public_id = ?',
+            [changed.id],
+        );
+        const changedPlan = (await broker.ensurePlan(changedRow, true)).plan;
+        const changedPreparedRow = await broker.get(
+            'SELECT * FROM video_jobs WHERE public_id = ?',
+            [changed.id],
+        );
+        await broker.ensureKeyframe(changedPreparedRow, changedPlan, true);
+
+        assert.equal(candidatePrompts.length, 2);
+        assert.deepEqual(keyframeUses, [{
+            prompt: baseKeyframe.prompt,
+            prefetched: true,
+        }, {
+            prompt: 'A left-facing dog poised at the opposite side of the park.',
+            prefetched: false,
+        }]);
+    } finally {
+        releaseMatchingPlanner?.();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('broker overlaps idle-job segment prefetch with rendering and joins the in-flight frame', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-segment-prefetch-'));
     let releaseSegment;

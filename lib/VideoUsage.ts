@@ -55,6 +55,10 @@ export interface VideoFrontierCallOptions extends VideoProviderHooks {
         prompt: string;
         plan: Record<string, unknown>;
     }>;
+    onProvisionalKeyframe?: (value: {
+        promptAnalysis: Record<string, unknown>;
+        keyframe: Record<string, unknown>;
+    }) => void;
 }
 
 export interface VideoUsageEvent {
