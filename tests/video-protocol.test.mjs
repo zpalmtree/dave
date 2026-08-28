@@ -9,6 +9,7 @@ import {
     formatGlobalVideoQueueJob,
     formatVideoRuntime,
     globalVideoQueueChunks,
+    initialVideoRequestStatus,
     completedVideoPost,
     failedVideoPost,
     singleVideoResponderGate,
@@ -367,7 +368,9 @@ test('fast video commands map to explicit quality tradeoffs', () => {
     assert.equal(isVideoModel('minimaxdraft'), false);
 });
 
-test('offline queue messages omit fake ETAs', () => {
+test('initial and offline queue messages always expose a clearly qualified rough ETA', () => {
+    assert.match(initialVideoRequestStatus('minimax'), /Rough ETA: \*\*10m–30m\*\*/);
+    assert.match(initialVideoRequestStatus('minimax'), /plus any work already queued/);
     const text = formatVideoJob({
         id: '12345678-1234-1234-1234-123456789abc',
         model: 'minimax',
@@ -404,6 +407,7 @@ test('offline queue messages omit fake ETAs', () => {
     });
     assert.match(text, /Queue position: \*\*2\*\*/);
     assert.match(text, /offline/);
+    assert.match(text, /Rough render ETA: \*\*10s–20s\*\*/);
     assert.doesNotMatch(text, /Expected (start|finish)/);
 });
 
@@ -444,7 +448,7 @@ test('global video queue identifies same-server requesters without exposing cros
     };
     const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
     assert.match(formatted, /Queue position: \*\*2\*\*/);
-    assert.match(formatted, /Estimated completion/);
+    assert.match(formatted, /Rough estimated completion/);
     assert.doesNotMatch(formatted, /Expected start|estimate.*-/i);
     assert.match(formatted, /<@483470443001413675>/);
     assert.match(formatted, /Three racers approach a neon finish line/);
@@ -543,11 +547,12 @@ test('active video status shows only rough progress and one completion ETA', () 
     });
     assert.match(waiting, /Waiting in the GPU queue/);
     assert.match(waiting, /position is reserved/);
-    assert.match(waiting, /include this wait/);
+    assert.match(waiting, /Rough render ETA: \*\*2m–5m\*\*/);
+    assert.match(waiting, /unrelated GPU work can move/);
     assert.doesNotMatch(waiting, /Estimated completion <t:/);
 });
 
-test('drained queue messages explain why completion time is unavailable', () => {
+test('drained queue messages retain a rough ETA and explain its assumption', () => {
     const text = formatVideoJob({
         id: '12345678-1234-1234-1234-123456789abc',
         model: 'minimax',
@@ -583,7 +588,8 @@ test('drained queue messages explain why completion time is unavailable', () => 
         dispatch_paused: true,
     });
     assert.match(text, /Dispatch is temporarily paused/);
-    assert.match(text, /estimated completion will appear/);
+    assert.match(text, /Rough render ETA: \*\*10s–20s\*\*/);
+    assert.match(text, /assumes dispatch resumes now/);
     assert.doesNotMatch(text, /Accepted and processing/);
 });
 
