@@ -25,6 +25,7 @@ export interface VideoMetricSpan {
         contracts?: number;
         origin?: 'prefetch' | 'on_demand';
         joined?: boolean;
+        prefetched?: boolean;
     };
 }
 

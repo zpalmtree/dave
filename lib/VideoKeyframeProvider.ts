@@ -88,6 +88,7 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     abortSignal?: AbortSignal;
     fastGateHedgeDelayMs?: number;
     reviewTimeoutMs?: number;
+    initialCandidate?: Promise<VideoKeyframeResult>;
 }
 
 export function configuredVideoKeyframeVariant(environment: NodeJS.ProcessEnv = process.env): {
@@ -957,13 +958,13 @@ async function createFastGatedKeyframe(
     };
     const basePrompt = buildVideoKeyframePrompt(plan);
     try {
-        const candidate = await generateWithRetry(
+        const candidate = await (options.initialCandidate || generateWithRetry(
             'gemini',
             basePrompt,
             references,
             1,
             fastOptions,
-        );
+        ));
         const review = await optionalReview(plan, candidate, references, fastOptions, nextReview);
         if (review?.acceptable) return accepted(candidate, true);
         if (review) {

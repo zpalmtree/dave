@@ -43,6 +43,7 @@ import {
 } from './VideoFrontierPlanner.js';
 import {
     VIDEO_KEYFRAME_ASPECT_RATIOS,
+    VIDEO_KEYFRAME_FAST_LITE_MODEL,
     VIDEO_KEYFRAME_MAX_BYTES,
     VideoKeyframeAspectRatio,
     VideoKeyframeOptions,
@@ -50,6 +51,7 @@ import {
     configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
+    generateFrontierVideoKeyframeCandidate,
 } from './VideoKeyframeProvider.js';
 import {
     VideoKeyframeReference,
@@ -103,6 +105,7 @@ interface BrokerOptions {
         references?: VideoKeyframeReference[],
         options?: VideoKeyframeOptions,
     ) => Promise<VideoKeyframeResult>;
+    keyframeCandidateGenerator?: typeof generateFrontierVideoKeyframeCandidate;
     keyframeReferenceResolver?: (
         plan: Record<string, any>,
         jobDirectory: string,
@@ -124,6 +127,21 @@ interface WorkerConnection {
     warmModel: VideoGeneratorModelId | null;
     leaseId: string | null;
     scheduler: VideoWorkerSchedulerState;
+}
+
+interface ProvisionalKeyframeReferenceResult {
+    references: VideoKeyframeReference[];
+    status: 'ok' | 'error';
+    durationSeconds: number;
+}
+
+interface ProvisionalKeyframePrefetch {
+    identity: string;
+    controller: AbortController;
+    referencesRequested: number;
+    references: Promise<ProvisionalKeyframeReferenceResult>;
+    candidate: Promise<VideoKeyframeResult>;
+    cleanupTimer: NodeJS.Timeout;
 }
 
 interface JobRow {
@@ -464,6 +482,7 @@ function normalizedMetricSpan(value: any): VideoMetricSpan {
         metadata.origin = value.metadata.origin;
     }
     if (typeof value.metadata?.joined === 'boolean') metadata.joined = value.metadata.joined;
+    if (typeof value.metadata?.prefetched === 'boolean') metadata.prefetched = value.metadata.prefetched;
     return {
         source: value.source,
         name,
@@ -612,6 +631,10 @@ function segmentKeyframePlanIdentity(plan: Record<string, any>): string {
     delete stablePlan.segment_keyframes;
     delete stablePlan._segment_keyframe_planner_model;
     return createHash('sha256').update(JSON.stringify(stablePlan)).digest('hex');
+}
+
+function keyframePlanIdentity(plan: Record<string, any>): string {
+    return createHash('sha256').update(JSON.stringify(plan?.keyframe || null)).digest('hex');
 }
 
 function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: number): Record<string, any> | null {
@@ -774,6 +797,7 @@ export class VideoBroker {
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly segmentContractInFlight = new Map<string, Promise<void>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
+    private readonly provisionalKeyframePrefetch = new Map<string, ProvisionalKeyframePrefetch>();
     private readonly segmentKeyframeInFlight = new Map<string, Promise<void>>();
     private segmentKeyframeSlots = 0;
     private readonly segmentKeyframeWaiters: Array<{
@@ -1203,6 +1227,9 @@ export class VideoBroker {
         this.stopping = true;
         if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
         if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+        for (const publicId of [...this.provisionalKeyframePrefetch.keys()]) {
+            this.discardProvisionalKeyframe(publicId);
+        }
         if (this.worker) this.worker.socket.close(1001, 'broker shutdown');
         await new Promise<void>(resolvePromise => this.server.close(() => resolvePromise()));
         await Promise.allSettled([...this.backgroundTasks]);
@@ -2078,6 +2105,79 @@ export class VideoBroker {
         return configuredVideoKeyframeStrategy(job.channel_id);
     }
 
+    private discardProvisionalKeyframe(publicId: string): void {
+        const prefetch = this.provisionalKeyframePrefetch.get(publicId);
+        if (!prefetch) return;
+        this.provisionalKeyframePrefetch.delete(publicId);
+        clearTimeout(prefetch.cleanupTimer);
+        prefetch.controller.abort();
+    }
+
+    private scheduleProvisionalKeyframe(
+        job: JobRow,
+        keyframe: Record<string, unknown>,
+        criticalPath: boolean,
+    ): void {
+        const candidateGenerator = this.options.keyframeCandidateGenerator
+            || (this.options.keyframeGenerator ? null : generateFrontierVideoKeyframeCandidate);
+        if (this.stopping || job.source_image_path || keyframe?.recommended !== true
+            || this.keyframeStrategy(job) !== 'fast-gated-v3'
+            || this.provisionalKeyframePrefetch.has(job.public_id)
+            || !candidateGenerator) return;
+        const plan = { keyframe };
+        const directory = resolve(this.options.resultsDir, job.public_id);
+        mkdirSync(directory, { recursive: true });
+        const controller = new AbortController();
+        const referencesRequested = countVideoKeyframeReferenceRequirements(plan);
+        const referenceStarted = Date.now();
+        const hooks = this.providerHooks(job);
+        const references = (async (): Promise<ProvisionalKeyframeReferenceResult> => {
+            let status: 'ok' | 'error' = 'ok';
+            let resolved: VideoKeyframeReference[] = [];
+            try {
+                resolved = this.options.keyframeReferenceResolver
+                    ? await this.options.keyframeReferenceResolver(plan, directory, hooks)
+                    : await resolveVideoKeyframeReferences(plan, directory, undefined, undefined, hooks);
+            } catch (error) {
+                status = 'error';
+                console.warn(
+                    `Provisional first-frame reference retrieval failed for ${job.public_id}; continuing without references.`,
+                    error,
+                );
+            }
+            return {
+                references: resolved,
+                status,
+                durationSeconds: (Date.now() - referenceStarted) / 1000,
+            };
+        })();
+        const candidate = references.then(result => candidateGenerator(
+            plan,
+            result.references,
+            {
+                ...this.frontierOptions(job, criticalPath),
+                ...configuredVideoKeyframeVariant(),
+                geminiModel: VIDEO_KEYFRAME_FAST_LITE_MODEL,
+                imageSize: '1K',
+                abortSignal: controller.signal,
+            },
+        ));
+        void candidate.catch(() => undefined);
+        const cleanupTimer = setTimeout(
+            () => this.discardProvisionalKeyframe(job.public_id),
+            5 * 60 * 1000,
+        );
+        cleanupTimer.unref();
+        this.provisionalKeyframePrefetch.set(job.public_id, {
+            identity: keyframePlanIdentity(plan),
+            controller,
+            referencesRequested,
+            references,
+            candidate,
+            cleanupTimer,
+        });
+    }
+
     private hasSegmentKeyframeContracts(plan: Record<string, any>): boolean {
         const targets = videoSegmentKeyframeTargetIndexes(plan);
         const contracts = Array.isArray(plan?.segment_keyframes) ? plan.segment_keyframes : [];
@@ -2212,6 +2312,11 @@ export class VideoBroker {
                         };
                     }
                     const plannerOptions = this.frontierOptions(job, criticalPath);
+                    plannerOptions.onProvisionalKeyframe = value => this.scheduleProvisionalKeyframe(
+                        job,
+                        value.keyframe,
+                        criticalPath,
+                    );
                     const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
                         job.prompt,
                         job.model,
@@ -2219,6 +2324,10 @@ export class VideoBroker {
                         sourceImage,
                         plannerOptions,
                     );
+                    const provisional = this.provisionalKeyframePrefetch.get(job.public_id);
+                    if (provisional && provisional.identity !== keyframePlanIdentity(plan)) {
+                        this.discardProvisionalKeyframe(job.public_id);
+                    }
                     const plannerModel = typeof (plan as any)._planner_model === 'string'
                         ? (plan as any)._planner_model
                         : plannerOptions.plannerModel || VIDEO_PLANNER_MODEL;
@@ -2257,6 +2366,7 @@ export class VideoBroker {
                     status = 'ok';
                     return { plan, plannerModel };
                 } catch (error) {
+                    this.discardProvisionalKeyframe(job.public_id);
                     if (error instanceof FrontierPlannerRejectedError) {
                         const reasonCode = /^[a-z_]+$/.test(error.reasonCode)
                             ? error.reasonCode
@@ -2313,49 +2423,73 @@ export class VideoBroker {
         plan: Record<string, any>,
         criticalPath = false,
     ): Promise<void> {
+        const provisional = this.provisionalKeyframePrefetch.get(job.public_id);
+        const provisionalMatches = Boolean(
+            provisional
+            && !job.source_image_path
+            && plan?.keyframe?.recommended === true
+            && !(job.keyframe_path && job.keyframe_mime)
+            && provisional.identity === keyframePlanIdentity(plan),
+        );
+        if (provisional && !provisionalMatches) this.discardProvisionalKeyframe(job.public_id);
         if (job.source_image_path || plan?.keyframe?.recommended !== true
             || (job.keyframe_path && job.keyframe_mime)) return;
         let generation = this.keyframeInFlight.get(job.public_id);
         if (!generation) {
+            const prefetch = provisionalMatches ? provisional : undefined;
+            if (prefetch) {
+                this.provisionalKeyframePrefetch.delete(job.public_id);
+                clearTimeout(prefetch.cleanupTimer);
+            }
             generation = (async () => {
                 const started = Date.now();
                 let status: 'ok' | 'error' | 'skipped' = 'error';
                 try {
                     const directory = resolve(this.options.resultsDir, job.public_id);
                     mkdirSync(directory, { recursive: true });
-                    const referencesRequested = countVideoKeyframeReferenceRequirements(plan);
                     const referenceStarted = Date.now();
-                    let referenceStatus: 'ok' | 'error' = 'ok';
-                    let references: VideoKeyframeReference[] = [];
-                    try {
-                        const hooks = this.providerHooks(job);
-                        references = this.options.keyframeReferenceResolver
-                            ? await this.options.keyframeReferenceResolver(plan, directory, hooks)
-                            : await resolveVideoKeyframeReferences(
-                                plan,
-                                directory,
-                                undefined,
-                                undefined,
-                                hooks,
-                            );
-                    } catch (error) {
-                        referenceStatus = 'error';
-                        console.warn(`First-frame reference retrieval failed for ${job.public_id}; continuing without references.`, error);
-                    } finally {
+                    let referenceResult: ProvisionalKeyframeReferenceResult;
+                    if (prefetch) {
+                        referenceResult = await prefetch.references;
+                    } else {
+                        let referenceStatus: 'ok' | 'error' = 'ok';
+                        let references: VideoKeyframeReference[] = [];
                         try {
-                            await this.recordMetricSpan(job.public_id, {
-                                source: 'broker',
-                                name: 'frontier_keyframe_references',
-                                duration_seconds: (Date.now() - referenceStarted) / 1000,
-                                metadata: {
-                                    status: referenceStatus,
-                                    references_requested: referencesRequested,
-                                    references_resolved: references.length,
-                                },
-                            });
+                            const hooks = this.providerHooks(job);
+                            references = this.options.keyframeReferenceResolver
+                                ? await this.options.keyframeReferenceResolver(plan, directory, hooks)
+                                : await resolveVideoKeyframeReferences(
+                                    plan,
+                                    directory,
+                                    undefined,
+                                    undefined,
+                                    hooks,
+                                );
                         } catch (error) {
-                            console.warn(`Could not store first-frame reference timing for ${job.public_id}`, error);
+                            referenceStatus = 'error';
+                            console.warn(`First-frame reference retrieval failed for ${job.public_id}; continuing without references.`, error);
                         }
+                        referenceResult = {
+                            references,
+                            status: referenceStatus,
+                            durationSeconds: (Date.now() - referenceStarted) / 1000,
+                        };
+                    }
+                    try {
+                        await this.recordMetricSpan(job.public_id, {
+                            source: 'broker',
+                            name: 'frontier_keyframe_references',
+                            duration_seconds: referenceResult.durationSeconds,
+                            metadata: {
+                                status: referenceResult.status,
+                                references_requested: prefetch?.referencesRequested
+                                    ?? countVideoKeyframeReferenceRequirements(plan),
+                                references_resolved: referenceResult.references.length,
+                                prefetched: Boolean(prefetch),
+                            },
+                        });
+                    } catch (error) {
+                        console.warn(`Could not store first-frame reference timing for ${job.public_id}`, error);
                     }
                     const strategy = this.keyframeStrategy(job);
                     await this.run(
@@ -2365,11 +2499,12 @@ export class VideoBroker {
                     );
                     const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
                         plan,
-                        references,
+                        referenceResult.references,
                         {
                             ...this.frontierOptions(job, criticalPath),
                             ...configuredVideoKeyframeVariant(),
                             strategy,
+                            initialCandidate: prefetch?.candidate,
                         },
                     );
                     if (!result.bytes.length || result.bytes.length > VIDEO_KEYFRAME_MAX_BYTES) {

@@ -884,6 +884,85 @@ test('single-pass frontier planner returns validated analysis and screenplay fro
     }
 });
 
+test('single-pass frontier planner streams a complete provisional keyframe before completion', async () => {
+    const combined = {
+        prompt_analysis: frontierAnalysis(),
+        plan: frontierPlan(),
+    };
+    const outputText = JSON.stringify(combined);
+    const requests = [];
+    const provisionalValues = [];
+    let streamController;
+    let announceProvisional;
+    const provisionalSeen = new Promise(resolve => { announceProvisional = resolve; });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        const stream = new ReadableStream({
+            start(controller) {
+                streamController = controller;
+                controller.enqueue(new TextEncoder().encode(
+                    `event: response.output_text.delta\ndata: ${JSON.stringify({
+                        type: 'response.output_text.delta',
+                        delta: outputText,
+                    })}\n\n`,
+                ));
+            },
+        });
+        return new Response(stream, {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+        });
+    };
+    try {
+        const planning = createFrontierVideoPlan(
+            'A dog runs through a park.',
+            'minimaxfast',
+            'requester-streaming-single-pass',
+            undefined,
+            {
+                plannerStrategy: 'single-pass',
+                onProvisionalKeyframe: value => {
+                    provisionalValues.push(value);
+                    announceProvisional();
+                },
+            },
+        );
+        await provisionalSeen;
+        assert.equal(requests[0].stream, true);
+        assert.equal(provisionalValues.length, 1);
+        assert.deepEqual(provisionalValues[0].promptAnalysis, combined.prompt_analysis);
+        assert.deepEqual(provisionalValues[0].keyframe, combined.plan.keyframe);
+        streamController.enqueue(new TextEncoder().encode(
+            `event: response.completed\ndata: ${JSON.stringify({
+                type: 'response.completed',
+                response: {
+                    status: 'completed',
+                    output_text: outputText,
+                    model: VIDEO_PLANNER_MODEL,
+                    service_tier: 'priority',
+                    usage: {
+                        input_tokens: 100,
+                        output_tokens: 200,
+                        input_tokens_details: { cached_tokens: 80 },
+                    },
+                },
+            })}\n\n`,
+        ));
+        streamController.close();
+        const result = await planning;
+        assert.equal(result.planner_metrics.single_pass, true);
+        assert.deepEqual(result.keyframe, combined.plan.keyframe);
+    } finally {
+        globalThis.fetch = originalFetch;
+        try {
+            streamController?.close?.();
+        } catch {
+            // The successful path already closed the synthetic stream.
+        }
+    }
+});
+
 test('invalid single-pass output falls back to the unchanged two-pass planner', async () => {
     const requests = [];
     const replies = [
@@ -1455,6 +1534,51 @@ test('serial keyframes retry generic Gemini no-image responses then use reviewed
         ['keyframe_candidate_openai', 1, 'success', undefined],
         ['keyframe_review', 1, 'accepted', undefined],
     ]);
+});
+
+test('fast-gated keyframes review and reuse a prefetched candidate without regenerating it', async t => {
+    let providerCalls = 0;
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        if (!url.endsWith('/v1/responses')) {
+            providerCalls += 1;
+            throw new Error(`Unexpected image generation request: ${url}`);
+        }
+        return new Response(JSON.stringify({
+            model: VIDEO_KEYFRAME_REVIEW_MODEL,
+            service_tier: 'priority',
+            output_text: JSON.stringify({
+                acceptable: true,
+                issues: [],
+                correction_prompt: '',
+            }),
+            usage: {
+                input_tokens: 10,
+                output_tokens: 5,
+                input_tokens_details: { cached_tokens: 0 },
+            },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const prefetched = {
+        bytes: Buffer.from('prefetched-fast-frame'),
+        mimeType: 'image/png',
+        provider: 'gemini',
+        model: VIDEO_KEYFRAME_FAST_LITE_MODEL,
+    };
+    const result = await createFrontierVideoKeyframe({
+        intent: 'A dog begins running.',
+        keyframe: { prompt: 'A dog at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The dog runs.', camera: 'Wide tracking shot.' }] }],
+    }, [], {
+        strategy: 'fast-gated-v3',
+        serviceTier: 'fast',
+        initialCandidate: Promise.resolve(prefetched),
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(result.bytes, prefetched.bytes);
+    assert.equal(result.model, VIDEO_KEYFRAME_FAST_LITE_MODEL);
+    assert.equal(result.reviewStatus, 'accepted');
 });
 
 test('keyframe review timeout retries the quality gate before accepting a candidate', async t => {
