@@ -68,7 +68,12 @@ at most twice. MiniMax H3 requires `comfy-aimdo` 0.4.14 or newer for the expande
 Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
 local startup path pins and verifies that runtime before starting ComfyUI. The
 server asks `gpt-5.6-sol` at medium reasoning effort for one strict combined
-prompt analysis and structured screenplay. It prepares the next queued job one position ahead while
+prompt analysis and structured screenplay. The analysis separates dialogue,
+requested visible wording, and conditional motion design. Exact on-screen text
+is normalized and validated in render-facing shot directions; motion graphics,
+loops, transformations, and brand films can declare one recurring visual spine,
+while ordinary narrative and found-footage requests explicitly opt out. It
+prepares the next queued job one position ahead while
 the desktop is rendering, without reserving the GPU. The API key never leaves
 the server, successful plans and generated frames are cached per job, and the desktop's local
 uncensored HauhauCS Qwen 3.8 27B Q4_K_P planner is the automatic offline fallback.
@@ -132,14 +137,16 @@ latency so alternatives can be compared without mixing cohorts.
 Run `yarn benchmark:video-planners --limit=2` for a short, render-free comparison.
 It runs Sol and two Gemini Flash reasoning variants concurrently per prompt, then
 uses a blinded Sol quality judge to score fidelity, creative development,
-specificity, continuity, and audio/dialogue. Reports and only the fast plans that
+specificity, continuity, visible-text fidelity, transition logic, and
+audio/dialogue. Reports and only the fast plans that
 clear the teacher gate are written under `artifacts/video-planner-benchmarks/`.
 Pass a prior report with `--examples=/path/to/report.json` to feed up to three
 teacher-approved Sol plans to the Flash candidates. Pass it with
 `--baseline=/path/to/report.json` to reuse matching successful Sol outputs,
 instead of regenerating the slow baseline. Same-prompt teacher examples are
 automatically excluded. `--candidates=id,id` narrows a run and
-`--concurrency=2` bounds prompt-level parallelism. Use `--full` only after the
+`--concurrency=2` bounds prompt-level parallelism. `--prompts=/path/to/prompts.json`
+loads a JSON array for a focused regression cohort. Use `--full` only after the
 quick candidate set is satisfactory.
 
 Run `yarn benchmark:video-keyframes --plans=/path/to/planner-report.json` for a

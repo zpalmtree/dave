@@ -45,6 +45,7 @@ import {
     configuredVideoPlannerVariant,
     reconcileFrontierKeyframeMotionGeometry,
     stageFrontierDialogueVisually,
+    stageFrontierVisibleText,
     validateFrontierVideoPlanForKeyframe,
     videoPlannerFingerprint,
     videoPlannerPromptCacheFields,
@@ -616,12 +617,26 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /at most three identity-critical people/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /user-supplied start image/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Preserve information state across reveals/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /before that knowledge/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Every hard scene change/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one independently generated clip/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat explicit speaking intent as authority to write speech/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Budget action density for reliable generation/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /a spoken turn also consumes beat time/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one decisive representative mini-story/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /trace the moving subject's leading edge/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /placing it on a new backing plate/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not swap identities and call that an exact reset/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /show their own material visibly bridge/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /never imply conservation by reversing already expelled material upstream/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /complete precomposed layer enclosed in straight English double quotes/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /let it land through a readable hold and silent physical reaction/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Copy its exact spine phrase into continuity and the shot directions/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /When mode=none, stage the request naturally/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /narrative_montage/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /narrative_adaptation/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /rigid_artifact/);
@@ -720,6 +735,39 @@ test('frontier dialogue staging makes every speaking shot visually explicit with
     assert.equal(stageFrontierDialogueVisually(plan), 0);
 });
 
+test('frontier visible-text staging normalizes exact words and validates the motion spine', () => {
+    const analysis = frontierAnalysis();
+    analysis.visible_text_contract = {
+        mode: 'required_only',
+        items: [{ text: 'NO VACANCY', role: 'sign', timing: 'held from 0-3 seconds' }],
+    };
+    analysis.motion_design_contract = {
+        mode: 'visual_spine',
+        spine: 'red neon border road',
+        style_invariants: ['red neon line', 'no hard cut during the transformation'],
+        transition_rules: ['the sign border extends into the desert road'],
+    };
+    const plan = frontierPlan();
+    plan.prompt_analysis = analysis;
+    plan.segments[0].shots[0].visual = 'A motel sign reads “NO VACANCY” above the road.';
+    assert.equal(stageFrontierVisibleText(plan, analysis), 1);
+    assert.match(plan.segments[0].shots[0].visual, /"NO VACANCY"/);
+    assert.equal(stageFrontierVisibleText(plan, analysis), 0);
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast', 'A sign reads "NO VACANCY".'),
+        /omitted the required visual motion spine/,
+    );
+    plan.continuity_bible += ' The red neon border road is the continuous transition device.';
+    assert.doesNotThrow(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast', 'A sign reads "NO VACANCY".'),
+    );
+    plan.segments[0].shots[0].visual += ' A second label reads "OPEN".';
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast', 'A sign reads "NO VACANCY".'),
+        /added unrequested visible text/,
+    );
+});
+
 test('frontier keyframe geometry deterministically follows an unambiguous motion contract', () => {
     const plan = {
         keyframe: {
@@ -760,6 +808,13 @@ function frontierAnalysis(dialogueMode = 'none') {
         inferred_staging: ['a park'],
         audio_requirements: ['park ambience'],
         dialogue_contract: { mode: dialogueMode, lines: [] },
+        visible_text_contract: { mode: 'none', items: [] },
+        motion_design_contract: {
+            mode: 'none',
+            spine: 'N/A',
+            style_invariants: [],
+            transition_rules: [],
+        },
         prohibited_substitutions: [],
         resolved_intent: 'A dog runs through a park.',
         frontier_handling: {
@@ -1193,6 +1248,34 @@ test('best-effort compiler truncates automatic screenplays to two minutes', () =
     );
 });
 
+test('best-effort compiler preserves required visible text and the visual motion spine', () => {
+    const analysis = frontierAnalysis();
+    analysis.visible_text_contract = {
+        mode: 'required',
+        items: [{ text: 'NIGHT OWL', role: 'wordmark', timing: 'final hold' }],
+    };
+    analysis.motion_design_contract = {
+        mode: 'visual_spine',
+        spine: 'crescent-shaped steam trail',
+        style_invariants: ['cream vapor on indigo'],
+        transition_rules: ['steam carries the scene transition'],
+    };
+    const compiled = compileBestEffortFrontierVideoPlan(
+        frontierPlan(),
+        analysis,
+        'A brand film for "NIGHT OWL" using a crescent-shaped steam trail.',
+        'minimaxfast',
+        'missing audiovisual contracts',
+    );
+    assert.match(compiled.segments[0].shots[0].visual, /"NIGHT OWL"/);
+    assert.match(compiled.continuity_bible, /crescent-shaped steam trail/);
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(
+        compiled,
+        'minimaxfast',
+        'A brand film for "NIGHT OWL" using a crescent-shaped steam trail.',
+    ));
+});
+
 test('broker validation catches long H3 dialogue and literal omissions before desktop dispatch', () => {
     const plan = frontierPlan([{
         speaker_id: 'dog', language: 'English', delivery: 'fast',
@@ -1279,6 +1362,16 @@ test('frontier prompt analysis classifies intent independently before screenplay
         'generated',
         'mixed',
     ]);
+    assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.visible_text_contract.properties.mode.enum, [
+        'none',
+        'prohibited',
+        'required',
+        'required_only',
+    ]);
+    assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.motion_design_contract.properties.mode.enum, [
+        'none',
+        'visual_spine',
+    ]);
     assert.deepEqual(VIDEO_PROMPT_ANALYSIS_SCHEMA.properties.source_image_strategy.enum, [
         'none',
         'continuous_scene',
@@ -1304,6 +1397,14 @@ test('frontier prompt analysis classifies intent independently before screenplay
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /narrative_montage/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /concrete event with an activity and consequence/);
     assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /small but legible logos, uniforms, tools/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Classify requested on-screen wording separately from dialogue/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Use motion_design_contract\.mode=visual_spine only/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Resolve grammatical scope conservatively/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /must not require adding eyes, a face, a mouth/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /do not add a spoken punchline that explains or competes/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /Never claim an exact reset while swapping distinguishable subjects/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /do not assert rigidity while leaving unsupported gaps/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /rather than forcing an arbitrary motif/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Do not default every meme or screenshot/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /mini-event with a setup, physical action, and visible consequence/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /accessory adjustment, or panel pan is not sufficient/);
