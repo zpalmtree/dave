@@ -56,6 +56,7 @@ async function extractVisualEvidence(candidate, outputDirectory, durationSeconds
     const candidateDirectory = resolve(outputDirectory, candidate.id);
     await mkdir(candidateDirectory, { recursive: true });
     const frameZeroPath = resolve(candidateDirectory, 'frame-zero.jpg');
+    const finalFramePath = resolve(candidateDirectory, 'final-frame.jpg');
     const timelinePath = resolve(candidateDirectory, 'timeline-2fps.jpg');
     const audioPath = resolve(candidateDirectory, 'audio.wav');
     await run('ffmpeg', [
@@ -63,6 +64,11 @@ async function extractVisualEvidence(candidate, outputDirectory, durationSeconds
         '-i', candidate.video_path,
         '-vf', 'select=eq(n\\,0)',
         '-frames:v', '1', '-q:v', '2', frameZeroPath,
+    ]);
+    await run('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-sseof', '-0.05', '-i', candidate.video_path,
+        '-frames:v', '1', '-q:v', '2', finalFramePath,
     ]);
     const timelineRate = 16 / Math.max(0.001, Number(durationSeconds));
     await run('ffmpeg', [
@@ -75,7 +81,7 @@ async function extractVisualEvidence(candidate, outputDirectory, durationSeconds
         '-hide_banner', '-loglevel', 'error', '-y',
         '-i', candidate.video_path, '-vn', '-ac', '1', '-ar', '16000', audioPath,
     ]);
-    return { frameZeroPath, timelinePath, audioPath };
+    return { frameZeroPath, finalFramePath, timelinePath, audioPath };
 }
 
 function metricValue(text, pattern) {
@@ -83,11 +89,11 @@ function metricValue(text, pattern) {
     return match ? Number(match[1]) : null;
 }
 
-async function frameZeroMetrics(keyframePath, frameZeroPath, width, height) {
+async function frameSimilarity(referencePath, candidatePath, width, height) {
     const filter = `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[reference];[reference][1:v]ssim`;
     const { stderr } = await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'info',
-        '-i', keyframePath, '-i', frameZeroPath,
+        '-i', referencePath, '-i', candidatePath,
         '-lavfi', filter, '-frames:v', '1', '-f', 'null', '-',
     ]);
     return {
@@ -177,7 +183,7 @@ function judgeSchema(labels) {
                     type: 'object', additionalProperties: false,
                     required: [
                         'label', 'prompt_fidelity', 'visual_quality', 'temporal_coherence',
-                        'frame_zero_continuity', 'creative_execution', 'audio_dialogue',
+                        'frame_zero_continuity', 'loop_closure', 'creative_execution', 'audio_dialogue',
                         'overall', 'acceptable', 'critical_failures',
                     ],
                     properties: {
@@ -186,6 +192,7 @@ function judgeSchema(labels) {
                         visual_quality: { type: 'number', minimum: 1, maximum: 10 },
                         temporal_coherence: { type: 'number', minimum: 1, maximum: 10 },
                         frame_zero_continuity: { type: 'number', minimum: 1, maximum: 10 },
+                        loop_closure: { type: 'number', minimum: 1, maximum: 10 },
                         creative_execution: { type: 'number', minimum: 1, maximum: 10 },
                         audio_dialogue: { type: 'number', minimum: 1, maximum: 10 },
                         overall: { type: 'number', minimum: 1, maximum: 10 },
@@ -213,9 +220,10 @@ async function judge(openai, spec, evidence, runIndex) {
                 `USER REQUEST: ${spec.prompt}`,
                 `PLANNED INTENT: ${spec.intent || 'Not supplied.'}`,
                 `EXPECTED DIALOGUE OR AUDIO: ${spec.expected_dialogue || 'No explicit dialogue requirement supplied.'}`,
+                `SEAMLESS LOOP REQUIRED: ${spec.loop_expected ? 'yes' : 'no'}`,
                 '',
                 'Each timeline sheet contains sixteen evenly spaced chronological samples spanning the complete candidate, left-to-right then top-to-bottom.',
-                'Judge only supplied evidence. Treat wrong counts, missing literal constraints, absent required dialogue, broken physical continuity, severe morphing, and failure to creatively develop a vague request as critical.',
+                'Judge only supplied evidence. Treat wrong counts, missing literal constraints, absent required dialogue, broken physical continuity, severe morphing, and failure to creatively develop a vague request as critical. When a seamless loop is required, loop_closure measures whether the final frame restores each distinguishable subject and the complete frame-zero camera/state without an early freeze, identity swap, cut, or cross-fade. When no loop is required, score loop_closure 10 unless the ending itself is visibly broken.',
                 'A candidate is acceptable only if it could be delivered without correction. Do not infer provider, source resolution, or candidate identity.',
             ].join('\n'),
         },
@@ -232,6 +240,8 @@ async function judge(openai, spec, evidence, runIndex) {
                     ? JSON.stringify(candidate.dialogue_verification)
                     : '[not configured]'}`,
                 `FRAME-ZERO SSIM: ${candidate.frame_zero.ssim ?? 'unavailable'}`,
+                `FIRST-TO-LAST SSIM: ${candidate.loop_endpoint.first_to_last_ssim ?? 'unavailable'}`,
+                `SOURCE-TO-LAST SSIM: ${candidate.loop_endpoint.source_to_last_ssim ?? 'unavailable'}`,
                 `FREEZE EVENTS: ${JSON.stringify(candidate.timeline.freeze_events)}`,
                 `BLACK EVENTS: ${JSON.stringify(candidate.timeline.black_events)}`,
                 candidate.keyframe_path
@@ -242,6 +252,8 @@ async function judge(openai, spec, evidence, runIndex) {
         if (candidate.keyframe_path) content.push(await imageInput(candidate.keyframe_path));
         content.push({ type: 'input_text', text: 'GENERATED FRAME ZERO:' });
         content.push(await imageInput(candidate.visuals.frameZeroPath));
+        content.push({ type: 'input_text', text: 'GENERATED FINAL FRAME:' });
+        content.push(await imageInput(candidate.visuals.finalFramePath));
         content.push({ type: 'input_text', text: 'GENERATED TIMELINE:' });
         content.push(await imageInput(candidate.visuals.timelinePath));
     }
@@ -280,7 +292,7 @@ async function judge(openai, spec, evidence, runIndex) {
 
 function aggregateJudgments(evidence, judgments) {
     const metrics = [
-        'prompt_fidelity', 'visual_quality', 'temporal_coherence', 'frame_zero_continuity',
+        'prompt_fidelity', 'visual_quality', 'temporal_coherence', 'frame_zero_continuity', 'loop_closure',
         'creative_execution', 'audio_dialogue', 'overall',
     ];
     const candidates = evidence.map(candidate => {
@@ -342,9 +354,18 @@ async function main() {
             outputDirectory,
             Number(probe.format?.duration),
         );
-        const [frameZero, timeline, transcript] = await Promise.all([
+        const [frameZero, loopFromFirst, loopFromSource, timeline, transcript] = await Promise.all([
             candidate.keyframe_path
-                ? frameZeroMetrics(candidate.keyframe_path, visuals.frameZeroPath, videoStream.width, videoStream.height)
+                ? frameSimilarity(candidate.keyframe_path, visuals.frameZeroPath, videoStream.width, videoStream.height)
+                : Promise.resolve({ ssim: null }),
+            frameSimilarity(
+                visuals.frameZeroPath,
+                visuals.finalFramePath,
+                videoStream.width,
+                videoStream.height,
+            ),
+            candidate.keyframe_path
+                ? frameSimilarity(candidate.keyframe_path, visuals.finalFramePath, videoStream.width, videoStream.height)
                 : Promise.resolve({ ssim: null }),
             detectTimelineProblems(candidate.video_path),
             transcribeVideo(
@@ -364,6 +385,10 @@ async function main() {
             probe,
             visuals,
             frame_zero: frameZero,
+            loop_endpoint: {
+                first_to_last_ssim: loopFromFirst.ssim,
+                source_to_last_ssim: loopFromSource.ssim,
+            },
             timeline,
             transcript,
             dialogue_verification: dialogueVerification,
@@ -381,6 +406,7 @@ async function main() {
         prompt: spec.prompt,
         intent: spec.intent || null,
         expected_dialogue: spec.expected_dialogue || null,
+        loop_expected: Boolean(spec.loop_expected),
         dialogue_contract: spec.dialogue_contract || null,
         judge_model: AI_MODELS.openAIChat,
         judge_runs: judgeRuns,
