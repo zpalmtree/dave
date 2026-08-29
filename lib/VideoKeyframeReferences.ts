@@ -12,8 +12,6 @@ import {
 } from './ImageSearch.js';
 
 export const VIDEO_KEYFRAME_MAX_REFERENCES = 4;
-export const VIDEO_KEYFRAME_SHARED_REFERENCE_CACHE_MAX_ENTRIES = 128;
-export const VIDEO_KEYFRAME_SHARED_REFERENCE_CACHE_MAX_BYTES = 96 * 1024 * 1024;
 
 export type VideoKeyframeReferenceKind = 'identity' | 'character' | 'object' | 'location' | 'style';
 
@@ -48,9 +46,6 @@ interface ReferenceManifest {
     requirements_sha256: string;
     references: CachedReference[];
 }
-
-const sharedReferenceCache = new Map<string, VideoKeyframeReference[]>();
-let sharedReferenceCacheBytes = 0;
 
 type SearchImages = (query: string) => Promise<ImageSearchResult[]>;
 type DownloadImage = typeof downloadSearchResultImage;
@@ -97,74 +92,6 @@ function extensionForMimeType(mimeType: VideoKeyframeReference['mimeType']): str
 
 function requirementsDigest(requirements: VideoKeyframeReferenceRequirement[]): string {
     return createHash('sha256').update(JSON.stringify(requirements)).digest('hex');
-}
-
-function cloneReferences(references: VideoKeyframeReference[]): VideoKeyframeReference[] {
-    return references.map(reference => ({
-        ...reference,
-        bytes: Buffer.from(reference.bytes),
-    }));
-}
-
-function sharedCachedReferences(digest: string): VideoKeyframeReference[] | null {
-    const cached = sharedReferenceCache.get(digest);
-    if (!cached) return null;
-    sharedReferenceCache.delete(digest);
-    sharedReferenceCache.set(digest, cached);
-    return cloneReferences(cached);
-}
-
-function referenceByteLength(references: VideoKeyframeReference[]): number {
-    return references.reduce((total, reference) => total + reference.bytes.length, 0);
-}
-
-function forgetSharedReferences(digest: string): void {
-    const cached = sharedReferenceCache.get(digest);
-    if (!cached) return;
-    sharedReferenceCache.delete(digest);
-    sharedReferenceCacheBytes -= referenceByteLength(cached);
-}
-
-function rememberSharedReferences(digest: string, references: VideoKeyframeReference[]): void {
-    if (!references.length) return;
-    const cacheBytes = referenceByteLength(references);
-    if (cacheBytes > VIDEO_KEYFRAME_SHARED_REFERENCE_CACHE_MAX_BYTES) return;
-    forgetSharedReferences(digest);
-    const cached = cloneReferences(references);
-    sharedReferenceCache.set(digest, cached);
-    sharedReferenceCacheBytes += cacheBytes;
-    while (sharedReferenceCache.size > VIDEO_KEYFRAME_SHARED_REFERENCE_CACHE_MAX_ENTRIES
-        || sharedReferenceCacheBytes > VIDEO_KEYFRAME_SHARED_REFERENCE_CACHE_MAX_BYTES) {
-        const oldest = sharedReferenceCache.keys().next().value;
-        if (typeof oldest !== 'string') break;
-        forgetSharedReferences(oldest);
-    }
-}
-
-function persistReferences(
-    directory: string,
-    digest: string,
-    references: VideoKeyframeReference[],
-): void {
-    mkdirSync(directory, { recursive: true });
-    const manifestReferences = references.map((reference, index): CachedReference => {
-        const filename = `reference_${index + 1}.${extensionForMimeType(reference.mimeType)}`;
-        writeFileSync(join(directory, filename), reference.bytes);
-        return {
-            label: reference.label,
-            kind: reference.kind,
-            visual_facts_to_preserve: reference.visualFactsToPreserve,
-            source_url: reference.sourceUrl,
-            context_url: reference.contextUrl,
-            filename,
-        };
-    });
-    const manifest: ReferenceManifest = {
-        version: 1,
-        requirements_sha256: digest,
-        references: manifestReferences,
-    };
-    writeFileSync(join(directory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function cachedReferences(directory: string, digest: string): VideoKeyframeReference[] | null {
@@ -243,12 +170,6 @@ export async function resolveVideoKeyframeReferences(
     const digest = requirementsDigest(requirements);
     const cached = cachedReferences(directory, digest);
     if (cached) return cached;
-
-    const sharedCached = sharedCachedReferences(digest);
-    if (sharedCached) {
-        persistReferences(directory, digest, sharedCached);
-        return sharedCached;
-    }
 
     mkdirSync(directory, { recursive: true });
     const references: VideoKeyframeReference[] = [];
@@ -349,9 +270,6 @@ export async function resolveVideoKeyframeReferences(
         references: manifestReferences,
     };
     writeFileSync(join(directory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-    if (references.length === requirements.length) {
-        rememberSharedReferences(digest, references);
-    }
     return references;
 }
 
