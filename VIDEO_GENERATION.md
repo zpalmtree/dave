@@ -167,8 +167,12 @@ production critical path.
 
 Run `yarn benchmark:video-renders --spec=/path/to/render-comparison.json` after a
 small controlled set of expensive renders completes. It transcribes each output,
-measures frame-zero similarity and obvious freeze/black intervals, extracts a
-16-frame timeline, and asks the strong judge twice with reversed candidate order.
+measures source-to-first, first-to-last, and source-to-last similarity plus obvious
+freeze/black intervals, extracts the first frame, final frame, and a 16-frame
+timeline, and asks the strong judge twice with reversed candidate order. Set
+`"loop_expected": true` in the spec to make exact endpoint restoration, continuous
+motion into the endpoint, and identity-safe frame-zero reset part of the blinded
+gate.
 The report promotes nothing unless one candidate receives a majority of acceptable
 votes; missing literal dialogue or another hard requirement therefore blocks an
 otherwise attractive speed result.
