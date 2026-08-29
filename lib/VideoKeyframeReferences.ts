@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { GoogleGenAI } from '@google/genai';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import fetch from 'node-fetch';
@@ -7,11 +8,13 @@ import { config } from './Config.js';
 import { VideoProviderHooks, VideoUsagePersistenceError } from './VideoUsage.js';
 import {
     ImageSearchResult,
+    DownloadedImage,
     downloadSearchResultImage,
     isUsableImageResult,
 } from './ImageSearch.js';
 
 export const VIDEO_KEYFRAME_MAX_REFERENCES = 4;
+export const VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL = 'gemini-3.5-flash-lite';
 
 export type VideoKeyframeReferenceKind = 'identity' | 'character' | 'object' | 'location' | 'style';
 
@@ -49,6 +52,25 @@ interface ReferenceManifest {
 
 type SearchImages = (query: string) => Promise<ImageSearchResult[]>;
 type DownloadImage = typeof downloadSearchResultImage;
+type ValidateReference = (
+    requirement: VideoKeyframeReferenceRequirement,
+    result: ImageSearchResult,
+    image: DownloadedImage,
+    hooks: VideoProviderHooks,
+    attempt: number,
+) => Promise<boolean>;
+
+const REFERENCE_QUERY_BOILERPLATE = new Set([
+    'art', 'artwork', 'appearance', 'character', 'characters', 'concept', 'design', 'face',
+    'film', 'full', 'game', 'high', 'identity', 'image', 'images', 'look', 'movie', 'official',
+    'photo', 'photos', 'picture', 'pictures', 'portrait', 'promotional', 'publicity', 'reference',
+    'references', 'resolution', 'screenshot', 'series', 'show', 'still', 'style', 'tv', 'visual',
+]);
+const GENERIC_IDENTITY_LABEL_WORDS = new Set([
+    'alien', 'animal', 'avocado', 'baby', 'boy', 'cat', 'character', 'child', 'creature',
+    'dog', 'driver', 'girl', 'hero', 'human', 'identity', 'man', 'monster', 'person', 'people',
+    'protagonist', 'racer', 'reference', 'robot', 'subject', 'villain', 'woman', 'worker',
+]);
 
 function transientReferenceSearchFailure(error: unknown): boolean {
     return /timed out|timeout|aborted|fetch|network|socket|econn|HTTP (408|409|429|5\d\d)/i.test(
@@ -59,6 +81,25 @@ function transientReferenceSearchFailure(error: unknown): boolean {
 function boundedText(value: unknown, maximum: number): string {
     if (typeof value !== 'string') return '';
     return value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maximum);
+}
+
+function referenceWords(value: string): string[] {
+    return [...new Set(value.toLocaleLowerCase().match(/[a-z0-9]+/g) || [])];
+}
+
+function isGenericIdentityRequirement(requirement: VideoKeyframeReferenceRequirement): boolean {
+    if (requirement.kind !== 'identity' && requirement.kind !== 'character') return false;
+    const labelWords = referenceWords(requirement.label)
+        .filter(word => !REFERENCE_QUERY_BOILERPLATE.has(word));
+    return labelWords.length > 0
+        && labelWords.every(word => GENERIC_IDENTITY_LABEL_WORDS.has(word));
+}
+
+function needsAmbiguousIdentityValidation(requirement: VideoKeyframeReferenceRequirement): boolean {
+    if (requirement.kind !== 'identity' && requirement.kind !== 'character') return false;
+    const distinctiveWords = referenceWords(requirement.searchQuery)
+        .filter(word => word.length > 1 && !REFERENCE_QUERY_BOILERPLATE.has(word));
+    return distinctiveWords.length < 2;
 }
 
 function referenceRequirements(plan: Record<string, any>): VideoKeyframeReferenceRequirement[] {
@@ -73,9 +114,94 @@ function referenceRequirements(plan: Record<string, any>): VideoKeyframeReferenc
         const visualFactsToPreserve = boundedText(candidate?.visual_facts_to_preserve, 400);
         const kind = boundedText(candidate?.kind, 20) as VideoKeyframeReferenceKind;
         if (!label || !searchQuery || !visualFactsToPreserve || !kinds.has(kind)) continue;
-        requirements.push({ label, kind, searchQuery, visualFactsToPreserve });
+        const requirement = { label, kind, searchQuery, visualFactsToPreserve };
+        if (!isGenericIdentityRequirement(requirement)) requirements.push(requirement);
     }
     return requirements;
+}
+
+async function validateAmbiguousVideoKeyframeReference(
+    requirement: VideoKeyframeReferenceRequirement,
+    result: ImageSearchResult,
+    image: DownloadedImage,
+    hooks: VideoProviderHooks,
+    attempt: number,
+): Promise<boolean> {
+    const started = Date.now();
+    let outcome: 'accepted' | 'rejected' | 'error' = 'error';
+    let detail: string | undefined;
+    try {
+        const mimeType = mimeTypeForExtension(image.extension);
+        const client = new GoogleGenAI({ apiKey: config.geminiApiKey, apiVersion: 'v1alpha' });
+        const response = await client.models.generateContent({
+            model: VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL,
+            contents: [{
+                role: 'user',
+                parts: [
+                    {
+                        text: [
+                            `Target label: ${requirement.label}`,
+                            `Public image search query: ${requirement.searchQuery}`,
+                            `Declared visual facts to preserve: ${requirement.visualFactsToPreserve}`,
+                            `Search-result title: ${boundedText(result.title, 200)}`,
+                            `Search-result source: ${boundedText(result.displayLink, 200)}`,
+                            '',
+                            'Decide whether the candidate visibly and specifically depicts the intended target well enough to bind a generated video\'s identity or character design.',
+                            'Reject unrelated results, wordplay, text/logo merchandise that does not clearly show the target, generic inspiration, and ambiguous results that cannot establish the intended identity.',
+                            'A product photo qualifies only when it clearly shows the correct named character\'s canonical design.',
+                        ].join('\n'),
+                    },
+                    { text: 'CANDIDATE REFERENCE:' },
+                    { inlineData: { mimeType, data: image.data.toString('base64') } },
+                ],
+            }],
+            config: {
+                systemInstruction: 'You are a conservative visual-reference relevance gate. False acceptance is worse than omitting a questionable reference. Output JSON.',
+                responseMimeType: 'application/json',
+                responseJsonSchema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['usable'],
+                    properties: { usable: { type: 'boolean' } },
+                },
+                thinkingConfig: { thinkingLevel: 'MINIMAL' as any },
+                temperature: 0,
+                maxOutputTokens: 100,
+            },
+        });
+        const parsed = JSON.parse(response.text || '{}');
+        if (typeof parsed?.usable !== 'boolean') {
+            throw new Error('Reference relevance gate returned invalid structured output.');
+        }
+        outcome = parsed.usable ? 'accepted' : 'rejected';
+        if (!parsed.usable) detail = 'Ambiguous public reference did not establish the declared target.';
+        const usage = response.usageMetadata;
+        await hooks.onUsage?.({
+            stage: 'keyframe_reference_validation',
+            attempt,
+            outcome,
+            provider: 'google',
+            model: VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL,
+            serviceTier: 'default',
+            inputTokens: Number(usage?.promptTokenCount || 0),
+            outputTokens: Number(usage?.candidatesTokenCount || 0),
+        });
+        return parsed.usable;
+    } catch (error) {
+        detail = error instanceof Error ? error.message : String(error);
+        throw error;
+    } finally {
+        await hooks.onAttempt?.({
+            stage: 'keyframe_reference_validation',
+            attempt,
+            outcome,
+            provider: 'google',
+            model: VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL,
+            serviceTier: 'default',
+            durationSeconds: (Date.now() - started) / 1000,
+            detail,
+        });
+    }
 }
 
 function mimeTypeForExtension(extension: string): VideoKeyframeReference['mimeType'] {
@@ -161,6 +287,7 @@ export async function resolveVideoKeyframeReferences(
     searchImages: SearchImages = searchVideoKeyframeReferenceImages,
     downloadImage: DownloadImage = downloadSearchResultImage,
     hooks: VideoProviderHooks = {},
+    validateReference: ValidateReference = validateAmbiguousVideoKeyframeReference,
 ): Promise<VideoKeyframeReference[]> {
     if (plan?.keyframe?.recommended !== true) return [];
     const requirements = referenceRequirements(plan);
@@ -219,6 +346,16 @@ export async function resolveVideoKeyframeReferences(
             for (const result of results.slice(0, 5)) {
                 const image = await downloadImage(result);
                 if (image && ['jpg', 'jpeg', 'png', 'webp'].includes(image.extension)) {
+                    if (needsAmbiguousIdentityValidation(requirement)) {
+                        const valid = await validateReference(
+                            requirement,
+                            result,
+                            image,
+                            hooks,
+                            requirementIndex + 1,
+                        );
+                        if (!valid) return null;
+                    }
                     selected = { result, image };
                     break;
                 }

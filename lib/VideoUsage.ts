@@ -10,7 +10,7 @@ export class VideoUsagePersistenceError extends Error {
     }
 }
 
-export type VideoProviderOutcome = 'success' | 'accepted' | 'rejected' | 'error' | 'unreviewed' | 'cancelled';
+export type VideoProviderOutcome = 'success' | 'accepted' | 'best_effort' | 'rejected' | 'error' | 'unreviewed' | 'cancelled';
 
 export interface VideoProviderUsage {
     stage: string;
@@ -107,6 +107,11 @@ export function videoUsageCost(usage: VideoProviderUsage): number {
         return input * 0.75 / 1_000_000
             + output * 3.75 / 1_000_000
             + cacheRead * 0.075 / 1_000_000;
+    }
+    if (usage.model.startsWith('gemini-3.5-flash-lite')) {
+        return input * 0.30 / 1_000_000
+            + output * 2.50 / 1_000_000
+            + cacheRead * 0.03 / 1_000_000;
     }
     if (usage.model.startsWith('gemini-3-pro-image')) {
         return input * 2 / 1_000_000 + output * 12 / 1_000_000 + images * 0.12;

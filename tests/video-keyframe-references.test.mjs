@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+    countVideoKeyframeReferenceRequirements,
     resolveVideoKeyframeReferences,
     searchVideoKeyframeReferenceImages,
 } from '../dist/VideoKeyframeReferences.js';
@@ -41,6 +42,74 @@ test('video reference search uses the configured Google image endpoint and keeps
     assert.equal(results.length, 1);
     assert.equal(results[0].link, 'https://images.example/character.png');
     assert.equal(results[0].url, 'https://example.com/character');
+});
+
+test('generic and ambiguous character references cannot bind arbitrary public images', async () => {
+    const genericDirectory = mkdtempSync(join(tmpdir(), 'dave-video-generic-reference-'));
+    const ambiguousDirectory = mkdtempSync(join(tmpdir(), 'dave-video-ambiguous-reference-'));
+    let searches = 0;
+    let validations = 0;
+    const search = async () => {
+        searches += 1;
+        return [{
+            title: 'Be in awe of my tism shirt',
+            link: 'https://images.example/shirt.png',
+            url: 'https://example.com/shirt',
+            displayLink: 'example.com',
+        }];
+    };
+    const download = async () => ({
+        data: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+        extension: 'png',
+    });
+    const generic = {
+        keyframe: {
+            recommended: true,
+            reference_requirements: [{
+                label: 'alien_character',
+                kind: 'character',
+                search_query: 'alien character design',
+                visual_facts_to_preserve: 'Generic non-human anatomy.',
+            }],
+        },
+    };
+    const ambiguous = {
+        keyframe: {
+            recommended: true,
+            reference_requirements: [{
+                label: 'Tism',
+                kind: 'character',
+                search_query: 'Tism character design',
+                visual_facts_to_preserve: 'Preserve the named character design.',
+            }],
+        },
+    };
+
+    try {
+        assert.equal(countVideoKeyframeReferenceRequirements(generic), 0);
+        assert.deepEqual(
+            await resolveVideoKeyframeReferences(generic, genericDirectory, search, download),
+            [],
+        );
+        assert.equal(searches, 0);
+
+        assert.deepEqual(await resolveVideoKeyframeReferences(
+            ambiguous,
+            ambiguousDirectory,
+            search,
+            download,
+            {},
+            async () => {
+                validations += 1;
+                return false;
+            },
+        ), []);
+        assert.equal(searches, 1);
+        assert.equal(validations, 1);
+    } finally {
+        rmSync(genericDirectory, { recursive: true, force: true });
+        rmSync(ambiguousDirectory, { recursive: true, force: true });
+    }
 });
 
 test('video keyframe references are bounded, downloaded, and reused from the job cache', async () => {

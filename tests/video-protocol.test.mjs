@@ -1429,16 +1429,19 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
 test('keyframe rejection telemetry retains bounded visible issues', () => {
     assert.equal(videoKeyframeReviewDetail({
         acceptable: true,
+        best_effort_worthy: true,
         issues: [],
         correction_prompt: '',
     }), undefined);
     assert.equal(videoKeyframeReviewDetail({
         acceptable: false,
+        best_effort_worthy: false,
         issues: ['  Wrong subject count.  ', '', 'Travel vector points left.'],
         correction_prompt: 'repair it',
     }), 'Wrong subject count.; Travel vector points left.');
     assert.equal(videoKeyframeReviewDetail({
         acceptable: false,
+        best_effort_worthy: false,
         issues: [],
         correction_prompt: '',
     }), 'review_rejected_without_issues');
@@ -1500,6 +1503,7 @@ test('serial keyframes retry generic Gemini no-image responses then use reviewed
                 service_tier: 'priority',
                 output_text: JSON.stringify({
                     acceptable: true,
+                    best_effort_worthy: true,
                     issues: [],
                     correction_prompt: '',
                 }),
@@ -1552,6 +1556,7 @@ test('fast-gated keyframes review and reuse a prefetched candidate without regen
             service_tier: 'priority',
             output_text: JSON.stringify({
                 acceptable: true,
+                best_effort_worthy: true,
                 issues: [],
                 correction_prompt: '',
             }),
@@ -1582,6 +1587,54 @@ test('fast-gated keyframes review and reuse a prefetched candidate without regen
     assert.deepEqual(result.bytes, prefetched.bytes);
     assert.equal(result.model, VIDEO_KEYFRAME_FAST_LITE_MODEL);
     assert.equal(result.reviewStatus, 'accepted');
+});
+
+test('reviewed best-effort keyframes stop before repair and baseline generation', async t => {
+    let reviewCalls = 0;
+    let generationCalls = 0;
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        if (!url.endsWith('/v1/responses')) {
+            generationCalls += 1;
+            throw new Error(`Unexpected image generation request: ${url}`);
+        }
+        reviewCalls += 1;
+        return new Response(JSON.stringify({
+            model: VIDEO_KEYFRAME_REVIEW_MODEL,
+            service_tier: 'priority',
+            output_text: JSON.stringify({
+                acceptable: false,
+                best_effort_worthy: true,
+                issues: ['One incidental background prop is missing.'],
+                correction_prompt: 'Show one additional background prop.',
+            }),
+            usage: {
+                input_tokens: 10,
+                output_tokens: 5,
+                input_tokens_details: { cached_tokens: 0 },
+            },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const candidate = {
+        bytes: Buffer.from('minor-reviewed-frame'),
+        mimeType: 'image/png',
+        provider: 'gemini',
+        model: VIDEO_KEYFRAME_FAST_LITE_MODEL,
+    };
+    const result = await createFrontierVideoKeyframe({
+        intent: 'A coherent opening scene with one incidental prop mismatch.',
+        keyframe: { prompt: 'A coherent opening frame.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The action begins.', camera: 'Wide shot.' }] }],
+    }, [], {
+        strategy: 'fast-gated-v3',
+        serviceTier: 'fast',
+        initialCandidate: Promise.resolve(candidate),
+    });
+
+    assert.equal(result.reviewStatus, 'best_effort');
+    assert.deepEqual(result.bytes, candidate.bytes);
+    assert.equal(reviewCalls, 1);
+    assert.equal(generationCalls, 0);
 });
 
 test('keyframe review timeout retries the quality gate before accepting a candidate', async t => {
@@ -1615,6 +1668,7 @@ test('keyframe review timeout retries the quality gate before accepting a candid
                 service_tier: 'priority',
                 output_text: JSON.stringify({
                     acceptable: true,
+                    best_effort_worthy: true,
                     issues: [],
                     correction_prompt: '',
                 }),
@@ -1684,6 +1738,7 @@ test('fast keyframes retry one reviewed Flash Lite correction before the baselin
                 service_tier: 'priority',
                 output_text: JSON.stringify({
                     acceptable,
+                    best_effort_worthy: acceptable,
                     issues: acceptable ? [] : ['The podium path has no usable ramp.'],
                     correction_prompt: acceptable
                         ? ''
@@ -1757,6 +1812,7 @@ test('rejected fast correction preserves the reviewed full-quality fallback', as
                 service_tier: 'priority',
                 output_text: JSON.stringify({
                     acceptable,
+                    best_effort_worthy: acceptable,
                     issues: acceptable ? [] : ['The frame still contradicts the motion contract.'],
                     correction_prompt: acceptable ? '' : 'Show all subjects aligned with the forward path.',
                 }),
@@ -1806,6 +1862,7 @@ test('slow rejected fast review overlaps the unchanged full-quality candidate', 
         service_tier: 'priority',
         output_text: JSON.stringify({
             acceptable,
+            best_effort_worthy: acceptable,
             issues: acceptable ? [] : ['The frame contradicts the motion contract.'],
             correction_prompt: acceptable ? '' : 'Align every racer with the forward path.',
         }),
@@ -1889,6 +1946,7 @@ test('accepted corrected fast review aborts its delayed full-quality hedge', asy
         service_tier: 'priority',
         output_text: JSON.stringify({
             acceptable,
+            best_effort_worthy: acceptable,
             issues: acceptable ? [] : ['The path is blocked.'],
             correction_prompt: acceptable ? '' : 'Show a clear forward path.',
         }),
