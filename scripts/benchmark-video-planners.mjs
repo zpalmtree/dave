@@ -55,6 +55,22 @@ const FOCUSED_FLASH_GUIDANCE = 'Preserve state transitions: when the request des
 
 const CANDIDATES = [
     {
+        id: 'production-baseline',
+        experimental: true,
+        plannerModel: VIDEO_PLANNER_MODEL,
+        plannerStrategy: 'single-pass',
+        analysisReasoningEffort: 'medium',
+        screenplayReasoningEffort: 'medium',
+    },
+    {
+        id: 'sol-single-medium-contracts',
+        experimental: true,
+        plannerModel: VIDEO_PLANNER_MODEL,
+        plannerStrategy: 'single-pass',
+        analysisReasoningEffort: 'medium',
+        screenplayReasoningEffort: 'medium',
+    },
+    {
         id: 'sol-high-high',
         plannerModel: VIDEO_PLANNER_MODEL,
         analysisReasoningEffort: 'high',
@@ -111,6 +127,7 @@ function args() {
     const limitArgument = process.argv.find(value => value.startsWith('--limit='));
     const examplesArgument = process.argv.find(value => value.startsWith('--examples='));
     const baselineArgument = process.argv.find(value => value.startsWith('--baseline='));
+    const promptsArgument = process.argv.find(value => value.startsWith('--prompts='));
     const candidatesArgument = process.argv.find(value => value.startsWith('--candidates='));
     const concurrencyArgument = process.argv.find(value => value.startsWith('--concurrency='));
     const judgeRunsArgument = process.argv.find(value => value.startsWith('--judge-runs='));
@@ -140,6 +157,7 @@ function args() {
         candidateIds,
         examplesPath: examplesArgument ? examplesArgument.slice('--examples='.length) : undefined,
         baselinePath: baselineArgument ? baselineArgument.slice('--baseline='.length) : undefined,
+        promptsPath: promptsArgument ? promptsArgument.slice('--prompts='.length) : undefined,
     };
 }
 
@@ -214,13 +232,15 @@ async function judgeCandidates(prompt, generated, runIndex = 0, judgeProvider = 
                 items: {
                     type: 'object',
                     additionalProperties: false,
-                    required: ['label', 'prompt_fidelity', 'creative_expansion', 'specificity', 'continuity', 'audio_dialogue', 'timing_efficiency', 'overall', 'critical_failures'],
+                    required: ['label', 'prompt_fidelity', 'creative_expansion', 'specificity', 'continuity', 'visible_text_fidelity', 'transition_logic', 'audio_dialogue', 'timing_efficiency', 'overall', 'critical_failures'],
                     properties: {
                         label: { type: 'string', enum: labels.map(value => value.label) },
                         prompt_fidelity: { type: 'number', minimum: 1, maximum: 10 },
                         creative_expansion: { type: 'number', minimum: 1, maximum: 10 },
                         specificity: { type: 'number', minimum: 1, maximum: 10 },
                         continuity: { type: 'number', minimum: 1, maximum: 10 },
+                        visible_text_fidelity: { type: 'number', minimum: 1, maximum: 10 },
+                        transition_logic: { type: 'number', minimum: 1, maximum: 10 },
                         audio_dialogue: { type: 'number', minimum: 1, maximum: 10 },
                         timing_efficiency: { type: 'number', minimum: 1, maximum: 10 },
                         overall: { type: 'number', minimum: 1, maximum: 10 },
@@ -232,7 +252,7 @@ async function judgeCandidates(prompt, generated, runIndex = 0, judgeProvider = 
             explanation: { type: 'string' },
         },
     };
-    const instructions = 'You are a blinded video-directing evaluator. Score plans only on the supplied request and their concrete feasibility for MiniMax H3. Reward inventive development of vague prompts, but penalize generic spectacle, prompt mirroring, missing literal constraints, impossible timing, broken shot continuity, and unwanted dialogue. For timing efficiency, reward the shortest duration that still gives every meaningful setup, action, consequence, and required line enough screen time; penalize both wasteful padding and destructive compression. Do not infer provider identity from style.';
+    const instructions = 'You are a blinded video-directing evaluator. Score plans only on the supplied request and their concrete feasibility for MiniMax H3. Reward inventive development of vague prompts, but penalize generic spectacle, prompt mirroring, missing literal constraints, impossible timing, broken shot continuity, and unwanted dialogue. visible_text_fidelity measures exact preservation and readable staging of explicitly requested on-screen words; when no visible text is requested, score 10 unless the plan invents visible text. transition_logic measures whether cuts and transformations have a concrete physical or visual throughline when useful, without forcing motion-design devices into ordinary scenes. For timing efficiency, reward the shortest duration that still gives every meaningful setup, action, consequence, and required line enough screen time; penalize both wasteful padding and destructive compression. Do not infer provider identity from style.';
     const inputText = [
         `USER REQUEST:\n${prompt}`,
         ...labels.map(value => `CANDIDATE ${value.label}:\n${JSON.stringify(value.plan)}`),
@@ -308,7 +328,15 @@ async function judgeCandidates(prompt, generated, runIndex = 0, judgeProvider = 
 
 async function main() {
     const options = args();
-    const source = options.duration ? DURATION_PROMPTS : options.full ? FULL_PROMPTS : QUICK_PROMPTS;
+    const customPrompts = options.promptsPath
+        ? JSON.parse(await readFile(resolve(options.promptsPath), 'utf8'))
+        : null;
+    if (customPrompts && (!Array.isArray(customPrompts)
+        || customPrompts.some(prompt => typeof prompt !== 'string' || !prompt.trim()))) {
+        throw new Error('--prompts must point to a JSON array of non-empty strings.');
+    }
+    const source = customPrompts
+        || (options.duration ? DURATION_PROMPTS : options.full ? FULL_PROMPTS : QUICK_PROMPTS);
     const prompts = source.slice(0, options.limit || source.length);
     const activeCandidates = CANDIDATES.filter(candidate => options.candidateIds.includes(candidate.id));
     let examplesReport = null;
@@ -364,13 +392,14 @@ async function main() {
     const teacherExamples = teacherExamplesFromReport({ cases });
     const report = {
         created_at: new Date().toISOString(),
-        mode: options.duration ? 'duration' : options.full ? 'full' : 'quick',
+        mode: options.promptsPath ? 'custom' : options.duration ? 'duration' : options.full ? 'full' : 'quick',
         benchmark_options: {
             prompt_concurrency: options.concurrency,
             judge_runs: options.noJudge ? 0 : options.judgeRuns,
             judge_provider: options.judgeProvider,
             baseline_report: baselinePath,
             examples_report: options.examplesPath ? resolve(options.examplesPath) : null,
+            prompts_file: options.promptsPath ? resolve(options.promptsPath) : null,
         },
         candidates: activeCandidates,
         cases,
