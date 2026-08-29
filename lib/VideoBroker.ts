@@ -463,6 +463,31 @@ function normalizedMetricSpan(value: any): VideoMetricSpan {
     if (['start', 'cut', 'continue', 'dissolve'].includes(value.metadata?.transition)) {
         metadata.transition = value.metadata.transition;
     }
+    if (['pytorch', 'comfy_kitchen_int8'].includes(value.metadata?.attention_backend)) {
+        metadata.attention_backend = value.metadata.attention_backend;
+    }
+    if (['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'].includes(
+        value.metadata?.aspect,
+    )) {
+        metadata.aspect = value.metadata.aspect;
+    }
+    for (const [name, minimum, maximum] of [
+        ['segment_duration_seconds', 0.01, 60],
+        ['frame_count', 1, 10_000],
+        ['run_index', 1, 20],
+        ['steps_observed', 1, 1_000],
+        ['steps_total', 1, 1_000],
+        ['first_step_seconds', 0, 3_600],
+        ['steady_step_mean_seconds', 0, 3_600],
+        ['steady_step_median_seconds', 0, 3_600],
+        ['steady_step_p90_seconds', 0, 3_600],
+    ] as const) {
+        if (value.metadata?.[name] === undefined) continue;
+        const number = boundedNumber(value.metadata[name], minimum, maximum, false)!;
+        metadata[name] = ['frame_count', 'run_index', 'steps_observed', 'steps_total'].includes(name)
+            ? Math.round(number)
+            : number;
+    }
     if (value.metadata?.references_requested !== undefined) {
         metadata.references_requested = Math.round(
             boundedNumber(value.metadata.references_requested, 0, 4, false)!,
