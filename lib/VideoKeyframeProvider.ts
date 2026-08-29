@@ -33,11 +33,12 @@ export interface VideoKeyframeResult {
     mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
     provider: string;
     model: string;
-    reviewStatus?: 'accepted' | 'unreviewed';
+    reviewStatus?: 'accepted' | 'best_effort' | 'unreviewed';
 }
 
 export interface VideoKeyframeReview {
     acceptable: boolean;
+    best_effort_worthy: boolean;
     issues: string[];
     correction_prompt: string;
 }
@@ -170,6 +171,7 @@ export function buildVideoKeyframeReviewPrompt(
         'Audit the image labeled CANDIDATE as the literal first frame of that video. Any later labeled images are references only. Treat stylized or caricatured likenesses as valid when the named people remain readily distinguishable.',
         'Reject it if the requested closed cast/count is wrong, key identities are not visibly distinguishable, important subjects or props are missing, or the composition contradicts the motion contract.',
         'For moving subjects, explicitly trace the physical front/nose, visible road or path ahead, gaze, screen direction, and vanishing point. Reject a frame that would require an immediate turn, reversal, gaze snap, axis crossing, teleport, or reframe.',
+        'Set best_effort_worthy true whenever acceptable is true. When acceptable is false, best_effort_worthy may be true only if the frame is visually coherent, preserves the core cast and requested identities, stages the intended first action with valid motion geometry, and every remaining issue is a low-impact detail. A small mismatch in the number or placement of repeated incidental props may qualify when the requested meaning remains unmistakable. It must be false for missing or wrong primary cast or identity, already-started action, broken motion path, required camera or composition failure, a major artifact, or any discrepancy that changes the story.',
         'If rejected, correction_prompt must be a concrete positive-only description of the corrected visible frame. Describe only wanted subjects and geometry; do not repeat unwanted names or write negations.',
     ].join('\n');
 }
@@ -513,9 +515,10 @@ export async function reviewVideoKeyframe(
                         schema: {
                             type: 'object',
                             additionalProperties: false,
-                            required: ['acceptable', 'issues', 'correction_prompt'],
+                            required: ['acceptable', 'best_effort_worthy', 'issues', 'correction_prompt'],
                             properties: {
                                 acceptable: { type: 'boolean' },
+                                best_effort_worthy: { type: 'boolean' },
                                 issues: {
                                     type: 'array',
                                     maxItems: 8,
@@ -549,7 +552,9 @@ export async function reviewVideoKeyframe(
         let review: any;
         try {
             review = JSON.parse(responseOutputText(body));
-            if (typeof review?.acceptable !== 'boolean' || !Array.isArray(review?.issues)
+            if (typeof review?.acceptable !== 'boolean'
+                || typeof review?.best_effort_worthy !== 'boolean'
+                || !Array.isArray(review?.issues)
                 || typeof review?.correction_prompt !== 'string') {
                 throw new Error('First-frame reviewer returned invalid structured output.');
             }
@@ -807,6 +812,10 @@ function accepted(image: VideoKeyframeResult, reviewed: boolean): VideoKeyframeR
     return { ...image, reviewStatus: reviewed ? 'accepted' : 'unreviewed' };
 }
 
+function bestEffort(image: VideoKeyframeResult): VideoKeyframeResult {
+    return { ...image, reviewStatus: 'best_effort' };
+}
+
 async function createReviewedOpenAIFallback(
     plan: Record<string, any>,
     references: VideoKeyframeReference[],
@@ -817,6 +826,7 @@ async function createReviewedOpenAIFallback(
     const fallback = await generateWithRetry('openai', prompt, references, 1, options);
     const review = await optionalReview(plan, fallback, references, options, nextReview);
     if (!review || review.acceptable) return accepted(fallback, Boolean(review));
+    if (review.best_effort_worthy) return bestEffort(fallback);
     const repairPrompt = [
         prompt,
         '',
@@ -831,6 +841,7 @@ async function createReviewedOpenAIFallback(
     if (!repairedReview || repairedReview.acceptable) {
         return accepted(repaired, Boolean(repairedReview));
     }
+    if (repairedReview.best_effort_worthy) return bestEffort(repaired);
     throw new Error(`Fallback first frames failed visual review: ${repairedReview.issues.join('; ')}`);
 }
 
@@ -855,6 +866,7 @@ async function createSerialKeyframe(
     }
     const firstReview = await optionalReview(plan, first, references, options, nextReview);
     if (!firstReview || firstReview.acceptable) return accepted(first, Boolean(firstReview));
+    if (firstReview.best_effort_worthy) return bestEffort(first);
     const retryPrompt = [basePrompt, '', 'Regenerate the image using this positive-only quality-control correction:',
         keyframeString(firstReview.correction_prompt, 'Strictly align every subject with the declared motion contract and keep every requested identity clearly visible.')].join('\n');
     let second: VideoKeyframeResult;
@@ -867,11 +879,13 @@ async function createSerialKeyframe(
     }
     const secondReview = await optionalReview(plan, second, references, options, nextReview);
     if (!secondReview || secondReview.acceptable) return accepted(second, Boolean(secondReview));
+    if (secondReview.best_effort_worthy) return bestEffort(second);
     const fallbackPrompt = [retryPrompt, '', 'Final quality-control correction:',
         keyframeString(secondReview.correction_prompt, firstReview.correction_prompt)].join('\n');
     const fallback = await generateWithRetry('openai', fallbackPrompt, references, 1, options);
     const fallbackReview = await optionalReview(plan, fallback, references, options, nextReview);
     if (!fallbackReview || fallbackReview.acceptable) return accepted(fallback, Boolean(fallbackReview));
+    if (fallbackReview.best_effort_worthy) return bestEffort(fallback);
     throw new Error(`All frontier first-frame candidates failed visual review: ${fallbackReview.issues.join('; ')}`);
 }
 
@@ -893,6 +907,7 @@ async function createConditionalKeyframe(
     }
     const firstReview = await optionalReview(plan, first, references, options, nextReview);
     if (!firstReview || firstReview.acceptable) return accepted(first, Boolean(firstReview));
+    if (firstReview.best_effort_worthy) return bestEffort(first);
 
     const retryPrompt = [
         basePrompt,
@@ -933,6 +948,7 @@ async function createConditionalKeyframe(
         const sole = gemini || openai!;
         const review = await optionalReview(plan, sole, references, options, nextReview);
         if (!review || review.acceptable) return accepted(sole, Boolean(review));
+        if (review.best_effort_worthy) return bestEffort(sole);
         correction = review.correction_prompt || correction;
     }
 
@@ -941,6 +957,7 @@ async function createConditionalKeyframe(
     const repaired = await generateWithRetry('gemini', repairPrompt, references, 5, options);
     const finalReview = await optionalReview(plan, repaired, references, options, nextReview);
     if (!finalReview || finalReview.acceptable) return accepted(repaired, Boolean(finalReview));
+    if (finalReview.best_effort_worthy) return bestEffort(repaired);
     throw new Error(`All frontier first-frame candidates failed visual review: ${finalReview.issues.join('; ')}`);
 }
 
@@ -967,6 +984,7 @@ async function createFastGatedKeyframe(
         ));
         const review = await optionalReview(plan, candidate, references, fastOptions, nextReview);
         if (review?.acceptable) return accepted(candidate, true);
+        if (review?.best_effort_worthy) return bestEffort(candidate);
         if (review) {
             const repairPrompt = [
                 basePrompt,
@@ -1019,6 +1037,10 @@ async function createFastGatedKeyframe(
                 if (repairedReview?.acceptable) {
                     abortBaseline();
                     return accepted(repaired, true);
+                }
+                if (repairedReview?.best_effort_worthy) {
+                    abortBaseline();
+                    return bestEffort(repaired);
                 }
                 console.log(
                     repairedReview

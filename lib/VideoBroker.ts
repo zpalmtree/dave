@@ -2513,7 +2513,9 @@ export class VideoBroker {
                     await this.providerHooks(job).onAttempt?.({
                         stage: 'keyframe_review_decision',
                         attempt: 1,
-                        outcome: result.reviewStatus === 'unreviewed' ? 'unreviewed' : 'accepted',
+                        outcome: result.reviewStatus === 'unreviewed'
+                            ? 'unreviewed'
+                            : result.reviewStatus === 'best_effort' ? 'best_effort' : 'accepted',
                         provider: result.provider,
                         model: result.model,
                         serviceTier: criticalPath ? 'priority' : 'default',
@@ -2683,7 +2685,9 @@ export class VideoBroker {
                     await hooks.onAttempt?.({
                         stage: 'keyframe_review_decision',
                         attempt: 1,
-                        outcome: result.reviewStatus === 'unreviewed' ? 'unreviewed' : 'accepted',
+                        outcome: result.reviewStatus === 'unreviewed'
+                            ? 'unreviewed'
+                            : result.reviewStatus === 'best_effort' ? 'best_effort' : 'accepted',
                         provider: result.provider,
                         model: result.model,
                         serviceTier: 'priority',
