@@ -27,6 +27,7 @@ import {
     sanitizeVideoWorkerText,
 } from '../dist/VideoProtocol.js';
 import {
+    VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS,
     VIDEO_PLAN_SCHEMA,
     VIDEO_PROMPT_ANALYSIS_SCHEMA,
     VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
@@ -605,6 +606,11 @@ test('drained queue messages retain a rough ETA and explain its assumption', () 
 
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
     assert.equal(VIDEO_PLANNER_MODEL, 'gpt-5.6-sol');
+    assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /exactly one segment containing exactly one shot/);
+    assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /5-7 seconds/);
+    assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /Do not force an idea into that shape/);
+    assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /multi-character discovery/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /exactly one segment containing exactly one shot/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /vehicle nose, visible road\/path ahead/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /positive-only diffusion prompt/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);

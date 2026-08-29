@@ -2,12 +2,14 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { GoogleGenAI } from '@google/genai';
 
 import { config } from '../dist/Config.js';
 import {
     VIDEO_PLANNER_FAST_MODEL,
     VIDEO_PLANNER_MODEL,
     createFrontierVideoPlan,
+    geminiCompatibleResponseSchema,
     reconcileFrontierKeyframeMotionGeometry,
     stageFrontierDialogueVisually,
 } from '../dist/VideoFrontierPlanner.js';
@@ -36,6 +38,17 @@ const FULL_PROMPTS = [
     'A cozy stop-motion sequence about a sock escaping from a laundry basket.',
     'A tense black-and-white detective scene where the only witness is a goldfish.',
     'A cheerful local-news segment about a pothole that residents have turned into a tiny beach.',
+];
+
+const DURATION_PROMPTS = [
+    'the pot supplies',
+    'olympus mons pubis',
+    'hitting the griddy for ukraine',
+    'the last thing a kosher deli sandwich sees before being inhaled',
+    'A duck becomes mayor.',
+    'Exactly three arcade racers speed toward a neon finish line while one says "Not today!"',
+    'A tiny knight tries to return an overdue library book during a dragon attack.',
+    'Two rival chefs discover they are both cooking for the same very judgmental cat.',
 ];
 
 const FOCUSED_FLASH_GUIDANCE = 'Preserve state transitions: when the request describes a change, frame zero must show the relevant state before that change, not the achieved result. Preserve temporal facts exactly; for example, overdue means already late. Make required abstract facts visually verifiable. Keep each short shot physically achievable, including a visible route for tiny subjects. Give each dialogue turn one visible speaker and stage its delivery in the same shot.';
@@ -101,9 +114,14 @@ function args() {
     const candidatesArgument = process.argv.find(value => value.startsWith('--candidates='));
     const concurrencyArgument = process.argv.find(value => value.startsWith('--concurrency='));
     const judgeRunsArgument = process.argv.find(value => value.startsWith('--judge-runs='));
+    const judgeArgument = process.argv.find(value => value.startsWith('--judge='));
     const limit = limitArgument ? Number(limitArgument.split('=')[1]) : undefined;
     const concurrency = concurrencyArgument ? Number(concurrencyArgument.split('=')[1]) : 1;
     const judgeRuns = judgeRunsArgument ? Number(judgeRunsArgument.split('=')[1]) : 1;
+    const judgeProvider = judgeArgument ? judgeArgument.slice('--judge='.length) : 'openai';
+    if (!['openai', 'gemini'].includes(judgeProvider)) {
+        throw new Error(`Unknown judge provider: ${judgeProvider}.`);
+    }
     const candidateIds = candidatesArgument
         ? candidatesArgument.slice('--candidates='.length).split(',').map(value => value.trim()).filter(Boolean)
         : CANDIDATES.filter(candidate => !candidate.experimental).map(candidate => candidate.id);
@@ -113,10 +131,12 @@ function args() {
     }
     return {
         full: values.has('--full'),
+        duration: values.has('--duration'),
         noJudge: values.has('--no-judge'),
         limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
         concurrency: Number.isInteger(concurrency) && concurrency > 0 ? Math.min(concurrency, 4) : 1,
         judgeRuns: Number.isInteger(judgeRuns) && judgeRuns > 0 ? Math.min(judgeRuns, 4) : 1,
+        judgeProvider,
         candidateIds,
         examplesPath: examplesArgument ? examplesArgument.slice('--examples='.length) : undefined,
         baselinePath: baselineArgument ? baselineArgument.slice('--baseline='.length) : undefined,
@@ -173,7 +193,7 @@ async function generateCandidate(prompt, candidate, plannerExamples) {
     }
 }
 
-async function judgeCandidates(prompt, generated, runIndex = 0) {
+async function judgeCandidates(prompt, generated, runIndex = 0, judgeProvider = 'openai') {
     const available = generated.filter(result => result.ok);
     const successful = runIndex % 2 ? [...available].reverse() : available;
     if (!successful.length) return null;
@@ -194,7 +214,7 @@ async function judgeCandidates(prompt, generated, runIndex = 0) {
                 items: {
                     type: 'object',
                     additionalProperties: false,
-                    required: ['label', 'prompt_fidelity', 'creative_expansion', 'specificity', 'continuity', 'audio_dialogue', 'overall', 'critical_failures'],
+                    required: ['label', 'prompt_fidelity', 'creative_expansion', 'specificity', 'continuity', 'audio_dialogue', 'timing_efficiency', 'overall', 'critical_failures'],
                     properties: {
                         label: { type: 'string', enum: labels.map(value => value.label) },
                         prompt_fidelity: { type: 'number', minimum: 1, maximum: 10 },
@@ -202,6 +222,7 @@ async function judgeCandidates(prompt, generated, runIndex = 0) {
                         specificity: { type: 'number', minimum: 1, maximum: 10 },
                         continuity: { type: 'number', minimum: 1, maximum: 10 },
                         audio_dialogue: { type: 'number', minimum: 1, maximum: 10 },
+                        timing_efficiency: { type: 'number', minimum: 1, maximum: 10 },
                         overall: { type: 'number', minimum: 1, maximum: 10 },
                         critical_failures: { type: 'array', maxItems: 8, items: { type: 'string' } },
                     },
@@ -211,6 +232,39 @@ async function judgeCandidates(prompt, generated, runIndex = 0) {
             explanation: { type: 'string' },
         },
     };
+    const instructions = 'You are a blinded video-directing evaluator. Score plans only on the supplied request and their concrete feasibility for MiniMax H3. Reward inventive development of vague prompts, but penalize generic spectacle, prompt mirroring, missing literal constraints, impossible timing, broken shot continuity, and unwanted dialogue. For timing efficiency, reward the shortest duration that still gives every meaningful setup, action, consequence, and required line enough screen time; penalize both wasteful padding and destructive compression. Do not infer provider identity from style.';
+    const inputText = [
+        `USER REQUEST:\n${prompt}`,
+        ...labels.map(value => `CANDIDATE ${value.label}:\n${JSON.stringify(value.plan)}`),
+    ].join('\n\n');
+    if (judgeProvider === 'gemini') {
+        const client = new GoogleGenAI({ apiKey: config.geminiApiKey, apiVersion: 'v1alpha' });
+        const response = await client.models.generateContent({
+            model: VIDEO_PLANNER_FAST_MODEL,
+            contents: [{ role: 'user', parts: [{ text: inputText }] }],
+            config: {
+                systemInstruction: instructions,
+                responseMimeType: 'application/json',
+                responseJsonSchema: geminiCompatibleResponseSchema(schema),
+                maxOutputTokens: 5000,
+                thinkingConfig: { thinkingLevel: 'HIGH' },
+            },
+        });
+        if (!response.text?.trim()) throw new Error('Gemini judge returned no rating.');
+        const judgment = JSON.parse(response.text);
+        return {
+            ...judgment,
+            run: runIndex + 1,
+            ratings: judgment.ratings.map(rating => ({
+                ...rating,
+                candidate: labels.find(value => value.label === rating.label)?.candidate,
+            })),
+            winner_candidate: labels.find(value => value.label === judgment.winner)?.candidate
+                || judgment.winner,
+            model: response.modelVersion || VIDEO_PLANNER_FAST_MODEL,
+            usage: response.usageMetadata,
+        };
+    }
     const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: {
@@ -220,15 +274,12 @@ async function judgeCandidates(prompt, generated, runIndex = 0) {
         body: JSON.stringify({
             model: VIDEO_PLANNER_MODEL,
             reasoning: { effort: 'high' },
-            instructions: 'You are a blinded video-directing evaluator. Score plans only on the supplied request and their concrete feasibility for MiniMax H3. Reward inventive development of vague prompts, but penalize generic spectacle, prompt mirroring, missing literal constraints, impossible timing, broken shot continuity, and unwanted dialogue. Do not infer provider identity from style.',
+            instructions,
             input: [{
                 role: 'user',
                 content: [{
                     type: 'input_text',
-                    text: [
-                        `USER REQUEST:\n${prompt}`,
-                        ...labels.map(value => `CANDIDATE ${value.label}:\n${JSON.stringify(value.plan)}`),
-                    ].join('\n\n'),
+                    text: inputText,
                 }],
             }],
             text: {
@@ -257,7 +308,7 @@ async function judgeCandidates(prompt, generated, runIndex = 0) {
 
 async function main() {
     const options = args();
-    const source = options.full ? FULL_PROMPTS : QUICK_PROMPTS;
+    const source = options.duration ? DURATION_PROMPTS : options.full ? FULL_PROMPTS : QUICK_PROMPTS;
     const prompts = source.slice(0, options.limit || source.length);
     const activeCandidates = CANDIDATES.filter(candidate => options.candidateIds.includes(candidate.id));
     let examplesReport = null;
@@ -289,7 +340,12 @@ async function main() {
         const judgments = [];
         if (!options.noJudge) {
             for (let runIndex = 0; runIndex < options.judgeRuns; runIndex += 1) {
-                judgments.push(await judgeCandidates(prompt, generated, runIndex));
+                judgments.push(await judgeCandidates(
+                    prompt,
+                    generated,
+                    runIndex,
+                    options.judgeProvider,
+                ));
             }
         }
         return { prompt, generated, judgment: judgments[0] || null, judgments };
@@ -308,10 +364,11 @@ async function main() {
     const teacherExamples = teacherExamplesFromReport({ cases });
     const report = {
         created_at: new Date().toISOString(),
-        mode: options.full ? 'full' : 'quick',
+        mode: options.duration ? 'duration' : options.full ? 'full' : 'quick',
         benchmark_options: {
             prompt_concurrency: options.concurrency,
             judge_runs: options.noJudge ? 0 : options.judgeRuns,
+            judge_provider: options.judgeProvider,
             baseline_report: baselinePath,
             examples_report: options.examplesPath ? resolve(options.examplesPath) : null,
         },
