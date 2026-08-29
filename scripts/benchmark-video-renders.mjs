@@ -84,7 +84,7 @@ function metricValue(text, pattern) {
 }
 
 async function frameZeroMetrics(keyframePath, frameZeroPath, width, height) {
-    const filter = `[0:v]scale=-2:${height},crop=${width}:${height}[reference];[reference][1:v]ssim`;
+    const filter = `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[reference];[reference][1:v]ssim`;
     const { stderr } = await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'info',
         '-i', keyframePath, '-i', frameZeroPath,
