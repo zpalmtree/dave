@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { WebSocket } from 'ws';
+import sqlite3 from 'sqlite3';
 
 import {
     VideoBroker,
@@ -133,10 +134,11 @@ test('broker projects a rough ETA immediately and includes earlier queued work',
 
 test('broker keeps the measured end-to-end runtime on the completed job', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-runtime-'));
+    const dbPath = join(directory, 'queue.sqlite3');
     const broker = new VideoBroker({
         host: '127.0.0.1',
         port: 0,
-        dbPath: join(directory, 'queue.sqlite3'),
+        dbPath,
         resultsDir: join(directory, 'results'),
         botToken: 'bot-secret',
         workerToken: 'worker-secret',
@@ -272,11 +274,64 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                 spans: [
                     { source: 'worker', name: 'generator_process', duration_seconds: 55 },
                     { source: 'worker', name: 'result_upload', duration_seconds: 2 },
-                    { source: 'comfy', name: 'Initializing sampler', segment_index: 1, duration_seconds: 40 },
+                    {
+                        source: 'comfy',
+                        name: 'sampling_progress',
+                        segment_index: 1,
+                        duration_seconds: 40,
+                        metadata: {
+                            mode: 'i2v',
+                            quality: 'final',
+                            transition: 'start',
+                            attention_backend: 'comfy_kitchen_int8',
+                            aspect: '16:9',
+                            segment_duration_seconds: 7.292,
+                            frame_count: 175,
+                            run_index: 1,
+                            steps_observed: 20,
+                            steps_total: 20,
+                            first_step_seconds: 4.5,
+                            steady_step_mean_seconds: 1.86,
+                            steady_step_median_seconds: 1.84,
+                            steady_step_p90_seconds: 1.91,
+                            private_worker_detail: 'must not be retained',
+                        },
+                    },
                 ],
             }),
         });
         assert.equal(metrics.status, 200);
+        const storedSpan = await new Promise((resolve, reject) => {
+            const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, error => {
+                if (error) return reject(error);
+                db.get(
+                    `SELECT metadata_json FROM video_job_spans
+                     WHERE job_public_id = ? AND source = 'comfy' AND name = 'sampling_progress'`,
+                    [lease.job.id],
+                    (queryError, row) => {
+                        db.close();
+                        if (queryError) reject(queryError);
+                        else resolve(row);
+                    },
+                );
+            });
+        });
+        assert.deepEqual(JSON.parse(storedSpan.metadata_json), {
+            mode: 'i2v',
+            quality: 'final',
+            transition: 'start',
+            attention_backend: 'comfy_kitchen_int8',
+            aspect: '16:9',
+            segment_duration_seconds: 7.292,
+            frame_count: 175,
+            run_index: 1,
+            steps_observed: 20,
+            steps_total: 20,
+            first_step_seconds: 4.5,
+            steady_step_mean_seconds: 1.86,
+            steady_step_median_seconds: 1.84,
+            steady_step_p90_seconds: 1.91,
+        });
         socket.send(JSON.stringify({
             type: 'event',
             event: 'complete',

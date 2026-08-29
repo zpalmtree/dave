@@ -20,6 +20,17 @@ export interface VideoMetricSpan {
         mode?: 't2v' | 'i2v';
         quality?: 'draft' | 'final';
         transition?: 'start' | 'cut' | 'continue' | 'dissolve';
+        attention_backend?: 'pytorch' | 'comfy_kitchen_int8';
+        aspect?: '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' | '21:9';
+        segment_duration_seconds?: number;
+        frame_count?: number;
+        run_index?: number;
+        steps_observed?: number;
+        steps_total?: number;
+        first_step_seconds?: number;
+        steady_step_mean_seconds?: number;
+        steady_step_median_seconds?: number;
+        steady_step_p90_seconds?: number;
         references_requested?: number;
         references_resolved?: number;
         contracts?: number;
