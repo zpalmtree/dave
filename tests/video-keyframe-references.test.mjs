@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -86,5 +86,52 @@ test('video keyframe references are bounded, downloaded, and reused from the job
         assert.equal(downloads, 1);
     } finally {
         rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('identical reference contracts are reused across job directories without another search', async () => {
+    const firstDirectory = mkdtempSync(join(tmpdir(), 'dave-video-reference-first-job-'));
+    const secondDirectory = mkdtempSync(join(tmpdir(), 'dave-video-reference-second-job-'));
+    let searches = 0;
+    let downloads = 0;
+    const plan = {
+        keyframe: {
+            recommended: true,
+            reference_requirements: [{
+                label: 'Cross-job cache identity',
+                kind: 'identity',
+                search_query: 'cross-job cache identity exact contract 2026',
+                visual_facts_to_preserve: 'A unique exact-contract face used only by this test.',
+            }],
+        },
+    };
+    const search = async () => {
+        searches += 1;
+        return [{
+            title: 'Cross-job reference',
+            link: 'https://images.example/cross-job-reference.png',
+            url: 'https://example.com/cross-job-reference',
+            displayLink: 'example.com',
+            thumbnailLink: 'https://encrypted-tbn0.gstatic.com/cross-job-reference',
+        }];
+    };
+    const download = async () => {
+        downloads += 1;
+        return { data: Buffer.from([0x89, 0x50, 0x4e, 0x47]), extension: 'png' };
+    };
+
+    try {
+        const first = await resolveVideoKeyframeReferences(plan, firstDirectory, search, download);
+        const second = await resolveVideoKeyframeReferences(plan, secondDirectory, search, download);
+        assert.deepEqual(second, first);
+        assert.equal(searches, 1);
+        assert.equal(downloads, 1);
+        assert.deepEqual(
+            readFileSync(join(secondDirectory, 'references', 'reference_1.png')),
+            first[0].bytes,
+        );
+    } finally {
+        rmSync(firstDirectory, { recursive: true, force: true });
+        rmSync(secondDirectory, { recursive: true, force: true });
     }
 });

@@ -87,6 +87,11 @@ SHA-256 identity. A mismatch, rejected/fallback plan, source image, or shutdown
 aborts and discards the speculative work. Full-plan validation and the existing
 visual review gate still finish before any frame is accepted.
 
+Downloaded reference packs remain cached per job for restart safety. A bounded
+96 MiB/128-entry process cache also reuses byte-identical packs across jobs only
+when the complete normalized reference contract has the same SHA-256 digest,
+avoiding another search and download without weakening identity or era matching.
+
 When a screenplay uses a hard cut or dissolve after an anchored first segment,
 the broker uses that original frame as identity-only visual evidence to create a
 new shot-specific frame zero. The generated frame matches the video's aspect
