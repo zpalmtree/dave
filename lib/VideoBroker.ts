@@ -129,6 +129,13 @@ interface WorkerConnection {
     scheduler: VideoWorkerSchedulerState;
 }
 
+interface VideoControlState {
+    paused_until: number | null;
+    dispatch_paused: boolean;
+    gpuq_gaming_requested: boolean | null;
+    gpuq_request_id: number;
+}
+
 interface ProvisionalKeyframeReferenceResult {
     references: VideoKeyframeReference[];
     status: 'ok' | 'error';
@@ -1072,6 +1079,8 @@ export class VideoBroker {
             id INTEGER PRIMARY KEY CHECK (id = 1),
             paused_until INTEGER,
             dispatch_paused INTEGER NOT NULL DEFAULT 0,
+            gpuq_gaming_requested INTEGER,
+            gpuq_request_id INTEGER NOT NULL DEFAULT 0,
             updated_by TEXT,
             updated_at INTEGER NOT NULL
         )`);
@@ -1081,6 +1090,12 @@ export class VideoBroker {
         );
         if (!controlColumns.has('dispatch_paused')) {
             await this.run('ALTER TABLE video_control ADD COLUMN dispatch_paused INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!controlColumns.has('gpuq_gaming_requested')) {
+            await this.run('ALTER TABLE video_control ADD COLUMN gpuq_gaming_requested INTEGER');
+        }
+        if (!controlColumns.has('gpuq_request_id')) {
+            await this.run('ALTER TABLE video_control ADD COLUMN gpuq_request_id INTEGER NOT NULL DEFAULT 0');
         }
         await this.run(
             `INSERT OR IGNORE INTO video_control(id, paused_until, dispatch_paused, updated_by, updated_at)
@@ -1261,9 +1276,15 @@ export class VideoBroker {
         await new Promise<void>((resolvePromise, reject) => this.db.close(err => err ? reject(err) : resolvePromise()));
     }
 
-    private async control(): Promise<{ paused_until: number | null; dispatch_paused: boolean }> {
-        const row = await this.get<{ paused_until: number | null; dispatch_paused: number }>(
-            'SELECT paused_until, dispatch_paused FROM video_control WHERE id = 1',
+    private async control(): Promise<VideoControlState> {
+        const row = await this.get<{
+            paused_until: number | null;
+            dispatch_paused: number;
+            gpuq_gaming_requested: number | null;
+            gpuq_request_id: number;
+        }>(
+            `SELECT paused_until, dispatch_paused, gpuq_gaming_requested, gpuq_request_id
+             FROM video_control WHERE id = 1`,
         );
         const paused = row?.paused_until && row.paused_until > nowSeconds() ? row.paused_until : null;
         if (!paused && row?.paused_until) {
@@ -1272,7 +1293,15 @@ export class VideoBroker {
                 [nowSeconds()],
             );
         }
-        return { paused_until: paused, dispatch_paused: Boolean(row?.dispatch_paused) };
+        return {
+            paused_until: paused,
+            dispatch_paused: Boolean(row?.dispatch_paused),
+            gpuq_gaming_requested: row?.gpuq_gaming_requested === null
+                || row?.gpuq_gaming_requested === undefined
+                ? null
+                : Boolean(row.gpuq_gaming_requested),
+            gpuq_request_id: Number(row?.gpuq_request_id) || 0,
+        };
     }
 
     private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1464,9 +1493,11 @@ export class VideoBroker {
             const body = await readJson(req);
             const until = nowSeconds() + Math.max(60, Math.min(7 * 86400, Number(body.seconds) || 21600));
             await this.run(
-                'UPDATE video_control SET paused_until = ?, updated_by = ?, updated_at = ? WHERE id = 1',
+                `UPDATE video_control SET paused_until = ?, gpuq_gaming_requested = 1,
+                 gpuq_request_id = gpuq_request_id + 1, updated_by = ?, updated_at = ? WHERE id = 1`,
                 [until, String(body.actor_id || ''), nowSeconds()],
             );
+            const control = await this.control();
             if (this.worker?.currentJob) {
                 await this.run(
                     `UPDATE video_jobs SET status = 'pausing', updated_at = ? WHERE public_id = ?`,
@@ -1477,6 +1508,7 @@ export class VideoBroker {
                 this.sendWorker({ type: 'unload', reason: 'pause' });
                 this.worker.warmModel = null;
             }
+            this.sendPendingGpuqControl(control);
             writeJson(res, 200, { paused_until: until, state: await this.brokerState() });
             return;
         }
@@ -1500,10 +1532,12 @@ export class VideoBroker {
         }
         if (url.pathname === '/v1/control/resume' && req.method === 'POST') {
             await this.run(
-                'UPDATE video_control SET paused_until = NULL, dispatch_paused = 0, updated_by = NULL, updated_at = ? WHERE id = 1',
+                `UPDATE video_control SET paused_until = NULL, dispatch_paused = 0,
+                 gpuq_gaming_requested = 0, gpuq_request_id = gpuq_request_id + 1,
+                 updated_by = NULL, updated_at = ? WHERE id = 1`,
                 [nowSeconds()],
             );
-            await this.dispatchNext();
+            this.sendPendingGpuqControl(await this.control());
             writeJson(res, 200, { state: await this.brokerState() });
             return;
         }
@@ -3108,15 +3142,16 @@ export class VideoBroker {
                         resume_current_job: reconciliation.resumeCurrentJob,
                     });
                     if (reconciliation.cancel) this.sendWorker(reconciliation.cancel);
+                    const control = await this.control();
                     if (!hello.current_job) {
-                        const control = await this.control();
                         if (control.paused_until) {
                             this.sendWorker({ type: 'unload', reason: 'pause' });
                             this.worker.warmModel = null;
-                        } else {
+                        } else if (control.gpuq_gaming_requested === null) {
                             await this.dispatchNext();
                         }
                     }
+                    this.sendPendingGpuqControl(control);
                     return;
                 }
                 await this.handleWorkerMessage(message);
@@ -3254,9 +3289,35 @@ export class VideoBroker {
             const control = await this.control();
             if (control.paused_until) {
                 this.sendWorker({ type: 'unload', reason: 'safety-pause' });
+                this.sendPendingGpuqControl(control);
+                return;
+            }
+            if (control.gpuq_gaming_requested !== null) {
+                this.sendPendingGpuqControl(control);
                 return;
             }
             await this.dispatchNext();
+            return;
+        }
+        if (message.type === 'gpuq_gaming_ack') {
+            const requestId = Number(message.request_id);
+            const enabled = message.enabled;
+            if (!Number.isInteger(requestId) || requestId < 1 || typeof enabled !== 'boolean') return;
+            if (message.scheduler !== undefined) {
+                this.worker.scheduler = workerScheduler(message.scheduler);
+            }
+            await this.run(
+                `UPDATE video_control SET gpuq_gaming_requested = NULL, updated_at = ?
+                 WHERE id = 1 AND gpuq_request_id = ? AND gpuq_gaming_requested = ?`,
+                [nowSeconds(), requestId, enabled ? 1 : 0],
+            );
+            const control = await this.control();
+            if (control.gpuq_gaming_requested !== null) {
+                this.sendPendingGpuqControl(control);
+            } else if (!this.worker.currentJob && this.worker.ready
+                && !control.paused_until && !control.dispatch_paused) {
+                await this.dispatchNext();
+            }
             return;
         }
         const jobId = String(message.job_id || '');
@@ -3516,7 +3577,8 @@ export class VideoBroker {
         if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
         if (!schedulerAcceptsReservations(this.worker.scheduler)) return;
         const control = await this.control();
-        if (control.paused_until || control.dispatch_paused) return;
+        if (control.paused_until || control.dispatch_paused
+            || control.gpuq_gaming_requested !== null) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
         if (!placeholders) return;
         const candidates = await this.all<JobRow>(
@@ -3585,6 +3647,15 @@ export class VideoBroker {
         if (this.worker?.socket.readyState === WebSocket.OPEN) {
             this.worker.socket.send(JSON.stringify(message));
         }
+    }
+
+    private sendPendingGpuqControl(control: VideoControlState): void {
+        if (control.gpuq_gaming_requested === null) return;
+        this.sendWorker({
+            type: 'gpuq_gaming',
+            enabled: control.gpuq_gaming_requested,
+            request_id: control.gpuq_request_id,
+        });
     }
 
     private async markWorkerOffline(): Promise<void> {
