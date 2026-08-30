@@ -1417,12 +1417,12 @@ test('broker overlaps idle-job segment prefetch with rendering and joins the in-
             },
         },
         segments: [{
-            title: 'Start', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
+            title: 'Start', overlay_label: 'First Racer', transition: 'start', target_seconds: 5, music: 'N/A', shots: [{
                 duration_seconds: 5, visual: 'The racer starts.', camera: 'wide', audio: 'engine', dialogue: [],
             }],
         }, {
-            title: 'Finish', transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
-                duration_seconds: 5, visual: 'The racer crosses the finish.', camera: 'medium', audio: 'cheers', dialogue: [],
+            title: 'Finish', overlay_label: 'Second Racer', transition: 'cut', target_seconds: 5, music: 'N/A', shots: [{
+                duration_seconds: 5, visual: 'A different racer crosses the finish.', camera: 'medium', audio: 'cheers', dialogue: [],
             }],
         }],
     };
@@ -1432,10 +1432,13 @@ test('broker overlaps idle-job segment prefetch with rendering and joins the in-
         botToken: 'bot-secret', workerToken: 'worker-secret', heartbeatTimeoutMs: 5000,
         preplanQueuedJobs: true,
         frontierPlanner: async () => structuredClone(plan),
-        keyframeGenerator: async planned => {
+        keyframeGenerator: async (planned, references) => {
             const transition = planned.segments?.[0]?.transition || 'none';
             keyframeCalls.push(transition);
             if (transition === 'cut') {
+                assert.equal(references.length, 0);
+                assert.match(planned.keyframe.reason, /independently selected identity Second Racer/);
+                assert.match(planned.keyframe.prompt, /Second Racer/);
                 announceSegment();
                 await segmentReleased;
             }
