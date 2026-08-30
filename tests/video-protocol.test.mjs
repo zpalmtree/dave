@@ -631,6 +631,11 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Every hard scene change/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one independently generated clip/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat explicit speaking intent as authority to write speech/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /clean 0\.35-second visual lead-in/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /from 00:00\.000 until 00:00\.350/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Apply this lead-in consistently in shot\.visual and keyframe\.motion_contract\.first_second_action/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Use dialogue\.delivery only for vocal and performance qualities/);
+    assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /make it begin immediately/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);

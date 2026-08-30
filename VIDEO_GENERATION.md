@@ -138,14 +138,22 @@ latency so alternatives can be compared without mixing cohorts.
   stable cache routing is used without extended retention by default.
 - `VIDEO_H3_AUTO_LOOP_TRIM=0` disables the desktop worker's conservative natural
   cyclic trim for explicit, short, single-segment base-H3 I2V loop requests.
+- `VIDEO_H3_DIALOGUE_LEAD_IN_SECONDS` controls H3's clean closed-mouth pre-roll
+  before dialogue. It defaults to `0.35`; set it to `0` for rollback or A/B tests.
+- `VIDEO_H3_DIALOGUE_OPENING_GUARD=0` disables the matching output-side audio
+  guard. By default, planned-dialogue H3 segments mute only the first `0.35`
+  seconds and apply a 50 ms fade-in while copying the encoded video stream
+  unchanged. Non-dialogue H3 clips and all other models bypass the guard.
 
 Explicit short H3 loops use output-side `natural-cyclic-trim-v1` only when a
 decoded-frame scan finds a materially better natural boundary. The gate searches
 small head/tail windows, preserves at least 95% of frames, requires the selected
 opening to remain visually equivalent, verifies the gain again after delivery
-encoding, and otherwise returns the original render unchanged. It never inserts a
-crossfade or synthetic frame. This avoids the quality and 2x latency regressions
-observed with native last-frame conditioning and a two-pass endpoint workaround.
+encoding, and otherwise returns the original render unchanged. It is disabled for
+speech requests and any screenplay containing dialogue because the corresponding
+audio trim could cut a phoneme. It never inserts a crossfade or synthetic frame.
+This avoids the quality and 2x latency regressions observed with native last-frame
+conditioning and a two-pass endpoint workaround.
 
 Run `yarn benchmark:video-planners --limit=2` for a short, render-free comparison.
 It runs Sol and two Gemini Flash reasoning variants concurrently per prompt, then
