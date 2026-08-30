@@ -91,7 +91,7 @@ deploy_repo() {
     ensure_clean_enough
 
     git fetch origin "$branch"
-    git pull --ff-only origin "$branch"
+    git merge --ff-only "origin/$branch"
     install_deps_if_requested
     build_repo
 
