@@ -233,6 +233,7 @@ interface VideoJobMetricRow {
     generator_model: VideoGeneratorModelId;
     total_seconds: number;
     output_duration_seconds: number | null;
+    generated_duration_seconds: number | null;
     width: number | null;
     height: number | null;
     fps: number | null;
@@ -539,11 +540,16 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
     if (value.generator_model !== expectedGenerator) {
         throw new Error('Metrics generator model does not match the leased job.');
     }
-    if (!Array.isArray(value.spans) || value.spans.length > 300) {
-        throw new Error('Metrics spans must be an array of at most 300 entries.');
+    if (!Array.isArray(value.spans) || value.spans.length > 2_000) {
+        throw new Error('Metrics spans must be an array of at most 2,000 entries.');
     }
     const output = value.output && typeof value.output === 'object' ? {
         duration_seconds: boundedNumber(value.output.duration_seconds, 0.01, 300) ?? undefined,
+        generated_duration_seconds: boundedNumber(
+            value.output.generated_duration_seconds,
+            0.01,
+            1_500,
+        ) ?? undefined,
         width: Math.round(boundedNumber(value.output.width, 16, 16384) ?? 0) || undefined,
         height: Math.round(boundedNumber(value.output.height, 16, 16384) ?? 0) || undefined,
         fps: boundedNumber(value.output.fps, 0.1, 240) ?? undefined,
@@ -611,6 +617,17 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
             && span.segment_index !== null && span.segment_index !== undefined)
         .map(span => span.segment_index)).size;
     if (output && observedSegments > 0) output.segment_count = observedSegments;
+    const generatedSegments = new Map<number, number>();
+    for (const span of spans) {
+        if (span.source !== 'comfy' || span.name !== 'segment_total'
+            || span.segment_index === null || span.segment_index === undefined
+            || !Number.isFinite(span.metadata?.segment_duration_seconds)) continue;
+        generatedSegments.set(span.segment_index, Number(span.metadata!.segment_duration_seconds));
+    }
+    if (output && generatedSegments.size > 0) {
+        output.generated_duration_seconds = [...generatedSegments.values()]
+            .reduce((sum, duration) => sum + duration, 0);
+    }
     return {
         schema_version: 1,
         model: expectedModel,
@@ -1234,6 +1251,7 @@ export class VideoBroker {
             generator_model TEXT NOT NULL,
             total_seconds REAL NOT NULL,
             output_duration_seconds REAL,
+            generated_duration_seconds REAL,
             width INTEGER,
             height INTEGER,
             fps REAL,
@@ -1277,6 +1295,7 @@ export class VideoBroker {
                 .map(column => column.name),
         );
         for (const [name, definition] of [
+            ['generated_duration_seconds', 'REAL'],
             ['vram_free_min_mb', 'REAL'],
             ['temperature_peak_c', 'REAL'],
             ['pcie_link_width_min', 'REAL'],
@@ -1336,6 +1355,20 @@ export class VideoBroker {
                 SELECT 1 FROM video_job_spans
                 WHERE video_job_spans.job_public_id = video_job_metrics.job_public_id
                 AND source = 'comfy' AND name = 'segment_total' AND segment_index > 0
+            )`);
+        await this.run(`UPDATE video_job_metrics
+            SET generated_duration_seconds = (
+                SELECT SUM(CAST(json_extract(metadata_json, '$.segment_duration_seconds') AS REAL))
+                FROM video_job_spans
+                WHERE video_job_spans.job_public_id = video_job_metrics.job_public_id
+                AND source = 'comfy' AND name = 'segment_total' AND segment_index > 0
+                AND json_extract(metadata_json, '$.segment_duration_seconds') > 0
+            )
+            WHERE EXISTS (
+                SELECT 1 FROM video_job_spans
+                WHERE video_job_spans.job_public_id = video_job_metrics.job_public_id
+                AND source = 'comfy' AND name = 'segment_total' AND segment_index > 0
+                AND json_extract(metadata_json, '$.segment_duration_seconds') > 0
             )`);
         await this.run(`CREATE TABLE IF NOT EXISTS video_provider_attempt_metrics (
             job_public_id TEXT NOT NULL,
@@ -1840,13 +1873,17 @@ export class VideoBroker {
         const usesStartFrame = Boolean(job.source_image_path || plan?.keyframe?.recommended === true);
         const rows = await this.all<{
             total_seconds: number;
-            output_duration_seconds: number;
+            generated_duration_seconds: number;
             segment_count: number;
             source_image: number;
         }>(
-            `SELECT total_seconds, output_duration_seconds, segment_count, source_image
+            `SELECT total_seconds,
+                COALESCE(generated_duration_seconds, output_duration_seconds) AS generated_duration_seconds,
+                segment_count, source_image
              FROM video_job_metrics
-             WHERE model = ? AND output_duration_seconds > 0 AND segment_count > 0
+             WHERE model = ?
+             AND COALESCE(generated_duration_seconds, output_duration_seconds) > 0
+             AND segment_count > 0
              ORDER BY recorded_at DESC LIMIT 50`,
             [job.model],
         );
@@ -1857,7 +1894,7 @@ export class VideoBroker {
             const factor = videoPlanRuntimeScale({
                 plannedDuration,
                 plannedSegments: segmentCount,
-                sampleDuration: Number(row.output_duration_seconds),
+                sampleDuration: Number(row.generated_duration_seconds),
                 sampleSegments: Number(row.segment_count),
                 sourceFactor,
             });
@@ -2060,6 +2097,10 @@ export class VideoBroker {
                 ],
             );
             for (const span of metrics.spans) await this.recordMetricSpan(job.public_id, span);
+            await this.run(
+                `UPDATE video_job_metrics SET generated_duration_seconds = ? WHERE job_public_id = ?`,
+                [output.generated_duration_seconds ?? null, job.public_id],
+            );
         });
     }
 
@@ -4128,7 +4169,7 @@ export class VideoBroker {
                 return;
             }
             try {
-                await this.storeWorkerMetrics(job, await readJson(req));
+                await this.storeWorkerMetrics(job, await readJson(req, 2 * 1024 * 1024));
                 writeJson(res, 200, { ok: true });
             } catch (error) {
                 writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
