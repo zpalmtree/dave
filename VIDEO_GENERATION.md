@@ -52,9 +52,12 @@ The default configuration file is `~/.config/dave-video.json` and must be mode
 }
 ```
 
-`scripts/deploy-bots.sh` builds both branches and starts or restarts the
-`video-broker`, `dave`, and `slug-bot` PM2 processes. Tailscale Serve proxies
-private HTTPS/WSS traffic to the broker's loopback port.
+`scripts/deploy-bots.sh` builds both branches and restarts the `dave` and
+`slug-bot` PM2 processes without draining or restarting `video-broker`, so bot-only
+changes do not interrupt active renders. Use `scripts/deploy-bots.sh --with-broker`
+for broker, protocol, database, or worker changes; that mode drains active video
+work before restarting all three processes. Tailscale Serve proxies private
+HTTPS/WSS traffic to the broker's loopback port.
 
 ## Desktop worker
 

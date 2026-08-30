@@ -8,10 +8,46 @@ NODE_VERSION="${NODE_VERSION:-22}"
 INSTALL_DEPS="${INSTALL_DEPS:-0}"
 ALLOW_DIRTY_YARN_LOCK="${ALLOW_DIRTY_YARN_LOCK:-1}"
 VIDEO_DRAIN_TIMEOUT_SECONDS="${VIDEO_DRAIN_TIMEOUT_SECONDS:-3600}"
+DEPLOY_VIDEO_BROKER="${DEPLOY_VIDEO_BROKER:-0}"
+
+usage() {
+    echo "Usage: $0 [--bots-only|--with-broker]"
+    echo "  --bots-only    Restart dave and slug-bot only (default)."
+    echo "  --with-broker  Drain video work and also restart video-broker."
+}
+
+if [ "$#" -gt 1 ]; then
+    usage >&2
+    exit 2
+fi
+case "${1:-}" in
+    '') ;;
+    --bots-only) DEPLOY_VIDEO_BROKER=0 ;;
+    --with-broker) DEPLOY_VIDEO_BROKER=1 ;;
+    --help|-h)
+        usage
+        exit 0
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+if [ "$DEPLOY_VIDEO_BROKER" != "0" ] && [ "$DEPLOY_VIDEO_BROKER" != "1" ]; then
+    echo "DEPLOY_VIDEO_BROKER must be 0 or 1." >&2
+    exit 2
+fi
 
 ssh "$REMOTE_HOST" \
-    "REMOTE_MASTER_DIR='$REMOTE_MASTER_DIR' REMOTE_SLUGS_DIR='$REMOTE_SLUGS_DIR' NODE_VERSION='$NODE_VERSION' INSTALL_DEPS='$INSTALL_DEPS' ALLOW_DIRTY_YARN_LOCK='$ALLOW_DIRTY_YARN_LOCK' VIDEO_DRAIN_TIMEOUT_SECONDS='$VIDEO_DRAIN_TIMEOUT_SECONDS' bash -s" <<'REMOTE'
+    "REMOTE_MASTER_DIR='$REMOTE_MASTER_DIR' REMOTE_SLUGS_DIR='$REMOTE_SLUGS_DIR' NODE_VERSION='$NODE_VERSION' INSTALL_DEPS='$INSTALL_DEPS' ALLOW_DIRTY_YARN_LOCK='$ALLOW_DIRTY_YARN_LOCK' VIDEO_DRAIN_TIMEOUT_SECONDS='$VIDEO_DRAIN_TIMEOUT_SECONDS' DEPLOY_VIDEO_BROKER='$DEPLOY_VIDEO_BROKER' bash -s" <<'REMOTE'
 set -euo pipefail
+
+SSH_SESSION_PID="$PPID"
+exec 9>"/tmp/dave-deploy-bots.lock"
+if ! flock -n 9; then
+    echo "Another bot deployment is already running on this server." >&2
+    exit 1
+fi
 
 load_node() {
     export NVM_DIR="$HOME/.nvm"
@@ -200,18 +236,20 @@ resume_video_dispatch() {
 
 drain_video_dispatch() {
     local result
+    VIDEO_DISPATCH_DRAINED=1
     result="$(video_control /v1/control/drain)"
     if [ "$result" = "unsupported" ]; then
         echo "Running broker predates dispatch drain; applying a compatibility dispatch hold without cancelling its active render."
         legacy_video_dispatch_drain
-        VIDEO_DISPATCH_DRAINED=1
         VIDEO_LEGACY_DRAINED=1
-    else
-        VIDEO_DISPATCH_DRAINED=1
     fi
     echo "Video dispatch drained; waiting for active rendering and preparation to finish."
     local deadline=$((SECONDS + VIDEO_DRAIN_TIMEOUT_SECONDS))
     while [ "$(video_control /v1/control)" != "idle" ]; do
+        if ! kill -0 "$SSH_SESSION_PID" 2>/dev/null; then
+            echo "SSH session ended while waiting for the video pipeline; cancelling deployment." >&2
+            exit 1
+        fi
         if [ "$SECONDS" -ge "$deadline" ]; then
             echo "Timed out waiting for the video pipeline to become idle." >&2
             exit 1
@@ -223,10 +261,19 @@ drain_video_dispatch() {
 
 load_node
 trap resume_video_dispatch EXIT
-drain_video_dispatch
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ "$DEPLOY_VIDEO_BROKER" = "1" ]; then
+    drain_video_dispatch
+else
+    echo "Bot-only deployment; video-broker and active renders will not be touched."
+fi
 deploy_repo "$REMOTE_MASTER_DIR" master
 deploy_repo "$REMOTE_SLUGS_DIR" slugs
-restart_video_broker
+if [ "$DEPLOY_VIDEO_BROKER" = "1" ]; then
+    restart_video_broker
+fi
 restart_app dave
 restart_app slug-bot
 resume_video_dispatch
