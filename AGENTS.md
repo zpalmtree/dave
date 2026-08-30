@@ -21,7 +21,7 @@ This project is deployed from two branch-based server tracks. Every functional c
 
 # Deployment
 
-Use `scripts/deploy-bots.sh` from `/home/zp/Code/js/dave` to deploy both server tracks after both branches have been pushed.
+Use `scripts/deploy-bots.sh` from `/home/zp/Code/js/dave` to deploy both server tracks after both branches have been pushed. Its default bot-only mode leaves `video-broker` and active renders untouched. Use `scripts/deploy-bots.sh --with-broker` only when the change affects broker, protocol, database, or worker behavior.
 
 The deploy script:
 
@@ -31,6 +31,8 @@ The deploy script:
 - Builds both working copies.
 - Restarts PM2 apps `dave` and `slug-bot`.
 - Prints the final PM2 process list.
+
+With `--with-broker`, it first drains active video work and also restarts PM2 app `video-broker` before resuming dispatch.
 
 Default remote settings can be overridden with environment variables:
 
