@@ -369,16 +369,8 @@ export function formatGlobalVideoQueueJob(
         : truncatePrompt(direction, promptLength);
     const position = job.queue_position ? `#${job.queue_position} · ` : '';
     let status: string;
-    const roughEstimate = job.status === 'queued'
-        || job.status === 'running_disconnected'
-        || !job.estimate_ready
-        || !job.worker_online
-        || Boolean(job.paused_until)
-        || job.gpu_queue_state === 'submitting'
-        || job.gpu_queue_state === 'queued';
     if (job.status === 'queued') {
         if (job.paused_until) status = `${position}Paused`;
-        else if (job.dispatch_paused) status = `${position}Dispatch paused`;
         else if (!job.worker_online) status = `${position}Worker offline`;
         else status = `${position}Queued`;
     } else if (job.status === 'running_disconnected') {
@@ -414,10 +406,10 @@ export function formatGlobalVideoQueueJob(
         status = 'Failed';
     }
     const eta = job.expected_finish_at
-        ? `${roughEstimate ? 'Rough ETA' : 'ETA'} <t:${Math.floor(job.expected_finish_at)}:R>`
+        ? `ETA <t:${Math.floor(job.expected_finish_at)}:R>`
         : ['ready', 'delivered', 'cancelled', 'failed'].includes(job.status)
             ? ''
-            : `Rough ETA ${roughRuntimeRange(job)} after start`;
+            : `ETA ${roughRuntimeRange(job)} after start`;
     return `**${status}** · ${requester}${eta ? ` · ${eta}` : ''}\n> ${displayedDirection}`;
 }
 
@@ -460,7 +452,8 @@ export function globalVideoQueueEmbeds(
     viewerGuildId: string | null,
     limit = 3900,
     revealAllRequesters = false,
-): Array<{ title: string; description: string; color: number }> {
+    dispatchPaused = false,
+): Array<{ title: string; description: string; color: number; footer?: { text: string } }> {
     if (!jobs.length) return [];
     const chunks = globalVideoQueueChunks(jobs, viewerGuildId, limit, revealAllRequesters);
     const title = `Video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}`;
@@ -468,6 +461,7 @@ export function globalVideoQueueEmbeds(
         title: `${title}${index ? ' · continued' : ''}`,
         description,
         color: 0x5865F2,
+        ...(dispatchPaused ? { footer: { text: 'Dispatch paused' } } : {}),
     }));
 }
 
@@ -890,6 +884,7 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         msg.guild?.id ?? null,
         3900,
         showGlobalQueue,
+        Boolean(response.state.dispatch_paused),
     );
     await msg.reply({
         embeds: [embeds[0]],
