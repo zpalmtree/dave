@@ -108,7 +108,15 @@ export const VIDEO_PLAN_SCHEMA = {
             items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['title', 'transition', 'target_seconds', 'music', 'shots'],
+                required: [
+                    'title',
+                    'overlay_label',
+                    'transition',
+                    'target_seconds',
+                    'output_seconds',
+                    'music',
+                    'shots',
+                ],
                 properties: {
                     title: { type: 'string' },
                     overlay_label: { type: 'string' },
@@ -377,7 +385,7 @@ ${VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS}
 
 Budget action density for reliable generation before polishing prose. In a shot of seven seconds or less, stage one primary physical action, optionally followed by one simple reaction or consequence; a spoken turn also consumes beat time. In an eight-to-fifteen-second shot, use at most three simple sequential phases with a clear causal link. If the story needs more, distribute the beats across additional shots, segments, or duration within the supplied limits instead of compressing a chain of gestures, transformations, reactions, and dialogue into one clip. For generated speech, prefer one memorable line or a concise two-turn exchange for a short comic beat; do not make every shot talk.
 
-Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow: target_seconds is the model's generation window, while output_seconds may specify a shorter final cut so every member fits within the total finished-runtime cap. Use overlay_label=N/A for ordinary segments that need no exact composited identity label.
+Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow: target_seconds is the model's generation window, while output_seconds may specify a shorter final cut so every member fits within the total finished-runtime cap. For ordinary segments set output_seconds equal to target_seconds and overlay_label to N/A.
 
 For a vague one-line premise, develop one decisive representative mini-story with a setup, primary action, and payoff. Do not dramatize every item in prompt_analysis.actions or inferred_staging, and do not turn words such as "always" into a repetitive survey unless the request actually calls for a montage or progression. For insertion, docking, entering, dressing, or fitting actions, trace the moving subject's leading edge, orientation, destination opening, and travel direction before writing the keyframe; they must agree physically through the first shot without an unexplained rotation. Do not invent a face or speaking anatomy solely to support generated dialogue.
 
