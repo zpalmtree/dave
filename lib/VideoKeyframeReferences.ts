@@ -354,7 +354,7 @@ export async function resolveVideoKeyframeReferences(
                             hooks,
                             requirementIndex + 1,
                         );
-                        if (!valid) return null;
+                        if (!valid) continue;
                     }
                     selected = { result, image };
                     break;
