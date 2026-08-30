@@ -71,6 +71,8 @@ const GENERIC_IDENTITY_LABEL_WORDS = new Set([
     'dog', 'driver', 'girl', 'hero', 'human', 'identity', 'man', 'monster', 'person', 'people',
     'protagonist', 'racer', 'reference', 'robot', 'subject', 'villain', 'woman', 'worker',
 ]);
+const DEFERRED_IDENTITY_REFERENCE_TITLE = /\b(?:painting|painted|artwork|illustration|illustrated|drawing|sketch|cross[- ]?stitch(?:ed)?|wood print|art print|wall art|poster|merchandise|figurine|statue|action figure|t[- ]?shirt)\b/i;
+const DEFERRED_IDENTITY_REFERENCE_HOST = /(?:^|\.)(?:etsy|fineartamerica|redbubble|teepublic|society6|ebay)\.[a-z.]+$/i;
 
 function transientReferenceSearchFailure(error: unknown): boolean {
     return /timed out|timeout|aborted|fetch|network|socket|econn|HTTP (408|409|429|5\d\d)/i.test(
@@ -100,6 +102,27 @@ function needsAmbiguousIdentityValidation(requirement: VideoKeyframeReferenceReq
     const distinctiveWords = referenceWords(requirement.searchQuery)
         .filter(word => word.length > 1 && !REFERENCE_QUERY_BOILERPLATE.has(word));
     return distinctiveWords.length < 2;
+}
+
+function orderedReferenceResults(
+    requirement: VideoKeyframeReferenceRequirement,
+    results: ImageSearchResult[],
+    environment: NodeJS.ProcessEnv = process.env,
+): ImageSearchResult[] {
+    if ((requirement.kind !== 'identity' && requirement.kind !== 'character')
+        || environment.VIDEO_IDENTITY_REFERENCE_METADATA_RANKING === '0') return results;
+    const preferred: ImageSearchResult[] = [];
+    const deferred: ImageSearchResult[] = [];
+    for (const result of results) {
+        const host = boundedText(result.displayLink, 200).replace(/^www\./i, '');
+        if (DEFERRED_IDENTITY_REFERENCE_TITLE.test(boundedText(result.title, 200))
+            || DEFERRED_IDENTITY_REFERENCE_HOST.test(host)) {
+            deferred.push(result);
+        } else {
+            preferred.push(result);
+        }
+    }
+    return [...preferred, ...deferred];
 }
 
 function referenceRequirements(plan: Record<string, any>): VideoKeyframeReferenceRequirement[] {
@@ -343,7 +366,7 @@ export async function resolveVideoKeyframeReferences(
             }
             if (!results) throw lastSearchError || new Error('Reference search failed.');
             let selected: { result: ImageSearchResult; image: Awaited<ReturnType<DownloadImage>> } | null = null;
-            for (const result of results.slice(0, 5)) {
+            for (const result of orderedReferenceResults(requirement, results.slice(0, 5))) {
                 const image = await downloadImage(result);
                 if (image && ['jpg', 'jpeg', 'png', 'webp'].includes(image.extension)) {
                     if (needsAmbiguousIdentityValidation(requirement)) {
