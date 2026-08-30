@@ -133,6 +133,16 @@ latency so alternatives can be compared without mixing cohorts.
 - `VIDEO_PREPLAN_QUEUED=0` disables one-job-ahead preparation for rollback.
 - `VIDEO_PROMPT_CACHE_24H=1` opts into 24-hour OpenAI prompt-cache retention;
   stable cache routing is used without extended retention by default.
+- `VIDEO_H3_AUTO_LOOP_TRIM=0` disables the desktop worker's conservative natural
+  cyclic trim for explicit, short, single-segment base-H3 I2V loop requests.
+
+Explicit short H3 loops use output-side `natural-cyclic-trim-v1` only when a
+decoded-frame scan finds a materially better natural boundary. The gate searches
+small head/tail windows, preserves at least 95% of frames, requires the selected
+opening to remain visually equivalent, verifies the gain again after delivery
+encoding, and otherwise returns the original render unchanged. It never inserts a
+crossfade or synthetic frame. This avoids the quality and 2x latency regressions
+observed with native last-frame conditioning and a two-pass endpoint workaround.
 
 Run `yarn benchmark:video-planners --limit=2` for a short, render-free comparison.
 It runs Sol and two Gemini Flash reasoning variants concurrently per prompt, then
