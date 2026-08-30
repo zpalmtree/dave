@@ -872,7 +872,8 @@ function frontierPlan(dialogue = []) {
             },
         },
         segments: [{
-            title: 'Run', transition: 'start', target_seconds: 5, music: 'N/A',
+            title: 'Run', overlay_label: 'N/A', transition: 'start',
+            target_seconds: 5, output_seconds: 5, music: 'N/A',
             shots: [{
                 duration_seconds: 5,
                 visual: dialogue.length ? 'A cat and dog visibly speak about cheese.' : 'The dog runs through the park.',
