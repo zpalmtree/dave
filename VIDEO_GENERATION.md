@@ -117,6 +117,12 @@ adds the declared or historically estimated duration of each job currently ahead
 and reports GPU queue position plus an admission window. Higher-priority future
 submissions and unmanaged GPU pressure remain explicit sources of uncertainty.
 Once admitted, the ETA anchors to actual GPU admission and becomes more precise.
+The broker's plan-aware range remains a display estimate; it does not reject a
+job. Immediately before rendering, the desktop recalculates GPU occupancy from
+the current model, mode, quality, attention backend, and recent compatible
+segment timings. If the conservative estimate plus its five-minute reserve
+exceeds the 60-minute per-video budget, it drops later screenplay segments until
+the longest safe prefix fits and records the truncation in the saved plan.
 
 ## Optimization experiments
 
