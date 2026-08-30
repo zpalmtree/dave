@@ -11,6 +11,8 @@ import sqlite3 from 'sqlite3';
 import {
     VideoBroker,
     duplicateVideoTerminalEventMatches,
+    projectedVideoFinishAt,
+    videoPlanRuntimeScale,
     videoFailureDisposition,
 } from '../dist/VideoBroker.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
@@ -56,6 +58,34 @@ test('video failure policy waits on readiness and suppresses identical render re
     assert.equal(videoFailureDisposition('Sampler crashed.', true, 0, 0, null), 'retry');
     assert.equal(videoFailureDisposition('Sampler crashed.', true, 1, 0, 'Sampler crashed.'), 'fail');
     assert.equal(videoFailureDisposition('Invalid screenplay.', false, 0, 0, null), 'fail');
+});
+
+test('long video estimates scale by full segment cost and live job progress replaces expired history', () => {
+    const scale = videoPlanRuntimeScale({
+        plannedDuration: 225,
+        plannedSegments: 45,
+        sampleDuration: 15.552,
+        sampleSegments: 3,
+        sourceFactor: 1,
+    });
+    assert.ok(scale > 12 && scale < 13, `unexpected long-plan scale ${scale}`);
+    assert.ok(scale > 4, 'long plans must not retain the old four-times ceiling');
+
+    assert.equal(projectedVideoFinishAt({
+        now: 1_000,
+        startedAt: 400,
+        expectedRuntime: 180,
+        progress: 0.49,
+        progressScope: 'stage',
+    }), 1_030);
+    const observed = projectedVideoFinishAt({
+        now: 1_000,
+        startedAt: 400,
+        expectedRuntime: 180,
+        progress: 0.49,
+        progressScope: 'job',
+    });
+    assert.ok(observed > 1_450, `live projection did not follow measured pace: ${observed}`);
 });
 
 test('terminal replay acknowledgements cover retry and pause requeues without accepting stale leases', () => {
@@ -240,7 +270,9 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                     width: 1280,
                     height: 720,
                     fps: 24,
-                    segment_count: 1,
+                    // Simulate the legacy worker counting a raw and delivery
+                    // manifest for one real segment.
+                    segment_count: 2,
                     bytes: bytes.length,
                     source_image: true,
                 },
@@ -274,6 +306,10 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                 spans: [
                     { source: 'worker', name: 'generator_process', duration_seconds: 55 },
                     { source: 'worker', name: 'result_upload', duration_seconds: 2 },
+                    {
+                        source: 'comfy', name: 'segment_total', segment_index: 1,
+                        duration_seconds: 55,
+                    },
                     {
                         source: 'comfy',
                         name: 'sampling_progress',
@@ -383,13 +419,13 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         });
         assert.equal(beforeReservation.status, 200);
         assert.equal(beforeReservation.body.job.estimate_ready, true);
-        assert.equal(beforeReservation.body.job.estimate_low_seconds, 57);
-        assert.equal(beforeReservation.body.job.estimate_high_seconds, 197);
+        assert.equal(beforeReservation.body.job.estimate_low_seconds, 53);
+        assert.equal(beforeReservation.body.job.estimate_high_seconds, 181);
         socket.send(JSON.stringify({ type: 'ready', warm_model: 'h3' }));
         const learnedLease = await take(value => value.type === 'job');
         assert.equal(learnedLease.job.id, learned.body.job.id);
-        assert.equal(learnedLease.job.estimate_low_seconds, 57);
-        assert.equal(learnedLease.job.estimate_high_seconds, 197);
+        assert.equal(learnedLease.job.estimate_low_seconds, 53);
+        assert.equal(learnedLease.job.estimate_high_seconds, 181);
         const submittedAt = Math.floor(Date.now() / 1000) - 120;
         socket.send(JSON.stringify({
             type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
@@ -418,10 +454,10 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         });
         assert.equal(prepared.status, 200);
         assert.equal(prepared.body.job.estimate_ready, true);
-        assert.equal(prepared.body.job.estimate_low_seconds, 57);
-        assert.equal(prepared.body.job.estimate_high_seconds, 197);
-        assert.equal(prepared.body.job.initial_estimate_low_seconds, 57);
-        assert.equal(prepared.body.job.initial_estimate_high_seconds, 197);
+        assert.equal(prepared.body.job.estimate_low_seconds, 53);
+        assert.equal(prepared.body.job.estimate_high_seconds, 181);
+        assert.equal(prepared.body.job.initial_estimate_low_seconds, 53);
+        assert.equal(prepared.body.job.initial_estimate_high_seconds, 181);
         assert.ok(prepared.body.job.initial_estimate_recorded_at > 0);
         assert.equal(prepared.body.job.planned_intent, 'A measured two-part test.');
         assert.equal(
@@ -430,7 +466,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
         );
         assert.equal(
             prepared.body.job.expected_finish_at - prepared.body.job.expected_start_at,
-            127,
+            117,
         );
         assert.equal(prepared.body.job.expected_start_at, admittedAt);
         assert.equal(prepared.body.job.gpu_queue_wait_seconds, admittedAt - submittedAt);
@@ -446,8 +482,8 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             () => botFetch('/v1/users/runtime-user-2/jobs'),
             value => value.body.jobs[0].status === 'planning',
         );
-        assert.equal(stableEstimate.body.jobs[0].estimate_low_seconds, 57);
-        assert.equal(stableEstimate.body.jobs[0].estimate_high_seconds, 197);
+        assert.equal(stableEstimate.body.jobs[0].estimate_low_seconds, 53);
+        assert.equal(stableEstimate.body.jobs[0].estimate_high_seconds, 181);
         const otherRequester = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({
@@ -2520,6 +2556,21 @@ test('desktop reserves gpuq during gaming, anchors ETA to admission, and fences 
         assert.equal(estimated.body.jobs[0].expected_start_at, admittedAt);
         assert.equal(estimated.body.jobs[0].gpu_queue_wait_seconds, admittedAt - submittedAt);
         assert.equal(estimated.body.jobs[0].expected_finish_at, admittedAt + 180);
+
+        socket.send(JSON.stringify({
+            type: 'event', event: 'progress', job_id: lease.job.id,
+            stage: 'Sampling segment 5/10', progress: 0.441,
+            progress_scope: 'job', segment_index: 5, segment_count: 10,
+            segment_progress: 0.5,
+        }));
+        const aggregateProgress = await eventually(
+            () => botFetch(`/v1/users/gpuq-user/jobs`),
+            value => value.body.jobs[0].progress_scope === 'job',
+        );
+        assert.equal(aggregateProgress.body.jobs[0].progress, 0.441);
+        assert.equal(aggregateProgress.body.jobs[0].segment_index, 5);
+        assert.equal(aggregateProgress.body.jobs[0].segment_count, 10);
+        assert.equal(aggregateProgress.body.jobs[0].segment_progress, 0.5);
 
         socket.send(JSON.stringify({
             type: 'event', event: 'failed', event_id: 'stale-event',

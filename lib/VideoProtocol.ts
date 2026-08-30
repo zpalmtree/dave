@@ -203,6 +203,10 @@ export interface VideoJobView {
     expected_finish_at: number | null;
     stage: string | null;
     progress: number | null;
+    progress_scope?: 'job' | 'stage' | null;
+    segment_index?: number | null;
+    segment_count?: number | null;
+    segment_progress?: number | null;
     error: string | null;
     result_path: string | null;
     result_bytes: number | null;

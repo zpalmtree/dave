@@ -179,6 +179,10 @@ interface JobRow {
     initial_estimate_recorded_at: number | null;
     stage: string | null;
     progress: number | null;
+    progress_scope: 'job' | 'stage' | null;
+    segment_index: number | null;
+    segment_count: number | null;
+    segment_progress: number | null;
     worker_id: string | null;
     lease_expires_at: number | null;
     lease_token: string | null;
@@ -601,6 +605,12 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
             ? { latest_utc: boundedMetricText(value.failure.latest_utc, 80) ?? undefined }
             : {}),
     } : undefined;
+    const spans: VideoMetricSpan[] = value.spans.map((span: unknown) => normalizedMetricSpan(span));
+    const observedSegments = new Set(spans
+        .filter(span => span.source === 'comfy' && span.name === 'segment_total'
+            && span.segment_index !== null && span.segment_index !== undefined)
+        .map(span => span.segment_index)).size;
+    if (output && observedSegments > 0) output.segment_count = observedSegments;
     return {
         schema_version: 1,
         model: expectedModel,
@@ -616,13 +626,101 @@ function normalizedWorkerMetrics(value: any, expectedModel: VideoModelId): Video
             ltx_one_stage: Boolean(value.flags?.ltx_one_stage),
             ...(quality ? { quality } : {}),
         },
-        spans: value.spans.map(normalizedMetricSpan),
+        spans,
     };
 }
 
 function average(values: Array<number | null | undefined>): number | null {
     const finite = values.filter((value): value is number => Number.isFinite(value));
     return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+}
+
+export function videoPlanRuntimeScale({
+    plannedDuration,
+    plannedSegments,
+    sampleDuration,
+    sampleSegments,
+    sourceFactor = 1,
+}: {
+    plannedDuration: number;
+    plannedSegments: number;
+    sampleDuration: number;
+    sampleSegments: number;
+    sourceFactor?: number;
+}): number {
+    const plannedAverage = plannedDuration / Math.max(1, plannedSegments);
+    const sampleAverage = sampleDuration / Math.max(1, sampleSegments);
+    const segmentRatio = Math.max(0.01, plannedSegments / Math.max(1, sampleSegments));
+    // Each generated clip has a fixed setup/decode cost, while sampling grows
+    // with frames per clip. Scale the full clip count and only compare average
+    // clip duration so duration and segment count are not counted twice.
+    const perSegmentDurationRatio = plannedAverage / Math.max(0.01, sampleAverage);
+    const perSegmentFactor = Math.max(0.25, Math.min(
+        4,
+        0.25 + 0.75 * perSegmentDurationRatio,
+    ));
+    // Roughly 15% of a normal job is fixed planning/delivery work. The old
+    // combined 4x ceiling made every unusually long screenplay underestimate.
+    return Math.max(0.15, 0.15 + 0.85 * segmentRatio * perSegmentFactor * sourceFactor);
+}
+
+export function projectedVideoFinishAt({
+    now,
+    startedAt,
+    expectedRuntime,
+    progress,
+    progressScope,
+}: {
+    now: number;
+    startedAt: number;
+    expectedRuntime: number;
+    progress: number | null;
+    progressScope: 'job' | 'stage' | null;
+}): number {
+    const historicalFinish = startedAt + Math.max(1, expectedRuntime);
+    if (progressScope !== 'job' || progress === null || progress < 0.02 || progress >= 1) {
+        return Math.max(now + 30, Math.round(historicalFinish));
+    }
+    const elapsed = Math.max(1, now - startedAt);
+    const observedRuntime = elapsed / Math.max(0.001, progress);
+    // Let measured pace take over gradually, reaching 90% authority after
+    // roughly one third of the render while retaining a little historical
+    // stability for pauses and coarse progress boundaries.
+    const observedWeight = Math.min(0.9, Math.max(0, (progress - 0.02) * 3));
+    const projectedRuntime = expectedRuntime * (1 - observedWeight)
+        + observedRuntime * observedWeight;
+    return Math.max(now + 30, Math.round(startedAt + projectedRuntime));
+}
+
+interface WorkerProgressFields {
+    progress: number | null;
+    scope: 'job' | 'stage' | null;
+    segmentIndex: number | null;
+    segmentCount: number | null;
+    segmentProgress: number | null;
+}
+
+function workerProgressFields(message: any): WorkerProgressFields {
+    const progress = typeof message.progress === 'number' && Number.isFinite(message.progress)
+        ? Math.min(1, Math.max(0, message.progress))
+        : null;
+    const scope = message.progress_scope === 'job'
+        ? 'job'
+        : message.progress_scope === 'stage' ? 'stage' : null;
+    const segmentCount = Number.isInteger(message.segment_count)
+        ? Math.min(100, Math.max(1, Number(message.segment_count)))
+        : null;
+    const segmentIndexCandidate = Number.isInteger(message.segment_index)
+        ? Math.max(1, Number(message.segment_index))
+        : null;
+    const segmentIndex = segmentCount !== null && segmentIndexCandidate !== null
+        ? Math.min(segmentCount, segmentIndexCandidate)
+        : null;
+    const segmentProgress = typeof message.segment_progress === 'number'
+        && Number.isFinite(message.segment_progress)
+        ? Math.min(1, Math.max(0, message.segment_progress))
+        : null;
+    return { progress, scope, segmentIndex, segmentCount, segmentProgress };
 }
 
 function median(values: Array<number | null | undefined>): number | null {
@@ -960,6 +1058,10 @@ export class VideoBroker {
             initial_estimate_recorded_at INTEGER,
             stage TEXT,
             progress REAL,
+            progress_scope TEXT,
+            segment_index INTEGER,
+            segment_count INTEGER,
+            segment_progress REAL,
             worker_id TEXT,
             lease_expires_at INTEGER,
             lease_token TEXT,
@@ -1030,6 +1132,16 @@ export class VideoBroker {
         }
         if (!columnNames.has('lease_token')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN lease_token TEXT');
+        }
+        for (const [name, definition] of [
+            ['progress_scope', 'TEXT'],
+            ['segment_index', 'INTEGER'],
+            ['segment_count', 'INTEGER'],
+            ['segment_progress', 'REAL'],
+        ] as const) {
+            if (!columnNames.has(name)) {
+                await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
+            }
         }
         for (const [name, definition] of [
             ['gpu_queue_state', 'TEXT'],
@@ -1210,6 +1322,21 @@ export class VideoBroker {
         )`);
         await this.run(`CREATE INDEX IF NOT EXISTS video_job_spans_job_idx
             ON video_job_spans(job_public_id)`);
+        // Older workers counted raw and delivery manifests separately. The
+        // distinct completed segment spans are authoritative and let startup
+        // repair any poisoned history, including a job that finished while a
+        // worker update was waiting for a safe restart.
+        await this.run(`UPDATE video_job_metrics
+            SET segment_count = (
+                SELECT COUNT(DISTINCT segment_index) FROM video_job_spans
+                WHERE video_job_spans.job_public_id = video_job_metrics.job_public_id
+                AND source = 'comfy' AND name = 'segment_total' AND segment_index > 0
+            )
+            WHERE EXISTS (
+                SELECT 1 FROM video_job_spans
+                WHERE video_job_spans.job_public_id = video_job_metrics.job_public_id
+                AND source = 'comfy' AND name = 'segment_total' AND segment_index > 0
+            )`);
         await this.run(`CREATE TABLE IF NOT EXISTS video_provider_attempt_metrics (
             job_public_id TEXT NOT NULL,
             stage TEXT NOT NULL,
@@ -1724,14 +1851,16 @@ export class VideoBroker {
             [job.model],
         );
         const predictions = rows.map(row => {
-            const durationRatio = plannedDuration / Number(row.output_duration_seconds);
-            const segmentRatio = segmentCount / Number(row.segment_count);
-            const durationFactor = 0.25 + 0.75 * durationRatio;
-            const segmentFactor = 0.85 + 0.15 * segmentRatio;
             const sourceFactor = usesStartFrame === Boolean(row.source_image)
                 ? 1
                 : usesStartFrame ? 1.08 : 0.96;
-            const factor = Math.max(0.3, Math.min(4, durationFactor * segmentFactor * sourceFactor));
+            const factor = videoPlanRuntimeScale({
+                plannedDuration,
+                plannedSegments: segmentCount,
+                sampleDuration: Number(row.output_duration_seconds),
+                sampleSegments: Number(row.segment_count),
+                sourceFactor,
+            });
             return Number(row.total_seconds) * factor;
         }).filter(value => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
         if (predictions.length) {
@@ -3044,7 +3173,15 @@ export class VideoBroker {
                 const start = admitted
                     ? row.gpu_admitted_at || row.started_at || now
                     : Math.max(cursor, estimatedAdmission || cursor);
-                const finish = Math.max(now + 30, start + expectedRuntime);
+                const finish = admitted
+                    ? projectedVideoFinishAt({
+                        now,
+                        startedAt: start,
+                        expectedRuntime,
+                        progress: row.progress,
+                        progressScope: row.progress_scope,
+                    })
+                    : Math.max(now + 30, start + expectedRuntime);
                 cursor = Math.max(cursor, finish);
                 projections.set(row.public_id, { position: null, start, finish });
             }
@@ -3076,6 +3213,10 @@ export class VideoBroker {
                 expected_finish_at: projection.finish,
                 stage: row.stage,
                 progress: row.progress,
+                progress_scope: row.progress_scope,
+                segment_index: row.segment_index,
+                segment_count: row.segment_count,
+                segment_progress: row.segment_progress,
                 error: row.error,
                 result_path: row.result_path,
                 result_bytes: row.result_bytes,
@@ -3220,7 +3361,9 @@ export class VideoBroker {
                 && row.worker_id === hello.worker_id) {
                 await this.run(
                     `UPDATE video_jobs SET status = 'queued', stage = 'Resuming with a fresh worker lease',
-                     progress = NULL, worker_id = NULL, lease_expires_at = NULL, lease_token = NULL,
+                     progress = NULL, progress_scope = NULL, segment_index = NULL,
+                     segment_count = NULL, segment_progress = NULL,
+                     worker_id = NULL, lease_expires_at = NULL, lease_token = NULL,
                      gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
                      gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                      gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
@@ -3250,7 +3393,9 @@ export class VideoBroker {
         );
         if (disconnected) {
             await this.run(
-                `UPDATE video_jobs SET status = 'queued', stage = 'Resuming after reconnect', progress = NULL,
+                `UPDATE video_jobs SET status = 'queued', stage = 'Resuming after reconnect',
+                 progress = NULL, progress_scope = NULL, segment_index = NULL,
+                 segment_count = NULL, segment_progress = NULL,
                  worker_id = NULL, lease_expires_at = NULL, gpu_queue_state = NULL,
                  gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                  gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
@@ -3270,15 +3415,29 @@ export class VideoBroker {
                 this.worker.scheduler = workerScheduler(message.scheduler);
             }
             if (message.job_id && message.job_id === this.worker.currentJob) {
+                const workerProgress = workerProgressFields(message);
                 await this.run(
                     `UPDATE video_jobs SET lease_expires_at = ?, stage = COALESCE(?, stage),
-                     progress = COALESCE(?, progress), updated_at = ? WHERE public_id = ?`,
+                     progress = CASE WHEN ? = 'job' AND progress_scope = 'job'
+                        THEN MAX(COALESCE(progress, 0), COALESCE(?, progress, 0))
+                        ELSE COALESCE(?, progress) END,
+                     progress_scope = COALESCE(?, progress_scope),
+                     segment_index = COALESCE(?, segment_index),
+                     segment_count = COALESCE(?, segment_count),
+                     segment_progress = COALESCE(?, segment_progress),
+                     updated_at = ? WHERE public_id = ?`,
                     [
                         nowSeconds() + 60,
                         message.stage === undefined
                             ? null
                             : sanitizeVideoWorkerText(message.stage, 'Generating'),
-                        typeof message.progress === 'number' ? Math.min(1, Math.max(0, message.progress)) : null,
+                        workerProgress.scope,
+                        workerProgress.progress,
+                        workerProgress.progress,
+                        workerProgress.scope,
+                        workerProgress.segmentIndex,
+                        workerProgress.segmentCount,
+                        workerProgress.segmentProgress,
                         nowSeconds(),
                         message.job_id,
                     ],
@@ -3440,12 +3599,26 @@ export class VideoBroker {
                     ],
                 );
             } else if (event === 'progress') {
+                const workerProgress = workerProgressFields(message);
                 await this.run(
-                    `UPDATE video_jobs SET status = 'running', stage = ?, progress = ?, lease_expires_at = ?,
-                     updated_at = ? WHERE public_id = ?`,
+                    `UPDATE video_jobs SET status = 'running', stage = ?,
+                     progress = CASE WHEN ? = 'job' AND progress_scope = 'job'
+                        THEN MAX(COALESCE(progress, 0), COALESCE(?, progress, 0))
+                        ELSE COALESCE(?, progress) END,
+                     progress_scope = COALESCE(?, progress_scope),
+                     segment_index = COALESCE(?, segment_index),
+                     segment_count = COALESCE(?, segment_count),
+                     segment_progress = COALESCE(?, segment_progress),
+                     lease_expires_at = ?, updated_at = ? WHERE public_id = ?`,
                     [
                         sanitizeVideoWorkerText(message.stage, 'Generating'),
-                        typeof message.progress === 'number' ? Math.min(1, Math.max(0, message.progress)) : null,
+                        workerProgress.scope,
+                        workerProgress.progress,
+                        workerProgress.progress,
+                        workerProgress.scope,
+                        workerProgress.segmentIndex,
+                        workerProgress.segmentCount,
+                        workerProgress.segmentProgress,
                         nowSeconds() + 60,
                         nowSeconds(),
                         jobId,
@@ -3453,7 +3626,9 @@ export class VideoBroker {
                 );
             } else if (event === 'uploading') {
                 await this.run(
-                    `UPDATE video_jobs SET status = 'uploading', stage = 'Uploading result', progress = NULL,
+                    `UPDATE video_jobs SET status = 'uploading', stage = 'Uploading result',
+                     progress = CASE WHEN progress_scope = 'job'
+                        THEN MAX(COALESCE(progress, 0), 0.99) ELSE progress END,
                      updated_at = ? WHERE public_id = ?`,
                     [nowSeconds(), jobId],
                 );
@@ -3467,7 +3642,9 @@ export class VideoBroker {
                 const pause = row?.status === 'pausing' || message.reason === 'pause';
                 await this.run(
                     pause
-                        ? `UPDATE video_jobs SET status = 'queued', stage = 'Paused for desktop use', progress = NULL,
+                        ? `UPDATE video_jobs SET status = 'queued', stage = 'Paused for desktop use',
+                           progress = NULL, progress_scope = NULL, segment_index = NULL,
+                           segment_count = NULL, segment_progress = NULL,
                            worker_id = NULL, lease_expires_at = NULL, gpu_queue_state = NULL,
                            gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                            gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
@@ -3515,7 +3692,9 @@ export class VideoBroker {
                     retry
                         ? `UPDATE video_jobs SET status = 'queued',
                            attempt = attempt + ?, readiness_retries = readiness_retries + ?, stage = ?,
-                           progress = NULL, worker_id = NULL, lease_expires_at = NULL,
+                           progress = NULL, progress_scope = NULL, segment_index = NULL,
+                           segment_count = NULL, segment_progress = NULL,
+                           worker_id = NULL, lease_expires_at = NULL,
                            gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
                            gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                            gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
