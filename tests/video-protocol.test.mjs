@@ -1284,7 +1284,7 @@ test('best-effort compiler truncates automatic screenplays to two minutes', () =
     );
 });
 
-test('exhaustive sequential coverage keeps every member inside the finished-runtime cap', () => {
+test('exhaustive sequential coverage rejects rosters that exceed the generated-footage cap', () => {
     const analysis = frontierAnalysis('verbatim');
     analysis.presentation = 'video game character selection screen';
     analysis.dialogue_contract.lines = [{
@@ -1303,27 +1303,25 @@ test('exhaustive sequential coverage keeps every member inside the finished-runt
         delivery: 'clear',
         text: 'Present.',
     }]);
-    expandExhaustiveSequentialPlan(plan, analysis, 'minimax');
-    plan.prompt_analysis = analysis;
+    assert.throws(
+        () => expandExhaustiveSequentialPlan(plan, analysis, 'minimax'),
+        /needs at least 225s of generated footage.*120s generation limit/,
+    );
+});
 
-    assert.equal(plan.segments.length, 45);
-    assert.equal(plan.segment_keyframes.length, 44);
-    assert.deepEqual(
-        plan.segments.map(segment => segment.overlay_label),
-        analysis.coverage_contract.members,
+test('frontier validation rejects any screenplay above the generated-footage cap', () => {
+    const plan = frontierPlan();
+    plan.segments = Array.from({ length: 25 }, (_, index) => ({
+        ...structuredClone(plan.segments[0]),
+        title: `Generated beat ${index + 1}`,
+        transition: index === 0 ? 'start' : 'cut',
+        target_seconds: 5,
+        shots: [{ ...structuredClone(plan.segments[0].shots[0]), duration_seconds: 5 }],
+    }));
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimax'),
+        /125\.0s of generated footage.*120s generation limit/,
     );
-    assert.ok(plan.segments.every(segment => segment.target_seconds >= 5));
-    assert.ok(plan.segments.every(segment => segment.output_seconds >= 0.5));
-    assert.ok(
-        plan.segments.reduce((sum, segment) => sum + segment.output_seconds, 0) <= 120,
-    );
-    assert.ok(plan.segments.every((segment, index) =>
-        segment.shots[0].dialogue[0].speaker_id === analysis.coverage_contract.members[index]));
-    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(
-        plan,
-        'minimax',
-        'Every president says "Present" in a character selection screen.',
-    ));
 });
 
 test('broker rejects a representative screenplay for an explicit every-president request', () => {
