@@ -266,7 +266,8 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                 generator_model: 'h3',
                 total_seconds: 65.625,
                 output: {
-                    duration_seconds: 7.292,
+                    // The delivered clip can be shorter than the generated pass.
+                    duration_seconds: 3.646,
                     width: 1280,
                     height: 720,
                     fps: 24,
@@ -304,11 +305,18 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
                 },
                 flags: { quality: 'final' },
                 spans: [
+                    ...Array.from({ length: 350 }, (_, index) => ({
+                        source: 'comfy',
+                        name: `bounded_stage_${index}`,
+                        segment_index: 1,
+                        duration_seconds: 0.01,
+                    })),
                     { source: 'worker', name: 'generator_process', duration_seconds: 55 },
                     { source: 'worker', name: 'result_upload', duration_seconds: 2 },
                     {
                         source: 'comfy', name: 'segment_total', segment_index: 1,
                         duration_seconds: 55,
+                        metadata: { segment_duration_seconds: 7.292 },
                     },
                     {
                         source: 'comfy',
@@ -368,6 +376,21 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             steady_step_median_seconds: 1.84,
             steady_step_p90_seconds: 1.91,
         });
+        const generatedDuration = await new Promise((resolve, reject) => {
+            const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, error => {
+                if (error) return reject(error);
+                db.get(
+                    'SELECT generated_duration_seconds FROM video_job_metrics WHERE job_public_id = ?',
+                    [lease.job.id],
+                    (queryError, row) => {
+                        db.close();
+                        if (queryError) reject(queryError);
+                        else resolve(row?.generated_duration_seconds);
+                    },
+                );
+            });
+        });
+        assert.equal(generatedDuration, 7.292);
         socket.send(JSON.stringify({
             type: 'event',
             event: 'complete',

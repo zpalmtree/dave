@@ -47,6 +47,7 @@ export interface VideoWorkerMetrics {
     total_seconds: number;
     output?: {
         duration_seconds?: number;
+        generated_duration_seconds?: number;
         width?: number;
         height?: number;
         fps?: number;
