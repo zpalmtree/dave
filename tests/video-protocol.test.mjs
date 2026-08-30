@@ -44,6 +44,7 @@ import {
     geminiCompatibleResponseSchema,
     configuredVideoPlannerStrategy,
     configuredVideoPlannerVariant,
+    expandExhaustiveSequentialPlan,
     reconcileFrontierKeyframeMotionGeometry,
     stageFrontierDialogueVisually,
     stageFrontierVisibleText,
@@ -829,6 +830,13 @@ function frontierAnalysis(dialogueMode = 'none') {
         inferred_staging: ['a park'],
         audio_requirements: ['park ambience'],
         dialogue_contract: { mode: dialogueMode, lines: [] },
+        coverage_contract: {
+            mode: 'representative',
+            members: [],
+            presentation: 'simultaneous',
+            per_member_dialogue: false,
+            per_member_label: false,
+        },
         visible_text_contract: { mode: 'none', items: [] },
         motion_design_contract: {
             mode: 'none',
@@ -1266,6 +1274,72 @@ test('best-effort compiler truncates automatic screenplays to two minutes', () =
         () => validateFrontierVideoPlanForKeyframe(
             compiled, 'ltxfast', 'A dog runs through three stages.',
         ),
+    );
+});
+
+test('exhaustive sequential coverage keeps every member inside the finished-runtime cap', () => {
+    const analysis = frontierAnalysis('verbatim');
+    analysis.presentation = 'video game character selection screen';
+    analysis.dialogue_contract.lines = [{
+        speaker_hint: 'each roster member', text: 'Present.', verbatim: true,
+    }];
+    analysis.coverage_contract = {
+        mode: 'exhaustive',
+        members: Array.from({ length: 45 }, (_, index) => `President ${index + 1}`),
+        presentation: 'sequential',
+        per_member_dialogue: true,
+        per_member_label: true,
+    };
+    const plan = frontierPlan([{
+        speaker_id: 'each roster member',
+        language: 'English',
+        delivery: 'clear',
+        text: 'Present.',
+    }]);
+    expandExhaustiveSequentialPlan(plan, analysis, 'minimax');
+    plan.prompt_analysis = analysis;
+
+    assert.equal(plan.segments.length, 45);
+    assert.equal(plan.segment_keyframes.length, 44);
+    assert.deepEqual(
+        plan.segments.map(segment => segment.overlay_label),
+        analysis.coverage_contract.members,
+    );
+    assert.ok(plan.segments.every(segment => segment.target_seconds >= 5));
+    assert.ok(plan.segments.every(segment => segment.output_seconds >= 0.5));
+    assert.ok(
+        plan.segments.reduce((sum, segment) => sum + segment.output_seconds, 0) <= 120,
+    );
+    assert.ok(plan.segments.every((segment, index) =>
+        segment.shots[0].dialogue[0].speaker_id === analysis.coverage_contract.members[index]));
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(
+        plan,
+        'minimax',
+        'Every president says "Present" in a character selection screen.',
+    ));
+});
+
+test('exhaustive sequential coverage rejects silent roster omission', () => {
+    const analysis = frontierAnalysis('verbatim');
+    analysis.dialogue_contract.lines = [{
+        speaker_hint: 'each roster member', text: 'Present.', verbatim: true,
+    }];
+    analysis.coverage_contract = {
+        mode: 'exhaustive',
+        members: ['First Member', 'Second Member', 'Third Member'],
+        presentation: 'sequential',
+        per_member_dialogue: true,
+        per_member_label: true,
+    };
+    const plan = frontierPlan([{
+        speaker_id: 'each roster member', language: 'English', delivery: 'clear', text: 'Present.',
+    }]);
+    expandExhaustiveSequentialPlan(plan, analysis, 'minimax');
+    plan.prompt_analysis = analysis;
+    plan.segments.pop();
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimax'),
+        /missing: Third Member|expected 3 labeled member segments/,
     );
 });
 

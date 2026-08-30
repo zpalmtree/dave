@@ -674,6 +674,8 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
     const firstShot = Array.isArray(segment?.shots) ? segment.shots[0] : null;
     if (!segment || !firstShot || !['cut', 'dissolve'].includes(String(segment.transition))) return null;
     const title = String(segment.title || `Segment ${segmentIndex}`).trim();
+    const overlayLabel = String(segment.overlay_label || '').trim();
+    const independentlyLabeled = Boolean(overlayLabel && overlayLabel !== 'N/A');
     const visual = String(firstShot.visual || '').trim();
     const camera = String(firstShot.camera || '').trim();
     if (!visual || !camera) return null;
@@ -693,12 +695,18 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
         continuity_bible: String(plan.continuity_bible || ''),
         keyframe: {
             recommended: true,
-            reason: `Preserve the recurring cast across the ${segment.transition} into ${title}.`,
+            reason: independentlyLabeled
+                ? `Anchor the independently selected identity ${overlayLabel}.`
+                : `Preserve the recurring cast across the ${segment.transition} into ${title}.`,
             prompt: hasExplicitContract ? explicitPrompt : [
                 `Opening still for segment ${segmentIndex}, ${title}: ${visual}`,
                 `Camera and framing: ${camera}.`,
-                'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
-                'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.',
+                independentlyLabeled
+                    ? `Depict ${overlayLabel} as the only selected identity; reserve a blank opaque nameplate with no readable text for postproduction.`
+                    : 'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
+                independentlyLabeled
+                    ? 'Do not copy the preceding segment identity.'
+                    : 'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.',
                 'Show one frozen, motion-ready instant at 0.00 seconds of this segment.',
             ].join(' '),
             reference_requirements: [],
@@ -2654,7 +2662,12 @@ export class VideoBroker {
     private async segmentIdentityReference(
         job: JobRow,
         plan: Record<string, any>,
+        segmentIndex: number,
     ): Promise<VideoKeyframeReference | null> {
+        const segments = Array.isArray(plan?.segments) ? plan.segments : [];
+        const firstLabel = String(segments[0]?.overlay_label || '').trim();
+        const targetLabel = String(segments[segmentIndex - 1]?.overlay_label || '').trim();
+        if (targetLabel && targetLabel !== 'N/A' && targetLabel !== firstLabel) return null;
         let current = job;
         if (!current.source_image_path && !current.keyframe_path && plan?.keyframe?.recommended === true) {
             await this.ensureKeyframe(current, plan, true);
@@ -2721,15 +2734,11 @@ export class VideoBroker {
                         status = 'skipped';
                         return;
                     }
-                    const identity = await this.segmentIdentityReference(job, plan);
-                    if (!identity) {
-                        status = 'skipped';
-                        return;
-                    }
+                    const identity = await this.segmentIdentityReference(job, plan, segmentIndex);
                     const hooks = this.segmentProviderHooks(job, segmentIndex);
                     const result = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
                         derivedPlan,
-                        [identity],
+                        identity ? [identity] : [],
                         {
                             serviceTier: criticalPath ? 'fast' : 'default',
                             ...hooks,
@@ -3797,8 +3806,8 @@ export class VideoBroker {
             }
             const segmentValue = url.searchParams.get('segment');
             const segmentIndex = segmentValue === null ? 1 : Number(segmentValue);
-            if (!Number.isInteger(segmentIndex) || segmentIndex < 1 || segmentIndex > 8) {
-                writeJson(res, 400, { error: 'Segment must be an integer from 1 through 8.' });
+            if (!Number.isInteger(segmentIndex) || segmentIndex < 1 || segmentIndex > 64) {
+                writeJson(res, 400, { error: 'Segment must be an integer from 1 through 64.' });
                 return;
             }
             if (segmentIndex > 1) {

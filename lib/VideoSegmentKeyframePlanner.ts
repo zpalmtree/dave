@@ -28,13 +28,13 @@ const SEGMENT_KEYFRAME_CONTRACT_SCHEMA = {
     properties: {
         contracts: {
             type: 'array',
-            maxItems: 7,
+            maxItems: 63,
             items: {
                 type: 'object',
                 additionalProperties: false,
                 required: ['segment_index', 'prompt', 'motion_contract'],
                 properties: {
-                    segment_index: { type: 'integer', minimum: 2, maximum: 8 },
+                    segment_index: { type: 'integer', minimum: 2, maximum: 64 },
                     prompt: { type: 'string' },
                     motion_contract: {
                         type: 'object',
@@ -121,7 +121,7 @@ export async function createVideoSegmentKeyframeContracts(
                 responseJsonSchema: geminiCompatibleResponseSchema(
                     SEGMENT_KEYFRAME_CONTRACT_SCHEMA as unknown as Record<string, any>,
                 ),
-                maxOutputTokens: 8_000,
+                maxOutputTokens: 32_000,
                 thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
         });

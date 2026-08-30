@@ -104,15 +104,17 @@ export const VIDEO_PLAN_SCHEMA = {
         segments: {
             type: 'array',
             minItems: 1,
-            maxItems: 8,
+            maxItems: 64,
             items: {
                 type: 'object',
                 additionalProperties: false,
                 required: ['title', 'transition', 'target_seconds', 'music', 'shots'],
                 properties: {
                     title: { type: 'string' },
+                    overlay_label: { type: 'string' },
                     transition: { type: 'string', enum: ['start', 'continue', 'cut', 'dissolve'] },
                     target_seconds: { type: 'number', minimum: 1, maximum: 20 },
+                    output_seconds: { type: 'number', minimum: 0.5, maximum: 20 },
                     music: { type: 'string' },
                     shots: {
                         type: 'array',
@@ -167,6 +169,7 @@ export const VIDEO_PROMPT_ANALYSIS_SCHEMA = {
         'inferred_staging',
         'audio_requirements',
         'dialogue_contract',
+        'coverage_contract',
         'visible_text_contract',
         'motion_design_contract',
         'prohibited_substitutions',
@@ -239,6 +242,24 @@ export const VIDEO_PROMPT_ANALYSIS_SCHEMA = {
                         },
                     },
                 },
+            },
+        },
+        coverage_contract: {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+                'mode',
+                'members',
+                'presentation',
+                'per_member_dialogue',
+                'per_member_label',
+            ],
+            properties: {
+                mode: { type: 'string', enum: ['representative', 'exhaustive'] },
+                members: { type: 'array', maxItems: 64, items: { type: 'string' } },
+                presentation: { type: 'string', enum: ['simultaneous', 'sequential'] },
+                per_member_dialogue: { type: 'boolean' },
+                per_member_label: { type: 'boolean' },
             },
         },
         visible_text_contract: {
@@ -330,6 +351,8 @@ When a source image is present, analyze its semantic and narrative affordances r
 
 Classify requested on-screen wording separately from dialogue in visible_text_contract. Copy each user-requested visible phrase exactly, including punctuation and capitalization, and state its role and intended timing. Use required_only when the user permits only those words, prohibited when the user explicitly forbids visible text, required for specified visible wording without an exclusivity constraint, and none otherwise. Do not turn source-image words into required items unless the user asks to preserve or feature them, and do not treat visible wording as speech unless speaking is independently requested.
 
+Populate coverage_contract independently from ordinary plural staging. Use mode=exhaustive only when the request explicitly says all, every, the full roster, the entire set, or gives an exact complete count; otherwise use representative with an empty members array. For exhaustive mode, enumerate every distinct requested member by its complete display name, with no examples, "etc.", category placeholders, or omitted later members. Use presentation=sequential when members take individual turns or appear as successive selections, and simultaneous only when they are all meant to appear together. Set per_member_dialogue when each member must speak, and per_member_label when a named interface, roster, profile, card, scoreboard, or character-selection presentation conventionally identifies the current member. If you cannot resolve the complete roster within 64 members, set frontier_handling to reject with reason_code=cannot_faithfully_fulfill instead of silently sampling it. Treat repeated office terms held by one person as one member unless the request explicitly asks for numbered administrations or repeated terms.
+
 Use motion_design_contract.mode=visual_spine only when the request calls for motion graphics, kinetic typography, a brand film, a montage, a seamless loop, or transformation-driven transitions that benefit from one recurring visual mechanism. Give spine a short literal noun phrase that can be copied verbatim into shot directions, then list the few style invariants and transition rules needed to keep it recognizable. Prefer one dominant motion law whose shape, path, color, prop, or material visibly carries one scene into the next. When a named element itself must transform, require that exact element—not a new backing plate, outline, wipe, or substitute object—to remain recognizable as the transforming material, with enough contrast to read the end state. For ordinary narrative, dialogue, documentary, found-footage, or continuous-action scenes, use mode=none, spine=N/A, and empty arrays rather than forcing an arbitrary motif.
 
 For a seamless loop, make the reset state explicit in transition_rules. Every identity-distinguishable subject—such as a uniquely colored, marked, or shaped object—must return to its own frame-zero position, orientation, and motion vector. Never claim an exact reset while swapping distinguishable subjects into one another's starting positions.
@@ -353,6 +376,8 @@ Choose the shortest natural finished duration that makes the idea legible, cappe
 ${VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS}
 
 Budget action density for reliable generation before polishing prose. In a shot of seven seconds or less, stage one primary physical action, optionally followed by one simple reaction or consequence; a spoken turn also consumes beat time. In an eight-to-fifteen-second shot, use at most three simple sequential phases with a clear causal link. If the story needs more, distribute the beats across additional shots, segments, or duration within the supplied limits instead of compressing a chain of gestures, transformations, reactions, and dialogue into one clip. For generated speech, prefer one memorable line or a concise two-turn exchange for a short comic beat; do not make every shot talk.
+
+Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow: target_seconds is the model's generation window, while output_seconds may specify a shorter final cut so every member fits within the total finished-runtime cap. Use overlay_label=N/A for ordinary segments that need no exact composited identity label.
 
 For a vague one-line premise, develop one decisive representative mini-story with a setup, primary action, and payoff. Do not dramatize every item in prompt_analysis.actions or inferred_staging, and do not turn words such as "always" into a repetitive survey unless the request actually calls for a montage or progression. For insertion, docking, entering, dressing, or fitting actions, trace the moving subject's leading edge, orientation, destination opening, and travel direction before writing the keyframe; they must agree physically through the first shot without an unexplained rotation. Do not invent a face or speaking anatomy solely to support generated dialogue.
 
@@ -705,7 +730,11 @@ function singlePassSchemaForMaximum(maximum: number): Record<string, unknown> {
 function semanticPlanText(plan: any): string {
     const parts = [String(plan?.intent || ''), String(plan?.continuity_bible || '')];
     for (const segment of plan?.segments || []) {
-        parts.push(String(segment?.title || ''), String(segment?.music || ''));
+        parts.push(
+            String(segment?.title || ''),
+            String(segment?.overlay_label || ''),
+            String(segment?.music || ''),
+        );
         for (const shot of segment?.shots || []) {
             parts.push(String(shot?.visual || ''), String(shot?.camera || ''), String(shot?.audio || ''));
             parts.push(...(shot?.dialogue || []).map((line: any) => String(line?.text || '')));
@@ -741,15 +770,239 @@ function dialogueFloorSeconds(segment: any): number {
     return words / (140 / 60) + punctuationPause + turnPause + 1.25;
 }
 
+function normalizedCoverageMember(value: unknown): string {
+    return String(value || '').trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function coverageContract(value: any): any | null {
+    const contract = value?.coverage_contract;
+    return contract && typeof contract === 'object' ? contract : null;
+}
+
+function validateCoverageContract(plan: any, analysis: any): void {
+    const contract = coverageContract(analysis);
+    if (!contract || String(contract.mode || '') !== 'exhaustive') return;
+    const members = Array.isArray(contract.members)
+        ? contract.members.map((member: any) => String(member || '').trim()).filter(Boolean)
+        : [];
+    if (!members.length) {
+        throw new Error('The exhaustive coverage contract did not resolve a complete roster.');
+    }
+    const normalizedMembers = members.map(normalizedCoverageMember);
+    if (new Set(normalizedMembers).size !== normalizedMembers.length) {
+        throw new Error('The exhaustive coverage contract contains duplicate roster members.');
+    }
+    if (String(contract.presentation || '') !== 'sequential') {
+        const semantic = semanticPlanText(plan).toLocaleLowerCase();
+        const missing = members.filter((member: string) =>
+            !semantic.includes(member.toLocaleLowerCase()));
+        if (missing.length) {
+            throw new Error(`The screenplay omitted exhaustive roster members: ${missing.join(' | ')}`);
+        }
+        return;
+    }
+    const expectedMembers = members;
+    const expectedNormalized = normalizedMembers;
+    const labels = (plan?.segments || []).map((segment: any) => String(
+        contract.per_member_label ? segment?.overlay_label : segment?.title,
+    ).trim()).filter((label: string) => label && label !== 'N/A');
+    const normalizedLabels = labels.map(normalizedCoverageMember);
+    const missing = expectedMembers.filter((_member: string, index: number) =>
+        !normalizedLabels.includes(expectedNormalized[index]));
+    const extras = labels.filter((_label: string, index: number) =>
+        !expectedNormalized.includes(normalizedLabels[index]));
+    if (missing.length || extras.length || labels.length !== expectedMembers.length) {
+        throw new Error([
+            missing.length ? `missing: ${missing.join(' | ')}` : '',
+            extras.length ? `unexpected: ${extras.join(' | ')}` : '',
+            labels.length !== expectedMembers.length
+                ? `expected ${expectedMembers.length} labeled member segments, found ${labels.length}`
+                : '',
+        ].filter(Boolean).join('; '));
+    }
+    if (contract.per_member_dialogue) {
+        for (const [index, member] of expectedMembers.entries()) {
+            const segment = (plan?.segments || []).find((candidate: any) =>
+                normalizedCoverageMember(
+                    contract.per_member_label ? candidate?.overlay_label : candidate?.title,
+                ) === expectedNormalized[index]);
+            const speakers = (segment?.shots || []).flatMap((shot: any) =>
+                (shot?.dialogue || []).map((line: any) => normalizedCoverageMember(line?.speaker_id)));
+            if (!speakers.includes(expectedNormalized[index])) {
+                throw new Error(`The exhaustive screenplay omitted ${member}'s required dialogue turn.`);
+            }
+        }
+    }
+}
+
+/** Expand a compact exhaustive analysis into one reliable, independently keyed member segment. */
+export function expandExhaustiveSequentialPlan(
+    plan: any,
+    promptAnalysis: any,
+    model: VideoModelId,
+): any {
+    const contract = coverageContract(promptAnalysis);
+    if (!contract || String(contract.mode || '') !== 'exhaustive'
+        || String(contract.presentation || '') !== 'sequential') return plan;
+    const members = Array.isArray(contract.members)
+        ? contract.members.map((member: any) => String(member || '').trim()).filter(Boolean)
+        : [];
+    if (!members.length || members.length > 64) {
+        throw new Error('The sequential exhaustive request requires a complete roster of 1-64 members.');
+    }
+    const normalized = members.map(normalizedCoverageMember);
+    if (new Set(normalized).size !== normalized.length) {
+        throw new Error('The sequential exhaustive roster contains duplicate members.');
+    }
+    const sourceSegments = Array.isArray(plan?.segments) ? plan.segments : [];
+    const templateSegment = sourceSegments[0] || {};
+    const templateShot = Array.isArray(templateSegment.shots) ? templateSegment.shots[0] || {} : {};
+    const candidateLines = sourceSegments.flatMap((segment: any) =>
+        (segment?.shots || []).flatMap((shot: any) => shot?.dialogue || []));
+    const contractLines = Array.isArray(promptAnalysis?.dialogue_contract?.lines)
+        ? promptAnalysis.dialogue_contract.lines.filter((line: any) => String(line?.text || '').trim())
+        : [];
+    const assignedLine = (index: number): any | null => {
+        const lines = contractLines.length ? contractLines : candidateLines;
+        if (!contract.per_member_dialogue) return null;
+        if (lines.length === 1) return lines[0];
+        if (lines.length === members.length) return lines[index];
+        throw new Error(
+            `The exhaustive screenplay needs either one shared line or ${members.length} member lines; `
+            + `found ${lines.length}.`,
+        );
+    };
+    const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
+    const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
+    const presentation = String(promptAnalysis?.presentation || 'selection interface').trim();
+    const blankNameplate = (
+        'The interface has one opaque blank nameplate centered across the top, reserved for '
+        + 'postproduction; it contains no readable letters, names, numbers, logos, or glyphs.'
+    );
+    const segments = members.map((member: string, index: number) => {
+        const line = assignedLine(index);
+        const dialogue = line ? [{
+            speaker_id: member,
+            language: String(line.language || 'English').trim(),
+            delivery: String(line.delivery || 'clear natural delivery').trim(),
+            text: String(line.text).trim(),
+        }] : [];
+        const shot = {
+            duration_seconds: minimum,
+            visual: [
+                `A stable ${presentation} shows ${member} as the only current selected member, `
+                + 'recognizable and centered in the portrait frame; no other roster member appears.',
+                blankNameplate,
+                dialogue.length
+                    ? `For the first 0.35 seconds ${member} holds still with mouth closed; afterward `
+                        + `${member} delivers the assigned line with synchronized mouth movement.`
+                    : `${member} performs one simple readable selection-screen idle action.`,
+            ].join(' '),
+            camera: String(templateShot.camera || 'Static frontal medium close-up centered on the selection frame.'),
+            audio: String(templateShot.audio || SAFE_NONSPEECH_AUDIO),
+            dialogue,
+        };
+        const target = Math.max(minimum, dialogueFloorSeconds({ shots: [shot] }));
+        if (target > maximum + 1e-6) {
+            throw new Error(`${member}'s assigned dialogue exceeds the ${maximum}s segment limit.`);
+        }
+        shot.duration_seconds = target;
+        return {
+            title: member,
+            overlay_label: contract.per_member_label ? member : 'N/A',
+            transition: index === 0 ? 'start' : 'cut',
+            target_seconds: target,
+            music: String(templateSegment.music || 'N/A').trim() || 'N/A',
+            shots: [shot],
+        };
+    });
+    const preferredOutputSeconds = segments.map((segment: any) => Math.min(
+        segment.target_seconds,
+        Math.max(2.5, dialogueFloorSeconds(segment)),
+    ));
+    const preferredOutputTotal = preferredOutputSeconds.reduce(
+        (sum: number, seconds: number) => sum + seconds,
+        0,
+    );
+    const outputScale = preferredOutputTotal > AUTO_TOTAL_LIMIT_SECONDS
+        ? AUTO_TOTAL_LIMIT_SECONDS / preferredOutputTotal
+        : 1;
+    for (const [index, segment] of segments.entries()) {
+        segment.output_seconds = Math.max(0.5, preferredOutputSeconds[index] * outputScale);
+    }
+    const outputTotal = segments.reduce(
+        (sum: number, segment: any) => sum + segment.output_seconds,
+        0,
+    );
+    if (outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+        const correction = AUTO_TOTAL_LIMIT_SECONDS / outputTotal;
+        for (const segment of segments) segment.output_seconds *= correction;
+    }
+    if (outputScale < 1) {
+        plan.generation_adjustments = {
+            ...(plan.generation_adjustments && typeof plan.generation_adjustments === 'object'
+                ? plan.generation_adjustments
+                : {}),
+            best_effort: true,
+            duration_compressed: true,
+            coverage_total: members.length,
+            coverage_rendered: members.length,
+        };
+    }
+    const motionContract = (member: string) => ({
+        subject_orientation: `${member} faces the camera directly in the selection frame.`,
+        gaze_direction: `${member} looks toward the viewer.`,
+        travel_direction: 'Stationary in the character portrait frame.',
+        camera_relation: 'Static frontal medium close-up centered on the selection frame.',
+        first_second_action: dialogueForMember(member, segments)
+            ? `${member} keeps their mouth closed for 0.35 seconds, then delivers the assigned line.`
+            : `${member} begins one restrained selection-screen idle action.`,
+    });
+    plan.segments = segments;
+    plan.keyframe = plan.keyframe && typeof plan.keyframe === 'object' ? plan.keyframe : {};
+    plan.keyframe.recommended = true;
+    plan.keyframe.reason = 'Anchor the first independently selected roster member.';
+    plan.keyframe.prompt = [
+        `Opening still of ${members[0]} as the only selected member in a ${presentation}.`,
+        blankNameplate,
+        'Static frontal medium close-up, fully composed at frame zero.',
+    ].join(' ');
+    plan.keyframe.reference_requirements = Array.isArray(plan.keyframe.reference_requirements)
+        ? plan.keyframe.reference_requirements.slice(0, 4)
+        : [];
+    plan.keyframe.motion_contract = motionContract(members[0]);
+    plan.segment_keyframes = members.slice(1).map((member: string, index: number) => ({
+        segment_index: index + 2,
+        prompt: [
+            `Opening still of ${member} as the only selected member in a ${presentation}.`,
+            blankNameplate,
+            'Static frontal medium close-up, fully composed at frame zero.',
+        ].join(' '),
+        motion_contract: motionContract(member),
+    }));
+    return plan;
+}
+
+function dialogueForMember(member: string, segments: any[]): boolean {
+    const normalized = normalizedCoverageMember(member);
+    const segment = segments.find(candidate =>
+        normalizedCoverageMember(candidate?.overlay_label || candidate?.title) === normalized);
+    return Boolean(segment?.shots?.some((shot: any) => Array.isArray(shot?.dialogue) && shot.dialogue.length));
+}
+
 function planAutomaticFloor(plan: any, model: VideoModelId): number {
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
     const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
-    return (plan?.segments || []).reduce((total: number, segment: any) => total + Math.max(
-        minimum,
-        Math.min(maximum, Number(segment?.target_seconds) || 0),
-        dialogueFloorSeconds(segment),
-        Math.min((segment?.shots?.length || 1) * 1.5, maximum),
-    ), 0);
+    return (plan?.segments || []).reduce((total: number, segment: any) => {
+        const outputSeconds = Number(segment?.output_seconds);
+        if (Number.isFinite(outputSeconds) && outputSeconds > 0) return total + outputSeconds;
+        return total + Math.max(
+            minimum,
+            Math.min(maximum, Number(segment?.target_seconds) || 0),
+            dialogueFloorSeconds(segment),
+            Math.min((segment?.shots?.length || 1) * 1.5, maximum),
+        );
+    }, 0);
 }
 
 function truncateDialogueToSeconds(shots: any[], maximumSeconds: number): boolean {
@@ -815,13 +1068,32 @@ export function compileBestEffortFrontierVideoPlan(
                 dialogue: [],
             }],
         }];
-    let structurallyAdjusted = rawSegments !== source.segments || rawSegments.length > 8;
+    let structurallyAdjusted = rawSegments !== source.segments || rawSegments.length > 64;
     let durationTruncated = false;
+    let durationCompressed = false;
     const segments: any[] = [];
     let remaining = AUTO_TOTAL_LIMIT_SECONDS;
+    const exhaustiveSequential = String(promptAnalysis?.coverage_contract?.mode || '') === 'exhaustive'
+        && String(promptAnalysis?.coverage_contract?.presentation || '') === 'sequential';
+    const exhaustiveRequestedOutputs = exhaustiveSequential
+        ? rawSegments.slice(0, 64).map((segment: any) => {
+            const output = Number(segment?.output_seconds);
+            const target = Number(segment?.target_seconds);
+            return Number.isFinite(output) && output > 0
+                ? output
+                : Number.isFinite(target) && target > 0 ? target : minimum;
+        })
+        : [];
+    const exhaustiveRequestedTotal = exhaustiveRequestedOutputs.reduce(
+        (sum: number, seconds: number) => sum + seconds,
+        0,
+    );
+    const exhaustiveOutputScale = exhaustiveRequestedTotal > AUTO_TOTAL_LIMIT_SECONDS
+        ? AUTO_TOTAL_LIMIT_SECONDS / exhaustiveRequestedTotal
+        : 1;
 
-    for (const [segmentIndex, originalValue] of rawSegments.slice(0, 8).entries()) {
-        if (remaining < minimum - 1e-6) {
+    for (const [segmentIndex, originalValue] of rawSegments.slice(0, 64).entries()) {
+        if (!exhaustiveSequential && remaining < minimum - 1e-6) {
             durationTruncated = true;
             break;
         }
@@ -899,7 +1171,7 @@ export function compileBestEffortFrontierVideoPlan(
 
         const shotCountFloor = Math.min(shots.length * 1.5, maximum);
         const structuralFloor = Math.max(minimum, shotCountFloor);
-        if (remaining < structuralFloor - 1e-6) {
+        if (!exhaustiveSequential && remaining < structuralFloor - 1e-6) {
             durationTruncated = true;
             break;
         }
@@ -910,12 +1182,12 @@ export function compileBestEffortFrontierVideoPlan(
                 0,
             ),
         );
-        let target = Math.min(maximum, requestedTarget, remaining);
+        let target = Math.min(maximum, requestedTarget, exhaustiveSequential ? maximum : remaining);
         if (target + 1e-6 < requestedTarget) durationTruncated = true;
         if (truncateDialogueToSeconds(shots, target)) durationTruncated = true;
         const dialogueFloor = dialogueFloorSeconds({ shots });
         target = Math.max(structuralFloor, target, dialogueFloor);
-        if (target > remaining + 1e-6) {
+        if (!exhaustiveSequential && target > remaining + 1e-6) {
             durationTruncated = true;
             break;
         }
@@ -926,18 +1198,30 @@ export function compileBestEffortFrontierVideoPlan(
         for (const shot of shots) {
             shot.duration_seconds = target * Number(shot.duration_seconds || 1) / shotDurationTotal;
         }
+        const outputSeconds = exhaustiveSequential
+            ? Math.min(
+                target,
+                Math.max(
+                    0.5,
+                    exhaustiveRequestedOutputs[segmentIndex] * exhaustiveOutputScale,
+                ),
+            )
+            : target;
+        if (exhaustiveSequential && outputSeconds + 1e-6 < target) durationCompressed = true;
         segments.push({
             title: String(original.title || `Segment ${segmentIndex + 1}`).trim(),
+            overlay_label: String(original.overlay_label || 'N/A').trim() || 'N/A',
             transition: segmentIndex === 0
                 ? 'start'
                 : (['continue', 'cut', 'dissolve'].includes(String(original.transition))
                     ? String(original.transition)
                     : 'cut'),
             target_seconds: target,
+            ...(exhaustiveSequential ? { output_seconds: outputSeconds } : {}),
             music: String(original.music || 'N/A').trim() || 'N/A',
             shots,
         });
-        remaining -= target;
+        remaining -= outputSeconds;
     }
 
     if (!segments.length) {
@@ -957,7 +1241,7 @@ export function compileBestEffortFrontierVideoPlan(
         })),
     };
     const notices: string[] = [];
-    if (durationTruncated) {
+    if (durationTruncated && String(promptAnalysis?.coverage_contract?.mode || '') !== 'exhaustive') {
         notices.push(
             `The screenplay exceeded the ${AUTO_TOTAL_LIMIT_SECONDS}-second generation budget and was truncated; `
             + 'later beats or dialogue may be omitted.',
@@ -998,9 +1282,24 @@ export function compileBestEffortFrontierVideoPlan(
         prompt_analysis: analysis,
         generation_notice: notices.join(' '),
         generation_adjustments: {
+            ...(source.generation_adjustments && typeof source.generation_adjustments === 'object'
+                ? source.generation_adjustments
+                : {}),
             best_effort: true,
-            duration_truncated: durationTruncated,
+            duration_truncated: durationTruncated
+                || Boolean(source?.generation_adjustments?.duration_truncated),
+            duration_compressed: durationCompressed
+                || Boolean(source?.generation_adjustments?.duration_compressed),
+            ...(exhaustiveSequential ? {
+                coverage_total: Array.isArray(promptAnalysis?.coverage_contract?.members)
+                    ? promptAnalysis.coverage_contract.members.length
+                    : rawSegments.length,
+                coverage_rendered: segments.length,
+            } : {}),
         },
+        ...(Array.isArray(source.segment_keyframes)
+            ? { segment_keyframes: JSON.parse(JSON.stringify(source.segment_keyframes)) }
+            : {}),
     };
     preserveAudiovisualContractsBestEffort(compiled, analysis);
     stageFrontierDialogueVisually(compiled);
@@ -1016,10 +1315,14 @@ export function validateFrontierVideoPlanForKeyframe(
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
         throw new Error('GPT-5.6 Sol returned no screenplay segments.');
     }
+    if (plan.segments.length > 64) {
+        throw new Error('GPT-5.6 Sol returned more than 64 screenplay segments.');
+    }
     if (!String(plan.intent || '').trim() || !String(plan.continuity_bible || '').trim()) {
         throw new Error('GPT-5.6 Sol omitted the intent or continuity bible.');
     }
     if (plan.prompt_analysis) validateAudiovisualContracts(plan, plan.prompt_analysis);
+    validateCoverageContract(plan, plan.prompt_analysis || plan.semantic_analysis);
     const keyframe = plan.keyframe;
     if (!keyframe || typeof keyframe !== 'object'
         || !String(keyframe.reason || '').trim() || !String(keyframe.prompt || '').trim()) {
@@ -1039,8 +1342,7 @@ export function validateFrontierVideoPlanForKeyframe(
     }
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
     const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
-    let minimumTotal = 0;
-    let dialogueMinimumTotal = 0;
+    let outputTotal = 0;
     for (const [segmentIndex, segment] of plan.segments.entries()) {
         if (!segment || typeof segment !== 'object'
             || !Array.isArray(segment.shots) || !segment.shots.length || segment.shots.length > 4) {
@@ -1049,6 +1351,14 @@ export function validateFrontierVideoPlanForKeyframe(
         const target = Number(segment.target_seconds);
         if (!Number.isFinite(target) || target <= 0 || target > maximum) {
             throw new Error(`GPT-5.6 Sol segment ${segmentIndex + 1} exceeds the ${maximum}s model limit.`);
+        }
+        const declaredOutput = Number(segment.output_seconds);
+        if (segment.output_seconds !== undefined
+            && (!Number.isFinite(declaredOutput) || declaredOutput < 0.5
+                || declaredOutput > target + 1e-6)) {
+            throw new Error(
+                `GPT-5.6 Sol segment ${segmentIndex + 1} has an invalid final-cut duration.`,
+            );
         }
         for (const [shotIndex, shot] of segment.shots.entries()) {
             if (!shot || typeof shot !== 'object'
@@ -1082,13 +1392,11 @@ export function validateFrontierVideoPlanForKeyframe(
                 `GPT-5.6 Sol segment ${segmentIndex + 1} needs ${floor.toFixed(1)}s of dialogue, above the ${maximum}s model limit.`,
             );
         }
-        minimumTotal += floor;
-        dialogueMinimumTotal += dialogueFloor;
+        outputTotal += segment.output_seconds === undefined ? floor : declaredOutput;
     }
-    if (minimumTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6
-        && dialogueMinimumTotal <= AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
-            `GPT-5.6 Sol screenplay needs at least ${minimumTotal.toFixed(1)}s, `
+            `GPT-5.6 Sol screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,
         );
     }
@@ -1580,6 +1888,7 @@ async function validatedPromptAnalysis(
 ): Promise<Record<string, any>> {
     if (!value || typeof value !== 'object'
         || !value.dialogue_contract || !Array.isArray(value.dialogue_contract.lines)
+        || !value.coverage_contract || !Array.isArray(value.coverage_contract.members)
         || !value.visible_text_contract || !Array.isArray(value.visible_text_contract.items)
         || !value.motion_design_contract
         || !Array.isArray(value.motion_design_contract.style_invariants)
@@ -1587,6 +1896,25 @@ async function validatedPromptAnalysis(
         || !value.frontier_handling || typeof value.frontier_handling !== 'object') {
         throw new Error('GPT-5.6 Sol returned an invalid prompt analysis.');
     }
+    const coverageMode = String(value.coverage_contract.mode || '');
+    const coveragePresentation = String(value.coverage_contract.presentation || '');
+    const coverageMembers = value.coverage_contract.members
+        .map((member: any) => String(member || '').trim()).filter(Boolean);
+    const normalizedMembers = coverageMembers.map(normalizedCoverageMember);
+    if (!['representative', 'exhaustive'].includes(coverageMode)
+        || !['simultaneous', 'sequential'].includes(coveragePresentation)
+        || typeof value.coverage_contract.per_member_dialogue !== 'boolean'
+        || typeof value.coverage_contract.per_member_label !== 'boolean'
+        || coverageMembers.length !== value.coverage_contract.members.length
+        || new Set(normalizedMembers).size !== normalizedMembers.length
+        || (coverageMode === 'representative' && coverageMembers.length)
+        || (coverageMode === 'exhaustive' && !coverageMembers.length)
+        || ((value.coverage_contract.per_member_dialogue
+            || value.coverage_contract.per_member_label)
+            && coveragePresentation !== 'sequential')) {
+        throw new Error('GPT-5.6 Sol returned an inconsistent coverage contract.');
+    }
+    value.coverage_contract.members = coverageMembers;
     const visibleMode = String(value.visible_text_contract.mode || '');
     const visibleItems = value.visible_text_contract.items;
     if (!['none', 'prohibited', 'required', 'required_only'].includes(visibleMode)
@@ -1644,6 +1972,7 @@ function validatePlanAgainstAnalysis(
     prompt: string,
 ): void {
     validateAudiovisualContracts(plan, promptAnalysis);
+    validateCoverageContract(plan, promptAnalysis);
     const dialogueMode = String(promptAnalysis.dialogue_contract?.mode || 'none');
     const protectedDialogueLines = promptAnalysis.dialogue_contract.lines
         .filter((line: any) => line?.verbatim && String(line.text || '').trim())
@@ -1792,7 +2121,7 @@ export async function createFrontierVideoPlan(
                             : 'Aspect ratio: 16:9.',
                         `Target video model: ${definition.displayName}.`,
                         `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                        `Choose an automatic total duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.`,
+                        `Choose an automatic finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory and must all be retained by shortening each segment's output_seconds; only nonessential ordinary overflow may be truncated.`,
                         `A source image is present: ${sourceImage ? 'yes' : 'no'}.`,
                         sourceImage
                             ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
@@ -1843,6 +2172,7 @@ export async function createFrontierVideoPlan(
                 if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
                     throw new Error('GPT-5.6 Sol returned an invalid combined screenplay object.');
                 }
+                expandExhaustiveSequentialPlan(plan, promptAnalysis, model);
                 stageFrontierVisibleText(plan, promptAnalysis);
                 validatePlanAgainstAnalysis(plan, promptAnalysis, prompt);
                 plan.prompt_analysis = promptAnalysis;
@@ -1934,7 +2264,7 @@ export async function createFrontierVideoPlan(
                     : 'Aspect ratio: 16:9.',
                 `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                `Choose an automatic total duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally; if the request cannot fit, preserve the earliest essential wording and beats because the compiler will truncate overflow rather than fail the job.`,
+                `Choose an automatic finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory and must all be retained by shortening each segment's output_seconds; only nonessential ordinary overflow may be truncated.`,
                 sourceImage
                     ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
                     : 'No user-supplied starting image is present.',
@@ -2006,6 +2336,7 @@ export async function createFrontierVideoPlan(
                     throw new Error('GPT-5.6 Sol returned an invalid screenplay object.');
                 }
                 lastParsedCandidate = plan;
+                expandExhaustiveSequentialPlan(plan, promptAnalysis, model);
                 stageFrontierVisibleText(plan, promptAnalysis);
                 validatePlanAgainstAnalysis(plan, promptAnalysis, prompt);
                 (plan as any).prompt_analysis = promptAnalysis;
