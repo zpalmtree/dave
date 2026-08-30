@@ -129,9 +129,9 @@ test('an ambiguous reference rejected by validation falls through to later searc
     };
     const results = [
         {
-            title: 'Unrelated merchandise',
-            link: 'https://images.example/shirt.png',
-            url: 'https://example.com/shirt',
+            title: 'Unrelated namesake page',
+            link: 'https://images.example/namesake.png',
+            url: 'https://example.com/namesake',
             displayLink: 'example.com',
         },
         {
@@ -162,6 +162,102 @@ test('an ambiguous reference rejected by validation falls through to later searc
         assert.equal(references[0].sourceUrl, 'https://images.example/character.png');
         assert.deepEqual(downloaded, results.map(result => result.link));
         assert.deepEqual(validated, results.map(result => result.link));
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('named identities prefer ordinary search results over explicit artwork metadata', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-ranked-identity-reference-'));
+    const downloaded = [];
+    const plan = {
+        keyframe: {
+            recommended: true,
+            reference_requirements: [{
+                label: 'Distinctive Agent',
+                kind: 'identity',
+                search_query: 'Distinctive Agent recognizable actor 1990s portrait',
+                visual_facts_to_preserve: 'Preserve the named actor and period styling.',
+            }],
+        },
+    };
+    const results = [
+        {
+            title: 'Distinctive Agent portrait painting',
+            link: 'https://images.example/painting.jpg',
+            url: 'https://market.example/painting',
+            displayLink: 'www.etsy.com',
+        },
+        {
+            title: 'Distinctive Agent production photograph',
+            link: 'https://images.example/photo.jpg',
+            url: 'https://news.example/profile',
+            displayLink: 'news.example',
+        },
+    ];
+
+    try {
+        const references = await resolveVideoKeyframeReferences(
+            plan,
+            directory,
+            async () => results,
+            async result => {
+                downloaded.push(result.link);
+                return { data: Buffer.from([0xff, 0xd8, 0xff]), extension: 'jpg' };
+            },
+        );
+
+        assert.equal(references.length, 1);
+        assert.equal(references[0].sourceUrl, 'https://images.example/photo.jpg');
+        assert.deepEqual(downloaded, ['https://images.example/photo.jpg']);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('deferred identity artwork remains available when preferred results do not download', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-ranked-identity-fallback-'));
+    const downloaded = [];
+    const plan = {
+        keyframe: {
+            recommended: true,
+            reference_requirements: [{
+                label: 'Distinctive Agent',
+                kind: 'identity',
+                search_query: 'Distinctive Agent recognizable actor 1990s portrait',
+                visual_facts_to_preserve: 'Preserve the named actor and period styling.',
+            }],
+        },
+    };
+    const artwork = {
+        title: 'Distinctive Agent art print',
+        link: 'https://images.example/art.jpg',
+        url: 'https://market.example/art',
+        displayLink: 'market.example',
+    };
+    const unavailablePhoto = {
+        title: 'Distinctive Agent production photograph',
+        link: 'https://images.example/photo.jpg',
+        url: 'https://news.example/profile',
+        displayLink: 'news.example',
+    };
+
+    try {
+        const references = await resolveVideoKeyframeReferences(
+            plan,
+            directory,
+            async () => [artwork, unavailablePhoto],
+            async result => {
+                downloaded.push(result.link);
+                return result === artwork
+                    ? { data: Buffer.from([0xff, 0xd8, 0xff]), extension: 'jpg' }
+                    : null;
+            },
+        );
+
+        assert.equal(references.length, 1);
+        assert.equal(references[0].sourceUrl, artwork.link);
+        assert.deepEqual(downloaded, [unavailablePhoto.link, artwork.link]);
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }
