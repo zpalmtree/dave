@@ -649,12 +649,18 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /from 00:00\.000 until 00:00\.350/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Apply this lead-in consistently in shot\.visual and keyframe\.motion_contract\.first_second_action/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Use dialogue\.delivery only for vocal and performance qualities/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /dialogue turn can overrun its authored shot boundary/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /reserve a small overflow margin/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not take that margin from the following payoff/);
     assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /make it begin immediately/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Budget action density for reliable generation/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /a spoken turn also consumes beat time/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not stack them in one authored shot/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /already-achieved aftermath\/reaction/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /explicit entry\/exit state across each cut/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /one decisive representative mini-story/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /trace the moving subject's leading edge/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /placing it on a new backing plate/);

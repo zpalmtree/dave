@@ -67,7 +67,8 @@ async function extractVisualEvidence(candidate, outputDirectory, durationSeconds
     ]);
     await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-y',
-        '-sseof', '-0.05', '-i', candidate.video_path,
+        '-sseof', '-1', '-i', candidate.video_path,
+        '-vf', 'reverse',
         '-frames:v', '1', '-q:v', '2', finalFramePath,
     ]);
     const timelineRate = 16 / Math.max(0.001, Number(durationSeconds));
