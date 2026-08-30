@@ -534,6 +534,10 @@ test('active video status shows only rough progress and one completion ETA', () 
         expected_finish_at: 2_000_000_210,
         stage: 'Sampling [##########----------] 50.0% | ETA 2m-5m',
         progress: 0.426,
+        progress_scope: 'job',
+        segment_index: 4,
+        segment_count: 9,
+        segment_progress: 0.83,
         error: null,
         result_path: null,
         result_bytes: null,
@@ -555,6 +559,7 @@ test('active video status shows only rough progress and one completion ETA', () 
     };
     const text = formatVideoJob(job);
     assert.match(text, /roughly 43% complete/);
+    assert.match(text, /Segment \*\*4\/9\*\*/);
     assert.match(text, /Estimated completion/);
     assert.doesNotMatch(text, /Sampling|2m-5m|Expected start/);
 

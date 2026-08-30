@@ -337,8 +337,11 @@ export function formatVideoJob(job: VideoJobView): string {
             return `${head}\n**Waiting in the GPU queue.**${position}${ahead}${timing}${basis}`;
         }
         const progress = percentage(job.progress);
+        const segment = job.segment_index && job.segment_count
+            ? ` Segment **${job.segment_index}/${job.segment_count}**.`
+            : '';
         const processing = progress
-            ? `**Processing — roughly ${progress} complete.**`
+            ? `**Processing — roughly ${progress} complete.**${segment}`
             : '**Processing your video.**';
         return `${head}\n${processing}${timing}${pauseText(job.paused_until)}`;
     }
@@ -395,7 +398,10 @@ export function formatGlobalVideoQueueJob(
         status = 'Cancelling';
     } else if (['leased', 'running'].includes(job.status)) {
         const progress = percentage(job.progress);
-        status = progress ? `Rendering · ${progress}` : 'Rendering';
+        const segment = job.segment_index && job.segment_count
+            ? ` · segment ${job.segment_index}/${job.segment_count}`
+            : '';
+        status = progress ? `Rendering · ${progress}${segment}` : `Rendering${segment}`;
     } else if (job.status === 'ready') {
         status = 'Delivering';
     } else if (job.status === 'delivered') {
