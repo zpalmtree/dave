@@ -112,6 +112,61 @@ test('generic and ambiguous character references cannot bind arbitrary public im
     }
 });
 
+test('an ambiguous reference rejected by validation falls through to later search results', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-ambiguous-reference-fallback-'));
+    const downloaded = [];
+    const validated = [];
+    const plan = {
+        keyframe: {
+            recommended: true,
+            reference_requirements: [{
+                label: 'Tism',
+                kind: 'character',
+                search_query: 'Tism character design',
+                visual_facts_to_preserve: 'Preserve the named character design.',
+            }],
+        },
+    };
+    const results = [
+        {
+            title: 'Unrelated merchandise',
+            link: 'https://images.example/shirt.png',
+            url: 'https://example.com/shirt',
+            displayLink: 'example.com',
+        },
+        {
+            title: 'Canonical character reference',
+            link: 'https://images.example/character.png',
+            url: 'https://example.com/character',
+            displayLink: 'example.com',
+        },
+    ];
+
+    try {
+        const references = await resolveVideoKeyframeReferences(
+            plan,
+            directory,
+            async () => results,
+            async result => {
+                downloaded.push(result.link);
+                return { data: Buffer.from([0x89, 0x50, 0x4e, 0x47]), extension: 'png' };
+            },
+            {},
+            async (_requirement, result) => {
+                validated.push(result.link);
+                return result.link.endsWith('/character.png');
+            },
+        );
+
+        assert.equal(references.length, 1);
+        assert.equal(references[0].sourceUrl, 'https://images.example/character.png');
+        assert.deepEqual(downloaded, results.map(result => result.link));
+        assert.deepEqual(validated, results.map(result => result.link));
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('video keyframe references are bounded, downloaded, and reused from the job cache', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-references-'));
     const searches = [];
