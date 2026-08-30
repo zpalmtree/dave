@@ -12,6 +12,7 @@ import {
     VideoBroker,
     duplicateVideoTerminalEventMatches,
     projectedVideoFinishAt,
+    videoGpuBudgetExceeded,
     videoPlanRuntimeScale,
     videoFailureDisposition,
 } from '../dist/VideoBroker.js';
@@ -86,6 +87,9 @@ test('long video estimates scale by full segment cost and live job progress repl
         progressScope: 'job',
     });
     assert.ok(observed > 1_450, `live projection did not follow measured pace: ${observed}`);
+    assert.equal(videoGpuBudgetExceeded(3_600, 3_600), false);
+    assert.equal(videoGpuBudgetExceeded(3_601, 3_600), true);
+    assert.equal(videoGpuBudgetExceeded(99_999, 0), false);
 });
 
 test('terminal replay acknowledgements cover retry and pause requeues without accepting stale leases', () => {
