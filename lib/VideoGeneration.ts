@@ -28,6 +28,10 @@ interface BrokerState {
     dispatch_paused?: boolean;
     preparation_busy?: boolean;
     active_jobs?: number;
+    scheduler?: {
+        mode?: 'normal' | 'draining' | 'enteringGaming' | 'gaming' | null;
+        gaming_ready?: boolean;
+    } | null;
     queued: number;
 }
 
@@ -842,12 +846,12 @@ export async function handleVideoAdmin(msg: Message, args: string): Promise<void
             method: 'POST',
             body: JSON.stringify({ seconds, actor_id: msg.author.id }),
         });
-        await msg.reply(`Video generation paused until ${formatDiscordDateAndRelative(result.paused_until)}. Any active render is being stopped and returned to the front of the queue.`);
+        await msg.reply(`Video generation paused until ${formatDiscordDateAndRelative(result.paused_until)}. Any active render is being stopped and returned to the front of the queue, and GPUq Gaming Mode is being enabled for all managed GPU work. Use \`${config.prefix}videogen resume\` to release GPUq explicitly.`);
         return;
     }
     if (action.toLowerCase() === 'resume') {
         await brokerRequest('/v1/control/resume', { method: 'POST', body: '{}' });
-        await msg.reply('Video generation resumed.');
+        await msg.reply('Video generation resumed. GPUq Gaming Mode is being released explicitly.');
         return;
     }
     if (action.toLowerCase() === 'cancel') {
@@ -870,7 +874,10 @@ export async function handleVideoAdmin(msg: Message, args: string): Promise<void
     const worker = state.worker_online
         ? `online${state.worker_busy ? ' and rendering' : ' and idle'}`
         : 'offline';
-    await msg.reply(`Desktop worker: **${worker}**. Queued jobs: **${state.queued}**.${pauseText(state.paused_until)}`);
+    const gpuq = state.scheduler?.mode === 'gaming' || state.scheduler?.mode === 'enteringGaming'
+        ? ` GPUq Gaming Mode is **${state.scheduler.gaming_ready ? 'ready' : 'being enabled'}**.`
+        : '';
+    await msg.reply(`Desktop worker: **${worker}**. Queued jobs: **${state.queued}**.${pauseText(state.paused_until)}${gpuq}`);
 }
 
 function metricDuration(value: number | null): string {

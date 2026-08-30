@@ -14,8 +14,11 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 - `$videogen status` is owner-only.
 - `$videogen pause [duration]` pauses dispatch for six hours by default. Durations
   may be `30m`, `6h`, or `1d`, from one minute through seven days. An active job is
-  interrupted, its VRAM is released, and it returns to the front of the queue.
-- `$videogen resume` resumes dispatch.
+  interrupted, its VRAM is released, and it returns to the front of the queue. The
+  desktop worker also enables GPUq Gaming Mode, preempting all managed GPU work and
+  holding new managed jobs. GPUq remains paused until an explicit resume even when
+  the timed video-dispatch pause expires.
+- `$videogen resume` resumes dispatch and explicitly releases GPUq Gaming Mode.
 - `$videogen cancel <short-id>` cancels any job as the owner.
 
 Jobs can be submitted while the desktop is offline or generation is paused. Dave

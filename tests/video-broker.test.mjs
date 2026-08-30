@@ -649,6 +649,9 @@ test('broker preserves an interrupted job at the front while paused', async () =
         const cancel = await take(value => value.type === 'cancel');
         assert.equal(cancel.job_id, jobId);
         assert.equal(cancel.reason, 'pause');
+        const firstGpuqPause = await take(value => value.type === 'gpuq_gaming');
+        assert.equal(firstGpuqPause.enabled, true);
+        assert.ok(firstGpuqPause.request_id > 0);
 
         socket.close();
         await eventually(
@@ -675,6 +678,19 @@ test('broker preserves an interrupted job at the front while paused', async () =
         assert.equal(reconnectAck.resume_current_job, false);
         const repeatedCancel = await takeReconnected(value => value.type === 'cancel');
         assert.equal(repeatedCancel.reason, 'pause');
+        const repeatedGpuqPause = await takeReconnected(value => value.type === 'gpuq_gaming');
+        assert.deepEqual(repeatedGpuqPause, firstGpuqPause);
+        socket.send(JSON.stringify({
+            type: 'gpuq_gaming_ack',
+            enabled: true,
+            request_id: repeatedGpuqPause.request_id,
+            scheduler: {
+                available: true,
+                mode: 'gaming',
+                gaming_ready: true,
+                health: 'healthy',
+            },
+        }));
 
         socket.send(JSON.stringify({ type: 'event', event: 'cancelled', job_id: jobId, reason: 'pause' }));
         socket.send(JSON.stringify({ type: 'ready' }));
@@ -709,6 +725,19 @@ test('broker preserves an interrupted job at the front while paused', async () =
         await assert.rejects(() => takeReconnected(value => value.type === 'job', 150), /Timed out/);
 
         await botFetch('/v1/control/resume', { method: 'POST', body: '{}' });
+        const gpuqResume = await takeReconnected(value => value.type === 'gpuq_gaming');
+        assert.equal(gpuqResume.enabled, false);
+        socket.send(JSON.stringify({
+            type: 'gpuq_gaming_ack',
+            enabled: false,
+            request_id: gpuqResume.request_id,
+            scheduler: {
+                available: true,
+                mode: 'normal',
+                gaming_ready: false,
+                health: 'healthy',
+            },
+        }));
         const resumed = await takeReconnected(value => value.type === 'job');
         assert.equal(resumed.job.id, jobId);
         socket.send(JSON.stringify({
@@ -938,6 +967,8 @@ test('broker unloads an idle worker when paused and after reconnecting while pau
         assert.equal(paused.status, 200);
         const firstUnload = await connected.take(value => value.type === 'unload');
         assert.equal(firstUnload.reason, 'pause');
+        const firstGpuqPause = await connected.take(value => value.type === 'gpuq_gaming');
+        assert.equal(firstGpuqPause.enabled, true);
 
         socket.close();
         await eventually(
@@ -948,6 +979,23 @@ test('broker unloads an idle worker when paused and after reconnecting while pau
         socket = connected.worker;
         const reconnectUnload = await connected.take(value => value.type === 'unload');
         assert.equal(reconnectUnload.reason, 'pause');
+        const reconnectGpuqPause = await connected.take(value => value.type === 'gpuq_gaming');
+        assert.deepEqual(reconnectGpuqPause, firstGpuqPause);
+        socket.send(JSON.stringify({
+            type: 'gpuq_gaming_ack',
+            enabled: true,
+            request_id: reconnectGpuqPause.request_id,
+            scheduler: {
+                available: true,
+                mode: 'gaming',
+                gaming_ready: true,
+                health: 'healthy',
+            },
+        }));
+        await eventually(
+            () => botFetch('/v1/control'),
+            value => value.body.scheduler?.mode === 'gaming',
+        );
     } finally {
         if (socket) socket.close();
         await broker.stop();
@@ -2147,6 +2195,13 @@ test('worker GPU-reset safety signal pauses dispatch and preserves failed-attemp
 
         const resumed = await botFetch('/v1/control/resume', { method: 'POST', body: '{}' });
         assert.equal(resumed.status, 200);
+        const gpuqResume = await take(value => value.type === 'gpuq_gaming');
+        assert.equal(gpuqResume.enabled, false);
+        socket.send(JSON.stringify({
+            type: 'gpuq_gaming_ack',
+            enabled: false,
+            request_id: gpuqResume.request_id,
+        }));
         const retry = await take(value => value.type === 'job');
         assert.equal(retry.job.id, lease.job.id);
         socket.send(JSON.stringify({
