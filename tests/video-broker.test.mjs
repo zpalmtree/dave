@@ -12,7 +12,6 @@ import {
     VideoBroker,
     duplicateVideoTerminalEventMatches,
     projectedVideoFinishAt,
-    videoGpuBudgetExceeded,
     videoPlanRuntimeScale,
     videoFailureDisposition,
 } from '../dist/VideoBroker.js';
@@ -87,9 +86,6 @@ test('long video estimates scale by full segment cost and live job progress repl
         progressScope: 'job',
     });
     assert.ok(observed > 1_450, `live projection did not follow measured pace: ${observed}`);
-    assert.equal(videoGpuBudgetExceeded(3_600, 3_600), false);
-    assert.equal(videoGpuBudgetExceeded(3_601, 3_600), true);
-    assert.equal(videoGpuBudgetExceeded(99_999, 0), false);
 });
 
 test('terminal replay acknowledgements cover retry and pause requeues without accepting stale leases', () => {
@@ -505,12 +501,15 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             estimate_low_seconds: 500,
             estimate_high_seconds: 900,
         }));
-        const stableEstimate = await eventually(
+        const workerEstimate = await eventually(
             () => botFetch('/v1/users/runtime-user-2/jobs'),
-            value => value.body.jobs[0].status === 'planning',
+            value => value.body.jobs[0].status === 'planning'
+                && value.body.jobs[0].estimate_high_seconds === 900,
         );
-        assert.equal(stableEstimate.body.jobs[0].estimate_low_seconds, 53);
-        assert.equal(stableEstimate.body.jobs[0].estimate_high_seconds, 181);
+        assert.equal(workerEstimate.body.jobs[0].estimate_low_seconds, 500);
+        assert.equal(workerEstimate.body.jobs[0].estimate_high_seconds, 900);
+        assert.equal(workerEstimate.body.jobs[0].initial_estimate_low_seconds, 53);
+        assert.equal(workerEstimate.body.jobs[0].initial_estimate_high_seconds, 181);
         const otherRequester = await botFetch('/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({

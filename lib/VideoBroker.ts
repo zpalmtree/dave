@@ -681,20 +681,6 @@ export function videoPlanRuntimeScale({
     return Math.max(0.15, 0.15 + 0.85 * segmentRatio * perSegmentFactor * sourceFactor);
 }
 
-export const VIDEO_GPU_RUNTIME_BUDGET_SECONDS = (() => {
-    const configured = Number(process.env.VIDEO_GPU_RUNTIME_BUDGET_SECONDS ?? 60 * 60);
-    return Number.isFinite(configured) && configured >= 0 ? configured : 60 * 60;
-})();
-
-export function videoGpuBudgetExceeded(
-    conservativeRuntimeSeconds: number,
-    budgetSeconds = VIDEO_GPU_RUNTIME_BUDGET_SECONDS,
-): boolean {
-    return budgetSeconds > 0
-        && Number.isFinite(conservativeRuntimeSeconds)
-        && conservativeRuntimeSeconds > budgetSeconds;
-}
-
 export function projectedVideoFinishAt({
     now,
     startedAt,
@@ -1876,16 +1862,14 @@ export class VideoBroker {
     private async plannedRuntimeEstimate(
         job: JobRow,
         plan: Record<string, any>,
-    ): Promise<{ low: number; high: number; sampleCount: number }> {
+    ): Promise<{ low: number; high: number }> {
         const segments = Array.isArray(plan.segments) ? plan.segments : [];
         const plannedDuration = segments.reduce(
             (sum: number, segment: any) => sum + Math.max(0, Number(segment?.target_seconds) || 0),
             0,
         );
         const segmentCount = Math.max(1, segments.length);
-        if (!(plannedDuration > 0)) {
-            return { ...await this.runtimeEstimate(job.model), sampleCount: 0 };
-        }
+        if (!(plannedDuration > 0)) return this.runtimeEstimate(job.model);
         const usesStartFrame = Boolean(job.source_image_path || plan?.keyframe?.recommended === true);
         const rows = await this.all<{
             total_seconds: number;
@@ -1933,7 +1917,7 @@ export class VideoBroker {
                 low = Math.min(low, Math.max(30, Math.round(legacy.low * durationFactor * segmentFactor)));
                 high = Math.max(high, Math.round(legacy.high * durationFactor * segmentFactor));
             }
-            return { low, high, sampleCount: predictions.length };
+            return { low, high };
         }
         const legacy = await this.runtimeEstimate(job.model);
         const durationFactor = Math.max(0.4, Math.min(2.5, 0.25 + 0.75 * (plannedDuration / 10)));
@@ -1941,7 +1925,6 @@ export class VideoBroker {
         return {
             low: Math.max(30, Math.round(legacy.low * durationFactor * segmentFactor)),
             high: Math.max(60, Math.round(legacy.high * durationFactor * segmentFactor)),
-            sampleCount: 0,
         };
     }
 
@@ -1963,6 +1946,9 @@ export class VideoBroker {
     private async storePlanEstimate(job: JobRow, plan: Record<string, any>): Promise<void> {
         const estimate = await this.plannedRuntimeEstimate(job, plan);
         const now = nowSeconds();
+        // This history-scaled range is for queue/display ETA only. The desktop
+        // generator has model/config-specific segment timings and truncates a
+        // screenplay there when its conservative GPU estimate exceeds budget.
         await this.run(
             `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?,
              estimate_ready = 1,
@@ -1973,28 +1959,6 @@ export class VideoBroker {
              WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
             [estimate.low, estimate.high, estimate.low, estimate.high, now, now, job.public_id],
         );
-        // A fresh database has only broad display-ETA fallbacks. Those are not
-        // evidence strong enough to reject a screenplay; the desktop worker's
-        // model/config-specific preflight remains the final admission guard.
-        if (estimate.sampleCount >= 3 && videoGpuBudgetExceeded(estimate.high)) {
-            const budgetMinutes = Math.round(VIDEO_GPU_RUNTIME_BUDGET_SECONDS / 60);
-            const estimatedMinutes = Math.ceil(estimate.high / 60);
-            const publicError = (
-                `This screenplay is conservatively estimated to need about ${estimatedMinutes} minutes `
-                + `of GPU time, above the ${budgetMinutes}-minute per-video budget. `
-                + 'Use fewer independently generated scenes or shorter actions.'
-            );
-            const failed = await this.run(
-                `UPDATE video_jobs SET status = 'failed', stage = 'GPU time budget exceeded',
-                 error = ?, completed_at = ?, updated_at = ?
-                 WHERE public_id = ? AND status = 'queued'`,
-                [publicError, now, now, job.public_id],
-            );
-            if (failed.changes > 0) {
-                this.discardProvisionalKeyframe(job.public_id);
-                throw new Error(publicError);
-            }
-        }
     }
 
     private async refreshQueuedEstimates(model: VideoModelId): Promise<void> {
@@ -3652,10 +3616,8 @@ export class VideoBroker {
                     : null;
                 await this.run(
                     `UPDATE video_jobs SET status = 'planning', stage = ?,
-                     estimate_low_seconds = CASE WHEN estimate_ready = 0
-                        THEN COALESCE(?, estimate_low_seconds) ELSE estimate_low_seconds END,
-                     estimate_high_seconds = CASE WHEN estimate_ready = 0
-                        THEN COALESCE(?, estimate_high_seconds) ELSE estimate_high_seconds END,
+                     estimate_low_seconds = COALESCE(?, estimate_low_seconds),
+                     estimate_high_seconds = COALESCE(?, estimate_high_seconds),
                      estimate_ready = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL
                         THEN 1 ELSE estimate_ready END,
                      initial_estimate_low_seconds = COALESCE(initial_estimate_low_seconds, ?),
