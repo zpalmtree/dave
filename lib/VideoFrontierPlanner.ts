@@ -14,6 +14,53 @@ import {
 export const VIDEO_PLANNER_MODEL = 'gpt-5.6-sol';
 export const VIDEO_PLANNER_FAST_MODEL = AI_MODELS.geminiChat;
 export const VIDEO_PLANNER_GEMINI_SCHEMA_MODE = 'compatible-structured-v1';
+export const UNIQUE_US_PRESIDENTS = [
+    'George Washington',
+    'John Adams',
+    'Thomas Jefferson',
+    'James Madison',
+    'James Monroe',
+    'John Quincy Adams',
+    'Andrew Jackson',
+    'Martin Van Buren',
+    'William Henry Harrison',
+    'John Tyler',
+    'James K. Polk',
+    'Zachary Taylor',
+    'Millard Fillmore',
+    'Franklin Pierce',
+    'James Buchanan',
+    'Abraham Lincoln',
+    'Andrew Johnson',
+    'Ulysses S. Grant',
+    'Rutherford B. Hayes',
+    'James A. Garfield',
+    'Chester A. Arthur',
+    'Grover Cleveland',
+    'Benjamin Harrison',
+    'William McKinley',
+    'Theodore Roosevelt',
+    'William Howard Taft',
+    'Woodrow Wilson',
+    'Warren G. Harding',
+    'Calvin Coolidge',
+    'Herbert Hoover',
+    'Franklin D. Roosevelt',
+    'Harry S. Truman',
+    'Dwight D. Eisenhower',
+    'John F. Kennedy',
+    'Lyndon B. Johnson',
+    'Richard Nixon',
+    'Gerald Ford',
+    'Jimmy Carter',
+    'Ronald Reagan',
+    'George H. W. Bush',
+    'Bill Clinton',
+    'George W. Bush',
+    'Barack Obama',
+    'Donald Trump',
+    'Joe Biden',
+] as const;
 export type VideoPlannerStrategy = 'two-pass' | 'single-pass';
 
 export function configuredVideoPlannerStrategy(
@@ -787,6 +834,44 @@ function coverageContract(value: any): any | null {
     return contract && typeof contract === 'object' ? contract : null;
 }
 
+function knownEveryPresidentRequirements(prompt: string): {
+    members: readonly string[];
+    perMemberDialogue: boolean;
+    perMemberLabel: boolean;
+} | null {
+    const normalized = String(prompt || '').trim().replace(/\s+/g, ' ');
+    const asksForUsPresidents = /\b(?:all|every)\s+(?:single\s+)?(?:(?:u\.?s\.?|united states|american)\s+)?presidents?\b/i
+        .test(normalized)
+        || /\b(?:full|complete|entire)\s+(?:u\.?s\.?\s+|united states\s+|american\s+)?(?:presidential\s+)?roster\b/i
+            .test(normalized);
+    if (!asksForUsPresidents) return null;
+    return {
+        members: UNIQUE_US_PRESIDENTS,
+        perMemberDialogue: /\b(?:say|says|saying|speak|speaks|speaking|talk|talks|talking|announce|announces|announcing|shout|shouts|shouting|sing|sings|singing)\b/i
+            .test(normalized),
+        perMemberLabel: /\b(?:character\s+selection|selection\s+screen|roster|profile|player\s+card|scoreboard)\b/i
+            .test(normalized),
+    };
+}
+
+function validateKnownEveryPresidentContract(analysis: any, rawPrompt: string): void {
+    const expected = knownEveryPresidentRequirements(rawPrompt);
+    if (!expected) return;
+    const contract = coverageContract(analysis);
+    const members = Array.isArray(contract?.members)
+        ? contract.members.map(normalizedCoverageMember)
+        : [];
+    const expectedMembers = expected.members.map(normalizedCoverageMember);
+    if (String(contract?.mode || '') !== 'exhaustive'
+        || String(contract?.presentation || '') !== 'sequential'
+        || members.length !== expectedMembers.length
+        || members.some((member: string, index: number) => member !== expectedMembers[index])
+        || (expected.perMemberDialogue && contract?.per_member_dialogue !== true)
+        || (expected.perMemberLabel && contract?.per_member_label !== true)) {
+        throw new Error('The screenplay did not preserve the explicit every-president roster.');
+    }
+}
+
 function validateCoverageContract(plan: any, analysis: any): void {
     const contract = coverageContract(analysis);
     if (!contract || String(contract.mode || '') !== 'exhaustive') return;
@@ -1330,6 +1415,7 @@ export function validateFrontierVideoPlanForKeyframe(
         throw new Error('GPT-5.6 Sol omitted the intent or continuity bible.');
     }
     if (plan.prompt_analysis) validateAudiovisualContracts(plan, plan.prompt_analysis);
+    validateKnownEveryPresidentContract(plan.prompt_analysis || plan.semantic_analysis, rawPrompt);
     validateCoverageContract(plan, plan.prompt_analysis || plan.semantic_analysis);
     const keyframe = plan.keyframe;
     if (!keyframe || typeof keyframe !== 'object'

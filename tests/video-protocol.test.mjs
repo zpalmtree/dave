@@ -38,6 +38,7 @@ import {
     VIDEO_PLANNER_FAST_MODEL,
     VIDEO_PLANNER_GEMINI_SCHEMA_MODE,
     VIDEO_PLANNER_MODEL,
+    UNIQUE_US_PRESIDENTS,
     FrontierPlannerRejectedError,
     compileBestEffortFrontierVideoPlan,
     createFrontierVideoPlan,
@@ -1286,7 +1287,7 @@ test('exhaustive sequential coverage keeps every member inside the finished-runt
     }];
     analysis.coverage_contract = {
         mode: 'exhaustive',
-        members: Array.from({ length: 45 }, (_, index) => `President ${index + 1}`),
+        members: [...UNIQUE_US_PRESIDENTS],
         presentation: 'sequential',
         per_member_dialogue: true,
         per_member_label: true,
@@ -1318,6 +1319,29 @@ test('exhaustive sequential coverage keeps every member inside the finished-runt
         'minimax',
         'Every president says "Present" in a character selection screen.',
     ));
+});
+
+test('broker rejects a representative screenplay for an explicit every-president request', () => {
+    const plan = frontierPlan([{
+        speaker_id: 'presidents', language: 'English', delivery: 'clear', text: 'Present.',
+    }]);
+    plan.semantic_analysis = {
+        coverage_contract: {
+            mode: 'representative',
+            members: [],
+            presentation: 'simultaneous',
+            per_member_dialogue: false,
+            per_member_label: false,
+        },
+    };
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(
+            plan,
+            'minimax',
+            'Every president says "Present" in a character selection screen.',
+        ),
+        /did not preserve the explicit every-president roster/,
+    );
 });
 
 test('exhaustive sequential coverage rejects silent roster omission', () => {
