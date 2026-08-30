@@ -9,6 +9,7 @@ import {
     formatGlobalVideoQueueJob,
     formatVideoRuntime,
     globalVideoQueueChunks,
+    globalVideoQueueEmbeds,
     initialVideoRequestStatus,
     completedVideoPost,
     failedVideoPost,
@@ -453,16 +454,24 @@ test('global video queue identifies same-server requesters without exposing cros
         dispatch_paused: false,
     };
     const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
-    assert.match(formatted, /Queue position: \*\*2\*\*/);
-    assert.match(formatted, /Rough estimated completion/);
+    assert.match(formatted, /\*\*#2 · Queued\*\*/);
+    assert.match(formatted, /Rough ETA <t:2000000450:R>/);
     assert.doesNotMatch(formatted, /Expected start|estimate.*-/i);
+    assert.doesNotMatch(formatted, /MiniMax H3|12345678/);
     assert.match(formatted, /<@483470443001413675>/);
     assert.match(formatted, /Three racers approach a neon finish line/);
+    assert.equal(formatted.split('\n').length, 2);
+
+    const embeds = globalVideoQueueEmbeds([queued], 'guild-a', 700);
+    assert.equal(embeds.length, 1);
+    assert.equal(embeds[0].title, 'Video queue · 1 job');
+    assert.equal(embeds[0].description, formatted);
+    assert.equal(embeds[0].color, 0x5865F2);
 
     const fullPrompt = `A complete queue prompt ${'with every requested detail '.repeat(12)}`;
     const fullPromptChunks = globalVideoQueueChunks([{ ...queued, prompt: fullPrompt }], 'guild-a', 700);
     assert.equal(fullPromptChunks.length, 1);
-    assert.match(fullPromptChunks[0], new RegExp(fullPrompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(fullPromptChunks[0], new RegExp(fullPrompt.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
     const crossServer = formatGlobalVideoQueueJob({
         ...queued,

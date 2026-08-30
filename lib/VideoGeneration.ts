@@ -358,40 +358,89 @@ export function formatGlobalVideoQueueJob(
     promptLength?: number,
     revealAllRequesters = false,
 ): string {
-    const [head, ...details] = formatVideoJob(job).split('\n');
     const sameServer = viewerGuildId !== null && job.guild_id === viewerGuildId;
     const mayIdentifyRequester = sameServer || revealAllRequesters;
     const requester = mayIdentifyRequester && /^\d+$/.test(job.requester_id)
         ? `<@${job.requester_id}>`
         : mayIdentifyRequester ? 'unknown requester' : 'requester hidden';
-    const direction = videoJobDirection(job);
+    const direction = videoJobDirection(job).replace(/\s+/g, ' ').trim();
     const displayedDirection = promptLength === undefined
         ? direction
         : truncatePrompt(direction, promptLength);
-    return `${head} · ${requester}\n${details.join('\n')}\n> ${displayedDirection}`;
+    const position = job.queue_position ? `#${job.queue_position} · ` : '';
+    let status: string;
+    const roughEstimate = job.status === 'queued'
+        || job.status === 'running_disconnected'
+        || !job.estimate_ready
+        || !job.worker_online
+        || Boolean(job.paused_until)
+        || job.gpu_queue_state === 'submitting'
+        || job.gpu_queue_state === 'queued';
+    if (job.status === 'queued') {
+        if (job.paused_until) status = `${position}Paused`;
+        else if (job.dispatch_paused) status = `${position}Dispatch paused`;
+        else if (!job.worker_online) status = `${position}Worker offline`;
+        else status = `${position}Queued`;
+    } else if (job.status === 'running_disconnected') {
+        status = 'Reconnecting';
+    } else if (job.gpu_queue_state === 'submitting') {
+        status = 'Reserving GPU';
+    } else if (job.gpu_queue_state === 'queued') {
+        const gpuPosition = job.gpu_queue_position && job.gpu_queue_position > 0
+            ? ` #${job.gpu_queue_position}`
+            : '';
+        const ahead = job.gpu_queue_jobs_ahead !== null && job.gpu_queue_jobs_ahead !== undefined
+            ? ` · ${job.gpu_queue_jobs_ahead} ahead`
+            : '';
+        status = `GPU queue${gpuPosition}${ahead}`;
+    } else if (job.status === 'planning') {
+        status = 'Planning';
+    } else if (job.status === 'uploading') {
+        status = 'Uploading';
+    } else if (job.status === 'pausing') {
+        status = 'Pausing';
+    } else if (job.status === 'cancelling') {
+        status = 'Cancelling';
+    } else if (['leased', 'running'].includes(job.status)) {
+        const progress = percentage(job.progress);
+        status = progress ? `Rendering · ${progress}` : 'Rendering';
+    } else if (job.status === 'ready') {
+        status = 'Delivering';
+    } else if (job.status === 'delivered') {
+        status = 'Delivered';
+    } else if (job.status === 'cancelled') {
+        status = 'Cancelled';
+    } else {
+        status = 'Failed';
+    }
+    const eta = job.expected_finish_at
+        ? `${roughEstimate ? 'Rough ETA' : 'ETA'} <t:${Math.floor(job.expected_finish_at)}:R>`
+        : ['ready', 'delivered', 'cancelled', 'failed'].includes(job.status)
+            ? ''
+            : `Rough ETA ${roughRuntimeRange(job)} after start`;
+    return `**${status}** · ${requester}${eta ? ` · ${eta}` : ''}\n> ${displayedDirection}`;
 }
 
 export function globalVideoQueueChunks(
     jobs: VideoJobView[],
     viewerGuildId: string | null,
-    limit = 1900,
+    limit = 3900,
     revealAllRequesters = false,
 ): string[] {
     if (!jobs.length) return ['The server video queue is empty.'];
-    const header = `**Server video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}**`;
     const chunks: string[] = [];
-    let current = header;
+    let current = '';
     for (const job of jobs) {
         let block = formatGlobalVideoQueueJob(job, viewerGuildId, undefined, revealAllRequesters);
-        if (`${current}\n\n${block}`.length > limit && current !== header) {
+        if (current && `${current}\n\n${block}`.length > limit) {
             chunks.push(current);
-            current = `${header} (continued)`;
+            current = '';
         }
-        if (`${current}\n\n${block}`.length > limit) {
+        if (block.length > limit) {
             const withoutPrompt = formatGlobalVideoQueueJob(job, viewerGuildId, 1, revealAllRequesters);
             const availablePromptLength = Math.max(
                 1,
-                limit - `${current}\n\n${withoutPrompt}`.length + 1,
+                limit - withoutPrompt.length + 1,
             );
             block = formatGlobalVideoQueueJob(
                 job,
@@ -400,10 +449,26 @@ export function globalVideoQueueChunks(
                 revealAllRequesters,
             );
         }
-        current += `\n\n${block}`;
+        current += `${current ? '\n\n' : ''}${block}`;
     }
-    chunks.push(current);
+    if (current) chunks.push(current);
     return chunks;
+}
+
+export function globalVideoQueueEmbeds(
+    jobs: VideoJobView[],
+    viewerGuildId: string | null,
+    limit = 3900,
+    revealAllRequesters = false,
+): Array<{ title: string; description: string; color: number }> {
+    if (!jobs.length) return [];
+    const chunks = globalVideoQueueChunks(jobs, viewerGuildId, limit, revealAllRequesters);
+    const title = `Video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}`;
+    return chunks.map((description, index) => ({
+        title: `${title}${index ? ' · continued' : ''}`,
+        description,
+        color: 0x5865F2,
+    }));
 }
 
 class VideoGenerationService {
@@ -820,19 +885,19 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         await msg.reply(`The server video queue is empty.${pauseText(response.state.paused_until)}`);
         return;
     }
-    const chunks = globalVideoQueueChunks(
+    const embeds = globalVideoQueueEmbeds(
         unfinished,
         msg.guild?.id ?? null,
-        1900,
+        3900,
         showGlobalQueue,
     );
     await msg.reply({
-        content: chunks[0],
+        embeds: [embeds[0]],
         allowedMentions: { parse: [], repliedUser: false },
     });
-    for (const chunk of chunks.slice(1)) {
+    for (const embed of embeds.slice(1)) {
         await msg.reply({
-            content: chunk,
+            embeds: [embed],
             allowedMentions: { parse: [], repliedUser: false },
         });
     }
