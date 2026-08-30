@@ -406,7 +406,7 @@ When a source image is present, analyze its semantic and narrative affordances r
 
 Classify requested on-screen wording separately from dialogue in visible_text_contract. Copy each user-requested visible phrase exactly, including punctuation and capitalization, and state its role and intended timing. Use required_only when the user permits only those words, prohibited when the user explicitly forbids visible text, required for specified visible wording without an exclusivity constraint, and none otherwise. Do not turn source-image words into required items unless the user asks to preserve or feature them, and do not treat visible wording as speech unless speaking is independently requested.
 
-Populate coverage_contract independently from ordinary plural staging. Use mode=exhaustive only when the request explicitly says all, every, the full roster, the entire set, or gives an exact complete count; otherwise use representative with an empty members array. For exhaustive mode, enumerate every distinct requested member by its complete display name, with no examples, "etc.", category placeholders, or omitted later members. Use presentation=sequential when members take individual turns or appear as successive selections, and simultaneous only when they are all meant to appear together. Set per_member_dialogue when each member must speak, and per_member_label when a named interface, roster, profile, card, scoreboard, or character-selection presentation conventionally identifies the current member. If you cannot resolve the complete roster within 64 members, set frontier_handling to reject with reason_code=cannot_faithfully_fulfill instead of silently sampling it. Treat repeated office terms held by one person as one member unless the request explicitly asks for numbered administrations or repeated terms.
+Populate coverage_contract independently from ordinary plural staging. Use mode=exhaustive only when the request explicitly says all, every, the full roster, the entire set, or gives an exact complete count; otherwise use representative with an empty members array. For exhaustive mode, enumerate every distinct requested member by its complete display name, with no examples, "etc.", category placeholders, or omitted later members. Use presentation=sequential when members take individual turns or appear as successive selections, and simultaneous only when they are all meant to appear together. Set per_member_dialogue when each member must speak, and per_member_label when a named interface, roster, profile, card, scoreboard, or character-selection presentation conventionally identifies the current member. Both total generated footage and finished runtime have a hard 120-second limit. If one independently generated segment per member cannot fit at the supplied per-segment minimum, set frontier_handling to reject with reason_code=cannot_faithfully_fulfill instead of shortening only the final cuts, silently sampling, or exceeding the generation budget. If you cannot resolve the complete roster within 64 members, reject for the same reason. Treat repeated office terms held by one person as one member unless the request explicitly asks for numbered administrations or repeated terms.
 
 Use motion_design_contract.mode=visual_spine only when the request calls for motion graphics, kinetic typography, a brand film, a montage, a seamless loop, or transformation-driven transitions that benefit from one recurring visual mechanism. Give spine a short literal noun phrase that can be copied verbatim into shot directions, then list the few style invariants and transition rules needed to keep it recognizable. Prefer one dominant motion law whose shape, path, color, prop, or material visibly carries one scene into the next. When a named element itself must transform, require that exact element—not a new backing plate, outline, wipe, or substitute object—to remain recognizable as the transforming material, with enough contrast to read the end state. For ordinary narrative, dialogue, documentary, found-footage, or continuous-action scenes, use mode=none, spine=N/A, and empty arrays rather than forcing an arbitrary motif.
 
@@ -432,7 +432,7 @@ ${VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS}
 
 Budget action density for reliable generation before polishing prose. In a shot of seven seconds or less, stage one primary physical action, optionally followed by one simple reaction or consequence; a spoken turn also consumes beat time. In an eight-to-fifteen-second shot, use at most three simple sequential phases with a clear causal link. If the story needs more, distribute the beats across additional shots, segments, or duration within the supplied limits instead of compressing a chain of gestures, transformations, reactions, and dialogue into one clip. For generated speech, prefer one memorable line or a concise two-turn exchange for a short comic beat; do not make every shot talk.
 
-Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow: target_seconds is the model's generation window, while output_seconds may specify a shorter final cut so every member fits within the total finished-runtime cap. For ordinary segments set output_seconds equal to target_seconds and overlay_label to N/A.
+Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow, but both the sum of target_seconds (generated footage) and output_seconds (finished runtime) must stay inside the supplied total limit. If the complete roster cannot fit at the per-segment minimum, reject it as unfulfillable instead of trimming only output_seconds, silently sampling, or exceeding the generation budget. For ordinary segments set output_seconds equal to target_seconds and overlay_label to N/A.
 
 For a vague one-line premise, develop one decisive representative mini-story with a setup, primary action, and payoff. Do not dramatize every item in prompt_analysis.actions or inferred_staging, and do not turn words such as "always" into a repetitive survey unless the request actually calls for a montage or progression. For insertion, docking, entering, dressing, or fitting actions, trace the moving subject's leading edge, orientation, destination opening, and travel direction before writing the keyframe; they must agree physically through the first shot without an unexplained rotation. Do not invent a face or speaking anatomy solely to support generated dialogue.
 
@@ -766,6 +766,16 @@ const NUMBER_WORDS = [
 ];
 
 const AUTO_TOTAL_LIMIT_SECONDS = 2 * 60;
+
+function requireExhaustiveGenerationBudget(memberCount: number, segmentMinimum: number): void {
+    const minimumTotal = memberCount * segmentMinimum;
+    if (minimumTotal <= AUTO_TOTAL_LIMIT_SECONDS + 1e-6) return;
+    throw new FrontierPlannerRejectedError(
+        'cannot_faithfully_fulfill',
+        `Exhaustive sequential coverage needs at least ${minimumTotal}s of generated footage for `
+        + `${memberCount} members, above the ${AUTO_TOTAL_LIMIT_SECONDS}s generation limit.`,
+    );
+}
 const SAFE_NONSPEECH_AUDIO = 'Natural environmental ambience and synchronized action sound effects.';
 const SPEECH_IN_AUDIO = /\b(?:voice|speaker|character|person|man|woman)\s+(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|announces?|narrates?|sings?)\b|\b(?:dialogue|speech|spoken words?|vocals?)\s*:|\b(?:lip[- ]?sync|mouth movement)\b/i;
 
@@ -967,6 +977,7 @@ export function expandExhaustiveSequentialPlan(
     };
     const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
+    requireExhaustiveGenerationBudget(members.length, minimum);
     const presentation = String(promptAnalysis?.presentation || 'selection interface').trim();
     const blankNameplate = (
         'The interface has one opaque blank nameplate centered across the top, reserved for '
@@ -1168,6 +1179,12 @@ export function compileBestEffortFrontierVideoPlan(
     let remaining = AUTO_TOTAL_LIMIT_SECONDS;
     const exhaustiveSequential = String(promptAnalysis?.coverage_contract?.mode || '') === 'exhaustive'
         && String(promptAnalysis?.coverage_contract?.presentation || '') === 'sequential';
+    if (exhaustiveSequential) {
+        const members = Array.isArray(promptAnalysis?.coverage_contract?.members)
+            ? promptAnalysis.coverage_contract.members.filter((member: any) => String(member || '').trim())
+            : [];
+        requireExhaustiveGenerationBudget(members.length, minimum);
+    }
     const exhaustiveRequestedOutputs = exhaustiveSequential
         ? rawSegments.slice(0, 64).map((segment: any) => {
             const output = Number(segment?.output_seconds);
@@ -1436,6 +1453,7 @@ export function validateFrontierVideoPlanForKeyframe(
     }
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
     const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
+    let generationTotal = 0;
     let outputTotal = 0;
     for (const [segmentIndex, segment] of plan.segments.entries()) {
         if (!segment || typeof segment !== 'object'
@@ -1486,7 +1504,14 @@ export function validateFrontierVideoPlanForKeyframe(
                 `GPT-5.6 Sol segment ${segmentIndex + 1} needs ${floor.toFixed(1)}s of dialogue, above the ${maximum}s model limit.`,
             );
         }
+        generationTotal += target;
         outputTotal += segment.output_seconds === undefined ? floor : declaredOutput;
+    }
+    if (generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+        throw new Error(
+            `GPT-5.6 Sol screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
+            + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s generation limit.`,
+        );
     }
     if (outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
@@ -2215,7 +2240,7 @@ export async function createFrontierVideoPlan(
                             : 'Aspect ratio: 16:9.',
                         `Target video model: ${definition.displayName}.`,
                         `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                        `Choose an automatic finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory and must all be retained by shortening each segment's output_seconds; only nonessential ordinary overflow may be truncated.`,
+                        `Keep both total generated footage and finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory; reject an exhaustive request that cannot fit every member at the per-segment minimum instead of shortening only output_seconds, sampling the roster, or exceeding the generation budget.`,
                         `A source image is present: ${sourceImage ? 'yes' : 'no'}.`,
                         sourceImage
                             ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
@@ -2358,7 +2383,7 @@ export async function createFrontierVideoPlan(
                     : 'Aspect ratio: 16:9.',
                 `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                `Choose an automatic finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory and must all be retained by shortening each segment's output_seconds; only nonessential ordinary overflow may be truncated.`,
+                `Keep both total generated footage and finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory; reject an exhaustive request that cannot fit every member at the per-segment minimum instead of shortening only output_seconds, sampling the roster, or exceeding the generation budget.`,
                 sourceImage
                     ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
                     : 'No user-supplied starting image is present.',
