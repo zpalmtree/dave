@@ -201,7 +201,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxFastVideo,
-            description: 'Generate full-resolution MiniMax H3 with the 8-step Turbo LoRA; supports reply text/images',
+            description: 'Generate full-resolution MiniMax FastH3 with 4-step VSA acceleration; supports reply text/images',
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimax', 'ltxfast', 'videoqueue'],

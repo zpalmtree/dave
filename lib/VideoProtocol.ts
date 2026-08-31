@@ -171,7 +171,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
     minimaxfast: {
         id: 'minimaxfast',
         command: 'minimaxfast',
-        displayName: 'MiniMax H3 Turbo',
+        displayName: 'MiniMax FastH3',
         generatorModel: 'h3',
         generatorArgs: ['--model', 'h3', '--quality', 'final', '--fast'],
         fallbackLowSeconds: 360,
