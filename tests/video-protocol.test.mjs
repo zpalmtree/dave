@@ -323,7 +323,7 @@ test('failed video post is a standalone sanitized reply', () => {
         prompt: 'baboons at a zoo',
         error: 'Failed at D:\\AI\\private\\video.plan.json',
     });
-    assert.match(text, /MiniMax H3 Turbo video \*\*09cfe948\*\* failed/);
+    assert.match(text, /MiniMax FastH3 video \*\*09cfe948\*\* failed/);
     assert.match(text, /> baboons at a zoo/);
     assert.doesNotMatch(text, /D:\\|private|video\.plan/);
 });
