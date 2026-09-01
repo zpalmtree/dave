@@ -86,7 +86,11 @@ function shortJobId(id: string): string {
 }
 
 function truncatePrompt(prompt: string, length = 180): string {
-    return prompt.length <= length ? prompt : `${prompt.slice(0, length - 1)}…`;
+    const safeLength = Math.max(0, Math.floor(length));
+    if (prompt.length <= safeLength) return prompt;
+    if (safeLength === 0) return '';
+    if (safeLength === 1) return '…';
+    return `${prompt.slice(0, safeLength - 1)}…`;
 }
 
 const DISCORD_MESSAGE_CONTENT_LIMIT = 1999;
@@ -98,12 +102,28 @@ function formatVideoReplyWithFullPrompt(
 ): string {
     const direction = videoJobDirection(job);
     const separator = '\n> ';
-    const tease = includePromptTease && job.prompt_tease ? `\n${job.prompt_tease}` : '';
+    const promptTease = includePromptTease
+        ? sanitizeVideoWorkerText(job.prompt_tease, '', 120).trim()
+        : '';
+    const tease = promptTease ? `\n${promptTease}` : '';
     const availablePrefixLength = DISCORD_MESSAGE_CONTENT_LIMIT
         - separator.length
         - direction.length
         - tease.length;
-    return `${truncatePrompt(prefix, availablePrefixLength)}${tease}${separator}${direction}`;
+    if (availablePrefixLength > 0) {
+        return `${truncatePrompt(prefix, availablePrefixLength)}${tease}${separator}${direction}`;
+    }
+
+    // A replied-to Discord message can use the entire content allowance, leaving
+    // no room for even the quote separator. Keep the useful status text in that
+    // boundary case and trim the repeated prompt instead of exceeding the limit.
+    const availableBodyLength = DISCORD_MESSAGE_CONTENT_LIMIT - separator.length - tease.length;
+    const displayedPrefix = truncatePrompt(prefix, Math.max(0, availableBodyLength - 1));
+    const displayedDirection = truncatePrompt(
+        direction,
+        Math.max(0, availableBodyLength - displayedPrefix.length),
+    );
+    return `${displayedPrefix}${tease}${separator}${displayedDirection}`;
 }
 
 const DEFAULT_SINGLE_VIDEO_RESPONDER_CHANNEL_ID = '483470443001413675';
@@ -790,8 +810,9 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(initialVideoRequestStatus(model));
+    let response: { job: VideoJobView };
     try {
-        const response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
+        response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
             method: 'POST',
             body: JSON.stringify({
                 model,
@@ -805,7 +826,13 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
                 source_image: sourceImage,
             }),
         }, 45_000);
-        let job = response.job;
+    } catch (error) {
+        await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+    }
+
+    let job = response.job;
+    try {
         await pending.edit({ content: formatVideoStatusPost(job) });
         const tease = await promptTease;
         if (tease) {
@@ -833,7 +860,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
         await pending.edit({ content: formatVideoStatusPost(job) });
         await services.get(msg.client.user.id)?.refresh();
     } catch (error) {
-        await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`[Video] Job ${job.id} was added, but its Discord status could not be updated: ${String(error)}`);
     }
 }
 
