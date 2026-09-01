@@ -315,6 +315,39 @@ test('video replies preserve the full accepted prompt', () => {
     assert.doesNotMatch(failed, /Pervert/);
 });
 
+test('video replies fit when a referenced prompt uses Discord\'s full content allowance', () => {
+    const prompt = 'Maximum-length replied-message prompt. '.repeat(60).slice(0, 2000).padEnd(2000, 'x');
+    const job = {
+        id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
+        model: 'minimax',
+        runtime_seconds: 65.6,
+        prompt,
+        prompt_tease: 'Pervert.',
+        generation_notice: 'The screenplay was prepared successfully.',
+        error: 'A detailed worker failure occurred while preparing the requested video.',
+        status: 'queued',
+        queue_position: 2,
+        paused_until: null,
+        dispatch_paused: false,
+        worker_online: true,
+        estimate_ready: true,
+        expected_finish_at: 2_000_000_450,
+        has_source_image: false,
+    };
+
+    const replies = [
+        formatVideoStatusPost(job),
+        completedVideoPost(job),
+        failedVideoPost(job),
+    ];
+    for (const reply of replies) {
+        assert.ok(reply.length <= 1999);
+        assert.match(reply, /^(?:\*\*)?MiniMax/);
+        assert.match(reply, /\n> Maximum-length replied-message prompt\./);
+        assert.ok(reply.endsWith('…'));
+    }
+});
+
 test('failed video post is a standalone sanitized reply', () => {
     const text = failedVideoPost({
         id: '09cfe948-165f-43d6-80bf-1f66dd26ee98',
