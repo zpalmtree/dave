@@ -12,6 +12,11 @@
     "benchmark:video-planners": "yarn build && node scripts/benchmark-video-planners.mjs",
     "benchmark:video-keyframes": "yarn build && node scripts/benchmark-video-keyframes.mjs",
     "benchmark:video-keyframe-reviewers": "yarn build && node scripts/benchmark-video-keyframe-reviewers.mjs",
+    "benchmark:video-cost-ab": "yarn build && node scripts/benchmark-video-cost-ab.mjs",
+    "benchmark:video-cost-ab-renders": "yarn build && node scripts/run-video-cost-ab-renders.mjs",
+    "benchmark:video-cost-ab-prepare-renders": "node scripts/prepare-video-cost-ab-renders.mjs",
+    "review:video-cost-ab": "node scripts/serve-video-cost-ab-review.mjs",
+    "review:video-cost-ab-final": "node scripts/serve-video-cost-ab-final-review.mjs",
     "benchmark:video-segment-contracts": "yarn build && node scripts/benchmark-video-segment-contracts.mjs",
     "benchmark:video-renders": "yarn build && node scripts/benchmark-video-renders.mjs"
   },

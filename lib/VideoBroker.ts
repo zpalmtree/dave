@@ -64,6 +64,8 @@ import {
     VideoProviderHooks,
     VideoProviderUsage,
     VideoUsagePersistenceError,
+    configuredVideoOpenAIServiceTier,
+    requestedOpenAIServiceTier,
     videoUsageCost,
 } from './VideoUsage.js';
 import {
@@ -2331,10 +2333,10 @@ export class VideoBroker {
         };
     }
 
-    private frontierOptions(job: JobRow, criticalPath: boolean): VideoFrontierCallOptions {
+    private frontierOptions(job: JobRow, _criticalPath: boolean): VideoFrontierCallOptions {
         const plannerStrategy = configuredVideoPlannerStrategy(job.channel_id);
         return {
-            serviceTier: criticalPath ? 'fast' : 'default',
+            serviceTier: configuredVideoOpenAIServiceTier(),
             ...configuredVideoPlannerVariant(process.env, plannerStrategy),
             plannerStrategy,
             ...this.providerHooks(job),
@@ -2758,7 +2760,9 @@ export class VideoBroker {
                             : result.reviewStatus === 'best_effort' ? 'best_effort' : 'accepted',
                         provider: result.provider,
                         model: result.model,
-                        serviceTier: criticalPath ? 'priority' : 'default',
+                        serviceTier: requestedOpenAIServiceTier(
+                            configuredVideoOpenAIServiceTier(),
+                        ) || 'default',
                         durationSeconds: 0,
                     });
                     const current = await this.get<JobRow>(
@@ -2913,7 +2917,7 @@ export class VideoBroker {
                         derivedPlan,
                         identity ? [identity] : [],
                         {
-                            serviceTier: criticalPath ? 'fast' : 'default',
+                            serviceTier: configuredVideoOpenAIServiceTier(),
                             ...hooks,
                             ...configuredVideoKeyframeVariant(),
                             strategy: this.keyframeStrategy(job),
@@ -2931,7 +2935,9 @@ export class VideoBroker {
                             : result.reviewStatus === 'best_effort' ? 'best_effort' : 'accepted',
                         provider: result.provider,
                         model: result.model,
-                        serviceTier: 'priority',
+                        serviceTier: requestedOpenAIServiceTier(
+                            configuredVideoOpenAIServiceTier(),
+                        ) || 'default',
                         durationSeconds: 0,
                     });
                     const currentAfterGeneration = await this.get<JobRow>(

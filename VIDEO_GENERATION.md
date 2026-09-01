@@ -136,7 +136,11 @@ latency so alternatives can be compared without mixing cohorts.
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
 - `VIDEO_PLANNER_MODEL=gemini-3.7-flash` enables the Flash planner adapter.
 - `VIDEO_PLANNER_ANALYSIS_EFFORT` and `VIDEO_PLANNER_SCREENPLAY_EFFORT` accept
-  `low`, `medium`, or `high`.
+  `low`, `medium`, or `high`. Single-pass planning defaults to the A/B-tested
+  `low`; set both to `medium` for immediate quality rollback without a deploy.
+- `VIDEO_OPENAI_SERVICE_TIER` accepts `fast` or `flex`. It is unset by default,
+  which uses standard OpenAI processing; set it to `fast` only as an emergency
+  latency rollback because priority processing costs more.
 - `VIDEO_KEYFRAME_GEMINI_MODEL` accepts `gemini-3-pro-image`,
   `gemini-3.1-flash-image`, or `gemini-3.1-flash-lite-image`.
 - `VIDEO_KEYFRAME_IMAGE_SIZE` accepts `1K` or `2K`; Flash Lite is always 1K.
