@@ -89,6 +89,10 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     abortSignal?: AbortSignal;
     fastGateHedgeDelayMs?: number;
     reviewTimeoutMs?: number;
+    reviewModel?: string;
+    reviewReasoningEffort?: 'low' | 'medium' | 'high';
+    reviewImageDetail?: 'low' | 'high';
+    reviewMaxOutputTokens?: number;
     initialCandidate?: Promise<VideoKeyframeResult>;
 }
 
@@ -454,10 +458,16 @@ export async function reviewVideoKeyframe(
     options: VideoKeyframeOptions = {},
     attempt = 1,
 ): Promise<VideoKeyframeReview> {
+    const reviewModel = options.reviewModel || VIDEO_KEYFRAME_REVIEW_MODEL;
+    const reviewReasoningEffort = options.reviewReasoningEffort || 'high';
+    const reviewImageDetail = options.reviewImageDetail || 'high';
+    const reviewMaxOutputTokens = Math.max(256, Math.min(128_000, Math.floor(
+        options.reviewMaxOutputTokens ?? 4000,
+    )));
     const started = Date.now();
     let outcome: 'accepted' | 'rejected' | 'error' = 'error';
     let detail: string | undefined;
-    let resolvedTier = options.serviceTier === 'fast' ? 'priority' : 'default';
+    let resolvedTier = requestedOpenAIServiceTier(options.serviceTier) || 'default';
     const controller = new AbortController();
     let timedOut = false;
     const reviewTimeoutMs = Math.max(
@@ -477,11 +487,11 @@ export async function reviewVideoKeyframe(
                 'content-type': 'application/json',
             },
             body: JSON.stringify({
-                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                model: reviewModel,
                 ...(requestedOpenAIServiceTier(options.serviceTier)
                     ? { service_tier: requestedOpenAIServiceTier(options.serviceTier) }
                     : {}),
-                reasoning: { effort: 'high' },
+                reasoning: { effort: reviewReasoningEffort },
                 instructions: 'You are the final visual quality gate for an expensive image-to-video render. Judge only visible evidence and physical continuity. Output the required JSON.',
                 input: [{
                     role: 'user',
@@ -491,7 +501,7 @@ export async function reviewVideoKeyframe(
                         {
                             type: 'input_image',
                             image_url: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`,
-                            detail: 'high',
+                            detail: reviewImageDetail,
                         },
                         ...references.flatMap((reference, index) => ([
                             {
@@ -501,7 +511,7 @@ export async function reviewVideoKeyframe(
                             {
                                 type: 'input_image',
                                 image_url: `data:${reference.mimeType};base64,${reference.bytes.toString('base64')}`,
-                                detail: 'high',
+                                detail: reviewImageDetail,
                             },
                         ])),
                     ],
@@ -529,7 +539,7 @@ export async function reviewVideoKeyframe(
                         },
                     },
                 },
-                max_output_tokens: 4000,
+                max_output_tokens: reviewMaxOutputTokens,
                 store: false,
             }),
         });
@@ -541,7 +551,7 @@ export async function reviewVideoKeyframe(
                 const cached = Number(body.usage.input_tokens_details?.cached_tokens || 0);
                 await options.onUsage?.({
                     stage: 'keyframe_review', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || VIDEO_KEYFRAME_REVIEW_MODEL), serviceTier: resolvedTier,
+                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
                     inputTokens: Math.max(0, Number(body.usage.input_tokens || 0) - cached),
                     outputTokens: Number(body.usage.output_tokens || 0), cacheReadTokens: cached,
                 });
@@ -563,7 +573,7 @@ export async function reviewVideoKeyframe(
                 const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
                 await options.onUsage?.({
                     stage: 'keyframe_review', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || VIDEO_KEYFRAME_REVIEW_MODEL), serviceTier: resolvedTier,
+                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
                     inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
                     outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
                 });
@@ -576,13 +586,13 @@ export async function reviewVideoKeyframe(
             const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
             await options.onUsage?.({
                 stage: 'keyframe_review', attempt, outcome, provider: 'openai',
-                model: String(body.model || VIDEO_KEYFRAME_REVIEW_MODEL), serviceTier: resolvedTier,
+                model: String(body.model || reviewModel), serviceTier: resolvedTier,
                 inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
                 outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
             });
         }
         console.log(
-            `[Video keyframe review] ${VIDEO_KEYFRAME_REVIEW_MODEL}: ${Number(usage?.input_tokens || 0)} input, `
+            `[Video keyframe review] ${reviewModel}: ${Number(usage?.input_tokens || 0)} input, `
             + `${Number(usage?.output_tokens || 0)} output tokens; ${review.acceptable ? 'accepted' : 'rejected'}`,
         );
         return review as VideoKeyframeReview;
@@ -596,7 +606,7 @@ export async function reviewVideoKeyframe(
         clearTimeout(timeout);
         await options.onAttempt?.({
             stage: 'keyframe_review', attempt, outcome, provider: 'openai',
-            model: VIDEO_KEYFRAME_REVIEW_MODEL, serviceTier: resolvedTier,
+            model: reviewModel, serviceTier: resolvedTier,
             durationSeconds: (Date.now() - started) / 1000, detail,
         });
     }
@@ -624,8 +634,8 @@ async function optionalReview(
         attempt: nextAttempt(),
         outcome: 'unreviewed',
         provider: 'openai',
-        model: VIDEO_KEYFRAME_REVIEW_MODEL,
-        serviceTier: options.serviceTier === 'fast' ? 'priority' : 'default',
+        model: options.reviewModel || VIDEO_KEYFRAME_REVIEW_MODEL,
+        serviceTier: requestedOpenAIServiceTier(options.serviceTier) || 'default',
         durationSeconds: 0,
         detail: lastError instanceof Error ? lastError.message : String(lastError),
     });
@@ -647,10 +657,16 @@ async function compareVideoKeyframes(
     options: VideoKeyframeOptions,
     attempt: number,
 ): Promise<VideoKeyframeComparison> {
+    const reviewModel = options.reviewModel || VIDEO_KEYFRAME_REVIEW_MODEL;
+    const reviewReasoningEffort = options.reviewReasoningEffort || 'high';
+    const reviewImageDetail = options.reviewImageDetail || 'high';
+    const reviewMaxOutputTokens = Math.max(256, Math.min(128_000, Math.floor(
+        options.reviewMaxOutputTokens ?? 4000,
+    )));
     const started = Date.now();
     let outcome: 'accepted' | 'rejected' | 'error' = 'error';
     let detail: string | undefined;
-    let resolvedTier = options.serviceTier === 'fast' ? 'priority' : 'default';
+    let resolvedTier = requestedOpenAIServiceTier(options.serviceTier) || 'default';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
     try {
@@ -662,11 +678,11 @@ async function compareVideoKeyframes(
                 'content-type': 'application/json',
             },
             body: JSON.stringify({
-                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                model: reviewModel,
                 ...(requestedOpenAIServiceTier(options.serviceTier)
                     ? { service_tier: requestedOpenAIServiceTier(options.serviceTier) }
                     : {}),
-                reasoning: { effort: 'high' },
+                reasoning: { effort: reviewReasoningEffort },
                 instructions: 'You are a blinded final visual comparator for an expensive image-to-video render. Judge visible evidence only. Candidate A and B have no disclosed provider. Output the required JSON.',
                 input: [{
                     role: 'user',
@@ -674,12 +690,12 @@ async function compareVideoKeyframes(
                         { type: 'input_text', text: buildVideoKeyframeReviewPrompt(plan, references) },
                         { type: 'input_text', text: 'Compare both candidates on five hard criteria: identity and closed cast; requested intent and elements; frame-zero motion geometry; composition and lead room; visual coherence. Select only a candidate that passes all five. If both pass equally, select A. If neither passes, select none and provide one cumulative positive-only correction.' },
                         { type: 'input_text', text: 'CANDIDATE A:' },
-                        { type: 'input_image', image_url: `data:${gemini.mimeType};base64,${gemini.bytes.toString('base64')}`, detail: 'high' },
+                        { type: 'input_image', image_url: `data:${gemini.mimeType};base64,${gemini.bytes.toString('base64')}`, detail: reviewImageDetail },
                         { type: 'input_text', text: 'CANDIDATE B:' },
-                        { type: 'input_image', image_url: `data:${openai.mimeType};base64,${openai.bytes.toString('base64')}`, detail: 'high' },
+                        { type: 'input_image', image_url: `data:${openai.mimeType};base64,${openai.bytes.toString('base64')}`, detail: reviewImageDetail },
                         ...references.flatMap((reference, index) => ([
                             { type: 'input_text', text: `REFERENCE ${index + 1} — ${reference.label}; use only for ${reference.kind}: ${reference.visualFactsToPreserve}` },
-                            { type: 'input_image', image_url: `data:${reference.mimeType};base64,${reference.bytes.toString('base64')}`, detail: 'high' },
+                            { type: 'input_image', image_url: `data:${reference.mimeType};base64,${reference.bytes.toString('base64')}`, detail: reviewImageDetail },
                         ])),
                     ],
                 }],
@@ -702,7 +718,7 @@ async function compareVideoKeyframes(
                         },
                     },
                 },
-                max_output_tokens: 4000,
+                max_output_tokens: reviewMaxOutputTokens,
                 store: false,
             }),
         });
@@ -714,7 +730,7 @@ async function compareVideoKeyframes(
                 const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
                 await options.onUsage?.({
                     stage: 'keyframe_comparison', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || VIDEO_KEYFRAME_REVIEW_MODEL), serviceTier: resolvedTier,
+                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
                     inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
                     outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
                 });
@@ -735,7 +751,7 @@ async function compareVideoKeyframes(
                 const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
                 await options.onUsage?.({
                     stage: 'keyframe_comparison', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || VIDEO_KEYFRAME_REVIEW_MODEL), serviceTier: resolvedTier,
+                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
                     inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
                     outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
                 });
@@ -750,7 +766,7 @@ async function compareVideoKeyframes(
             const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
             await options.onUsage?.({
                 stage: 'keyframe_comparison', attempt, outcome, provider: 'openai',
-                model: String(body.model || VIDEO_KEYFRAME_REVIEW_MODEL), serviceTier: resolvedTier,
+                model: String(body.model || reviewModel), serviceTier: resolvedTier,
                 inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
                 outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
             });
@@ -763,7 +779,7 @@ async function compareVideoKeyframes(
         clearTimeout(timeout);
         await options.onAttempt?.({
             stage: 'keyframe_comparison', attempt, outcome, provider: 'openai',
-            model: VIDEO_KEYFRAME_REVIEW_MODEL, serviceTier: resolvedTier,
+            model: reviewModel, serviceTier: resolvedTier,
             durationSeconds: (Date.now() - started) / 1000, detail,
         });
     }

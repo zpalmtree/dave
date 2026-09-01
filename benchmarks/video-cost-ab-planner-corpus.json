@@ -1,0 +1,302 @@
+[
+  {
+    "id": "loop-marble-sculpture",
+    "category": "seamless_loop",
+    "prompt": "A polished cinematic seamless loop of colored glass marbles rolling through a brass kinetic sculpture, wide static camera, detailed reflections, synchronized mechanical sounds, no speech."
+  },
+  {
+    "id": "type-trapdoor",
+    "category": "exact_text",
+    "prompt": "A kinetic typography video with only the words \"ONE BAD IDEA\"; the complete phrase becomes a trapdoor."
+  },
+  {
+    "id": "motel-border-road",
+    "category": "visual_transformation",
+    "prompt": "A neon motel sign reading \"NO VACANCY\" flickers, then its red border becomes a road into the desert."
+  },
+  {
+    "id": "night-owl-steam",
+    "category": "multi_scene_transition",
+    "prompt": "A brand film for a coffee shop called \"NIGHT OWL\"; each scene transitions through the same crescent-shaped steam trail."
+  },
+  {
+    "id": "loop-match-flame",
+    "category": "seamless_loop",
+    "prompt": "A single wooden match strikes, its flame curls into a glowing circle, and the circle returns to the untouched match in an exact seamless loop; macro lens, black background, no text or speech."
+  },
+  {
+    "id": "loop-paper-plane",
+    "category": "seamless_loop",
+    "prompt": "A blue paper plane rides a miniature airport conveyor, circles through three clearly connected mechanisms, and lands in the exact starting cradle for a seamless seven-second loop, one locked camera, playful mechanical audio."
+  },
+  {
+    "id": "loop-pendulum-sand",
+    "category": "seamless_loop",
+    "prompt": "A brass pendulum draws one geometric flower in black sand, then a concealed leveler restores the perfectly smooth starting surface before the pendulum reaches its exact initial pose; seamless loop, overhead static shot."
+  },
+  {
+    "id": "loop-toy-train",
+    "category": "seamless_loop",
+    "prompt": "A red toy train carries three colored blocks around a tabletop mountain and returns with the same block order, wheel position, steam puff, and camera composition as frame zero; seamless loop, no cuts."
+  },
+  {
+    "id": "loop-clockwork-garden",
+    "category": "seamless_loop",
+    "prompt": "Clockwork flowers open in a copper garden as one mechanical bee visits each bloom, then every petal and gear visibly resets to the opening arrangement for a seamless loop; wide static camera, no speech."
+  },
+  {
+    "id": "loop-pinball",
+    "category": "seamless_loop",
+    "prompt": "One silver pinball follows a readable path through a retro machine, triggers three lights in order, and returns to the launcher at rest with all lights reset; seamless physical loop, top-down camera."
+  },
+  {
+    "id": "loop-rube-breakfast",
+    "category": "seamless_loop",
+    "prompt": "A compact breakfast Rube Goldberg machine pours cereal, rolls an orange, and resets every prop to its untouched starting position in one convincing seamless loop; no hidden cut, no people, synchronized kitchen sounds."
+  },
+  {
+    "id": "loop-umbrella-gears",
+    "category": "seamless_loop",
+    "prompt": "Three tiny umbrellas open and close as they travel around interlocking brass gears, returning to their original closed positions and colors at frame zero; seamless loop, centered macro composition."
+  },
+  {
+    "id": "loop-moon-rover",
+    "category": "seamless_loop",
+    "prompt": "A miniature lunar rover circles a crater, deploys one antenna, and returns to its exact starting location while a sweeping dust mechanism visibly restores the original tracks; seamless studio miniature loop."
+  },
+  {
+    "id": "loop-domino-reset",
+    "category": "seamless_loop",
+    "prompt": "A line of black and gold dominoes falls through a sculptural course, then an explicit chain-driven mechanism raises every domino back into its initial upright pose before the loop closes; wide locked shot."
+  },
+  {
+    "id": "loop-snow-globe",
+    "category": "seamless_loop",
+    "prompt": "Inside one snow globe, a tiny tram completes a circle while snow rises and settles, ending with the tram, flakes, lighting, and miniature figures exactly matching frame zero; seamless loop, no camera movement."
+  },
+  {
+    "id": "text-rise-shine",
+    "category": "exact_text",
+    "prompt": "Only the exact words \"RISE AND SHINE\" appear. The letters stack into a staircase climbed by a tiny sun, with no other letters, logos, captions, or numbers."
+  },
+  {
+    "id": "text-stay-curious",
+    "category": "exact_text",
+    "prompt": "A clean kinetic type animation using only \"STAY CURIOUS\" in uppercase; CURIOUS bends into a magnifying glass while every letter remains readable, no additional text."
+  },
+  {
+    "id": "text-scoreboard",
+    "category": "exact_text",
+    "prompt": "An old stadium scoreboard clearly changes from \"3–2\" to \"3–3\" as the crowd reacts; those are the only visible numbers, and there are no team names or captions."
+  },
+  {
+    "id": "text-headline",
+    "category": "exact_text",
+    "prompt": "A newspaper spins toward camera and stops with the exact headline \"CITY SAVED BY PIGEONS\" fully legible; no other readable body text, then pigeons burst from behind it."
+  },
+  {
+    "id": "text-countdown",
+    "category": "exact_text",
+    "prompt": "A bold countdown shows exactly \"3\", \"2\", \"1\", then \"GO\" in that order, each filling the frame once; no other text or repeated number."
+  },
+  {
+    "id": "text-price-tag",
+    "category": "exact_text",
+    "prompt": "A handmade market price card reading exactly \"FRESH PIE $4.99\" flips into a tiny picnic table; keep every character legible and introduce no other words or prices."
+  },
+  {
+    "id": "text-welcome-home",
+    "category": "exact_text",
+    "prompt": "A fountain pen writes the exact phrase \"WELCOME HOME, MIA\" on one cream card, then the ink line becomes a road leading to a lit house; no extra handwriting."
+  },
+  {
+    "id": "text-open-late",
+    "category": "exact_text",
+    "prompt": "A storefront sign displays only \"OPEN LATE\". The two words detach as glowing physical letters and illuminate the empty night street while remaining correctly spelled."
+  },
+  {
+    "id": "text-one-more-mile",
+    "category": "exact_text",
+    "prompt": "The exact words \"ONE MORE MILE\" are painted on an empty road and rise into three-dimensional landmarks as a runner passes; no bib numbers, signs, or additional text."
+  },
+  {
+    "id": "text-museum-date",
+    "category": "exact_text",
+    "prompt": "A minimalist museum poster shows exactly \"FUTURES / 2088\" before folding into a silver doorway; preserve the slash, all letters, and all four digits, with no logo or fine print."
+  },
+  {
+    "id": "dialogue-three-robots",
+    "category": "dialogue_and_count",
+    "prompt": "Exactly three small repair robots race to fix one leaking pipe. The yellow robot alone says \"I have a plan!\" exactly once; the red and blue robots never speak."
+  },
+  {
+    "id": "dialogue-two-chefs",
+    "category": "dialogue_and_count",
+    "prompt": "Two chefs stand on opposite sides of one enormous soufflé. The older chef says \"Nobody breathe.\" and the younger chef silently nods; no other people or dialogue."
+  },
+  {
+    "id": "dialogue-four-explorers",
+    "category": "dialogue_and_count",
+    "prompt": "Exactly four cave explorers in distinct red, blue, green, and white helmets stop at a crystal doorway. The explorer in green says \"We found it.\" while everyone remains visible."
+  },
+  {
+    "id": "dialogue-crowd-one-speaker",
+    "category": "dialogue_and_count",
+    "prompt": "A silent crowd of eight commuters watches one escaped balloon. Only a child in a yellow coat says \"Wait for me!\"; no crowd chatter, narration, or subtitles."
+  },
+  {
+    "id": "dialogue-astronaut",
+    "category": "dialogue_and_count",
+    "prompt": "One astronaut plants a tiny garden on Mars, looks toward Earth, and says exactly \"First leaf.\" once; keep the helmet on and include no radio response."
+  },
+  {
+    "id": "dialogue-wizard",
+    "category": "dialogue_and_count",
+    "prompt": "A tired wizard opens an empty spellbook and says \"That's not ideal.\" A single paper dragon emerges; no other spoken words, captions, or characters."
+  },
+  {
+    "id": "dialogue-twins",
+    "category": "dialogue_and_count",
+    "prompt": "Identical twins remain distinguishable by a red scarf and a blue scarf while swapping seats on a moving carousel. Red says \"Your turn.\" and Blue says nothing."
+  },
+  {
+    "id": "dialogue-cyclists",
+    "category": "dialogue_and_count",
+    "prompt": "Exactly five cyclists crest a foggy hill in one continuous shot. The lead cyclist raises one hand and says \"There it is!\"; all five bicycles stay visible."
+  },
+  {
+    "id": "dialogue-puppets",
+    "category": "dialogue_and_count",
+    "prompt": "Three handmade animal puppets—a fox, an owl, and a frog—share one tiny stage. The frog says \"Again?\" exactly once; the fox and owl respond only with gestures."
+  },
+  {
+    "id": "dialogue-detective",
+    "category": "dialogue_and_count",
+    "prompt": "A detective follows the same orange cat through three connected rooms without losing its identity. At the final doorway she says \"Case closed.\" and the cat meows once."
+  },
+  {
+    "id": "transition-red-umbrella",
+    "category": "multi_scene_transition",
+    "prompt": "A red umbrella remains centered while carrying us through a rainy city, a sunny beach, and a snowy mountain; each transition passes through the same circular canopy shape."
+  },
+  {
+    "id": "transition-apple-planet",
+    "category": "multi_scene_transition",
+    "prompt": "Match-cut one red apple into Mars, then a red lantern, then back to the same apple, preserving its screen position and rotation across all transformations."
+  },
+  {
+    "id": "transition-soap-bubbles",
+    "category": "multi_scene_transition",
+    "prompt": "A premium soap film moves through a kitchen, pottery studio, and garden, with every scene transition occurring inside the same floating iridescent bubble; no text or people speaking."
+  },
+  {
+    "id": "transition-four-seasons",
+    "category": "multi_scene_transition",
+    "prompt": "One old oak tree remains perfectly aligned as spring, summer, autumn, and winter replace one another through wipes created by the same passing blue bicycle."
+  },
+  {
+    "id": "transition-cafe-day",
+    "category": "multi_scene_transition",
+    "prompt": "A locked view through a café window moves from dawn to lunch rush to midnight cleanup, using the sweep of the same wall-clock hand for both transitions; preserve the room layout."
+  },
+  {
+    "id": "transition-sneaker",
+    "category": "multi_scene_transition",
+    "prompt": "The same white sneaker lands in a gym, a wet city crosswalk, and a desert trail, each impact producing a circular wipe while the shoe's markings and orientation stay consistent."
+  },
+  {
+    "id": "transition-paintings",
+    "category": "multi_scene_transition",
+    "prompt": "A museum visitor walks through three paintings as if they are rooms; every transition crosses the same gold frame edge, and her green coat and satchel remain unchanged."
+  },
+  {
+    "id": "transition-paper-plane-rooms",
+    "category": "multi_scene_transition",
+    "prompt": "One yellow paper plane flies continuously from a classroom into a library and then a rooftop garden, with each doorway matching its exact flight direction and height."
+  },
+  {
+    "id": "transition-city-windows",
+    "category": "multi_scene_transition",
+    "prompt": "Push through three identically shaped apartment windows to reveal breakfast, band practice, and stargazing, keeping the same smooth forward camera motion and no visible text."
+  },
+  {
+    "id": "transition-teacup",
+    "category": "multi_scene_transition",
+    "prompt": "A rotating blue teacup becomes a storm cloud, then a spinning planet, then returns as the same teacup on its saucer; match the rim and rotation at every transition."
+  },
+  {
+    "id": "audio-silent-cooking",
+    "category": "audio_and_silence",
+    "prompt": "A cook prepares one bowl of noodles in a continuous overhead shot with crisp chopping, sizzling, pouring, and ceramic sounds synchronized exactly; no speech, narration, or music."
+  },
+  {
+    "id": "audio-asmr-workshop",
+    "category": "audio_and_silence",
+    "prompt": "An ASMR-style close-up of a watchmaker assembling a brass pocket watch: distinct clicks, tiny screw turns, and one final tick, with no music, voice, or visible text."
+  },
+  {
+    "id": "audio-underwater",
+    "category": "audio_and_silence",
+    "prompt": "A quiet underwater tracking shot follows one sea turtle through swaying kelp and a school of silver fish; muffled bubbles and current only, no speech or music."
+  },
+  {
+    "id": "audio-thunder-room",
+    "category": "audio_and_silence",
+    "prompt": "A static shot of an empty attic during a storm, with lightning flashes preceding matching thunder, rain shifting across the roof, and one window rattle; no people, text, or music."
+  },
+  {
+    "id": "audio-footstep-dance",
+    "category": "audio_and_silence",
+    "prompt": "Four dancers perform a synchronized pattern using only shoes and shadows in frame; every heel tap and slide is audible and matched, with no soundtrack or voices."
+  },
+  {
+    "id": "audio-macro-forest",
+    "category": "audio_and_silence",
+    "prompt": "A macro journey across moss at sunrise reveals dew, one ladybug, and unfurling fern tips, accompanied only by soft wind, distant birds, and tiny leaf movement."
+  },
+  {
+    "id": "audio-blacksmith",
+    "category": "audio_and_silence",
+    "prompt": "A blacksmith turns one glowing bar into a simple leaf-shaped hook in a single workshop sequence; hammer impacts, forge roar, quench hiss, no dialogue or music."
+  },
+  {
+    "id": "audio-library",
+    "category": "audio_and_silence",
+    "prompt": "An empty grand library quietly reorganizes itself at night as books glide to shelves; page rustles, wooden creaks, and a distant clock only, with no readable titles."
+  },
+  {
+    "id": "audio-space-station",
+    "category": "audio_and_silence",
+    "prompt": "A small maintenance drone crosses a deserted space-station corridor while status lights pulse; use restrained ventilation hum, servo whirs, and three synchronized beeps, no alarms or speech."
+  },
+  {
+    "id": "audio-rain-chain",
+    "category": "audio_and_silence",
+    "prompt": "Close-ups follow rainwater down a copper rain chain into three ceramic bowls, with spatially accurate drips and resonances; meditative pace, no narration, music, or text."
+  },
+  {
+    "id": "narrative-tiny-knight",
+    "category": "narrative_continuity",
+    "prompt": "A tiny knight tries to return an overdue library book during a dragon attack, protecting the same book and maintaining a clear path from the street to the return slot."
+  },
+  {
+    "id": "narrative-duck-mayor",
+    "category": "narrative_continuity",
+    "prompt": "A duck becomes mayor: it waddles up a shallow ramp, stops behind a podium, receives one tiny ceremonial sash, and faces the cheering residents in a coherent continuous scene."
+  },
+  {
+    "id": "narrative-inventor",
+    "category": "narrative_continuity",
+    "prompt": "An elderly inventor in round green glasses tests a suitcase-sized weather machine; it creates one indoor cloud, rains into a bucket, and shuts down while every prop remains spatially consistent."
+  },
+  {
+    "id": "narrative-baker-moon",
+    "category": "narrative_continuity",
+    "prompt": "A baker discovers that the same round loaf rises like the moon above her floury kitchen; follow her gaze and the loaf's continuous upward path without duplicating either."
+  },
+  {
+    "id": "narrative-mail-carrier",
+    "category": "narrative_continuity",
+    "prompt": "A bicycle mail carrier follows a paper map through a miniature town, delivers one red envelope to the blue house, and leaves with the map but not the envelope; maintain left-to-right travel."
+  }
+]

@@ -63,6 +63,10 @@ export const UNIQUE_US_PRESIDENTS = [
 ] as const;
 export type VideoPlannerStrategy = 'two-pass' | 'single-pass';
 
+export function supportsSinglePassVideoPlanning(model: string): boolean {
+    return model === 'gpt-5.6' || model.startsWith('gpt-5.6-');
+}
+
 export function configuredVideoPlannerStrategy(
     _channelId: string,
     environment: NodeJS.ProcessEnv = process.env,
@@ -86,7 +90,7 @@ export function configuredVideoPlannerVariant(
     const effort = (name: string): 'low' | 'medium' | 'high' => {
         const value = environment[name];
         if (value === 'low' || value === 'medium' || value === 'high') return value;
-        return strategy === 'single-pass' ? 'medium' : 'high';
+        return strategy === 'single-pass' ? 'low' : 'high';
     };
     return {
         plannerModel,
@@ -2199,7 +2203,7 @@ export async function createFrontierVideoPlan(
     const plannerModel = options.plannerModel || defaultConfigured.plannerModel;
     const plannerProvider = plannerModel.startsWith('gemini-') ? 'google' : 'openai';
     const plannerStrategy: VideoPlannerStrategy = options.plannerStrategy === 'single-pass'
-        && plannerModel === VIDEO_PLANNER_MODEL
+        && supportsSinglePassVideoPlanning(plannerModel)
         ? 'single-pass'
         : 'two-pass';
     const configured = configuredVideoPlannerVariant(process.env, plannerStrategy);
