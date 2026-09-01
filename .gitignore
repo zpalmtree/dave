@@ -9,6 +9,7 @@ node_modules
 /artifacts/video-keyframe-concurrency/
 /artifacts/video-render-benchmarks/
 /artifacts/video-segment-contract-benchmarks/
+/artifacts/video-cost-ab/
 yarn-error.log
 dist/
 *.sqlite3

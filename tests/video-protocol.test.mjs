@@ -130,8 +130,8 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
     });
     assert.deepEqual(configuredVideoPlannerVariant({}, 'single-pass'), {
         plannerModel: VIDEO_PLANNER_MODEL,
-        analysisReasoningEffort: 'medium',
-        screenplayReasoningEffort: 'medium',
+        analysisReasoningEffort: 'low',
+        screenplayReasoningEffort: 'low',
     });
     assert.deepEqual(configuredVideoPlannerVariant({
         VIDEO_PLANNER_ANALYSIS_EFFORT: 'high',
@@ -978,6 +978,8 @@ test('single-pass frontier planner returns validated analysis and screenplay fro
         );
         assert.equal(requests.length, 1);
         assert.equal(requests[0].text.format.name, 'local_video_analysis_and_screenplay');
+        assert.equal(requests[0].reasoning.effort, 'low');
+        assert.equal('service_tier' in requests[0], false);
         assert.equal(result.planner_metrics.single_pass, true);
         assert.equal(result.planner_metrics.screenplay_attempts, 1);
         assert.deepEqual(result.prompt_analysis, frontierAnalysis());
