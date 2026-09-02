@@ -62,6 +62,7 @@ import {
     handleViper,
     handleItsOver,
     handleChickenFried,
+    handleGooning,
     handleMilton,
 } from './CommandImplementations.js';
 
@@ -1142,6 +1143,14 @@ const sharedCommands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleChickenFried,
             description: 'Get the chicken fried vid',
+        },
+    },
+    {
+        aliases: ['gooning'],
+        primaryCommand: {
+            argsFormat: Args.DontNeed,
+            implementation: handleGooning,
+            description: 'Get the gooning vid',
         },
     },
     {
