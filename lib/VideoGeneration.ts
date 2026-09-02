@@ -10,6 +10,7 @@ import {
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VideoJobView,
     VideoModelId,
+    discordVideoUploadLimitBytes,
     parsePauseDuration,
     sanitizeVideoWorkerText,
 } from './VideoProtocol.js';
@@ -821,6 +822,7 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
                 origin_bot_id: msg.client.user.id,
                 channel_id: msg.channel.id,
                 guild_id: msg.guild?.id || null,
+                delivery_limit_bytes: discordVideoUploadLimitBytes(msg.guild?.premiumTier),
                 command_message_id: msg.id,
                 status_message_id: pending.id,
                 source_image: sourceImage,

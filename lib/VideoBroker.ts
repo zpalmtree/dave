@@ -12,6 +12,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import {
     ACTIVE_VIDEO_STATUSES,
     UNFINISHED_VIDEO_STATUSES,
+    VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
     VIDEO_MAX_GLOBAL_JOBS,
     VIDEO_MAX_TOTAL_DURATION_SECONDS,
     VIDEO_MAX_USER_JOBS,
@@ -162,6 +163,7 @@ interface JobRow {
     model: VideoModelId;
     prompt: string;
     requested_duration_seconds: number | null;
+    delivery_limit_bytes: number;
     prompt_tease: string | null;
     requester_id: string;
     origin_bot_id: string;
@@ -1059,6 +1061,7 @@ export class VideoBroker {
             model TEXT NOT NULL,
             prompt TEXT NOT NULL,
             requested_duration_seconds REAL,
+            delivery_limit_bytes INTEGER NOT NULL DEFAULT ${VIDEO_DISCORD_BASELINE_UPLOAD_BYTES},
             prompt_tease TEXT,
             requester_id TEXT NOT NULL,
             origin_bot_id TEXT NOT NULL,
@@ -1137,6 +1140,9 @@ export class VideoBroker {
         }
         if (!columnNames.has('requested_duration_seconds')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN requested_duration_seconds REAL');
+        }
+        if (!columnNames.has('delivery_limit_bytes')) {
+            await this.run(`ALTER TABLE video_jobs ADD COLUMN delivery_limit_bytes INTEGER NOT NULL DEFAULT ${VIDEO_DISCORD_BASELINE_UPLOAD_BYTES}`);
         }
         for (const [name, definition] of [
             ['experiment_id', 'TEXT'],
@@ -1725,6 +1731,17 @@ export class VideoBroker {
         if (!isVideoModel(body.model)) return { status: 400, body: { error: 'Unknown video model.' } };
         const prompt = String(body.prompt || '').trim();
         if (!prompt) return { status: 400, body: { error: 'Prompt must not be empty.' } };
+        const deliveryLimit = Number(
+            body.delivery_limit_bytes ?? VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
+        );
+        if (!Number.isInteger(deliveryLimit)
+            || deliveryLimit < VIDEO_DISCORD_BASELINE_UPLOAD_BYTES
+            || deliveryLimit > VIDEO_RESULT_MAX_BYTES) {
+            return {
+                status: 400,
+                body: { error: 'Discord delivery limit is outside the supported range.' },
+            };
+        }
         const requestedDurationValue = body.requested_duration_seconds
             ?? requestedVideoDurationSeconds(prompt);
         const requestedDuration = requestedDurationValue === null
@@ -1810,18 +1827,20 @@ export class VideoBroker {
                 await this.run(
                     `INSERT INTO video_jobs(
                         public_id, idempotency_key, model, prompt, requested_duration_seconds,
+                        delivery_limit_bytes,
                         requester_id, origin_bot_id,
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_image_path, source_image_mime, source_image_bytes,
                         experiment_id, variant_id
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
                         body.model,
                         prompt,
                         requestedDuration,
+                        deliveryLimit,
                         String(body.requester_id),
                         String(body.origin_bot_id),
                         String(body.channel_id),
@@ -3271,6 +3290,7 @@ export class VideoBroker {
                 model: row.model,
                 prompt: row.prompt,
                 requested_duration_seconds: row.requested_duration_seconds,
+                delivery_limit_bytes: row.delivery_limit_bytes,
                 prompt_tease: row.prompt_tease,
                 planned_intent: plannedIntent(row),
                 generation_notice: generationNotice(row),
@@ -3895,6 +3915,7 @@ export class VideoBroker {
                 model: row.model,
                 prompt: row.prompt,
                 requested_duration_seconds: row.requested_duration_seconds,
+                delivery_limit_bytes: row.delivery_limit_bytes,
                 profile: 'maximum',
                 has_source_image: Boolean(row.source_image_path),
                 lease_id: leaseId,

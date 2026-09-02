@@ -3,7 +3,10 @@ export const VIDEO_IMAGE_ONLY_AUTO_PROMPT = 'Image-only auto-direction: inspect 
 export const VIDEO_MAX_USER_JOBS = 3;
 export const VIDEO_MAX_GLOBAL_JOBS = 20;
 export const VIDEO_MAX_TOTAL_DURATION_SECONDS = 2 * 60;
-export const VIDEO_RESULT_MAX_BYTES = 50 * 1024 * 1024;
+export const VIDEO_DISCORD_BASELINE_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const VIDEO_DISCORD_TIER_2_UPLOAD_BYTES = 50 * 1024 * 1024;
+export const VIDEO_DISCORD_TIER_3_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const VIDEO_RESULT_MAX_BYTES = VIDEO_DISCORD_TIER_3_UPLOAD_BYTES;
 export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
@@ -185,6 +188,7 @@ export interface VideoJobView {
     model: VideoModelId;
     prompt: string;
     requested_duration_seconds?: number | null;
+    delivery_limit_bytes?: number;
     prompt_tease?: string | null;
     planned_intent?: string | null;
     generation_notice?: string | null;
@@ -258,6 +262,13 @@ export function isVideoModel(value: unknown): value is VideoModelId {
         || value === 'ltxfast'
         || value === 'minimax'
         || value === 'minimaxfast';
+}
+
+export function discordVideoUploadLimitBytes(premiumTier: unknown): number {
+    const tier = Number(premiumTier);
+    if (Number.isFinite(tier) && tier >= 3) return VIDEO_DISCORD_TIER_3_UPLOAD_BYTES;
+    if (Number.isFinite(tier) && tier >= 2) return VIDEO_DISCORD_TIER_2_UPLOAD_BYTES;
+    return VIDEO_DISCORD_BASELINE_UPLOAD_BYTES;
 }
 
 function videoDurationSeconds(value: string, unit: string): number | null {
