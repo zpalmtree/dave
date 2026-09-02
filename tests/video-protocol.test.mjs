@@ -25,6 +25,7 @@ import {
     VIDEO_MODELS,
     isVideoModel,
     parsePauseDuration,
+    requestedVideoDurationSeconds,
     sanitizeVideoWorkerText,
 } from '../dist/VideoProtocol.js';
 import {
@@ -81,6 +82,28 @@ test('video pause durations default to six hours and enforce safe limits', () =>
     assert.equal(parsePauseDuration('2d'), 2 * 24 * 60 * 60);
     assert.throws(() => parsePauseDuration('30s'), /look like/);
     assert.throws(() => parsePauseDuration('8d'), /between 1 minute and 7 days/);
+});
+
+test('explicit total video durations are extracted without mistaking shot timing for runtime', () => {
+    assert.equal(
+        requestedVideoDurationSeconds(
+            'Create a 15-second fast-paced character creation timelapse in a drawing interface.',
+        ),
+        15,
+    );
+    assert.equal(requestedVideoDurationSeconds('Video duration: 12.5 seconds.'), 12.5);
+    assert.equal(requestedVideoDurationSeconds('Produce a 2-minute short film.'), 120);
+    assert.equal(
+        requestedVideoDurationSeconds(
+            '0:00-0:02 rough sketch; 0:02-0:11 color; 0:11-0:15 final polish.',
+        ),
+        15,
+    );
+    assert.equal(
+        requestedVideoDurationSeconds('Hold for 5 seconds, then make a 15-second video.'),
+        15,
+    );
+    assert.equal(requestedVideoDurationSeconds('Wait 5 seconds before the character moves.'), null);
 });
 
 test('fast segment frame planning targets only independently generated hard cuts', () => {
@@ -772,6 +795,35 @@ test('broker-side frontier validation rejects plans the desktop would reject bef
     plan.segments[0].shots[0].dialogue[0].text = 'Hold formation!';
     assert.doesNotThrow(
         () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast', creativeBrief),
+    );
+});
+
+test('frontier validation enforces an extracted finished-duration contract', () => {
+    const plan = {
+        intent: 'A fifteen-second drawing timelapse.',
+        continuity_bible: 'The cursor continuously builds one character.',
+        keyframe: {
+            recommended: true, reason: 'Blank-canvas anchor', prompt: 'A blank drawing canvas.',
+            motion_contract: {
+                subject_orientation: 'Canvas faces viewer', gaze_direction: 'N/A', travel_direction: 'N/A',
+                camera_relation: 'Screen recording', first_second_action: 'Cursor begins the rough sketch',
+            },
+        },
+        segments: [{
+            transition: 'start', target_seconds: 15, output_seconds: 15,
+            shots: [{
+                duration_seconds: 15, visual: 'A cursor completes the character in a fast timelapse.',
+                camera: 'Stable screen recording.', audio: 'Pen strokes and interface clicks.', dialogue: [],
+            }],
+        }],
+    };
+    assert.doesNotThrow(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15),
+    );
+    plan.segments[0].output_seconds = 14;
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15),
+        /explicit duration contract requires 15s exactly/,
     );
 });
 

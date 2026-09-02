@@ -1729,7 +1729,8 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
         botToken: 'bot-secret', workerToken: 'worker-secret',
-        frontierPlanner: async () => {
+        frontierPlanner: async (_prompt, _model, _requester, _source, options) => {
+            assert.equal(options.requestedDurationSeconds, 15);
             plannerCalls += 1;
             throw new FrontierPlannerRejectedError('provider_policy');
         },
@@ -1782,15 +1783,18 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
             method: 'POST',
             headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
             body: JSON.stringify({
-                model: 'minimaxfast', prompt: 'Gigachad walks confidently into a gym.',
+                model: 'minimaxfast',
+                prompt: 'Create a 15-second video of Gigachad walking confidently into a gym.',
                 requester_id: 'rejection-user', origin_bot_id: 'bot-1', channel_id: 'channel-1',
                 command_message_id: 'rejection-message', status_message_id: 'rejection-status',
             }),
         });
         assert.equal(submitted.status, 201);
         const job = (await submitted.json()).job;
+        assert.equal(job.requested_duration_seconds, 15);
         const lease = await take(value => value.type === 'job');
         assert.equal(lease.job.id, job.id);
+        assert.equal(lease.job.requested_duration_seconds, 15);
         const requestPlan = () => fetch(`${base}/v1/worker/jobs/${job.id}/plan`, {
             method: 'POST',
             headers: { authorization: 'Bearer worker-secret', 'content-type': 'application/json' },
@@ -1835,11 +1839,12 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
             segments: [{
                 title: 'Entrance',
                 transition: 'start',
-                target_seconds: 5,
+                target_seconds: 15,
+                output_seconds: 15,
                 music: 'N/A',
                 shots: [{
-                    duration_seconds: 5,
-                    visual: 'Gigachad walks confidently into the gym.',
+                    duration_seconds: 15,
+                    visual: 'A continuous 15-second shot of Gigachad walking confidently into the gym.',
                     camera: 'Track beside him without crossing the axis.',
                     audio: 'Gym room tone, footsteps, and a door hinge.',
                     dialogue: [],

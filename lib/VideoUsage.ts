@@ -51,6 +51,7 @@ export interface VideoFrontierCallOptions extends VideoProviderHooks {
     analysisReasoningEffort?: 'low' | 'medium' | 'high';
     screenplayReasoningEffort?: 'low' | 'medium' | 'high';
     plannerGuidance?: string;
+    requestedDurationSeconds?: number;
     plannerExamples?: Array<{
         prompt: string;
         plan: Record<string, unknown>;
