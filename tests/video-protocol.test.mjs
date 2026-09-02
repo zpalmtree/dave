@@ -21,8 +21,12 @@ import {
     videoPollDelayMs,
 } from '../dist/VideoGeneration.js';
 import {
+    VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
+    VIDEO_DISCORD_TIER_2_UPLOAD_BYTES,
+    VIDEO_DISCORD_TIER_3_UPLOAD_BYTES,
     VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MODELS,
+    discordVideoUploadLimitBytes,
     isVideoModel,
     parsePauseDuration,
     requestedVideoDurationSeconds,
@@ -104,6 +108,14 @@ test('explicit total video durations are extracted without mistaking shot timing
         15,
     );
     assert.equal(requestedVideoDurationSeconds('Wait 5 seconds before the character moves.'), null);
+});
+
+test('Discord video delivery limits follow the guild boost tier', () => {
+    assert.equal(discordVideoUploadLimitBytes(undefined), VIDEO_DISCORD_BASELINE_UPLOAD_BYTES);
+    assert.equal(discordVideoUploadLimitBytes(0), VIDEO_DISCORD_BASELINE_UPLOAD_BYTES);
+    assert.equal(discordVideoUploadLimitBytes(1), VIDEO_DISCORD_BASELINE_UPLOAD_BYTES);
+    assert.equal(discordVideoUploadLimitBytes(2), VIDEO_DISCORD_TIER_2_UPLOAD_BYTES);
+    assert.equal(discordVideoUploadLimitBytes(3), VIDEO_DISCORD_TIER_3_UPLOAD_BYTES);
 });
 
 test('fast segment frame planning targets only independently generated hard cuts', () => {

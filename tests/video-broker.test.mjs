@@ -1785,6 +1785,7 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
             body: JSON.stringify({
                 model: 'minimaxfast',
                 prompt: 'Create a 15-second video of Gigachad walking confidently into a gym.',
+                delivery_limit_bytes: 50 * 1024 * 1024,
                 requester_id: 'rejection-user', origin_bot_id: 'bot-1', channel_id: 'channel-1',
                 command_message_id: 'rejection-message', status_message_id: 'rejection-status',
             }),
@@ -1792,9 +1793,11 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         assert.equal(submitted.status, 201);
         const job = (await submitted.json()).job;
         assert.equal(job.requested_duration_seconds, 15);
+        assert.equal(job.delivery_limit_bytes, 50 * 1024 * 1024);
         const lease = await take(value => value.type === 'job');
         assert.equal(lease.job.id, job.id);
         assert.equal(lease.job.requested_duration_seconds, 15);
+        assert.equal(lease.job.delivery_limit_bytes, 50 * 1024 * 1024);
         const requestPlan = () => fetch(`${base}/v1/worker/jobs/${job.id}/plan`, {
             method: 'POST',
             headers: { authorization: 'Bearer worker-secret', 'content-type': 'application/json' },
