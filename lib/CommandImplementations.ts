@@ -2430,6 +2430,15 @@ export async function handleChickenFried(msg: Message): Promise<void> {
     await replyWithMention(msg, 'https://cdn.discordapp.com/attachments/483470443001413675/1088687349497597982/repost.mov');
 }
 
+export async function handleGooning(msg: Message): Promise<void> {
+    await (msg.channel as TextChannel).send({
+        files: [
+            new AttachmentBuilder('./images/gooning.mp4')
+                .setName('gooning.mp4'),
+        ],
+    });
+}
+
 export async function handleDot(msg: Message, arg: string): Promise<void> {
     await initDot();
 
