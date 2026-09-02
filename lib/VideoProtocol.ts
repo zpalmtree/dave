@@ -2,6 +2,7 @@ export const VIDEO_PROTOCOL_VERSION = 1;
 export const VIDEO_IMAGE_ONLY_AUTO_PROMPT = 'Image-only auto-direction: inspect the supplied image and create the most natural short motion continuation.';
 export const VIDEO_MAX_USER_JOBS = 3;
 export const VIDEO_MAX_GLOBAL_JOBS = 20;
+export const VIDEO_MAX_TOTAL_DURATION_SECONDS = 2 * 60;
 export const VIDEO_RESULT_MAX_BYTES = 50 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
@@ -183,6 +184,7 @@ export interface VideoJobView {
     id: string;
     model: VideoModelId;
     prompt: string;
+    requested_duration_seconds?: number | null;
     prompt_tease?: string | null;
     planned_intent?: string | null;
     generation_notice?: string | null;
@@ -256,6 +258,59 @@ export function isVideoModel(value: unknown): value is VideoModelId {
         || value === 'ltxfast'
         || value === 'minimax'
         || value === 'minimaxfast';
+}
+
+function videoDurationSeconds(value: string, unit: string): number | null {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    return amount * (/^m/i.test(unit) ? 60 : 1);
+}
+
+/**
+ * Extract only an explicitly stated total video duration. Shot-level pauses and
+ * beat timings are deliberately ignored unless a complete 0:00-based timeline
+ * supplies the total endpoint.
+ */
+export function requestedVideoDurationSeconds(prompt: string): number | null {
+    const text = String(prompt || '').replace(/[‐‑‒–—]/g, '-');
+    const unit = '(seconds?|secs?|minutes?|mins?)';
+    const amount = '(\\d+(?:\\.\\d+)?)';
+    const explicitPatterns = [
+        new RegExp(`\\b(?:total(?:\\s+(?:video\\s+)?)?(?:duration|runtime|length)|duration|runtime|length)\\s*(?:of|=|:|is|be)?\\s*${amount}\\s*${unit}\\b`, 'i'),
+        new RegExp(`\\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\\s+(?:with\\s+)?(?:a\\s+)?(?:total\\s+)?(?:duration|runtime|length)?\\s*(?:of|=|:|is|be|lasting|lasts|should\\s+be|must\\s+be)?\\s*${amount}\\s*${unit}\\b`, 'i'),
+        new RegExp(`\\b${amount}\\s*${unit}\\s*(?:long|in\\s+total|total|overall)\\b`, 'i'),
+    ];
+    for (const expression of explicitPatterns) {
+        const match = expression.exec(text);
+        if (!match) continue;
+        const seconds = videoDurationSeconds(match[1], match[2]);
+        if (seconds !== null) return seconds;
+    }
+
+    const modifier = new RegExp(`\\b${amount}\\s*(?:-\\s*)?${unit}\\b`, 'gi');
+    let candidate: RegExpExecArray | null;
+    while ((candidate = modifier.exec(text)) !== null) {
+        const after = text.slice(candidate.index + candidate[0].length, candidate.index + candidate[0].length + 100);
+        const media = /\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\b/i.exec(after);
+        if (!media) continue;
+        const bridge = after.slice(0, media.index);
+        if (/\b(?:then|after|before|followed|pause|wait|hold)\b/i.test(bridge)
+            || new RegExp(`\\b${amount}\\s*(?:-\\s*)?${unit}\\b`, 'i').test(bridge)) continue;
+        const seconds = videoDurationSeconds(candidate[1], candidate[2]);
+        if (seconds !== null) return seconds;
+    }
+
+    const timeline = /\b(\d{1,2}):([0-5]\d(?:\.\d+)?)\s*-\s*(\d{1,2}):([0-5]\d(?:\.\d+)?)\b/g;
+    let timelineMatch: RegExpExecArray | null;
+    let beginsAtZero = false;
+    let endpoint = 0;
+    while ((timelineMatch = timeline.exec(text)) !== null) {
+        const start = Number(timelineMatch[1]) * 60 + Number(timelineMatch[2]);
+        const finish = Number(timelineMatch[3]) * 60 + Number(timelineMatch[4]);
+        if (start === 0) beginsAtZero = true;
+        if (finish > start) endpoint = Math.max(endpoint, finish);
+    }
+    return beginsAtZero && endpoint > 0 ? endpoint : null;
 }
 
 export function sanitizeVideoWorkerText(

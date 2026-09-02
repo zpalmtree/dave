@@ -1429,6 +1429,7 @@ export function validateFrontierVideoPlanForKeyframe(
     plan: any,
     model: VideoModelId,
     rawPrompt = '',
+    requestedDurationSeconds?: number | null,
 ): void {
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
         throw new Error('GPT-5.6 Sol returned no screenplay segments.');
@@ -1463,6 +1464,7 @@ export function validateFrontierVideoPlanForKeyframe(
     const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
     let generationTotal = 0;
     let outputTotal = 0;
+    let finishedTotal = 0;
     for (const [segmentIndex, segment] of plan.segments.entries()) {
         if (!segment || typeof segment !== 'object'
             || !Array.isArray(segment.shots) || !segment.shots.length || segment.shots.length > 4) {
@@ -1514,6 +1516,7 @@ export function validateFrontierVideoPlanForKeyframe(
         }
         generationTotal += target;
         outputTotal += segment.output_seconds === undefined ? floor : declaredOutput;
+        finishedTotal += segment.output_seconds === undefined ? target : declaredOutput;
     }
     if (generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
@@ -1525,6 +1528,13 @@ export function validateFrontierVideoPlanForKeyframe(
         throw new Error(
             `GPT-5.6 Sol screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,
+        );
+    }
+    if (requestedDurationSeconds !== null && requestedDurationSeconds !== undefined
+        && Math.abs(finishedTotal - requestedDurationSeconds) > 0.05) {
+        throw new Error(
+            `GPT-5.6 Sol screenplay finishes at ${finishedTotal.toFixed(2)}s; `
+            + `the explicit duration contract requires ${requestedDurationSeconds}s exactly.`,
         );
     }
     if (rawPrompt) {
@@ -2142,6 +2152,11 @@ async function analyzePromptWithPlanner(
         type: 'input_text',
         text: [
             `Target video model: ${VIDEO_MODELS[model].displayName}.`,
+            ...(options.requestedDurationSeconds !== undefined
+                ? [
+                    `The caller deterministically extracted a binding total finished duration of ${options.requestedDurationSeconds} seconds. Treat that duration as an intentional compression brief. Do not route a non-exhaustive request to local planning merely because its phases must be staged rapidly inside that duration.`,
+                ]
+                : []),
             `A source image is present: ${sourceImage ? 'yes' : 'no'}.`,
             `Image-only auto-direction mode: ${imageOnly ? 'yes' : 'no'}.`,
             imageOnly
@@ -2232,6 +2247,9 @@ export async function createFrontierVideoPlan(
     const imageOnly = Boolean(sourceImage && prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT);
     const segmentMaximum = isH3 ? 15 : 20;
     const segmentMinimum = isH3 ? 5 : 3;
+    const durationContract = options.requestedDurationSeconds !== undefined
+        ? `Finished-duration contract: exactly ${options.requestedDurationSeconds} seconds. The sum of output_seconds must equal ${options.requestedDurationSeconds} seconds exactly; use target_seconds only for generation headroom that will be trimmed from the final output.`
+        : `Keep both total generated footage and finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds.`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
     let singlePassFallbackSeconds = 0;
@@ -2248,7 +2266,7 @@ export async function createFrontierVideoPlan(
                             : 'Aspect ratio: 16:9.',
                         `Target video model: ${definition.displayName}.`,
                         `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                        `Keep both total generated footage and finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory; reject an exhaustive request that cannot fit every member at the per-segment minimum instead of shortening only output_seconds, sampling the roster, or exceeding the generation budget.`,
+                        `${durationContract} Keep total generated footage no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory; reject an exhaustive request that cannot fit every member at the per-segment minimum instead of shortening only output_seconds, sampling the roster, or exceeding the generation budget.`,
                         `A source image is present: ${sourceImage ? 'yes' : 'no'}.`,
                         sourceImage
                             ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
@@ -2313,7 +2331,12 @@ export async function createFrontierVideoPlan(
                         prompt,
                         model,
                     );
-                    validateFrontierVideoPlanForKeyframe(compiled, model, prompt);
+                    validateFrontierVideoPlanForKeyframe(
+                        compiled,
+                        model,
+                        prompt,
+                        options.requestedDurationSeconds,
+                    );
                     compiled.planner_metrics = {
                         single_pass_seconds: elapsedSeconds,
                         screenplay_attempts: 1,
@@ -2332,7 +2355,12 @@ export async function createFrontierVideoPlan(
                     });
                     return attributed(compiled);
                 }
-                validateFrontierVideoPlanForKeyframe(plan, model, prompt);
+                validateFrontierVideoPlanForKeyframe(
+                    plan,
+                    model,
+                    prompt,
+                    options.requestedDurationSeconds,
+                );
                 plan.planner_metrics = {
                     single_pass_seconds: elapsedSeconds,
                     screenplay_attempts: 1,
@@ -2391,7 +2419,7 @@ export async function createFrontierVideoPlan(
                     : 'Aspect ratio: 16:9.',
                 `Target video model: ${definition.displayName}.`,
                 `Per-segment duration: ${segmentMinimum}-${segmentMaximum} seconds.`,
-                `Keep both total generated footage and finished duration no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory; reject an exhaustive request that cannot fit every member at the per-segment minimum instead of shortening only output_seconds, sampling the roster, or exceeding the generation budget.`,
+                `${durationContract} Keep total generated footage no longer than ${AUTO_TOTAL_LIMIT_SECONDS} seconds. Keep required speech concise enough to fit naturally. Exhaustive roster members are mandatory; reject an exhaustive request that cannot fit every member at the per-segment minimum instead of shortening only output_seconds, sampling the roster, or exceeding the generation budget.`,
                 sourceImage
                     ? 'The accompanying image is the user-supplied immutable frame at 0.00 seconds.'
                     : 'No user-supplied starting image is present.',
@@ -2476,7 +2504,12 @@ export async function createFrontierVideoPlan(
                         prompt,
                         model,
                     );
-                    validateFrontierVideoPlanForKeyframe(compiled, model, prompt);
+                    validateFrontierVideoPlanForKeyframe(
+                        compiled,
+                        model,
+                        prompt,
+                        options.requestedDurationSeconds,
+                    );
                     compiled.planner_metrics = {
                         prompt_analysis_seconds: promptAnalysisSeconds,
                         screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
@@ -2498,7 +2531,12 @@ export async function createFrontierVideoPlan(
                     });
                     return attributed(compiled);
                 }
-                validateFrontierVideoPlanForKeyframe(plan, model, prompt);
+                validateFrontierVideoPlanForKeyframe(
+                    plan,
+                    model,
+                    prompt,
+                    options.requestedDurationSeconds,
+                );
                 (plan as any).planner_metrics = {
                     prompt_analysis_seconds: promptAnalysisSeconds,
                     screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
@@ -2556,7 +2594,12 @@ export async function createFrontierVideoPlan(
                         model,
                         repairFailure,
                     );
-                    validateFrontierVideoPlanForKeyframe(compiled, model, prompt);
+                    validateFrontierVideoPlanForKeyframe(
+                        compiled,
+                        model,
+                        prompt,
+                        options.requestedDurationSeconds,
+                    );
                     compiled.planner_metrics = {
                         prompt_analysis_seconds: promptAnalysisSeconds,
                         screenplay_seconds: (Date.now() - screenplayStarted) / 1000,
