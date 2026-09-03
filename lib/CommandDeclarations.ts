@@ -125,6 +125,7 @@ import {
     handleLtxVideo,
     handleMinimaxFastVideo,
     handleMinimaxVideo,
+    handleOalgoVideo,
     handleVideoAdmin,
     handleVideoQueue,
     handleVideoStats,
@@ -156,6 +157,18 @@ const sharedCommands: Command[] = [
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimaxfast', 'ltx', 'videoqueue'],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
+    },
+    {
+        aliases: ['oalgo', 'meximutt', 'minimutt'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleOalgoVideo,
+            description: 'Generate a MiniMax H3 video from the built-in OALGO image; attached images are AI-composited into it',
+            examples: [{ value: 'oalgo celebrates a championship victory' }],
+        },
+        relatedCommands: ['minimax', 'minimaxfast', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {

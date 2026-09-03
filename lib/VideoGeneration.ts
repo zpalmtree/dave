@@ -214,12 +214,20 @@ export function failedVideoPost(job: VideoJobView): string {
     );
 }
 
-export interface SubmittedVideoSourceImage {
+export interface SubmittedVideoAttachmentSourceImage {
     url: string;
     mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
     bytes: number;
     name: string;
 }
+
+export interface SubmittedVideoPresetSourceImage {
+    preset: 'oalgo';
+}
+
+export type SubmittedVideoSourceImage =
+    | SubmittedVideoAttachmentSourceImage
+    | SubmittedVideoPresetSourceImage;
 
 function inferredImageMime(name: string | null | undefined): string | null {
     const extension = name?.split('.').pop()?.toLowerCase();
@@ -230,7 +238,7 @@ function inferredImageMime(name: string | null | undefined): string | null {
     return null;
 }
 
-export function videoSourceImageFromMessage(msg: Message): SubmittedVideoSourceImage | null {
+export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachmentSourceImage | null {
     const candidates = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
@@ -250,7 +258,7 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoSourceI
     }
     return {
         url: attachment.url,
-        mime_type: mime as SubmittedVideoSourceImage['mime_type'],
+        mime_type: mime as SubmittedVideoAttachmentSourceImage['mime_type'],
         bytes: attachment.size,
         name: attachment.name || 'start-frame',
     };
@@ -259,7 +267,7 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoSourceI
 export function videoSourceImageFromMessages(
     commandMessage: Message,
     referencedMessage: Message | null,
-): SubmittedVideoSourceImage | null {
+): SubmittedVideoAttachmentSourceImage | null {
     return videoSourceImageFromMessage(commandMessage)
         || (referencedMessage ? videoSourceImageFromMessage(referencedMessage) : null);
 }
@@ -790,15 +798,38 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
         : { canAccess: false, error: 'Only the bot owner can control the video worker.' };
 }
 
-export async function handleVideoRequest(model: VideoModelId, msg: Message, prompt: string): Promise<void> {
+interface VideoRequestOptions {
+    presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
+    compositeAttachedImage?: boolean;
+    plannerGuidance?: string;
+}
+
+export const OALGO_VIDEO_PLANNER_GUIDANCE = [
+    'When the requested action or source image supports dialogue, give the OALGO character playful Mexican-American slang and code-switching.',
+    'Naturally enrich suitable dialogue with phrases such as “o algo,” “mayne,” “wey,” “puta pinche,” and “no mames wey” without mechanically forcing every phrase into every line.',
+    'Preserve any dialogue the user explicitly requested verbatim and apply this voice only to new or adaptable OALGO dialogue.',
+].join(' ');
+
+export async function handleVideoRequest(
+    model: VideoModelId,
+    msg: Message,
+    prompt: string,
+    options: VideoRequestOptions = {},
+): Promise<void> {
     const referencedMessage = await fetchReferencedVideoMessage(msg);
-    let sourceImage: SubmittedVideoSourceImage | null;
+    let attachedSourceImage: SubmittedVideoAttachmentSourceImage | null;
     try {
-        sourceImage = videoSourceImageFromMessages(msg, referencedMessage);
+        attachedSourceImage = videoSourceImageFromMessages(msg, referencedMessage);
     } catch (error) {
         await msg.reply(error instanceof Error ? error.message : String(error));
         return;
     }
+    const sourceImage: SubmittedVideoSourceImage | null = options.presetSourceImage
+        ? { preset: options.presetSourceImage }
+        : attachedSourceImage;
+    const compositeSourceImage = options.presetSourceImage && options.compositeAttachedImage
+        ? attachedSourceImage
+        : null;
     prompt = videoPromptFromMessages(prompt, referencedMessage);
     if (!prompt && sourceImage) {
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
@@ -826,8 +857,10 @@ export async function handleVideoRequest(model: VideoModelId, msg: Message, prom
                 command_message_id: msg.id,
                 status_message_id: pending.id,
                 source_image: sourceImage,
+                source_image_composite: compositeSourceImage,
+                planner_guidance: options.plannerGuidance,
             }),
-        }, 45_000);
+        }, compositeSourceImage ? 7 * 60 * 1000 : 45_000);
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
         return;
@@ -872,6 +905,14 @@ export async function handleLtxVideo(msg: Message, prompt: string): Promise<void
 
 export async function handleMinimaxVideo(msg: Message, prompt: string): Promise<void> {
     await handleVideoRequest('minimax', msg, prompt);
+}
+
+export async function handleOalgoVideo(msg: Message, prompt: string): Promise<void> {
+    await handleVideoRequest('minimax', msg, prompt, {
+        presetSourceImage: 'oalgo',
+        compositeAttachedImage: true,
+        plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
+    });
 }
 
 export async function handleLtxFastVideo(msg: Message, prompt: string): Promise<void> {
