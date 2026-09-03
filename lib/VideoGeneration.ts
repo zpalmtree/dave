@@ -810,6 +810,13 @@ export const OALGO_VIDEO_PLANNER_GUIDANCE = [
     'Preserve any dialogue the user explicitly requested verbatim and apply this voice only to new or adaptable OALGO dialogue.',
 ].join(' ');
 
+export const MEXIMUTT_VIDEO_PLANNER_GUIDANCE = [
+    OALGO_VIDEO_PLANNER_GUIDANCE,
+    'Every dialogue turn must have a natural, unmistakable Spanglish accent in dialogue.delivery, including dialogue supplied verbatim by the user and dialogue spoken by characters other than OALGO.',
+    'For generated or adaptable dialogue, naturally blend Mexican Spanish and American English wording throughout instead of leaving any line in a generic voice.',
+    'Keep user-supplied dialogue text verbatim; express its Spanglish character through accent, cadence, and delivery without translating or rewriting its words.',
+].join(' ');
+
 export async function handleVideoRequest(
     model: VideoModelId,
     msg: Message,
@@ -912,6 +919,14 @@ export async function handleOalgoVideo(msg: Message, prompt: string): Promise<vo
         presetSourceImage: 'oalgo',
         compositeAttachedImage: true,
         plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
+    });
+}
+
+export async function handleMeximuttVideo(msg: Message, prompt: string): Promise<void> {
+    await handleVideoRequest('minimax', msg, prompt, {
+        presetSourceImage: 'oalgo',
+        compositeAttachedImage: true,
+        plannerGuidance: MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
     });
 }
 

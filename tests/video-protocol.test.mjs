@@ -11,6 +11,7 @@ import {
     globalVideoQueueChunks,
     globalVideoQueueEmbeds,
     initialVideoRequestStatus,
+    MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
     OALGO_VIDEO_PLANNER_GUIDANCE,
     completedVideoPost,
     failedVideoPost,
@@ -246,11 +247,19 @@ test('local video commands are declared as Discord-only', () => {
         assert.equal(command.discordOnly, true);
     }
     const oalgo = Commands.find(candidate => candidate.aliases.includes('oalgo'));
-    assert.deepEqual(oalgo.aliases, ['oalgo', 'meximutt', 'minimutt']);
+    assert.deepEqual(oalgo.aliases, ['oalgo', 'minimutt']);
+    const meximutt = Commands.find(candidate => candidate.aliases.includes('meximutt'));
+    assert.deepEqual(meximutt.aliases, ['meximutt']);
+    assert.notEqual(meximutt.primaryCommand.implementation, oalgo.primaryCommand.implementation);
     for (const phrase of ['o algo', 'mayne', 'wey', 'puta pinche', 'no mames wey']) {
         assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, new RegExp(phrase));
     }
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /explicitly requested verbatim/);
+    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /Every dialogue turn/);
+    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /Spanglish accent in dialogue\.delivery/);
+    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /including dialogue supplied verbatim/);
+    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /characters other than OALGO/);
+    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /Keep user-supplied dialogue text verbatim/);
     assert.equal(Commands.some(candidate => candidate.aliases.includes('minimaxdraft')), false);
 });
 
