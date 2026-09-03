@@ -11,6 +11,7 @@ import {
     globalVideoQueueChunks,
     globalVideoQueueEmbeds,
     initialVideoRequestStatus,
+    isVideoCancellationReaction,
     MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
     OALGO_VIDEO_PLANNER_GUIDANCE,
     completedVideoPost,
@@ -21,6 +22,7 @@ import {
     videoSourceImageFromMessage,
     videoSourceImageFromMessages,
     videoPollDelayMs,
+    VIDEO_CANCEL_REACTION,
 } from '../dist/VideoGeneration.js';
 import {
     VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
@@ -145,6 +147,16 @@ test('video delivery polling is fast only while work is active', () => {
     assert.equal(videoPollDelayMs([], { ...idle, preparation_busy: true }), 3_000);
     assert.equal(videoPollDelayMs([], { ...idle, active_jobs: 1 }), 3_000);
     assert.equal(videoPollDelayMs([{}], idle), 3_000);
+});
+
+test('only a video job caller can use its cancellation reaction', () => {
+    const reaction = emoji => ({ emoji: { name: emoji } });
+    const user = id => ({ id });
+
+    assert.equal(VIDEO_CANCEL_REACTION, '❌');
+    assert.equal(isVideoCancellationReaction(reaction('❌'), user('caller'), 'caller'), true);
+    assert.equal(isVideoCancellationReaction(reaction('❌'), user('someone-else'), 'caller'), false);
+    assert.equal(isVideoCancellationReaction(reaction('👍'), user('caller'), 'caller'), false);
 });
 
 test('video planner requests share stable cache routing without retaining prompts by default', () => {

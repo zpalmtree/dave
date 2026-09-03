@@ -12,6 +12,7 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 - `$oalgo <prompt>` (also `$minimutt`) runs the same MiniMax H3 pipeline with the built-in OALGO starting image and its character-specific dialogue guidance. `$meximutt <prompt>` uses that pipeline while requiring every spoken line to have an exaggerated cholo/ese-style Mexican-American Spanglish accent and hard-edged street cadence; generated dialogue aggressively code-switches and uses expressions such as “ese,” “güey,” “cabrón,” “pinche,” and “no mames.” If another image is attached or inherited from a reply, the bot first tries to AI-composite it with OALGO and falls back to the built-in image if composition fails.
 - `$videoqueue` shows the caller's unfinished jobs, positions, progress, and ETA.
 - `$videoqueue cancel <short-id>` cancels one of the caller's jobs.
+- Each video job status has a ❌ reaction that its caller can click to cancel it.
 - `$videogen status` is owner-only.
 - `$videogen pause [duration]` pauses dispatch for six hours by default. Durations
   may be `30m`, `6h`, or `1d`, from one minute through seven days. An active job is
