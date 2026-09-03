@@ -2706,12 +2706,25 @@ test('external gpuq Gaming Mode pauses and safely requeues video dispatch', asyn
         assert.equal(state.body.scheduler.mode, 'gaming');
         await assert.rejects(() => take(value => value.type === 'job', 150), /Timed out/);
 
+        const explicitPause = await botFetch('/v1/control/pause', {
+            method: 'POST', body: JSON.stringify({ seconds: 60, actor_id: 'owner' }),
+        });
+        assert.ok(explicitPause.body.paused_until);
+        const gpuqPause = await take(value => value.type === 'gpuq_gaming');
+        socket.send(JSON.stringify({
+            type: 'gpuq_gaming_ack', enabled: true, request_id: gpuqPause.request_id,
+            scheduler: { available: true, mode: 'gaming', gaming_ready: true, health: 'healthy' },
+        }));
+
         socket.send(JSON.stringify({
             type: 'heartbeat', job_id: null,
             scheduler: { available: true, mode: 'normal', gaming_ready: false, health: 'healthy' },
         }));
         const resumedLease = await take(value => value.type === 'job');
         assert.equal(resumedLease.job.id, submitted.body.job.id);
+        const resumedState = await botFetch('/v1/control');
+        assert.equal(resumedState.body.paused_until, null);
+        assert.equal(resumedState.body.dispatch_paused, false);
     } finally {
         if (socket) socket.close();
         await broker.stop();

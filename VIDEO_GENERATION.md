@@ -24,8 +24,8 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 Enabling GPUq Gaming Mode directly has the same dispatch effect as pausing video
 generation: the broker stops issuing video leases, interrupts an active render
 without losing its queue position, and labels queued jobs as dispatch-paused.
-Directly disabling Gaming Mode resumes dispatch unless a timed `$videogen pause`
-or deployment drain is still active.
+Directly disabling Gaming Mode clears the video pause and resumes dispatch unless
+an independent deployment drain is still active.
 
 Jobs can be submitted while the desktop is offline or generation is paused. Dave
 always shows a rough ETA from model history and current bot queue depth, including

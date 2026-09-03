@@ -3397,7 +3397,7 @@ export class VideoBroker {
                         resume_current_job: reconciliation.resumeCurrentJob,
                     });
                     if (reconciliation.cancel) this.sendWorker(reconciliation.cancel);
-                    await this.pauseForSchedulerGaming();
+                    await this.synchronizeSchedulerGaming(null);
                     const control = await this.control();
                     if (!hello.current_job) {
                         if (control.paused_until) {
@@ -3518,8 +3518,9 @@ export class VideoBroker {
         this.worker.lastHeartbeat = Date.now();
         if (message.type === 'heartbeat') {
             if (message.scheduler !== undefined) {
+                const previousScheduler = this.worker.scheduler;
                 this.worker.scheduler = workerScheduler(message.scheduler);
-                await this.pauseForSchedulerGaming();
+                await this.synchronizeSchedulerGaming(previousScheduler);
             }
             if (message.job_id && message.job_id === this.worker.currentJob) {
                 const workerProgress = workerProgressFields(message);
@@ -3578,6 +3579,7 @@ export class VideoBroker {
             const requestId = Number(message.request_id);
             const enabled = message.enabled;
             if (!Number.isInteger(requestId) || requestId < 1 || typeof enabled !== 'boolean') return;
+            const previousScheduler = this.worker.scheduler;
             if (message.scheduler !== undefined) {
                 this.worker.scheduler = workerScheduler(message.scheduler);
             }
@@ -3586,6 +3588,7 @@ export class VideoBroker {
                  WHERE id = 1 AND gpuq_request_id = ? AND gpuq_gaming_requested = ?`,
                 [nowSeconds(), requestId, enabled ? 1 : 0],
             );
+            await this.synchronizeSchedulerGaming(previousScheduler);
             const control = await this.control();
             if (control.gpuq_gaming_requested !== null) {
                 this.sendPendingGpuqControl(control);
@@ -3938,8 +3941,20 @@ export class VideoBroker {
         await this.scheduleNextQueuedPreparation();
     }
 
-    private async pauseForSchedulerGaming(): Promise<void> {
-        if (!this.worker || !schedulerPausesDispatch(this.worker.scheduler)) return;
+    private async synchronizeSchedulerGaming(
+        previousScheduler: VideoWorkerSchedulerState | null,
+    ): Promise<void> {
+        if (!this.worker) return;
+        if (!schedulerPausesDispatch(this.worker.scheduler)) {
+            if (previousScheduler && schedulerPausesDispatch(previousScheduler)) {
+                await this.run(
+                    `UPDATE video_control SET paused_until = NULL, updated_by = NULL, updated_at = ?
+                     WHERE id = 1 AND gpuq_gaming_requested IS NULL`,
+                    [nowSeconds()],
+                );
+            }
+            return;
+        }
         if (this.worker.currentJob) {
             const result = await this.run(
                 `UPDATE video_jobs SET status = 'pausing', updated_at = ?
