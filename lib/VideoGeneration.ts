@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import fetch, { RequestInit, Response } from 'node-fetch';
-import { Client, Message, PermissionFlagsBits } from 'discord.js';
+import { Client, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
 
 import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
@@ -19,6 +19,7 @@ import { config } from './Config.js';
 import { recordExternalTokenSpend } from './TokenSpend.js';
 import { VideoUsageEvent } from './VideoUsage.js';
 import { classifyPromptTease } from './PromptTease.js';
+import { tryDeleteReaction, tryReactMessage } from './Utilities.js';
 
 interface BrokerState {
     worker_online: boolean;
@@ -84,6 +85,20 @@ class BrokerError extends Error {
 
 function shortJobId(id: string): string {
     return id.slice(0, 8);
+}
+
+export const VIDEO_CANCEL_REACTION = '❌';
+
+export function isVideoCancellationReaction(
+    reaction: Pick<MessageReaction, 'emoji'>,
+    user: Pick<User, 'id'>,
+    requesterId: string,
+): boolean {
+    return reaction.emoji.name === VIDEO_CANCEL_REACTION && user.id === requesterId;
+}
+
+function videoJobCanBeCancelled(job: Pick<VideoJobView, 'status'>): boolean {
+    return !['cancelling', 'cancelled', 'delivered', 'failed'].includes(job.status);
 }
 
 function truncatePrompt(prompt: string, length = 180): string {
@@ -505,6 +520,10 @@ class VideoGenerationService {
     private polling = false;
     private nextPollMs = 15_000;
     private readonly rendered = new Map<string, string>();
+    private readonly cancellationCollectors = new Map<
+        string,
+        ReturnType<Message['createReactionCollector']>
+    >();
 
     constructor(private readonly client: Client) {}
 
@@ -515,6 +534,70 @@ class VideoGenerationService {
 
     async refresh(): Promise<void> {
         await this.poll();
+    }
+
+    private stopCancellationControl(jobId: string): void {
+        const collector = this.cancellationCollectors.get(jobId);
+        if (collector && !collector.ended) collector.stop('job-finished');
+        this.cancellationCollectors.delete(jobId);
+    }
+
+    private async removeCancellationReaction(jobId: string, message: Message): Promise<void> {
+        this.stopCancellationControl(jobId);
+        const reaction = message.reactions.resolve(VIDEO_CANCEL_REACTION);
+        if (!reaction || !this.client.user) return;
+        try {
+            await reaction.users.remove(this.client.user.id);
+        } catch (error) {
+            console.warn(`[Video] Could not remove the cancellation reaction for ${jobId}: ${String(error)}`);
+        }
+    }
+
+    async watchCancellationControl(job: VideoJobView, message: Message): Promise<void> {
+        if (!videoJobCanBeCancelled(job)) {
+            await this.removeCancellationReaction(job.id, message);
+            return;
+        }
+        if (this.cancellationCollectors.has(job.id)) return;
+
+        let requestInFlight = false;
+        const collector = message.createReactionCollector({
+            filter: (reaction: MessageReaction, user: User) => (
+                isVideoCancellationReaction(reaction, user, job.requester_id)
+            ),
+        });
+        this.cancellationCollectors.set(job.id, collector);
+        collector.once('end', () => {
+            if (this.cancellationCollectors.get(job.id) === collector) {
+                this.cancellationCollectors.delete(job.id);
+            }
+        });
+        collector.on('collect', async (reaction: MessageReaction, user: User) => {
+            if (requestInFlight) return;
+            requestInFlight = true;
+            await tryDeleteReaction(reaction, user.id);
+            try {
+                const result = await brokerRequest<{ ok: boolean; error?: string }>(
+                    `/v1/jobs/${job.id}/cancel`,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({ requester_id: user.id, is_admin: false }),
+                    },
+                );
+                if (!result.ok) {
+                    console.warn(`[Video] Could not cancel ${job.id} from its status reaction: ${result.error || 'unknown error'}`);
+                    requestInFlight = false;
+                    return;
+                }
+                collector.stop('cancelled-by-requester');
+                await this.refresh();
+            } catch (error) {
+                console.warn(`[Video] Could not cancel ${job.id} from its status reaction: ${String(error)}`);
+                requestInFlight = false;
+            }
+        });
+
+        await tryReactMessage(message, VIDEO_CANCEL_REACTION);
     }
 
     private async tick(): Promise<void> {
@@ -609,6 +692,7 @@ class VideoGenerationService {
     private async updateJob(job: VideoJobView): Promise<void> {
         const message = await this.statusMessage(job);
         if (!message) return;
+        await this.watchCancellationControl(job, message);
         const content = formatVideoStatusPost(job);
         if (job.status === 'ready') {
             if (!job.result_path || !existsSync(job.result_path)) {
@@ -623,6 +707,7 @@ class VideoGenerationService {
                 attachments: [],
             });
             await this.acknowledge(job, 'delivered', deliverySeconds);
+            await this.removeCancellationReaction(job.id, message);
             this.rendered.delete(job.id);
             return;
         }
@@ -876,6 +961,7 @@ export async function handleVideoRequest(
 
     let job = response.job;
     try {
+        await services.get(msg.client.user.id)?.watchCancellationControl(job, pending);
         await pending.edit({ content: formatVideoStatusPost(job) });
         const tease = await promptTease;
         if (tease) {
