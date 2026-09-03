@@ -313,8 +313,12 @@ function workerScheduler(value: unknown): VideoWorkerSchedulerState {
     };
 }
 
+function schedulerPausesDispatch(value: VideoWorkerSchedulerState): boolean {
+    return value.mode === 'enteringGaming' || value.mode === 'gaming';
+}
+
 function schedulerAcceptsReservations(value: VideoWorkerSchedulerState): boolean {
-    return value.available;
+    return value.available && !schedulerPausesDispatch(value);
 }
 
 function plannedIntent(row: JobRow): string | null {
@@ -3220,7 +3224,8 @@ export class VideoBroker {
             worker_id: this.worker?.id || null,
             current_job: this.worker?.currentJob || null,
             paused_until: control.paused_until,
-            dispatch_paused: control.dispatch_paused,
+            dispatch_paused: control.dispatch_paused
+                || Boolean(this.worker && schedulerPausesDispatch(this.worker.scheduler)),
             scheduler: this.worker?.scheduler || null,
             queued: queued?.count || 0,
             active_jobs: active?.count || 0,
@@ -3329,7 +3334,8 @@ export class VideoBroker {
                 worker_online: online,
                 worker_busy: busy,
                 paused_until: control.paused_until,
-                dispatch_paused: control.dispatch_paused,
+                dispatch_paused: control.dispatch_paused
+                    || Boolean(this.worker && schedulerPausesDispatch(this.worker.scheduler)),
                 gpu_queue_state: row.gpu_queue_state,
                 gpu_queue_submitted_at: row.gpu_queue_submitted_at,
                 gpu_admitted_at: row.gpu_admitted_at,
@@ -3391,6 +3397,7 @@ export class VideoBroker {
                         resume_current_job: reconciliation.resumeCurrentJob,
                     });
                     if (reconciliation.cancel) this.sendWorker(reconciliation.cancel);
+                    await this.pauseForSchedulerGaming();
                     const control = await this.control();
                     if (!hello.current_job) {
                         if (control.paused_until) {
@@ -3512,6 +3519,7 @@ export class VideoBroker {
         if (message.type === 'heartbeat') {
             if (message.scheduler !== undefined) {
                 this.worker.scheduler = workerScheduler(message.scheduler);
+                await this.pauseForSchedulerGaming();
             }
             if (message.job_id && message.job_id === this.worker.currentJob) {
                 const workerProgress = workerProgressFields(message);
@@ -3928,6 +3936,29 @@ export class VideoBroker {
             },
         });
         await this.scheduleNextQueuedPreparation();
+    }
+
+    private async pauseForSchedulerGaming(): Promise<void> {
+        if (!this.worker || !schedulerPausesDispatch(this.worker.scheduler)) return;
+        if (this.worker.currentJob) {
+            const result = await this.run(
+                `UPDATE video_jobs SET status = 'pausing', updated_at = ?
+                 WHERE public_id = ? AND status IN ('leased','planning','running','uploading','running_disconnected')`,
+                [nowSeconds(), this.worker.currentJob],
+            );
+            if (result.changes === 1) {
+                this.sendWorker({
+                    type: 'cancel',
+                    job_id: this.worker.currentJob,
+                    reason: 'pause',
+                });
+            }
+            return;
+        }
+        if (this.worker.ready && this.worker.warmModel) {
+            this.sendWorker({ type: 'unload', reason: 'pause' });
+            this.worker.warmModel = null;
+        }
     }
 
     private sendWorker(message: unknown): void {
