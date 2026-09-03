@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,7 @@ import sqlite3 from 'sqlite3';
 import {
     VideoBroker,
     duplicateVideoTerminalEventMatches,
+    oalgoSourceImageCompositePlan,
     projectedVideoFinishAt,
     videoPlanRuntimeScale,
     videoFailureDisposition,
@@ -86,6 +87,47 @@ test('long video estimates scale by full segment cost and live job progress repl
         progressScope: 'job',
     });
     assert.ok(observed > 1_450, `live projection did not follow measured pace: ${observed}`);
+});
+
+test('OALGO composite instructions preserve both inputs as one scene', () => {
+    const plan = oalgoSourceImageCompositePlan('OALGO races toward the finish line.');
+    assert.match(plan.keyframe.prompt, /OALGO base image/);
+    assert.match(plan.keyframe.prompt, /Integrate the salient person, character, animal, or object/);
+    assert.match(plan.keyframe.prompt, /never a split screen, side-by-side layout, pasted rectangle, or collage/);
+    assert.match(plan.keyframe.prompt, /races toward the finish line/);
+    assert.equal(plan.keyframe.motion_contract.camera_relation.includes('OALGO'), true);
+});
+
+test('broker resolves the built-in OALGO preset without arbitrary file input', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-preset-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret',
+    });
+    await broker.start();
+    try {
+        const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax', prompt: 'Animate the preset', requester_id: 'preset-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: 'preset-message', status_message_id: 'preset-status',
+                source_image: { preset: 'oalgo' },
+            }),
+        });
+        const body = await response.json();
+        assert.equal(response.status, 201);
+        assert.equal(body.job.has_source_image, true);
+        assert.deepEqual(
+            readFileSync(join(directory, 'results', body.job.id, 'source.png')),
+            readFileSync(new URL('../images/oalgo.png', import.meta.url)),
+        );
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
 });
 
 test('terminal replay acknowledgements cover retry and pause requeues without accepting stale leases', () => {
@@ -620,6 +662,124 @@ test('source-image download does not hold the enqueue write lock', async () => {
         assert.equal((await slow).status, 201);
     } finally {
         releaseDownload?.();
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('OALGO jobs use the preset, AI-composite an attachment, and fall back safely', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-'));
+    const dbPath = join(directory, 'queue.sqlite3');
+    const presetBytes = Buffer.from('oalgo-preset');
+    const attachedBytes = Buffer.from('attached-subject');
+    const compositedBytes = Buffer.from('ai-composited-frame');
+    let failComposition = false;
+    const compositionPrompts = [];
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath, resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret',
+        sourceImageDownloader: async (descriptor, targetDirectory) => {
+            mkdirSync(targetDirectory, { recursive: true });
+            const bytes = 'preset' in descriptor ? presetBytes : attachedBytes;
+            const path = join(targetDirectory, 'source.png');
+            writeFileSync(path, bytes);
+            return { path, mimeType: 'image/png', bytes: bytes.length };
+        },
+        sourceImageComposer: async (base, attached, prompt, hooks) => {
+            compositionPrompts.push(prompt);
+            assert.deepEqual(readFileSync(base.path), presetBytes);
+            assert.deepEqual(readFileSync(attached.path), attachedBytes);
+            if (failComposition) throw new Error('image model unavailable');
+            await hooks.onAttempt?.({
+                stage: 'candidate', attempt: 1, outcome: 'success', provider: 'test',
+                model: 'test-image-model', durationSeconds: 0.01,
+            });
+            await hooks.onUsage?.({
+                stage: 'candidate', attempt: 1, outcome: 'success', provider: 'test',
+                model: 'test-image-model', images: 1, costOverride: 0.01,
+            });
+            return {
+                bytes: compositedBytes,
+                mimeType: 'image/png',
+                provider: 'test',
+                model: 'test-image-model',
+            };
+        },
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const submit = async (suffix, plannerGuidance) => {
+        const response = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax', prompt: `OALGO prompt ${suffix}`,
+                planner_guidance: plannerGuidance,
+                requester_id: `user-${suffix}`, origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: `message-${suffix}`, status_message_id: `status-${suffix}`,
+                source_image: { preset: 'oalgo' },
+                source_image_composite: {
+                    url: 'https://cdn.discordapp.com/attachments/1/2/attached.png',
+                    mime_type: 'image/png', bytes: attachedBytes.length, name: 'attached.png',
+                },
+            }),
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    try {
+        const generated = await submit('generated', 'Use OALGO dialogue.');
+        assert.equal(generated.status, 201);
+        assert.equal(generated.body.job.has_source_image, true);
+        assert.equal(generated.body.source_image_composition, 'generated');
+        const generatedPath = join(directory, 'results', generated.body.job.id, 'source.png');
+        assert.deepEqual(readFileSync(generatedPath), compositedBytes);
+        assert.equal(existsSync(join(directory, 'results', generated.body.job.id, 'composite-base')), false);
+        assert.equal(existsSync(join(directory, 'results', generated.body.job.id, 'composite-attached')), false);
+
+        const guidance = await new Promise((resolve, reject) => {
+            const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, error => {
+                if (error) return reject(error);
+                db.get(
+                    'SELECT planner_guidance FROM video_jobs WHERE public_id = ?',
+                    [generated.body.job.id],
+                    (queryError, row) => {
+                        db.close();
+                        if (queryError) reject(queryError);
+                        else resolve(row?.planner_guidance);
+                    },
+                );
+            });
+        });
+        assert.equal(guidance, 'Use OALGO dialogue.');
+
+        failComposition = true;
+        const fallback = await submit('fallback', 'Keep the slang natural.');
+        assert.equal(fallback.status, 201);
+        assert.equal(fallback.body.job.has_source_image, true);
+        assert.equal(fallback.body.source_image_composition, 'fallback');
+        assert.deepEqual(
+            readFileSync(join(directory, 'results', fallback.body.job.id, 'source.png')),
+            presetBytes,
+        );
+        assert.deepEqual(compositionPrompts, [
+            'OALGO prompt generated',
+            'OALGO prompt fallback',
+        ]);
+
+        const invalid = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax', prompt: 'Invalid preset', requester_id: 'invalid-user',
+                origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: 'invalid-message', status_message_id: 'invalid-status',
+                source_image: { preset: 'arbitrary-file' },
+            }),
+        });
+        assert.equal(invalid.status, 400);
+        assert.match((await invalid.json()).error, /Unknown starting-image preset/);
+    } finally {
         await broker.stop();
         rmSync(directory, { recursive: true, force: true });
     }

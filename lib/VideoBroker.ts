@@ -1,10 +1,10 @@
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
+import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import fetch from 'node-fetch';
 import sqlite3 from 'sqlite3';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -13,6 +13,7 @@ import {
     ACTIVE_VIDEO_STATUSES,
     UNFINISHED_VIDEO_STATUSES,
     VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
+    VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MAX_GLOBAL_JOBS,
     VIDEO_MAX_TOTAL_DURATION_SECONDS,
     VIDEO_MAX_USER_JOBS,
@@ -80,13 +81,22 @@ import {
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
+const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', import.meta.url));
 
-interface VideoSourceImageDescriptor {
+interface VideoAttachmentSourceImageDescriptor {
     url: string;
     mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
     bytes: number;
     name: string;
 }
+
+interface VideoPresetSourceImageDescriptor {
+    preset: 'oalgo';
+}
+
+type VideoSourceImageDescriptor =
+    | VideoAttachmentSourceImageDescriptor
+    | VideoPresetSourceImageDescriptor;
 
 interface StoredVideoSourceImage {
     path: string;
@@ -120,6 +130,12 @@ interface BrokerOptions {
         descriptor: VideoSourceImageDescriptor,
         directory: string,
     ) => Promise<StoredVideoSourceImage>;
+    sourceImageComposer?: (
+        base: StoredVideoSourceImage,
+        attached: StoredVideoSourceImage,
+        prompt: string,
+        hooks: VideoProviderHooks,
+    ) => Promise<VideoKeyframeResult>;
 }
 
 interface WorkerConnection {
@@ -162,6 +178,7 @@ interface JobRow {
     idempotency_key: string;
     model: VideoModelId;
     prompt: string;
+    planner_guidance: string | null;
     requested_duration_seconds: number | null;
     delivery_limit_bytes: number;
     prompt_tease: string | null;
@@ -857,6 +874,10 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
 function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object') throw new Error('Invalid starting-image metadata.');
+    if (value.preset !== undefined) {
+        if (value.preset !== 'oalgo') throw new Error('Unknown starting-image preset.');
+        return { preset: 'oalgo' };
+    }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
     const bytes = Number(value.bytes || 0);
     if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) {
@@ -867,10 +888,16 @@ function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
     }
     return {
         url: String(value.url || ''),
-        mime_type: mimeType as VideoSourceImageDescriptor['mime_type'],
+        mime_type: mimeType as VideoAttachmentSourceImageDescriptor['mime_type'],
         bytes,
         name: String(value.name || 'start-frame').slice(0, 255),
     };
+}
+
+function isPresetSourceImage(
+    descriptor: VideoSourceImageDescriptor,
+): descriptor is VideoPresetSourceImageDescriptor {
+    return 'preset' in descriptor;
 }
 
 function isDiscordAttachmentUrl(value: string): boolean {
@@ -884,7 +911,7 @@ function isDiscordAttachmentUrl(value: string): boolean {
 }
 
 async function downloadDiscordSourceImage(
-    descriptor: VideoSourceImageDescriptor,
+    descriptor: VideoAttachmentSourceImageDescriptor,
     directory: string,
 ): Promise<StoredVideoSourceImage> {
     if (!isDiscordAttachmentUrl(descriptor.url)) {
@@ -938,6 +965,122 @@ async function downloadDiscordSourceImage(
         clearTimeout(timeout);
         rmSync(temporary, { force: true });
     }
+}
+
+async function storeVideoSourceImage(
+    descriptor: VideoSourceImageDescriptor,
+    directory: string,
+): Promise<StoredVideoSourceImage> {
+    if (!isPresetSourceImage(descriptor)) {
+        return downloadDiscordSourceImage(descriptor, directory);
+    }
+    if (!existsSync(OALGO_VIDEO_PRESET_PATH) || !statSync(OALGO_VIDEO_PRESET_PATH).isFile()) {
+        throw new Error('The OALGO starting-image preset is unavailable.');
+    }
+    const bytes = statSync(OALGO_VIDEO_PRESET_PATH).size;
+    if (!bytes || bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+        throw new Error('The OALGO starting-image preset is empty or too large.');
+    }
+    mkdirSync(directory, { recursive: true });
+    const destination = join(directory, 'source.png');
+    rmSync(destination, { force: true });
+    copyFileSync(OALGO_VIDEO_PRESET_PATH, destination);
+    return { path: destination, mimeType: 'image/png', bytes };
+}
+
+export function oalgoSourceImageCompositePlan(prompt: string): Record<string, unknown> {
+    const requestedAction = prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT
+        ? 'Invent a lively, visually clear action that naturally follows from the combined image.'
+        : `Stage the combined image so it can naturally begin this requested video: ${prompt}`;
+    return {
+        intent: requestedAction,
+        keyframe: {
+            recommended: true,
+            reason: 'Combine the built-in OALGO art with the user-supplied visual reference.',
+            prompt: [
+                'Create one cohesive square image based primarily on Reference 1, the OALGO base image.',
+                'Preserve the base character, caricature drawing style, face, body, Mexican flag clothing and emblem, city background, palette, and overall composition so OALGO remains immediately recognizable.',
+                'Integrate the salient person, character, animal, or object from Reference 2 naturally into the same illustrated scene while preserving its recognizable appearance.',
+                'Render a unified scene with consistent perspective, lighting, outlines, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
+                requestedAction,
+            ].join(' '),
+            reference_requirements: [],
+            motion_contract: {
+                subject_orientation: 'Keep all subjects oriented for the opening action.',
+                gaze_direction: 'Direct each visible gaze toward the opening action or another subject.',
+                travel_direction: 'Give moving subjects clear space in their intended direction.',
+                camera_relation: 'Use the OALGO base image framing and a coherent single camera view.',
+                first_second_action: requestedAction,
+            },
+        },
+        segments: [],
+    };
+}
+
+async function composeOalgoSourceImages(
+    base: StoredVideoSourceImage,
+    attached: StoredVideoSourceImage,
+    prompt: string,
+    hooks: VideoProviderHooks,
+): Promise<VideoKeyframeResult> {
+    const references: VideoKeyframeReference[] = [
+        {
+            label: 'OALGO base image',
+            kind: 'style',
+            visualFactsToPreserve: 'Preserve the complete base scene, recognizable caricature, Mexican flag clothing and emblem, city background, drawing style, palette, and composition.',
+            bytes: readFileSync(base.path),
+            mimeType: base.mimeType,
+            sourceUrl: 'built-in:oalgo',
+            contextUrl: 'built-in:oalgo',
+        },
+        {
+            label: 'User-attached image',
+            kind: 'object',
+            visualFactsToPreserve: 'Preserve the recognizable appearance of the salient person, character, animal, or object and integrate it naturally into the OALGO scene.',
+            bytes: readFileSync(attached.path),
+            mimeType: attached.mimeType,
+            sourceUrl: 'discord-attachment',
+            contextUrl: 'discord-attachment',
+        },
+    ];
+    return generateFrontierVideoKeyframeCandidate(
+        oalgoSourceImageCompositePlan(prompt),
+        references,
+        {
+            ...configuredVideoKeyframeVariant(),
+            aspectRatio: '1:1',
+            ...hooks,
+        },
+    );
+}
+
+function storeCompositedSourceImage(
+    result: VideoKeyframeResult,
+    directory: string,
+): StoredVideoSourceImage {
+    if (!result.bytes.length || result.bytes.length > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+        throw new Error('The composited starting image is empty or exceeds the 20 MiB limit.');
+    }
+    mkdirSync(directory, { recursive: true });
+    const extension = imageExtension(result.mimeType);
+    const temporary = join(directory, `source.${extension}.part`);
+    const destination = join(directory, `source.${extension}`);
+    rmSync(temporary, { force: true });
+    rmSync(destination, { force: true });
+    writeFileSync(temporary, result.bytes, { flag: 'wx' });
+    renameSync(temporary, destination);
+    return { path: destination, mimeType: result.mimeType, bytes: result.bytes.length };
+}
+
+function copyStoredSourceImage(
+    source: StoredVideoSourceImage,
+    directory: string,
+): StoredVideoSourceImage {
+    mkdirSync(directory, { recursive: true });
+    const destination = join(directory, `source.${imageExtension(source.mimeType)}`);
+    rmSync(destination, { force: true });
+    copyFileSync(source.path, destination);
+    return { path: destination, mimeType: source.mimeType, bytes: source.bytes };
 }
 
 function writeImage(res: ServerResponse, path: string, mimeType: string, headers: Record<string, string>): void {
@@ -1064,6 +1207,7 @@ export class VideoBroker {
             idempotency_key TEXT NOT NULL UNIQUE,
             model TEXT NOT NULL,
             prompt TEXT NOT NULL,
+            planner_guidance TEXT,
             requested_duration_seconds REAL,
             delivery_limit_bytes INTEGER NOT NULL DEFAULT ${VIDEO_DISCORD_BASELINE_UPLOAD_BYTES},
             prompt_tease TEXT,
@@ -1132,6 +1276,9 @@ export class VideoBroker {
         }
         if (!columnNames.has('planner_model')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN planner_model TEXT');
+        }
+        if (!columnNames.has('planner_guidance')) {
+            await this.run('ALTER TABLE video_jobs ADD COLUMN planner_guidance TEXT');
         }
         if (!columnNames.has('affinity_bypasses')) {
             await this.run('ALTER TABLE video_jobs ADD COLUMN affinity_bypasses INTEGER NOT NULL DEFAULT 0');
@@ -1735,6 +1882,11 @@ export class VideoBroker {
         if (!isVideoModel(body.model)) return { status: 400, body: { error: 'Unknown video model.' } };
         const prompt = String(body.prompt || '').trim();
         if (!prompt) return { status: 400, body: { error: 'Prompt must not be empty.' } };
+        const plannerGuidance = sanitizeVideoWorkerText(
+            body.planner_guidance,
+            '',
+            2000,
+        ).trim() || null;
         const deliveryLimit = Number(
             body.delivery_limit_bytes ?? VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
         );
@@ -1767,10 +1919,20 @@ export class VideoBroker {
             return { status: 400, body: { error: 'Missing Discord job identity.' } };
         }
         let sourceDescriptor: VideoSourceImageDescriptor | null;
+        let compositeDescriptor: VideoSourceImageDescriptor | null;
         try {
             sourceDescriptor = sourceImageDescriptor(body.source_image);
+            compositeDescriptor = sourceImageDescriptor(body.source_image_composite);
         } catch (error) {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
+        }
+        if (compositeDescriptor && (!sourceDescriptor
+            || !isPresetSourceImage(sourceDescriptor)
+            || isPresetSourceImage(compositeDescriptor))) {
+            return {
+                status: 400,
+                body: { error: 'Image compositing requires the OALGO preset and one Discord attachment.' },
+            };
         }
         const existingBeforeDownload = await this.get<JobRow>(
             'SELECT * FROM video_jobs WHERE idempotency_key = ?',
@@ -1779,23 +1941,101 @@ export class VideoBroker {
         if (existingBeforeDownload) {
             return { status: 200, body: { job: (await this.views([existingBeforeDownload]))[0], duplicate: true } };
         }
+        const [globalBeforeDownload, userBeforeDownload] = await Promise.all([
+            this.get<{ count: number }>(
+                `SELECT COUNT(*) AS count FROM video_jobs WHERE status IN (${statusPlaceholders(UNFINISHED_VIDEO_STATUSES)})`,
+                UNFINISHED_VIDEO_STATUSES,
+            ),
+            this.get<{ count: number }>(
+                `SELECT COUNT(*) AS count FROM video_jobs WHERE requester_id = ?
+                 AND status IN (${statusPlaceholders(UNFINISHED_VIDEO_STATUSES)})`,
+                [String(body.requester_id), ...UNFINISHED_VIDEO_STATUSES],
+            ),
+        ]);
+        if ((globalBeforeDownload?.count || 0) >= VIDEO_MAX_GLOBAL_JOBS) {
+            return { status: 409, body: { error: `The video queue is full (${VIDEO_MAX_GLOBAL_JOBS} jobs).` } };
+        }
+        if ((userBeforeDownload?.count || 0) >= VIDEO_MAX_USER_JOBS) {
+            return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
+        }
         const publicId = randomUUID();
         const directory = resolve(this.options.resultsDir, publicId);
         let sourceImage: StoredVideoSourceImage | null = null;
         let sourceImageDownloadSeconds: number | null = null;
+        let sourceImageCompositionSeconds: number | null = null;
+        let sourceImageComposition: 'generated' | 'fallback' | null = null;
+        const compositionAttempts: VideoProviderAttempt[] = [];
+        const compositionUsages: VideoProviderUsage[] = [];
         if (sourceDescriptor) {
             const sourceImageStarted = Date.now();
             try {
-                sourceImage = await (this.options.sourceImageDownloader || downloadDiscordSourceImage)(
-                    sourceDescriptor,
-                    directory,
-                );
-                sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
+                const sourceImageDownloader = this.options.sourceImageDownloader || storeVideoSourceImage;
+                if (compositeDescriptor) {
+                    const base = await sourceImageDownloader(
+                        sourceDescriptor,
+                        join(directory, 'composite-base'),
+                    );
+                    const attached = await sourceImageDownloader(
+                        compositeDescriptor,
+                        join(directory, 'composite-attached'),
+                    );
+                    sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
+                    const compositionStarted = Date.now();
+                    const hooks: VideoProviderHooks = {
+                        onAttempt: attempt => {
+                            compositionAttempts.push({
+                                ...attempt,
+                                stage: `source_image_composite_${attempt.stage}`,
+                            });
+                        },
+                        onUsage: usage => {
+                            compositionUsages.push({
+                                ...usage,
+                                stage: `source_image_composite_${usage.stage}`,
+                            });
+                        },
+                    };
+                    try {
+                        const composed = await (
+                            this.options.sourceImageComposer || composeOalgoSourceImages
+                        )(base, attached, prompt, hooks);
+                        sourceImage = storeCompositedSourceImage(composed, directory);
+                        sourceImageComposition = 'generated';
+                    } catch (error) {
+                        sourceImageComposition = 'fallback';
+                        compositionAttempts.push({
+                            stage: 'source_image_composite_fallback',
+                            attempt: 1,
+                            outcome: 'error',
+                            provider: 'broker',
+                            model: 'oalgo-preset',
+                            serviceTier: 'default',
+                            durationSeconds: (Date.now() - compositionStarted) / 1000,
+                            detail: sanitizeVideoWorkerText(
+                                error instanceof Error ? error.message : String(error),
+                                'Unknown image-composition error.',
+                                1000,
+                            ),
+                        });
+                        console.warn(
+                            '[Video] OALGO source-image composition failed; using the built-in preset.',
+                            error,
+                        );
+                        sourceImage = copyStoredSourceImage(base, directory);
+                    } finally {
+                        sourceImageCompositionSeconds = (Date.now() - compositionStarted) / 1000;
+                        rmSync(join(directory, 'composite-base'), { recursive: true, force: true });
+                        rmSync(join(directory, 'composite-attached'), { recursive: true, force: true });
+                    }
+                } else {
+                    sourceImage = await sourceImageDownloader(sourceDescriptor, directory);
+                    sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
+                }
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
                 return {
                     status: 400,
-                    body: { error: `Could not use the attached starting image: ${error instanceof Error ? error.message : String(error)}` },
+                    body: { error: `Could not use the starting image: ${error instanceof Error ? error.message : String(error)}` },
                 };
             }
         }
@@ -1830,19 +2070,21 @@ export class VideoBroker {
             try {
                 await this.run(
                     `INSERT INTO video_jobs(
-                        public_id, idempotency_key, model, prompt, requested_duration_seconds,
+                        public_id, idempotency_key, model, prompt, planner_guidance,
+                        requested_duration_seconds,
                         delivery_limit_bytes,
                         requester_id, origin_bot_id,
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_image_path, source_image_mime, source_image_bytes,
                         experiment_id, variant_id
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
                         body.model,
                         prompt,
+                        plannerGuidance,
                         requestedDuration,
                         deliveryLimit,
                         String(body.requester_id),
@@ -1871,14 +2113,41 @@ export class VideoBroker {
                         metadata: { status: 'ok' },
                     });
                 }
+                if (sourceImageCompositionSeconds !== null && sourceImageComposition) {
+                    await this.recordMetricSpan(publicId, {
+                        source: 'broker',
+                        name: 'source_image_composite',
+                        duration_seconds: sourceImageCompositionSeconds,
+                        metadata: {
+                            status: sourceImageComposition === 'generated' ? 'ok' : 'error',
+                        },
+                    });
+                }
             } catch (error) {
                 if (sourceImage) rmSync(directory, { recursive: true, force: true });
                 throw error;
             }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-            return { status: 201, body: { job: (await this.views([row!]))[0], duplicate: false } };
+            return {
+                status: 201,
+                body: {
+                    job: (await this.views([row!]))[0],
+                    duplicate: false,
+                    source_image_composition: sourceImageComposition,
+                },
+            };
         });
         if (result.status === 201) {
+            const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+            if (job) {
+                const hooks = this.providerHooks(job);
+                for (const attempt of compositionAttempts) {
+                    await hooks.onAttempt?.(attempt);
+                }
+                for (const usage of compositionUsages) {
+                    await hooks.onUsage?.(usage);
+                }
+            }
             if (this.worker?.currentJob) await this.scheduleNextQueuedPreparation();
             await this.dispatchNext();
         }
@@ -2383,10 +2652,16 @@ export class VideoBroker {
 
     private frontierOptions(job: JobRow, _criticalPath: boolean): VideoFrontierCallOptions {
         const plannerStrategy = configuredVideoPlannerStrategy(job.channel_id);
+        const configured = configuredVideoPlannerVariant(process.env, plannerStrategy);
+        const plannerGuidance = [job.planner_guidance]
+            .map(value => String(value || '').trim())
+            .filter(Boolean)
+            .join('\n');
         return {
             serviceTier: configuredVideoOpenAIServiceTier(),
-            ...configuredVideoPlannerVariant(process.env, plannerStrategy),
+            ...configured,
             plannerStrategy,
+            ...(plannerGuidance ? { plannerGuidance } : {}),
             ...(job.requested_duration_seconds !== null ? {
                 requestedDurationSeconds: job.requested_duration_seconds,
             } : {}),
