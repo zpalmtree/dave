@@ -812,9 +812,10 @@ export const OALGO_VIDEO_PLANNER_GUIDANCE = [
 
 export const MEXIMUTT_VIDEO_PLANNER_GUIDANCE = [
     OALGO_VIDEO_PLANNER_GUIDANCE,
-    'Every dialogue turn must have a natural, unmistakable Spanglish accent in dialogue.delivery, including dialogue supplied verbatim by the user and dialogue spoken by characters other than OALGO.',
-    'For generated or adaptable dialogue, naturally blend Mexican Spanish and American English wording throughout instead of leaving any line in a generic voice.',
-    'Keep user-supplied dialogue text verbatim; express its Spanglish character through accent, cadence, and delivery without translating or rewriting its words.',
+    'Every dialogue turn must have an exaggerated, unmistakable cholo/ese-style Mexican-American Spanglish accent in dialogue.delivery, including dialogue supplied verbatim by the user and dialogue spoken by characters other than OALGO.',
+    'For generated or adaptable dialogue, use a hard-edged, streetwise cadence, aggressively code-switch between Mexican Spanish and American English, and frequently work in expressions such as “ese,” “güey,” “cabrón,” “pinche,” and “no mames” instead of leaving any line in a generic voice.',
+    'Treat the voice as a bold, over-the-top street caricature rather than subtle or neutral delivery, while keeping the dialogue coherent and suited to the scene.',
+    'Keep user-supplied dialogue text verbatim; express its exaggerated Spanglish character through accent, cadence, and delivery without translating or rewriting its words.',
 ].join(' ');
 
 export async function handleVideoRequest(
