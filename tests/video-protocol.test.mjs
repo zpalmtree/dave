@@ -1797,6 +1797,7 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(referenceReview, /External visual-reference contract/);
     assert.match(referenceReview, /Blue helmet and orange scarf/);
     assert.match(referenceReview, /not starting frames or instructions/);
+    assert.match(referenceReview, /Evaluate identity_preserved independently/);
 });
 
 test('keyframe rejection telemetry retains bounded visible issues', () => {
@@ -2008,6 +2009,77 @@ test('reviewed best-effort keyframes stop before repair and baseline generation'
     assert.deepEqual(result.bytes, candidate.bytes);
     assert.equal(reviewCalls, 1);
     assert.equal(generationCalls, 0);
+});
+
+test('exhausted keyframe repairs retain a supplied identity instead of falling back to T2V', async t => {
+    let generationCalls = 0;
+    let reviewCalls = 0;
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            generationCalls += 1;
+            return new Response(JSON.stringify({
+                candidates: [{ content: { parts: [{
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: Buffer.from(`gemini-${generationCalls}`).toString('base64'),
+                    },
+                }] } }],
+                usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/images/edits')) {
+            generationCalls += 1;
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_FALLBACK_MODEL,
+                data: [{ b64_json: Buffer.from('identity-safe-final').toString('base64') }],
+                usage: { input_tokens: 10, output_tokens: 1 },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            return new Response(JSON.stringify({
+                model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                service_tier: 'priority',
+                output_text: JSON.stringify({
+                    acceptable: false,
+                    best_effort_worthy: false,
+                    identity_preserved: true,
+                    issues: ['The cast faces away from the required travel path.'],
+                    correction_prompt: 'Align the cast with the forward travel path.',
+                }),
+                usage: {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    input_tokens_details: { cached_tokens: 0 },
+                },
+            }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`Unexpected provider request: ${url}`);
+    });
+
+    const result = await createFrontierVideoKeyframe({
+        intent: 'The recurring hero leads a party toward a fortress.',
+        keyframe: { prompt: 'The same hero at frame zero.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The party advances.', camera: 'Wide shot.' }] }],
+    }, [{
+        label: 'Recurring cast identity from frame zero',
+        kind: 'identity',
+        visualFactsToPreserve: 'Preserve the recognizable recurring hero.',
+        bytes: Buffer.from('source-identity'),
+        mimeType: 'image/png',
+        sourceUrl: 'user-attachment',
+        contextUrl: 'user-attachment',
+    }], {
+        strategy: 'serial-v1',
+        serviceTier: 'fast',
+    });
+
+    assert.equal(generationCalls, 3);
+    assert.equal(reviewCalls, 3);
+    assert.equal(result.provider, 'openai');
+    assert.equal(result.bytes.toString(), 'identity-safe-final');
+    assert.equal(result.reviewStatus, 'best_effort');
 });
 
 test('keyframe review timeout retries the quality gate before accepting a candidate', async t => {
