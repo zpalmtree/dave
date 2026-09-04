@@ -39,6 +39,7 @@ export interface VideoKeyframeResult {
 export interface VideoKeyframeReview {
     acceptable: boolean;
     best_effort_worthy: boolean;
+    identity_preserved?: boolean;
     issues: string[];
     correction_prompt: string;
 }
@@ -176,6 +177,7 @@ export function buildVideoKeyframeReviewPrompt(
         'Reject it if the requested closed cast/count is wrong, key identities are not visibly distinguishable, important subjects or props are missing, or the composition contradicts the motion contract.',
         'For moving subjects, explicitly trace the physical front/nose, visible road or path ahead, gaze, screen direction, and vanishing point. Reject a frame that would require an immediate turn, reversal, gaze snap, axis crossing, teleport, or reframe.',
         'Set best_effort_worthy true whenever acceptable is true. When acceptable is false, best_effort_worthy may be true only if the frame is visually coherent, preserves the core cast and requested identities, stages the intended first action with valid motion geometry, and every remaining issue is a low-impact detail. A small mismatch in the number or placement of repeated incidental props may qualify when the requested meaning remains unmistakable. It must be false for missing or wrong primary cast or identity, already-started action, broken motion path, required camera or composition failure, a major artifact, or any discrepancy that changes the story.',
+        'Evaluate identity_preserved independently from acceptable and best_effort_worthy. Set it true only when every supplied reference declared for identity is represented by the same recognizable subject exactly once, with its defining face, body proportions, hair, skin tone, clothing, and character design intact. Motion, gaze, camera, staging, and incidental-cast errors do not make identity_preserved false. Set it false when there is no identity reference or a referenced identity is missing, duplicated, substituted, or visibly changed.',
         'If rejected, correction_prompt must be a concrete positive-only description of the corrected visible frame. Describe only wanted subjects and geometry; do not repeat unwanted names or write negations.',
     ].join('\n');
 }
@@ -525,10 +527,14 @@ export async function reviewVideoKeyframe(
                         schema: {
                             type: 'object',
                             additionalProperties: false,
-                            required: ['acceptable', 'best_effort_worthy', 'issues', 'correction_prompt'],
+                            required: [
+                                'acceptable', 'best_effort_worthy', 'identity_preserved',
+                                'issues', 'correction_prompt',
+                            ],
                             properties: {
                                 acceptable: { type: 'boolean' },
                                 best_effort_worthy: { type: 'boolean' },
+                                identity_preserved: { type: 'boolean' },
                                 issues: {
                                     type: 'array',
                                     maxItems: 8,
@@ -564,10 +570,15 @@ export async function reviewVideoKeyframe(
             review = JSON.parse(responseOutputText(body));
             if (typeof review?.acceptable !== 'boolean'
                 || typeof review?.best_effort_worthy !== 'boolean'
+                || (review?.identity_preserved !== undefined
+                    && typeof review.identity_preserved !== 'boolean')
                 || !Array.isArray(review?.issues)
                 || typeof review?.correction_prompt !== 'string') {
                 throw new Error('First-frame reviewer returned invalid structured output.');
             }
+            // Older persisted fixtures and provider mocks predate this independent
+            // review axis. Production structured output always supplies it.
+            review.identity_preserved = review.identity_preserved === true;
         } catch (error) {
             if (usage) {
                 const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
@@ -832,6 +843,14 @@ function bestEffort(image: VideoKeyframeResult): VideoKeyframeResult {
     return { ...image, reviewStatus: 'best_effort' };
 }
 
+function preservesSuppliedIdentity(
+    review: VideoKeyframeReview,
+    references: VideoKeyframeReference[],
+): boolean {
+    return review.identity_preserved === true
+        && references.some(reference => reference.kind === 'identity');
+}
+
 async function createReviewedOpenAIFallback(
     plan: Record<string, any>,
     references: VideoKeyframeReference[],
@@ -857,7 +876,8 @@ async function createReviewedOpenAIFallback(
     if (!repairedReview || repairedReview.acceptable) {
         return accepted(repaired, Boolean(repairedReview));
     }
-    if (repairedReview.best_effort_worthy) return bestEffort(repaired);
+    if (repairedReview.best_effort_worthy
+        || preservesSuppliedIdentity(repairedReview, references)) return bestEffort(repaired);
     throw new Error(`Fallback first frames failed visual review: ${repairedReview.issues.join('; ')}`);
 }
 
@@ -901,7 +921,8 @@ async function createSerialKeyframe(
     const fallback = await generateWithRetry('openai', fallbackPrompt, references, 1, options);
     const fallbackReview = await optionalReview(plan, fallback, references, options, nextReview);
     if (!fallbackReview || fallbackReview.acceptable) return accepted(fallback, Boolean(fallbackReview));
-    if (fallbackReview.best_effort_worthy) return bestEffort(fallback);
+    if (fallbackReview.best_effort_worthy
+        || preservesSuppliedIdentity(fallbackReview, references)) return bestEffort(fallback);
     throw new Error(`All frontier first-frame candidates failed visual review: ${fallbackReview.issues.join('; ')}`);
 }
 
@@ -973,7 +994,8 @@ async function createConditionalKeyframe(
     const repaired = await generateWithRetry('gemini', repairPrompt, references, 5, options);
     const finalReview = await optionalReview(plan, repaired, references, options, nextReview);
     if (!finalReview || finalReview.acceptable) return accepted(repaired, Boolean(finalReview));
-    if (finalReview.best_effort_worthy) return bestEffort(repaired);
+    if (finalReview.best_effort_worthy
+        || preservesSuppliedIdentity(finalReview, references)) return bestEffort(repaired);
     throw new Error(`All frontier first-frame candidates failed visual review: ${finalReview.issues.join('; ')}`);
 }
 
