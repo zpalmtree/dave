@@ -140,6 +140,13 @@ the worker bypasses planning and renders a duration-safe literal continuation.
 Explicit user cancellation, GPU or generator failures, missing or invalid output,
 and delivery failures remain terminal or follow the existing bounded retry path.
 
+The local path protects English, Spanish, and code-switched first-person
+utterances as verbatim dialogue instead of misclassifying them as silent visual
+briefs. It gives the screenplay model up to three feedback-driven attempts. If
+the final quality gate still rejects every structurally valid candidate, the
+worker compares the best model-authored near-pass with the deterministic semantic
+fallback and renders the one with fewer reported fidelity issues.
+
 ## Optimization experiments
 
 Production remains on Sol and uses the review-gated `fast-gated-v3` first-frame
