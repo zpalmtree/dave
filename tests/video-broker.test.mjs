@@ -2223,7 +2223,9 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
                 assert.equal(references.length, 1);
                 assert.equal(references[0].label, 'Recurring cast identity from frame zero');
                 assert.deepEqual(references[0].bytes, attachedBytes);
+                assert.match(references[0].visualFactsToPreserve, /exact eye aperture/);
                 assert.match(planned.keyframe.prompt, /waits below the podium steps/i);
+                assert.match(planned.keyframe.prompt, /sole authority for facial anatomy/);
                 assert.equal(
                     planned.keyframe.motion_contract.first_second_action,
                     'The racer takes the first step toward the podium.',
