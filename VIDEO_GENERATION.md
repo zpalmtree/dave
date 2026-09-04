@@ -132,6 +132,14 @@ segment timings. If the conservative estimate plus its five-minute reserve
 exceeds the 60-minute per-video budget, it drops later screenplay segments until
 the longest safe prefix fits and records the truncation in the saved plan.
 
+Planning and review failures degrade instead of terminating the video job. A
+structurally valid semantic fallback renders as best effort even when its final
+quality review is unavailable or rejects it, with that fact recorded in the plan
+and delivery notice. If structured local planning itself cannot produce a plan,
+the worker bypasses planning and renders a duration-safe literal continuation.
+Explicit user cancellation, GPU or generator failures, missing or invalid output,
+and delivery failures remain terminal or follow the existing bounded retry path.
+
 ## Optimization experiments
 
 Production remains on Sol and uses the review-gated `fast-gated-v3` first-frame
