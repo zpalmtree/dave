@@ -1126,6 +1126,104 @@ test('single-pass frontier planner returns validated analysis and screenplay fro
     }
 });
 
+test('single-pass frontier planner salvages a validated screenplay from a routing rejection', async () => {
+    const analysis = frontierAnalysis();
+    analysis.frontier_handling = {
+        disposition: 'reject',
+        reason_code: 'provider_policy',
+        reason: 'The frontier path may not preserve the original intensity.',
+    };
+    const attempts = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse({
+        status: 'completed',
+        output_text: JSON.stringify({ prompt_analysis: analysis, plan: frontierPlan() }),
+        model: VIDEO_PLANNER_MODEL,
+    });
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.',
+            'minimaxfast',
+            'requester-single-pass-salvage',
+            undefined,
+            { plannerStrategy: 'single-pass', onAttempt: attempt => attempts.push(attempt) },
+        );
+        assert.equal(result.planner_route, 'frontier-salvaged');
+        assert.equal(result.planner_metrics.frontier_rejection_reason, 'provider_policy');
+        assert.match(result.generation_notice, /independently validated screenplay/);
+        assert.ok(attempts.some(attempt =>
+            attempt.stage === 'single_pass_decision' && attempt.outcome === 'rejected'));
+        assert.ok(attempts.some(attempt =>
+            attempt.stage === 'single_pass_salvage' && attempt.outcome === 'accepted'));
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('single-pass frontier planner routes locally when a rejected screenplay is unusable', async () => {
+    const analysis = frontierAnalysis();
+    analysis.frontier_handling = {
+        disposition: 'reject',
+        reason_code: 'provider_policy',
+        reason: 'The frontier path may not preserve the original intensity.',
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse({
+        status: 'completed',
+        output_text: JSON.stringify({ prompt_analysis: analysis, plan: {} }),
+        model: VIDEO_PLANNER_MODEL,
+    });
+    try {
+        await assert.rejects(
+            () => createFrontierVideoPlan(
+                'A dog runs through a park.',
+                'minimaxfast',
+                'requester-single-pass-placeholder',
+                undefined,
+                { plannerStrategy: 'single-pass' },
+            ),
+            error => error instanceof FrontierPlannerRejectedError
+                && error.reasonCode === 'provider_policy'
+                && /candidate was unusable/.test(error.message),
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('single-pass frontier planner does not salvage an unrelated schema-valid placeholder', async () => {
+    const analysis = frontierAnalysis();
+    analysis.subjects = ['a cat'];
+    analysis.actions = ['flies over the moon'];
+    analysis.resolved_intent = 'A cat flies over the moon.';
+    analysis.frontier_handling = {
+        disposition: 'reject',
+        reason_code: 'provider_policy',
+        reason: 'The frontier path may not preserve the original intensity.',
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse({
+        status: 'completed',
+        output_text: JSON.stringify({ prompt_analysis: analysis, plan: frontierPlan() }),
+        model: VIDEO_PLANNER_MODEL,
+    });
+    try {
+        await assert.rejects(
+            () => createFrontierVideoPlan(
+                'A cat flies over the moon.',
+                'minimaxfast',
+                'requester-single-pass-unrelated',
+                undefined,
+                { plannerStrategy: 'single-pass' },
+            ),
+            error => error instanceof FrontierPlannerRejectedError
+                && /salient analysis terms/.test(error.message),
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('single-pass frontier planner streams a complete provisional keyframe before completion', async () => {
     const combined = {
         prompt_analysis: frontierAnalysis(),

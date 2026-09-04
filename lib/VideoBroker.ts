@@ -812,6 +812,27 @@ function keyframePlanIdentity(plan: Record<string, any>): string {
     return createHash('sha256').update(JSON.stringify(plan?.keyframe || null)).digest('hex');
 }
 
+export function videoSegmentUsesFrameZeroIdentity(
+    plan: Record<string, any>,
+    segmentIndex: number,
+): boolean {
+    const segments = Array.isArray(plan?.segments) ? plan.segments : [];
+    const firstLabel = String(segments[0]?.overlay_label || '').trim();
+    const targetLabel = String(segments[segmentIndex - 1]?.overlay_label || '').trim();
+    if (targetLabel && targetLabel !== 'N/A' && targetLabel !== firstLabel) return false;
+    const explicit = (Array.isArray(plan?.segment_keyframes) ? plan.segment_keyframes : [])
+        .find((candidate: any) => Number(candidate?.segment_index) === segmentIndex);
+    if (explicit?.identity_scope === 'new') return false;
+    if (explicit?.identity_scope === 'recurring') return true;
+    const segment = segments[segmentIndex - 1];
+    const firstShot = Array.isArray(segment?.shots) ? segment.shots[0] : null;
+    const targetText = [segment?.title, firstShot?.visual, explicit?.prompt]
+        .map(value => String(value || ''))
+        .join(' ');
+    return !/\b(?:another|different|new|separate|independent)\s+(?:person|man|woman|girl|boy|worker|employee|character|subject|protagonist|cast\s+member|racer)\b/i
+        .test(targetText);
+}
+
 function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: number): Record<string, any> | null {
     const segment = Array.isArray(plan?.segments) ? plan.segments[segmentIndex - 1] : null;
     const firstShot = Array.isArray(segment?.shots) ? segment.shots[0] : null;
@@ -819,6 +840,7 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
     const title = String(segment.title || `Segment ${segmentIndex}`).trim();
     const overlayLabel = String(segment.overlay_label || '').trim();
     const independentlyLabeled = Boolean(overlayLabel && overlayLabel !== 'N/A');
+    const usesFrameZeroIdentity = videoSegmentUsesFrameZeroIdentity(plan, segmentIndex);
     const visual = String(firstShot.visual || '').trim();
     const camera = String(firstShot.camera || '').trim();
     if (!visual || !camera) return null;
@@ -840,20 +862,26 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
             recommended: true,
             reason: independentlyLabeled
                 ? `Anchor the independently selected identity ${overlayLabel}.`
-                : `Preserve the recurring cast across the ${segment.transition} into ${title}.`,
+                : usesFrameZeroIdentity
+                    ? `Preserve the recurring cast across the ${segment.transition} into ${title}.`
+                    : `Establish the newly introduced cast for ${title}.`,
             prompt: [
                 hasExplicitContract ? explicitPrompt : [
                     `Opening still for segment ${segmentIndex}, ${title}: ${visual}`,
                     `Camera and framing: ${camera}.`,
                     independentlyLabeled
                         ? `Depict ${overlayLabel} as the only selected identity; reserve a blank opaque nameplate with no readable text for postproduction.`
-                        : 'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
+                        : usesFrameZeroIdentity
+                            ? 'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.'
+                            : 'Establish only the newly introduced subject or cast required by this segment from the target visual.',
                     independentlyLabeled
                         ? 'Do not copy the preceding segment identity.'
-                        : 'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.',
+                        : usesFrameZeroIdentity
+                            ? 'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.'
+                            : 'Give the new cast internally consistent faces, body proportions, hair, skin tone, wardrobe, and defining appearance for this segment.',
                     'Show one frozen, motion-ready instant at 0.00 seconds of this segment.',
                 ].join(' '),
-                independentlyLabeled ? '' : (
+                independentlyLabeled || !usesFrameZeroIdentity ? '' : (
                     'Treat the supplied identity reference as the sole authority for facial anatomy: '
                     + 'match its eye aperture, eye shape and spacing, iris and pupil scale, nose and '
                     + 'nostril shape, cheek contour, lip proportions, jaw width, and chin silhouette. '
@@ -3176,9 +3204,7 @@ export class VideoBroker {
         segmentIndex: number,
     ): Promise<VideoKeyframeReference | null> {
         const segments = Array.isArray(plan?.segments) ? plan.segments : [];
-        const firstLabel = String(segments[0]?.overlay_label || '').trim();
-        const targetLabel = String(segments[segmentIndex - 1]?.overlay_label || '').trim();
-        if (targetLabel && targetLabel !== 'N/A' && targetLabel !== firstLabel) return null;
+        if (!segments.length || !videoSegmentUsesFrameZeroIdentity(plan, segmentIndex)) return null;
         let current = job;
         if (!current.source_image_path && !current.keyframe_path && plan?.keyframe?.recommended === true) {
             await this.ensureKeyframe(current, plan, true);

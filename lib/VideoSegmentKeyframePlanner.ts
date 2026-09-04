@@ -17,6 +17,7 @@ const MOTION_FIELDS = [
 
 export interface VideoSegmentKeyframeContract {
     segment_index: number;
+    identity_scope: 'recurring' | 'new';
     prompt: string;
     motion_contract: Record<typeof MOTION_FIELDS[number], string>;
 }
@@ -32,9 +33,10 @@ const SEGMENT_KEYFRAME_CONTRACT_SCHEMA = {
             items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['segment_index', 'prompt', 'motion_contract'],
+                required: ['segment_index', 'identity_scope', 'prompt', 'motion_contract'],
                 properties: {
                     segment_index: { type: 'integer', minimum: 2, maximum: 64 },
+                    identity_scope: { type: 'string', enum: ['recurring', 'new'] },
                     prompt: { type: 'string' },
                     motion_contract: {
                         type: 'object',
@@ -59,6 +61,7 @@ function validatedContracts(value: any, targets: number[]): VideoSegmentKeyframe
     const contracts: VideoSegmentKeyframeContract[] = [];
     for (const candidate of Array.isArray(value?.contracts) ? value.contracts : []) {
         const segmentIndex = Number(candidate?.segment_index);
+        const identityScope = candidate?.identity_scope === 'new' ? 'new' : 'recurring';
         const prompt = String(candidate?.prompt || '').trim();
         const motion = Object.fromEntries(MOTION_FIELDS.map(field => [
             field,
@@ -67,7 +70,12 @@ function validatedContracts(value: any, targets: number[]): VideoSegmentKeyframe
         if (!expected.has(segmentIndex) || seen.has(segmentIndex) || !prompt
             || MOTION_FIELDS.some(field => !motion[field])) continue;
         seen.add(segmentIndex);
-        contracts.push({ segment_index: segmentIndex, prompt, motion_contract: motion });
+        contracts.push({
+            segment_index: segmentIndex,
+            identity_scope: identityScope,
+            prompt,
+            motion_contract: motion,
+        });
     }
     if (contracts.length !== targets.length || targets.some(index => !seen.has(index))) {
         throw new Error('Gemini Flash omitted or duplicated a hard-cut frame-zero contract.');
@@ -114,6 +122,7 @@ export async function createVideoSegmentKeyframeContracts(
                     'Each prompt describes only the frozen visible state at precisely 0.00 seconds, never a sequence or completed beat.',
                     'Move all change after frame zero into first_second_action. For approach, boarding, insertion, ignition, landing, stepping, reveal, opening, or transformation, stage the instant immediately before or at onset so MiniMax H3 can visibly perform it.',
                     'Make subject orientation, gaze, physical front or vehicle nose, travel vector, visible path ahead, lead room, camera side, and vanishing direction mutually consistent.',
+                    'Set identity_scope to recurring only when the target segment visibly includes the same source/frame-zero subject. Set it to new when the segment introduces different cast and the source subject is not present; a thematic relationship alone does not make a new person the same identity.',
                     'Preserve recurring identity, closed cast and count, wardrobe, props, scale, location, and the distinctive premise. Use positive-only visual wording.',
                     'Return exactly one contract for every supplied target index.',
                 ].join('\n'),

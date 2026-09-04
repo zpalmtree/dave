@@ -140,6 +140,12 @@ the worker bypasses planning and renders a duration-safe literal continuation.
 Explicit user cancellation, GPU or generator failures, missing or invalid output,
 and delivery failures remain terminal or follow the existing bounded retry path.
 
+A completed single-pass frontier response that requests local routing is not
+discarded automatically. Its screenplay is retained only when the ordinary
+analysis, dialogue, duration, continuity, and keyframe validators all accept it;
+otherwise the request still follows the local fallback path. Actual provider
+refusals contain no salvageable screenplay and always route locally.
+
 The local path protects English, Spanish, and code-switched first-person
 utterances as verbatim dialogue instead of misclassifying them as silent visual
 briefs. It gives the screenplay model up to three feedback-driven attempts. If
