@@ -13,6 +13,7 @@ import {
     duplicateVideoTerminalEventMatches,
     oalgoSourceImageCompositePlan,
     projectedVideoFinishAt,
+    videoSegmentUsesFrameZeroIdentity,
     videoPlanRuntimeScale,
     videoFailureDisposition,
 } from '../dist/VideoBroker.js';
@@ -96,6 +97,25 @@ test('OALGO composite instructions preserve both inputs as one scene', () => {
     assert.match(plan.keyframe.prompt, /never a split screen, side-by-side layout, pasted rectangle, or collage/);
     assert.match(plan.keyframe.prompt, /races toward the finish line/);
     assert.equal(plan.keyframe.motion_contract.camera_relation.includes('OALGO'), true);
+});
+
+test('derived segment identity references apply only to recurring source cast', () => {
+    const plan = {
+        segments: [{
+            overlay_label: 'N/A',
+            shots: [{ visual: 'The pictured foreman watches an empty workstation.' }],
+        }, {
+            overlay_label: 'N/A',
+            shots: [{ visual: 'A blonde woman stands outside the factory.' }],
+        }],
+        segment_keyframes: [{ segment_index: 2, identity_scope: 'new' }],
+    };
+    assert.equal(videoSegmentUsesFrameZeroIdentity(plan, 2), false);
+    plan.segment_keyframes[0].identity_scope = 'recurring';
+    assert.equal(videoSegmentUsesFrameZeroIdentity(plan, 2), true);
+    delete plan.segment_keyframes;
+    plan.segments[1].shots[0].visual = 'A different worker stands outside the factory.';
+    assert.equal(videoSegmentUsesFrameZeroIdentity(plan, 2), false);
 });
 
 test('broker resolves the built-in OALGO preset without arbitrary file input', async () => {
@@ -2181,6 +2201,7 @@ test('broker serves a cached frontier frame and gives a user attachment preceden
     };
     const segmentContracts = [{
         segment_index: 2,
+        identity_scope: 'recurring',
         prompt: 'The same racer waits below the podium steps before the celebration begins.',
         motion_contract: {
             subject_orientation: 'The racer faces the podium steps.',
