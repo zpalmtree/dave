@@ -7,7 +7,6 @@ import { OpenAI } from 'openai';
 import type {
   Response as ResponsesPayload,
   ResponseOutputItem,
-  ResponseReasoningItem,
   ResponseStreamEvent,
 } from 'openai/resources/responses/responses.js';
 import type { Stream } from 'openai/streaming';
@@ -28,6 +27,7 @@ import {
     type CImageGenerationTool,
 } from './CImageGeneration.js';
 import { classifyPromptTease } from './PromptTease.js';
+import { extractOpenAIResponseText } from './OpenAIResponse.js';
 
 // Polyfill File for environments running on Node < 20 so OpenAI uploads work.
 void (async () => {
@@ -190,12 +190,6 @@ function getPreviousResponseId(
     : undefined;
 }
 
-function isReasoningItem(
-  item: ResponseOutputItem,
-): item is ResponseReasoningItem {
-  return item.type === 'reasoning';
-}
-
 function isStreamResponse(
   response: ResponsesCreateReturn,
 ): response is Stream<ResponseStreamEvent> & { _request_id?: string | null } {
@@ -210,40 +204,6 @@ function toNonStreamingResponse(
   }
 
   throw new Error('Expected non-streaming response from OpenAI Responses API.');
-}
-
-function extractAssistantOutputText(result: ResponsesPayload): string {
-  if (typeof result.output_text === 'string') {
-    const trimmed = result.output_text.trim();
-    if (trimmed.length > 0) {
-      return trimmed;
-    }
-  }
-
-  const segments: string[] = [];
-
-  for (const item of result.output ?? []) {
-    if (item?.type !== 'message') continue;
-
-    const role = (item as any)?.role;
-    if (role !== 'assistant') continue;
-
-    const contentParts = (item as any)?.content;
-    if (!Array.isArray(contentParts)) continue;
-
-    for (const part of contentParts) {
-      if (part?.type === 'output_text' && typeof part.text === 'string') {
-        const formatted = part.text.trim();
-        if (formatted.length > 0) {
-          segments.push(formatted);
-        }
-      }
-    }
-  }
-
-  if (segments.length === 0) return '';
-
-  return segments.join('\n\n');
 }
 
 function extractErrorMessage(result: ResponsesPayload): string | undefined {
@@ -287,46 +247,16 @@ function recordResponsesUsage(result: ResponsesPayload, images: number = 0): voi
 
 function buildOpenAIResponseFromResult(
   result: ResponsesPayload,
-  elapsedSeconds: string,
   convo: UniversalMessage[],
 ): OpenAIResponse {
   const images = extractImagesFromResponse(result);
 
   recordResponsesUsage(result, images.length);
-  const reasoningItem = result.output.find(isReasoningItem);
-
-  let thinkingData: string | undefined;
-  if (reasoningItem) {
-    try {
-      thinkingData = reasoningItem.summary
-        .map((t: ResponseReasoningItem.Summary) => t.text)
-        .join('');
-    } catch (err) {
-      console.warn('Failed to read reasoning summary', err);
-    }
-  }
-
-  const rawOutputText = extractAssistantOutputText(result);
+  const rawOutputText = extractOpenAIResponseText(result);
   const hasText = rawOutputText.length > 0;
-  let responseText: string | undefined;
+  const responseText = hasText ? rawOutputText : undefined;
 
-  if (hasText) {
-    const baseResponse = `${rawOutputText}\n\n*Thought for ${elapsedSeconds} seconds*`;
-
-    if (
-      thinkingData &&
-      baseResponse.length + thinkingData.length + 10 <= 2000
-    ) {
-      responseText =
-        '```' +
-        thinkingData +
-        '```\n' +
-        rawOutputText +
-        `\n\n*Thought for ${elapsedSeconds} seconds*`;
-    } else {
-      responseText = baseResponse;
-    }
-  } else if (!hasText && images.length === 0) {
+  if (!hasText && images.length === 0) {
     const errorMessage = extractErrorMessage(result);
     if (errorMessage) {
       return { error: errorMessage };
@@ -475,7 +405,7 @@ async function formatTranscriptionText(rawTranscript: string, userId: string): P
 
     recordResponsesUsage(result);
 
-    const formatted = stripSurroundingCodeFence(extractAssistantOutputText(result));
+    const formatted = stripSurroundingCodeFence(extractOpenAIResponseText(result));
 
     if (formatted.length === 0) {
         const errorMessage = extractErrorMessage(result);
@@ -597,8 +527,6 @@ async function masterOpenAIHandler(
             return { messagesForInput: roleMsgs, previousResponseId: prevId };
           })();
 
-          const t0 = Date.now();
-
           // Create the request params
           const requestParams: ResponsesCreateParams = {
             model,
@@ -608,7 +536,6 @@ async function masterOpenAIHandler(
             user: msg.author.id,
             reasoning: {
               effort: 'high',
-              summary: 'auto',
             },
             tools: [
               { type: 'image_generation', moderation: 'low' },
@@ -625,8 +552,7 @@ async function masterOpenAIHandler(
           const rawResult = await aiClient.responses.create(requestParams);
           const result = toNonStreamingResponse(rawResult);
 
-          const secs = ((Date.now() - t0) / 1000).toFixed(1);
-          return buildOpenAIResponseFromResult(result, secs, convo);
+          return buildOpenAIResponseFromResult(result, convo);
         }
 
         const chatMsgs = convo.filter(
@@ -1400,7 +1326,7 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
             if (!isStreamResponse(rawResult)) {
                 const result = toNonStreamingResponse(rawResult);
                 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-                const payload = buildOpenAIResponseFromResult(result, elapsed, []);
+                const payload = buildOpenAIResponseFromResult(result, []);
 
                 if (payload.error) {
                     await updateProgress({
@@ -1506,7 +1432,7 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
             }
 
             const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-            const payload = buildOpenAIResponseFromResult(finalResponse, elapsed, []);
+            const payload = buildOpenAIResponseFromResult(finalResponse, []);
 
             if (payload.error) {
                 logResponseSummary('Empty streamed response payload', finalResponse);
@@ -1784,7 +1710,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             if (!isStreamResponse(rawResult)) {
                 const result = toNonStreamingResponse(rawResult);
                 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-                const payload = buildOpenAIResponseFromResult(result, elapsed, []);
+                const payload = buildOpenAIResponseFromResult(result, []);
 
                 if (payload.error) {
                     return { completed: false, errorText: payload.error };
@@ -1881,7 +1807,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             }
 
             const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-            const payload = buildOpenAIResponseFromResult(finalResponse, elapsed, []);
+            const payload = buildOpenAIResponseFromResult(finalResponse, []);
 
             if (payload.error) {
                 logResponseSummary('Empty streamed response payload', finalResponse);
