@@ -742,6 +742,10 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /at most three identity-critical people/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /user-supplied start image/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /source image as the sole authority/);
+    assert.match(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, /generic wide-eyed, bulging-eyed, or toothy expression/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /preserve observed facial anatomy rather than a generic genre face/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /restat(?:e|ing) this concrete source identity in every shot after a cut/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Preserve information state across reveals/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /before that knowledge/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Every hard scene change/);
