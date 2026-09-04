@@ -982,6 +982,106 @@ test('broker preserves an interrupted job at the front while paused', async () =
     }
 });
 
+test('broker restarts preserve an active render lease while dispatch is drained', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-broker-restart-'));
+    const options = {
+        host: '127.0.0.1',
+        port: 0,
+        dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+    };
+    let broker = new VideoBroker(options);
+    let socket;
+    let base;
+    const connect = async (currentJob = null, currentLease = null) => {
+        const connectedSocket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(connectedSocket);
+        await new Promise((resolve, reject) => {
+            connectedSocket.once('open', resolve);
+            connectedSocket.once('error', reject);
+        });
+        connectedSocket.send(JSON.stringify({
+            type: 'hello',
+            protocol: 1,
+            worker_id: 'persistent-render-worker',
+            capabilities: ['minimax'],
+            current_job: currentJob,
+            current_lease: currentLease,
+        }));
+        return { socket: connectedSocket, take };
+    };
+
+    try {
+        await broker.start();
+        base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const submitted = await fetch(`${base}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'minimax',
+                prompt: 'A continuous active render survives a broker deployment.',
+                requester_id: 'broker-restart-user',
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: 'broker-restart-message',
+                status_message_id: 'broker-restart-status',
+            }),
+        });
+        assert.equal(submitted.status, 201);
+        const jobId = (await submitted.json()).job.id;
+
+        let connection = await connect();
+        socket = connection.socket;
+        const initialAck = await connection.take(value => value.type === 'hello_ack');
+        assert.equal(initialAck.resume_current_job, false);
+        const leased = await connection.take(value => value.type === 'job');
+        assert.equal(leased.job.id, jobId);
+
+        const drained = await fetch(`${base}/v1/control/drain`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ actor_id: 'deploy-bots.sh' }),
+        });
+        assert.equal(drained.status, 200);
+        const drainedState = (await drained.json()).state;
+        assert.equal(drainedState.dispatch_paused, true);
+        assert.equal(drainedState.current_job, jobId);
+
+        await broker.stop();
+        broker = null;
+        socket = null;
+
+        broker = new VideoBroker(options);
+        await broker.start();
+        base = `http://127.0.0.1:${broker.listeningPort()}`;
+        connection = await connect(jobId, leased.job.lease_id);
+        socket = connection.socket;
+        const resumedAck = await connection.take(value => value.type === 'hello_ack');
+        assert.equal(resumedAck.resume_current_job, true);
+        assert.equal(resumedAck.state.dispatch_paused, true);
+        assert.equal(resumedAck.state.current_job, jobId);
+        assert.equal(resumedAck.state.worker_busy, true);
+
+        const control = await fetch(`${base}/v1/control`, {
+            headers: { authorization: 'Bearer bot-secret' },
+        });
+        assert.equal(control.status, 200);
+        const recoveredState = await control.json();
+        assert.equal(recoveredState.active_jobs, 1);
+        assert.equal(recoveredState.current_job, jobId);
+        assert.equal(recoveredState.worker_online, true);
+    } finally {
+        if (socket) socket.close();
+        if (broker) await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('worker restarts reuse the stored frontier plan only after lease reconciliation', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-restart-plan-'));
     let plannerCalls = 0;

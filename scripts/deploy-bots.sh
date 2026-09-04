@@ -8,12 +8,13 @@ NODE_VERSION="${NODE_VERSION:-22}"
 INSTALL_DEPS="${INSTALL_DEPS:-0}"
 ALLOW_DIRTY_YARN_LOCK="${ALLOW_DIRTY_YARN_LOCK:-1}"
 VIDEO_DRAIN_TIMEOUT_SECONDS="${VIDEO_DRAIN_TIMEOUT_SECONDS:-3600}"
+VIDEO_BROKER_RECOVERY_TIMEOUT_SECONDS="${VIDEO_BROKER_RECOVERY_TIMEOUT_SECONDS:-120}"
 DEPLOY_VIDEO_BROKER="${DEPLOY_VIDEO_BROKER:-0}"
 
 usage() {
     echo "Usage: $0 [--bots-only|--with-broker]"
     echo "  --bots-only    Restart dave and slug-bot only (default)."
-    echo "  --with-broker  Drain video work and also restart video-broker."
+    echo "  --with-broker  Pause new video dispatch, restart video-broker, and preserve an active render."
 }
 
 if [ "$#" -gt 1 ]; then
@@ -39,7 +40,7 @@ if [ "$DEPLOY_VIDEO_BROKER" != "0" ] && [ "$DEPLOY_VIDEO_BROKER" != "1" ]; then
 fi
 
 ssh "$REMOTE_HOST" \
-    "REMOTE_MASTER_DIR='$REMOTE_MASTER_DIR' REMOTE_SLUGS_DIR='$REMOTE_SLUGS_DIR' NODE_VERSION='$NODE_VERSION' INSTALL_DEPS='$INSTALL_DEPS' ALLOW_DIRTY_YARN_LOCK='$ALLOW_DIRTY_YARN_LOCK' VIDEO_DRAIN_TIMEOUT_SECONDS='$VIDEO_DRAIN_TIMEOUT_SECONDS' DEPLOY_VIDEO_BROKER='$DEPLOY_VIDEO_BROKER' bash -s" <<'REMOTE'
+    "REMOTE_MASTER_DIR='$REMOTE_MASTER_DIR' REMOTE_SLUGS_DIR='$REMOTE_SLUGS_DIR' NODE_VERSION='$NODE_VERSION' INSTALL_DEPS='$INSTALL_DEPS' ALLOW_DIRTY_YARN_LOCK='$ALLOW_DIRTY_YARN_LOCK' VIDEO_DRAIN_TIMEOUT_SECONDS='$VIDEO_DRAIN_TIMEOUT_SECONDS' VIDEO_BROKER_RECOVERY_TIMEOUT_SECONDS='$VIDEO_BROKER_RECOVERY_TIMEOUT_SECONDS' DEPLOY_VIDEO_BROKER='$DEPLOY_VIDEO_BROKER' bash -s" <<'REMOTE'
 set -euo pipefail
 
 SSH_SESSION_PID="$PPID"
@@ -155,7 +156,12 @@ restart_video_broker() {
 
 video_control() {
     local endpoint="$1"
-    VIDEO_CONTROL_ENDPOINT="$endpoint" node --input-type=module <<'NODE'
+    local output_mode="${2:-default}"
+    VIDEO_CONTROL_ENDPOINT="$endpoint" \
+        VIDEO_CONTROL_OUTPUT_MODE="$output_mode" \
+        VIDEO_EXPECT_WORKER_ONLINE="${VIDEO_EXPECT_WORKER_ONLINE:-0}" \
+        VIDEO_EXPECT_CURRENT_JOB="${VIDEO_EXPECT_CURRENT_JOB:-}" \
+        node --input-type=module <<'NODE'
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -165,6 +171,7 @@ const file = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8'
 const base = (process.env.VIDEO_BROKER_URL || file.brokerUrl || 'http://127.0.0.1:8765').replace(/\/$/, '');
 const token = process.env.VIDEO_BROKER_BOT_TOKEN || file.botToken || '';
 const endpoint = process.env.VIDEO_CONTROL_ENDPOINT;
+const outputMode = process.env.VIDEO_CONTROL_OUTPUT_MODE || 'default';
 if (!token || !endpoint) throw new Error('Video broker control is not configured.');
 const isRead = endpoint === '/v1/control';
 const response = await fetch(base + endpoint, {
@@ -183,10 +190,21 @@ const body = await response.json().catch(() => ({}));
 if (!response.ok) throw new Error(body.error || `Video broker returned HTTP ${response.status}.`);
 const state = body.state || body;
 if (isRead) {
-    const idle = Number(state.active_jobs || 0) === 0
-        && !state.worker_busy
-        && !state.preparation_busy;
-    console.log(idle ? 'idle' : 'busy');
+    if (outputMode === 'snapshot') {
+        console.log([
+            state.worker_online ? '1' : '0',
+            state.current_job || '-',
+        ].join(' '));
+    } else if (outputMode === 'recovery') {
+        const expectedOnline = process.env.VIDEO_EXPECT_WORKER_ONLINE === '1';
+        const expectedJob = process.env.VIDEO_EXPECT_CURRENT_JOB || '';
+        const activeJobs = Number(state.active_jobs || 0);
+        const workerRecovered = !expectedOnline || Boolean(state.worker_online);
+        const leaseRecovered = !expectedJob || activeJobs === 0 || state.current_job === expectedJob;
+        console.log(workerRecovered && leaseRecovered ? 'ready' : 'waiting');
+    } else {
+        console.log('ready');
+    }
 } else {
     console.log('supported');
 }
@@ -195,6 +213,8 @@ NODE
 
 VIDEO_DISPATCH_DRAINED=0
 VIDEO_LEGACY_DRAINED=0
+VIDEO_EXPECT_WORKER_ONLINE=0
+VIDEO_EXPECT_CURRENT_JOB=
 
 legacy_video_dispatch_drain() {
     (
@@ -234,8 +254,8 @@ resume_video_dispatch() {
     VIDEO_LEGACY_DRAINED=0
 }
 
-drain_video_dispatch() {
-    local result
+pause_video_dispatch() {
+    local result snapshot
     VIDEO_DISPATCH_DRAINED=1
     result="$(video_control /v1/control/drain)"
     if [ "$result" = "unsupported" ]; then
@@ -243,20 +263,42 @@ drain_video_dispatch() {
         legacy_video_dispatch_drain
         VIDEO_LEGACY_DRAINED=1
     fi
-    echo "Video dispatch drained; waiting for active rendering and preparation to finish."
-    local deadline=$((SECONDS + VIDEO_DRAIN_TIMEOUT_SECONDS))
-    while [ "$(video_control /v1/control)" != "idle" ]; do
+    snapshot="$(video_control /v1/control snapshot)"
+    read -r VIDEO_EXPECT_WORKER_ONLINE VIDEO_EXPECT_CURRENT_JOB <<<"$snapshot"
+    if [ "$VIDEO_EXPECT_CURRENT_JOB" = "-" ]; then
+        VIDEO_EXPECT_CURRENT_JOB=
+    fi
+    if [ -n "$VIDEO_EXPECT_CURRENT_JOB" ]; then
+        echo "Video dispatch paused; active render $VIDEO_EXPECT_CURRENT_JOB will continue during the broker restart."
+    else
+        echo "Video dispatch paused; no active render lease needs reconciliation."
+    fi
+}
+
+wait_for_video_broker_recovery() {
+    local deadline=$((SECONDS + VIDEO_BROKER_RECOVERY_TIMEOUT_SECONDS))
+    local result
+    echo "Waiting for video-broker recovery and worker lease reconciliation."
+    while true; do
         if ! kill -0 "$SSH_SESSION_PID" 2>/dev/null; then
-            echo "SSH session ended while waiting for the video pipeline; cancelling deployment." >&2
+            echo "SSH session ended while waiting for video-broker recovery; cancelling deployment." >&2
             exit 1
+        fi
+        result="$(video_control /v1/control recovery 2>/dev/null)" || result=waiting
+        if [ "$result" = "ready" ]; then
+            break
         fi
         if [ "$SECONDS" -ge "$deadline" ]; then
-            echo "Timed out waiting for the video pipeline to become idle." >&2
+            echo "Timed out waiting for video-broker recovery and worker lease reconciliation." >&2
             exit 1
         fi
-        sleep 5
+        sleep 2
     done
-    echo "Video pipeline is idle."
+    if [ -n "$VIDEO_EXPECT_CURRENT_JOB" ]; then
+        echo "Active render lease reconciled after broker restart."
+    else
+        echo "Video broker is ready after restart."
+    fi
 }
 
 load_node
@@ -265,7 +307,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 if [ "$DEPLOY_VIDEO_BROKER" = "1" ]; then
-    drain_video_dispatch
+    pause_video_dispatch
 else
     echo "Bot-only deployment; video-broker and active renders will not be touched."
 fi
@@ -273,6 +315,7 @@ deploy_repo "$REMOTE_MASTER_DIR" master
 deploy_repo "$REMOTE_SLUGS_DIR" slugs
 if [ "$DEPLOY_VIDEO_BROKER" = "1" ]; then
     restart_video_broker
+    wait_for_video_broker_recovery
 fi
 restart_app dave
 restart_app slug-bot
