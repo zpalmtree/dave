@@ -147,6 +147,14 @@ the final quality gate still rejects every structurally valid candidate, the
 worker compares the best model-authored near-pass with the deterministic semantic
 fallback and renders the one with fewer reported fidelity issues.
 
+When a user-supplied image accompanies a policy-routed request, the local
+analyzer, planner, and quality gate all treat the pictured subject as the
+protagonist. A requested look, persona, or archetype restyles that same person
+through a visible in-shot change that starts from the immutable source frame,
+instead of recasting a different subject that the frame-zero rule can never
+show. The gate accepts the restyle once the pictured subject visibly acquires it
+with the same face.
+
 ## Optimization experiments
 
 Production remains on Sol and uses the review-gated `fast-gated-v3` first-frame
