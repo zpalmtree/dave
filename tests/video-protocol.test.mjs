@@ -781,6 +781,8 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /narrative_adaptation/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /rigid_artifact/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Treat visible language as quoted source material/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Frame-zero immutability constrains only the instant/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /stationary subject is compatible with a motivated pull-back/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /first-person confession/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Unquoted third-person narrative or scene prose is visual direction/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /does not ask a narrator to recite that sentence/);
