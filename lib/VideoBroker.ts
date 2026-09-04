@@ -841,17 +841,25 @@ function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: num
             reason: independentlyLabeled
                 ? `Anchor the independently selected identity ${overlayLabel}.`
                 : `Preserve the recurring cast across the ${segment.transition} into ${title}.`,
-            prompt: hasExplicitContract ? explicitPrompt : [
-                `Opening still for segment ${segmentIndex}, ${title}: ${visual}`,
-                `Camera and framing: ${camera}.`,
-                independentlyLabeled
-                    ? `Depict ${overlayLabel} as the only selected identity; reserve a blank opaque nameplate with no readable text for postproduction.`
-                    : 'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
-                independentlyLabeled
-                    ? 'Do not copy the preceding segment identity.'
-                    : 'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.',
-                'Show one frozen, motion-ready instant at 0.00 seconds of this segment.',
-            ].join(' '),
+            prompt: [
+                hasExplicitContract ? explicitPrompt : [
+                    `Opening still for segment ${segmentIndex}, ${title}: ${visual}`,
+                    `Camera and framing: ${camera}.`,
+                    independentlyLabeled
+                        ? `Depict ${overlayLabel} as the only selected identity; reserve a blank opaque nameplate with no readable text for postproduction.`
+                        : 'Use the supplied identity reference to depict the same recognizable recurring person or people in this new shot composition.',
+                    independentlyLabeled
+                        ? 'Do not copy the preceding segment identity.'
+                        : 'Preserve their facial identity, body proportions, hair, skin tone, and defining appearance while placing them in the pose, wardrobe, environment, lighting, and action required by this segment.',
+                    'Show one frozen, motion-ready instant at 0.00 seconds of this segment.',
+                ].join(' '),
+                independentlyLabeled ? '' : (
+                    'Treat the supplied identity reference as the sole authority for facial anatomy: '
+                    + 'match its eye aperture, eye shape and spacing, iris and pupil scale, nose and '
+                    + 'nostril shape, cheek contour, lip proportions, jaw width, and chin silhouette. '
+                    + 'A new rendering style must not replace these features with generic face anatomy.'
+                ),
+            ].filter(Boolean).join(' '),
             reference_requirements: [],
             motion_contract: hasExplicitContract ? {
                 subject_orientation: String(explicitMotion.subject_orientation).trim(),
@@ -3184,8 +3192,10 @@ export class VideoBroker {
             label: 'Recurring cast identity from frame zero',
             kind: 'identity',
             visualFactsToPreserve: (
-                'Preserve the recognizable facial identity, body proportions, hair, skin tone, '
-                + 'and defining appearance of each recurring person shown in this reference.'
+                'Use this frame as the sole authority for each recurring face. Preserve the exact '
+                + 'eye aperture, eye shape and spacing, iris and pupil scale, nose and nostril shape, '
+                + 'cheek volume and contour, lip proportions, jaw width, chin silhouette, body '
+                + 'proportions, hair, skin tone, and defining appearance; style is not anatomy.'
             ),
             bytes: readFileSync(path),
             mimeType: mimeType as VideoKeyframeReference['mimeType'],
