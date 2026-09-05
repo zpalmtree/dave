@@ -269,3 +269,29 @@ test('commit polling preserves PR progress across restarts', async () => {
     const result = await planEmbeds({ ...state({ main: 'a' }), lastPullRequestNumber: 4 }, repo, thread, async () => [branch('main', 'a')]);
     assert.equal(result.lastPullRequestNumber, 4);
 });
+
+const { pullRequestLinks, previewPullRequests } = await import('../dist/GitHubCommitWatch.js');
+test('PR links are restricted to configured repository, deduplicated and capped', () => {
+    assert.deepEqual(pullRequestLinks('https://github.com/Xazware/Pooners/pull/4 https://github.com/Xazware/Pooners/pull/4/files https://github.com/other/private/pull/5 https://github.com/Xazware/Pooners/pull/6#discussion https://github.com/Xazware/Pooners/pull/7 https://github.com/Xazware/Pooners/pull/8', repo), [4, 6, 7]);
+    assert.deepEqual(pullRequestLinks('<https://github.com/Xazware/Pooners/pull/4> https://github.com.evil.test/Xazware/Pooners/pull/5', repo), []);
+});
+test('private PR preview shows live status, author, branches, body and avatar', async () => {
+    const embeds = await previewPullRequests('https://github.com/Xazware/Pooners/pull/4', repo, async path => {
+        assert.equal(path, '/pulls/4');
+        return { ...openedPR(4), merged_at: '2026-09-05', state: 'closed', body: 'Adds settings.' };
+    });
+    assert.equal(embeds.length, 1);
+    assert.equal(embeds[0].title, 'PR #4: Add settings');
+    assert.match(embeds[0].description, /Merged.*dev/);
+    assert.match(embeds[0].description, /Adds settings/);
+    assert.equal(embeds[0].color, 0x8957e5);
+    assert.ok(embeds[0].thumbnail);
+});
+test('unavailable PR previews are skipped without stopping other previews', async () => {
+    const embeds = await previewPullRequests('https://github.com/Xazware/Pooners/pull/4 https://github.com/Xazware/Pooners/pull/5', repo, async path => {
+        if (path === '/pulls/4') throw new Error('GitHub HTTP 404');
+        return openedPR(5);
+    });
+    assert.equal(embeds.length, 1);
+    assert.match(embeds[0].title, /#5/);
+});

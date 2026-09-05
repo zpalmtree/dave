@@ -75,3 +75,11 @@ PR-number watermark survives restarts and prevents repeat notifications. Checks
 include closed PRs so PRs opened and closed/merged between polls are still shown,
 with their current status noted. Reopening or editing an existing PR does not
 produce another opening notification. This requires Pull requests: read access.
+
+Human-posted GitHub PR links in the configured thread receive a reply with a
+private-repository preview: title/link, current status, author avatar, branches,
+and a short description. Only the configured repository is expanded. Bot messages
+are ignored, repeated links in one message are deduplicated, and at most three
+PRs are previewed per message. Angle-bracket links (`<https://...>`) suppress
+previews. Preview replies never ping the sender. No public OpenGraph service is
+used, and private PR details are not expanded in other channels.
