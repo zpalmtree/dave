@@ -2,7 +2,9 @@
 
 The bot polls every 60 seconds after each completed check. It watches every branch
 (including the default branch), discovers new branches, and posts commit links,
-first-line summaries, authors, and branch names. Mentions are disabled.
+first-line summaries, authors, and branch names in grouped Discord embeds.
+Merge updates use purple accents; ordinary updates use blue. Large batches split
+into bounded pages. Mentions are disabled. The bot needs Embed Links permission.
 
 Merged PRs receive a prominent line such as **xaz merged branch
 codex/title-harpoon-transition into main**, followed by a PR link. The actor is
@@ -11,8 +13,16 @@ and rebase merges when the resulting SHA matches GitHub's merged PR record.
 Only the PR's destination branch receives that announcement; an older merge
 carried into another branch is labeled as a merge commit. Direct Git merge
 commits use the branch names in the standard Git subject when available, and
-otherwise receive a generic merge label. Fast-forward merges without a PR have
-no distinct merge record and remain ordinary commit posts.
+otherwise receive a generic merge label.
+
+Fast-forward updates without a PR are highlighted when the added commits include
+another previously tracked branch tip. This also works if that source branch has
+since advanced or been deleted. The embed names the source and destination and
+labels the inference; it does not guess who performed the merge from commit
+authorship. Git cannot distinguish a fast-forward merge from another ref update
+that produces identical history. Previously unseen source branches, or branches
+created and merged entirely between polls, cannot be reliably identified.
+Rewritten history and newly created destination branches do not use this inference.
 
 Configuration is read from `~/.config/dave-github-watch.json`, or the path in
 `GITHUB_WATCH_CONFIG_FILE`:
@@ -52,3 +62,5 @@ The bot must have access to the thread and permission to send messages in it.
 Archived threads are reopened when there is an update; locked threads may require
 additional Discord permissions. Configuration and API failures appear in PM2 logs
 with the `[GitHub watch]` prefix. No webhook or public inbound endpoint is needed.
+
+Existing text outbox entries remain deliverable after the embed migration.

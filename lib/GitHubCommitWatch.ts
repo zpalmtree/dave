@@ -1,4 +1,4 @@
-import { Client, escapeMarkdown } from 'discord.js';
+import { APIEmbed, Client, escapeMarkdown, MessageCreateOptions } from 'discord.js';
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
@@ -24,8 +24,14 @@ export interface WatchState {
     repository: string;
     threadId: string;
     heads: Record<string, string>;
-    pending: string[];
+    pending: WatchNotification[];
 }
+export type WatchNotification = string | { embeds: APIEmbed[] };
+
+export function notificationOptions(notification: WatchNotification): MessageCreateOptions {
+    return { ...(typeof notification === 'string' ? { content: notification } : notification), allowedMentions: { parse: [] } };
+}
+
 type Request = (path: string) => Promise<any>;
 
 export async function listBranches(request: Request): Promise<Branch[]> {
@@ -89,7 +95,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
     if (!state) return { repository, threadId, heads, pending: [] };
     if (state.repository !== repository || state.threadId !== threadId) throw new Error('Watch state destination differs from configuration. Use a new state file.');
     if (state.pending.length) throw new Error('Deliver pending messages before polling.');
-    const pending: string[] = [];
+    const pending: WatchNotification[] = [];
     let defaultBranch: string | undefined;
     const formatMerge = mergeFormatter(repository, request);
     for (const branch of branches) {
@@ -101,13 +107,16 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             defaultBranch ??= (await request('')).default_branch;
             base = state.heads[defaultBranch!] || heads[defaultBranch!];
         }
-        const prefix = `**${plain(repository, 150)} · ${plain(branch.name, 180)}**`;
+        const entries: string[] = [];
+        const mergeLabels: string[] = [];
         const commits: Commit[] = [];
         let rewritten = false;
+        let ahead = false;
         if (base && base !== head) {
             try {
                 for (let page = 1; ; page++) {
                     const comparison = await request(`/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=100&page=${page}`);
+                    ahead = comparison.status === 'ahead';
                     rewritten = comparison.status === 'diverged' || comparison.status === 'behind';
                     commits.push(...comparison.commits);
                     if (comparison.commits.length < 100) break;
@@ -119,12 +128,48 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             }
         }
         if (!previous || rewritten || !commits.length) {
-            pending.push(`${prefix}\n${!previous ? 'New branch' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
+            entries.push(`${!previous ? 'New branch' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
         }
         for (const commit of commits) {
             const merge = await formatMerge(commit, branch.name);
-            const content = `${prefix}\n${merge ? `${merge}\n` : ''}[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${plain(commit.commit.message.split('\n')[0], 1000)} — ${plain(commit.commit.author?.name || 'Unknown author', 150)}`;
-            pending.push(content.length > 2000 ? `${content.slice(0, 1999)}…` : content);
+            if (merge) mergeLabels.push(merge);
+            const content = `[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${plain(commit.commit.message.split('\n')[0], 1000)} — ${plain(commit.commit.author?.name || 'Unknown author', 150)}`;
+            entries.push(content.length > 2000 ? `${content.slice(0, 1999)}…` : content);
+        }
+        // Only pre-existing branch tips provide evidence of integration. Matching newly
+        // created refs could just be a branch being created from the destination.
+        const added = new Set(commits.map(commit => commit.sha));
+        const sources = previous && ahead && !rewritten
+            ? Object.entries(state.heads).filter(([name, sha]) => name !== branch.name && added.has(sha)).map(([name]) => name)
+            : [];
+        if (sources.length) {
+            mergeLabels.push(`🔀 **Branch integration detected: ${sources.map(name => plain(name, 180)).join(', ')} → ${plain(branch.name, 180)}**`);
+        }
+        const title = `${mergeLabels.length ? '🔀 Branch merge' : 'Commits'} · ${branch.name}`.slice(0, 256);
+        const sections = [...mergeLabels, ...entries];
+        const pages: string[] = [];
+        let description = '';
+        for (const section of sections) {
+            // Each individual section is bounded too (e.g. hundreds of matching refs).
+            for (let offset = 0; offset < section.length; offset += 3800) {
+                const part = section.slice(offset, offset + 3800);
+                if (description && description.length + part.length + 2 > 3800) {
+                    pages.push(description);
+                    description = '';
+                }
+                description += `${description ? '\n\n' : ''}${part}`;
+            }
+        }
+        if (description) pages.push(description);
+        for (const [index, description] of pages.entries()) {
+            pending.push({ embeds: [{
+                title,
+                url: previous ? `https://github.com/${repository}/compare/${previous}...${head}` : `https://github.com/${repository}/commit/${head}`,
+                author: { name: repository.slice(0, 256), url: `https://github.com/${repository}` },
+                color: mergeLabels.length ? 0x8957e5 : 0x2f81f7,
+                description,
+                footer: { text: `${commits.length} commit${commits.length === 1 ? '' : 's'}${sources.length ? ` • ${commits.some(commit => (commit.parents?.length || 0) > 1) ? 'Integration' : 'Fast-forward'} inferred from tracked branch tips; merger unknown` : ''}${pages.length > 1 ? ` • Page ${index + 1}/${pages.length}` : ''}` },
+            }] });
         }
     }
     return { repository, threadId, heads, pending };
@@ -136,7 +181,7 @@ export async function saveState(path: string, state: WatchState): Promise<void> 
     await fs.rename(`${path}.tmp`, path);
 }
 
-export async function deliverPending(state: WatchState, send: (content: string) => Promise<unknown>, save: () => Promise<void>): Promise<void> {
+export async function deliverPending(state: WatchState, send: (content: WatchNotification) => Promise<unknown>, save: () => Promise<void>): Promise<void> {
     while (state.pending.length) {
         await send(state.pending[0]);
         state.pending.shift();
@@ -178,9 +223,9 @@ export function startGitHubCommitWatch(client: Client): void {
                 try { state = JSON.parse(await fs.readFile(statePath, 'utf8')); }
                 catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
                 if (state && (state.repository !== repository || state.threadId !== threadId)) throw new Error('Watch state destination differs from configuration.');
-                const send = async (content: string) => {
+                const send = async (content: WatchNotification) => {
                     if (channel.archived) await channel.setArchived(false);
-                    return channel.send({ content, allowedMentions: { parse: [] } });
+                    return channel.send(notificationOptions(content));
                 };
                 if (state) await deliverPending(state, send, () => saveState(statePath, state!));
                 const initialized = Boolean(state);
