@@ -4,6 +4,16 @@ The bot polls every 60 seconds after each completed check. It watches every bran
 (including the default branch), discovers new branches, and posts commit links,
 first-line summaries, authors, and branch names. Mentions are disabled.
 
+Merged PRs receive a prominent line such as **xaz merged branch
+codex/title-harpoon-transition into main**, followed by a PR link. The actor is
+GitHub's `merged_by` user, not the PR author or commit author. This includes squash
+and rebase merges when the resulting SHA matches GitHub's merged PR record.
+Only the PR's destination branch receives that announcement; an older merge
+carried into another branch is labeled as a merge commit. Direct Git merge
+commits use the branch names in the standard Git subject when available, and
+otherwise receive a generic merge label. Fast-forward merges without a PR have
+no distinct merge record and remain ordinary commit posts.
+
 Configuration is read from `~/.config/dave-github-watch.json`, or the path in
 `GITHUB_WATCH_CONFIG_FILE`:
 
@@ -18,7 +28,9 @@ Configuration is read from `~/.config/dave-github-watch.json`, or the path in
 
 Keep this file outside Git with mode 0600. Only the matching bot user starts the
 watcher, so both deployment tracks can share this file without duplicate posts.
-A fine-grained GitHub token needs access to this repository with Contents: read.
+A fine-grained GitHub token needs access to this repository with Contents: read
+and Pull requests: read for merge details. Without PR access, commit tracking
+continues with merge-commit labels and a warning in the logs.
 If the account is an outside collaborator and cannot select this repository for
 a fine-grained token, use an appropriate classic token or a GitHub App installed
 by the repository owner. Restart the bot after changing configuration.

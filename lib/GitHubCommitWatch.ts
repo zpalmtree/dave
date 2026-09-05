@@ -5,7 +5,20 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 
 interface Branch { name: string; commit: { sha: string } }
-interface Commit { sha: string; commit: { message: string; author: { name: string } | null } }
+interface Commit {
+    sha: string;
+    parents?: { sha: string }[];
+    committer?: { login: string } | null;
+    commit: { message: string; author: { name: string } | null; committer?: { name: string } | null };
+}
+interface PullRequest {
+    number: number;
+    merged_at: string | null;
+    merge_commit_sha: string | null;
+    merged_by?: { login: string } | null;
+    head: { ref: string };
+    base: { ref: string };
+}
 interface Settings { token: string; botUserId: string; repository: string; threadId: string }
 export interface WatchState {
     repository: string;
@@ -26,6 +39,50 @@ export async function listBranches(request: Request): Promise<Branch[]> {
 
 const plain = (value: string, limit: number) => escapeMarkdown(value.replace(/[\r\n]+/g, ' ').slice(0, limit));
 
+// Resolve PR metadata once per SHA per poll, even when it appears on several branches.
+function mergeFormatter(repository: string, request: Request) {
+    const cache = new Map<string, PullRequest[]>();
+    let pullAccess = true;
+    return async (commit: Commit, destination: string): Promise<string | undefined> => {
+        let pulls = cache.get(commit.sha);
+        if (!pulls && pullAccess) {
+            pulls = [];
+            try {
+                for (let page = 1; ; page++) {
+                    const batch: PullRequest[] = await request(`/commits/${encodeURIComponent(commit.sha)}/pulls?per_page=100&page=${page}`);
+                    pulls.push(...batch);
+                    if (batch.length < 100) break;
+                }
+                cache.set(commit.sha, pulls);
+            } catch (error) {
+                // Missing PR permission must not disable ordinary commit tracking.
+                if (![403, 404].includes((error as { status?: number }).status || 0)) throw error;
+                pullAccess = false;
+                console.warn('[GitHub watch] PR metadata unavailable; using merge-commit labels. Token needs Pull requests: read.');
+            }
+        }
+        const pull = pulls?.find(pr => pr.merged_at && pr.merge_commit_sha === commit.sha && pr.base.ref === destination);
+        if (pull) {
+            const detail: PullRequest = await request(`/pulls/${pull.number}`);
+            const actor = detail.merged_by?.login;
+            const action = actor ? `${plain(actor, 100)} merged branch` : 'Merged branch';
+            return `🔀 **${action} ${plain(pull.head.ref, 180)} into ${plain(pull.base.ref, 180)}**\n[PR #${pull.number}](https://github.com/${repository}/pull/${pull.number})`;
+        }
+        if ((commit.parents?.length || 0) < 2) return undefined;
+        // An older PR merge carried into another branch is not a new PR merge there.
+        if (pulls?.some(pr => pr.merged_at && pr.merge_commit_sha === commit.sha)) return '🔀 **Merge commit**';
+        const subject = commit.commit.message.split('\n')[0];
+        const local = /^Merge (?:remote-tracking )?branch '([^']+)'(?: into (.+))?$/.exec(subject);
+        if (local) {
+            const actor = commit.committer?.login || commit.commit.committer?.name;
+            // Without an explicit target, Git's subject cannot prove the original destination.
+            const target = local[2] ? ` into ${plain(local[2], 180)}` : '';
+            return `🔀 **${actor ? `${plain(actor, 100)} merged branch` : 'Merged branch'} ${plain(local[1], 180)}${target}**`;
+        }
+        return '🔀 **Merge commit**';
+    };
+}
+
 export async function planUpdates(state: WatchState | undefined, repository: string, threadId: string, request: Request): Promise<WatchState> {
     const branches = await listBranches(request);
     const heads = Object.fromEntries(branches.map(branch => [branch.name, branch.commit.sha]));
@@ -34,6 +91,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
     if (state.pending.length) throw new Error('Deliver pending messages before polling.');
     const pending: string[] = [];
     let defaultBranch: string | undefined;
+    const formatMerge = mergeFormatter(repository, request);
     for (const branch of branches) {
         const previous = state.heads[branch.name];
         const head = branch.commit.sha;
@@ -64,7 +122,9 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             pending.push(`${prefix}\n${!previous ? 'New branch' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
         }
         for (const commit of commits) {
-            pending.push(`${prefix}\n[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${plain(commit.commit.message.split('\n')[0], 1000)} — ${plain(commit.commit.author?.name || 'Unknown author', 150)}`);
+            const merge = await formatMerge(commit, branch.name);
+            const content = `${prefix}\n${merge ? `${merge}\n` : ''}[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${plain(commit.commit.message.split('\n')[0], 1000)} — ${plain(commit.commit.author?.name || 'Unknown author', 150)}`;
+            pending.push(content.length > 2000 ? `${content.slice(0, 1999)}…` : content);
         }
     }
     return { repository, threadId, heads, pending };
