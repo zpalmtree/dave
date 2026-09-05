@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planUpdates, deliverPending, listBranches } from '../dist/GitHubCommitWatch.js';
+import { planUpdates as planEmbeds, notificationOptions, deliverPending, listBranches } from '../dist/GitHubCommitWatch.js';
+// Existing detection checks inspect individual sections inside the grouped embeds.
+async function planUpdates(...args) {
+    const result = await planEmbeds(...args);
+    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split('\n\n'))) };
+}
 const repo = 'Xazware/Pooners';
 const thread = '1544486384629452831';
 const branch = (name, sha) => ({ name, commit: { sha } });
@@ -96,7 +101,7 @@ test('PR merges highlight actual merger, source, destination and link despite cu
     const result = await mergedUpdate();
     assert.match(result.pending[0], /🔀 \*\*xaz merged branch codex\/title-harpoon-transition into main\*\*/);
     assert.match(result.pending[0], /PR #4/);
-    assert.match(result.pending[0], /Custom title/);
+    assert.match(result.pending.join('\n'), /Custom title/);
     assert.doesNotMatch(result.pending[0], /git-committer merged/);
 });
 test('single-parent squash and rebase results receive PR merge highlights', async () => {
@@ -135,4 +140,71 @@ test('long commit summaries plus merge metadata fit Discord message limits', asy
     const result = await mergedUpdate({ subject: '*'.repeat(1000) });
     assert.ok(result.pending[0].length <= 2000);
     assert.match(result.pending[0], /xaz merged branch/);
+});
+
+async function integration({ oldHeads = { main: 'a', topic: 'c' }, branches = [branch('main', 'c'), branch('topic', 'c')], status = 'ahead', commits = [commit('b'), commit('c')] } = {}) {
+    return planEmbeds(state(oldHeads), repo, thread, async path => {
+        if (path.startsWith('/branches')) return branches;
+        if (path.includes('/pulls?')) return [];
+        if (path.startsWith('/compare')) return { status, commits };
+        if (!path) return { default_branch: 'main' };
+        throw new Error(`Unexpected request ${path}`);
+    });
+}
+test('fast-forward integration is highlighted in one purple embed with all commits', async () => {
+    const result = await integration();
+    assert.equal(result.pending.length, 1);
+    const embed = result.pending[0].embeds[0];
+    assert.equal(embed.color, 0x8957e5);
+    assert.match(embed.description, /topic → main/);
+    assert.match(embed.description, /commit\/b/);
+    assert.match(embed.description, /commit\/c/);
+    assert.match(embed.footer.text, /inferred.*merger unknown/);
+    assert.match(embed.url, /compare\/a\.\.\.c/);
+});
+test('integration still works after deleting or advancing the source branch', async () => {
+    for (const branches of [[branch('main', 'c')], [branch('main', 'c'), branch('topic', 'd')]]) {
+        const result = await integration({ branches });
+        assert.match(result.pending[0].embeds[0].description, /topic → main/);
+    }
+});
+test('ordinary pushes and rewritten history do not imply branch integrations', async () => {
+    for (const options of [{ oldHeads: { main: 'a' } }, { status: 'diverged' }]) {
+        const result = await integration(options);
+        assert.doesNotMatch(result.pending[0].embeds[0].description, /Branch integration/);
+        assert.equal(result.pending[0].embeds[0].color, 0x2f81f7);
+    }
+});
+test('new refs sharing the new destination tip are not mistaken for source branches', async () => {
+    const result = await integration({ oldHeads: { main: 'a' } });
+    assert.doesNotMatch(result.pending[0].embeds[0].description, /integration/);
+});
+test('large batches paginate embeds without dropping commits or exceeding Discord limits', async () => {
+    const commits = Array.from({ length: 80 }, (_, i) => ({ ...commit(`sha${i}`), commit: { message: '*'.repeat(1000), author: { name: 'Author' } } }));
+    const result = await integration({ oldHeads: { main: 'a' }, branches: [branch('main', 'z')], commits });
+    const text = result.pending.map(item => item.embeds[0].description).join('\n');
+    for (const c of commits) assert.ok(text.includes(`/commit/${c.sha})`));
+    for (const item of result.pending) {
+        const embed = item.embeds[0];
+        assert.ok(embed.description.length <= 4096);
+        assert.ok(embed.title.length <= 256);
+        assert.ok(embed.description.length + embed.title.length + embed.author.name.length + embed.footer.text.length <= 6000);
+    }
+});
+test('legacy text outbox entries and new embed entries both deliver with mentions disabled', async () => {
+    assert.deepEqual(notificationOptions('old pending message'), { content: 'old pending message', allowedMentions: { parse: [] } });
+    const result = await integration();
+    assert.deepEqual(notificationOptions(result.pending[0]).allowedMentions, { parse: [] });
+    const queued = { ...state({}), pending: ['legacy', result.pending[0]] };
+    const sent = [];
+    await deliverPending(queued, async item => sent.push(notificationOptions(item)), async () => {});
+    assert.equal(sent[0].content, 'legacy');
+    assert.ok(sent[1].embeds.length);
+    assert.equal(queued.pending.length, 0);
+});
+test('a subsequent merge in the same poll does not hide the earlier branch integration', async () => {
+    const merged = { ...commit('d'), parents: [{ sha: 'c' }, { sha: 'other' }] };
+    const result = await integration({ branches: [branch('main', 'd'), branch('topic', 'c')], commits: [commit('b'), commit('c'), merged] });
+    assert.match(result.pending[0].embeds[0].description, /topic → main/);
+    assert.match(result.pending[0].embeds[0].footer.text, /Integration inferred/);
 });
