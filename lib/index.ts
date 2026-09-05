@@ -11,6 +11,7 @@ import {
     tryDeleteMessage,
     tryReactMessage,
 } from './Utilities.js';
+import { startGitHubCommitWatch } from './GitHubCommitWatch.js';
 import { getDiscordLoginRetryDelay } from './DiscordRetry.js';
 
 import {
@@ -131,6 +132,7 @@ function createDiscordClient(db: sqlite3.Database): Client {
 
         restoreTimers(db, client);
         startVideoGenerationService(client);
+        startGitHubCommitWatch(client);
 
     });
 
