@@ -227,6 +227,42 @@ export async function planPullRequests(state: WatchState, request: Request): Pro
     return { ...state, lastPullRequestNumber: latest, pending };
 }
 
+export function pullRequestLinks(content: string, repository: string): number[] {
+    const numbers = new Set<number>();
+    for (const match of content.matchAll(/https:\/\/github\.com\/[^\s<>]+/gi)) {
+        // Respect Discord's explicit <url> preview suppression.
+        if (match.index !== undefined && content[match.index - 1] === '<') continue;
+        const url = new URL(match[0]);
+        const parts = url.pathname.split('/');
+        if (`${parts[1]}/${parts[2]}`.toLowerCase() !== repository.toLowerCase() || parts[3] !== 'pull') continue;
+        const number = /^([1-9]\d*)(?:[).,!?]*)$/.exec(parts[4] || '');
+        if (number && Number.isSafeInteger(Number(number[1]))) numbers.add(Number(number[1]));
+        if (numbers.size === 3) break;
+    }
+    return [...numbers];
+}
+
+export async function previewPullRequests(content: string, repository: string, request: Request): Promise<APIEmbed[]> {
+    const embeds: APIEmbed[] = [];
+    for (const number of pullRequestLinks(content, repository)) {
+        try {
+            const pull: OpenedPullRequest & { body?: string | null } = await request(`/pulls/${number}`);
+            const status = pull.merged_at ? 'Merged' : pull.state === 'closed' ? 'Closed' : pull.draft ? 'Draft' : 'Open';
+            const avatar = pull.user?.avatar_url;
+            embeds.push({
+                title: `PR #${number}: ${pull.title}`.slice(0, 256),
+                url: `https://github.com/${repository}/pull/${number}`,
+                color: pull.merged_at ? 0x8957e5 : pull.state === 'closed' ? 0xda3633 : 0x238636,
+                description: `**${status}** · ${plain(pull.user?.login || 'Unknown author', 70)}\n${plain(pull.head.ref, 100)} → ${plain(pull.base.ref, 100)}${pull.body?.trim() ? `\n\n${plain(pull.body.trim(), 350)}` : ''}`,
+                ...(avatar && /^https:\/\/avatars\.githubusercontent\.com\//.test(avatar) ? { thumbnail: { url: avatar } } : {}),
+            });
+        } catch (error) {
+            console.warn(`[GitHub watch] Could not preview PR #${number}: ${(error as Error).message}`);
+        }
+    }
+    return embeds;
+}
+
 export async function saveState(path: string, state: WatchState): Promise<void> {
     await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await fs.writeFile(`${path}.tmp`, JSON.stringify(state), { mode: 0o600 });
@@ -267,6 +303,13 @@ export function startGitHubCommitWatch(client: Client): void {
             if (!response.ok) throw Object.assign(new Error(`GitHub HTTP ${response.status}; check repository access, token expiry, and rate limits.`), { status: response.status });
             return response.json();
         };
+        client.on('messageCreate', message => {
+            if (message.author.bot || message.channelId !== threadId) return;
+            void (async () => {
+                const embeds = await previewPullRequests(message.content, repository, request);
+                if (embeds.length) await message.reply({ embeds, allowedMentions: { parse: [], repliedUser: false } });
+            })().catch(error => console.error('[GitHub watch] Link preview failed:', error.message));
+        });
         const poll = async () => {
             try {
                 const channel = await client.channels.fetch(threadId);
