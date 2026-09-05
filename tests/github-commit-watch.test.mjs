@@ -159,6 +159,8 @@ test('fast-forward integration is highlighted in one purple embed with all commi
     assert.equal(embed.author, undefined);
     assert.equal(embed.footer, undefined);
     assert.equal(embed.title, undefined);
+    assert.ok(embed.description.startsWith('**Branch ['));
+    assert.ok(embed.description.split('\n')[0].endsWith('**'));
     assert.ok(!embed.description.includes('\n\n'));
     assert.match(embed.description, /Branch \[topic\]\(https:\/\/github.com\/Xazware\/Pooners\/tree\/topic\) merged into main/);
     assert.match(embed.description, /commit\/b/);

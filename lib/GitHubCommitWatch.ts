@@ -145,7 +145,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
         if (sources.length) {
             for (const source of sources) {
                 if (mergeLabels.some(label => label.includes(plain(source, 180)))) continue;
-                mergeLabels.push(`Branch [${plain(source, 180)}](https://github.com/${repository}/tree/${encodeURIComponent(source)}) merged into ${plain(branch.name, 180)}`);
+                mergeLabels.push(`**Branch [${plain(source, 180)}](https://github.com/${repository}/tree/${encodeURIComponent(source)}) merged into ${plain(branch.name, 180)}**`);
             }
             if (mergeLabels.length > 1) {
                 const generic = mergeLabels.indexOf('🔀 **Merge commit**');
