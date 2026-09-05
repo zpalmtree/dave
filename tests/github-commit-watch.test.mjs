@@ -4,7 +4,7 @@ import { planUpdates as planEmbeds, notificationOptions, deliverPending, listBra
 // Existing detection checks inspect individual sections inside the grouped embeds.
 async function planUpdates(...args) {
     const result = await planEmbeds(...args);
-    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split(/\n(?!\[PR #)/))) };
+    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split(/\n(?!\[PR #)/).filter(Boolean))) };
 }
 const repo = 'Xazware/Pooners';
 const thread = '1544486384629452831';
@@ -161,7 +161,8 @@ test('fast-forward integration is highlighted in one purple embed with all commi
     assert.equal(embed.title, undefined);
     assert.ok(embed.description.startsWith('**Branch ['));
     assert.ok(embed.description.split('\n')[0].endsWith('**'));
-    assert.ok(!embed.description.includes('\n\n'));
+    assert.equal(embed.description.split('\n')[1], '');
+    assert.ok(!embed.description.split('\n').slice(2).join('\n').includes('\n\n'));
     assert.match(embed.description, /Branch \[topic\]\(https:\/\/github.com\/Xazware\/Pooners\/tree\/topic\) merged into main/);
     assert.match(embed.description, /commit\/b/);
     assert.match(embed.description, /commit\/c/);
