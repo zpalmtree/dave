@@ -128,8 +128,8 @@ export async function planUpdates(state: WatchState | undefined, repository: str
                 commits.push(await request(`/commits/${encodeURIComponent(head)}`));
             }
         }
-        if (!previous || rewritten || !commits.length) {
-            entries.push(`${!previous ? 'New branch' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
+        if (rewritten || !commits.length) {
+            entries.push(`${!previous ? 'Branch tip' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
         }
         for (const commit of commits) {
             const merge = await formatMerge(commit, branch.name);
@@ -153,7 +153,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
                 if (generic !== -1) mergeLabels.splice(generic, 1);
             }
         }
-        const title = `Commits · ${branch.name}`.slice(0, 256);
+        const title = `${previous ? 'Commits ·' : 'New branch:'} ${branch.name}`.slice(0, 256);
         const sections = [...mergeLabels.map((label, index) => index === mergeLabels.length - 1 ? `${label}\n` : label), ...entries];
         const pages: string[] = [];
         let description = '';
@@ -175,8 +175,8 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             ? author.avatar_url : undefined;
         for (const description of pages) {
             pending.push({ embeds: [{
-                ...(mergeLabels.length ? {} : { title }),
-                url: previous ? `https://github.com/${repository}/compare/${previous}...${head}` : `https://github.com/${repository}/commit/${head}`,
+                ...(previous && mergeLabels.length ? {} : { title }),
+                url: previous ? `https://github.com/${repository}/compare/${previous}...${head}` : `https://github.com/${repository}/tree/${encodeURIComponent(branch.name)}`,
                 ...(avatar ? { thumbnail: { url: avatar } } : {}),
                 color: mergeLabels.length ? 0x8957e5 : 0x2f81f7,
                 description,
