@@ -3,7 +3,9 @@
 The bot polls every 60 seconds after each completed check. It watches every branch
 (including the default branch), discovers new branches, and posts commit links,
 first-line summaries, authors, and branch names in grouped Discord embeds.
-Merge updates use purple accents; ordinary updates use blue. Large batches split
+Merge updates use purple accents and a single linked branch heading; ordinary
+updates use blue. Repository headings and footers are omitted and commits use single line
+breaks for compact spacing. Large batches split
 into bounded pages. Mentions are disabled. The bot needs Embed Links permission.
 
 Merged PRs receive a prominent line such as **xaz merged branch
@@ -17,9 +19,8 @@ otherwise receive a generic merge label.
 
 Fast-forward updates without a PR are highlighted when the added commits include
 another previously tracked branch tip. This also works if that source branch has
-since advanced or been deleted. The embed names the source and destination and
-labels the inference; it does not guess who performed the merge from commit
-authorship. Git cannot distinguish a fast-forward merge from another ref update
+since advanced or been deleted. The embed names the source and destination; it does not guess who performed
+the merge from commit authorship. This detection is an inference from branch history. Git cannot distinguish a fast-forward merge from another ref update
 that produces identical history. Previously unseen source branches, or branches
 created and merged entirely between polls, cannot be reliably identified.
 Rewritten history and newly created destination branches do not use this inference.

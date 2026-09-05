@@ -143,9 +143,16 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             ? Object.entries(state.heads).filter(([name, sha]) => name !== branch.name && added.has(sha)).map(([name]) => name)
             : [];
         if (sources.length) {
-            mergeLabels.push(`🔀 **Branch integration detected: ${sources.map(name => plain(name, 180)).join(', ')} → ${plain(branch.name, 180)}**`);
+            for (const source of sources) {
+                if (mergeLabels.some(label => label.includes(plain(source, 180)))) continue;
+                mergeLabels.push(`Branch [${plain(source, 180)}](https://github.com/${repository}/tree/${encodeURIComponent(source)}) merged into ${plain(branch.name, 180)}`);
+            }
+            if (mergeLabels.length > 1) {
+                const generic = mergeLabels.indexOf('🔀 **Merge commit**');
+                if (generic !== -1) mergeLabels.splice(generic, 1);
+            }
         }
-        const title = `${mergeLabels.length ? '🔀 Branch merge' : 'Commits'} · ${branch.name}`.slice(0, 256);
+        const title = `Commits · ${branch.name}`.slice(0, 256);
         const sections = [...mergeLabels, ...entries];
         const pages: string[] = [];
         let description = '';
@@ -153,22 +160,20 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             // Each individual section is bounded too (e.g. hundreds of matching refs).
             for (let offset = 0; offset < section.length; offset += 3800) {
                 const part = section.slice(offset, offset + 3800);
-                if (description && description.length + part.length + 2 > 3800) {
+                if (description && description.length + part.length + 1 > 3800) {
                     pages.push(description);
                     description = '';
                 }
-                description += `${description ? '\n\n' : ''}${part}`;
+                description += `${description ? '\n' : ''}${part}`;
             }
         }
         if (description) pages.push(description);
-        for (const [index, description] of pages.entries()) {
+        for (const description of pages) {
             pending.push({ embeds: [{
-                title,
+                ...(mergeLabels.length ? {} : { title }),
                 url: previous ? `https://github.com/${repository}/compare/${previous}...${head}` : `https://github.com/${repository}/commit/${head}`,
-                author: { name: repository.slice(0, 256), url: `https://github.com/${repository}` },
                 color: mergeLabels.length ? 0x8957e5 : 0x2f81f7,
                 description,
-                footer: { text: `${commits.length} commit${commits.length === 1 ? '' : 's'}${sources.length ? ` • ${commits.some(commit => (commit.parents?.length || 0) > 1) ? 'Integration' : 'Fast-forward'} inferred from tracked branch tips; merger unknown` : ''}${pages.length > 1 ? ` • Page ${index + 1}/${pages.length}` : ''}` },
             }] });
         }
     }
