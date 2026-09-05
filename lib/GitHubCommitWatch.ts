@@ -25,6 +25,7 @@ export interface WatchState {
     repository: string;
     threadId: string;
     heads: Record<string, string>;
+    lastPullRequestNumber?: number;
     pending: WatchNotification[];
 }
 export type WatchNotification = string | { embeds: APIEmbed[] };
@@ -183,7 +184,47 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             }] });
         }
     }
-    return { repository, threadId, heads, pending };
+    return { ...state, repository, threadId, heads, pending };
+}
+
+interface OpenedPullRequest extends PullRequest {
+    title: string;
+    state: string;
+    draft: boolean;
+    user: { login: string; avatar_url: string } | null;
+}
+
+export async function planPullRequests(state: WatchState, request: Request): Promise<WatchState> {
+    const previous = state.lastPullRequestNumber;
+    let latest = previous || 0;
+    const discovered: OpenedPullRequest[] = [];
+    try {
+        for (let page = 1; ; page++) {
+            // Include closed PRs so an opening followed by a quick close/merge is still seen.
+            const batch: OpenedPullRequest[] = await request(`/pulls?state=all&sort=created&direction=desc&per_page=100&page=${page}`);
+            for (const pull of batch) {
+                latest = Math.max(latest, pull.number);
+                if (previous !== undefined && pull.number > previous) discovered.push(pull);
+            }
+            if (previous === undefined || batch.length < 100 || batch.some(pull => pull.number <= previous)) break;
+        }
+    } catch (error) {
+        if (![403, 404].includes((error as { status?: number }).status || 0)) throw error;
+        console.warn('[GitHub watch] PR opening notifications unavailable; token needs Pull requests: read.');
+        return state;
+    }
+    const pending = [...state.pending];
+    for (const pull of discovered.sort((a, b) => a.number - b.number)) {
+        const avatar = pull.user?.avatar_url;
+        pending.push({ embeds: [{
+            title: `${pull.draft ? 'Draft PR opened' : 'PR opened'} #${pull.number}: ${pull.title}`.slice(0, 256),
+            url: `https://github.com/${state.repository}/pull/${pull.number}`,
+            color: 0x238636,
+            description: `**${plain(pull.user?.login || 'Unknown author', 100)}** opened a pull request\n\n${plain(pull.head.ref, 180)} → ${plain(pull.base.ref, 180)}${pull.state === 'closed' ? `\n${pull.merged_at ? 'Already merged' : 'Already closed'}` : ''}`,
+            ...(avatar && /^https:\/\/avatars\.githubusercontent\.com\//.test(avatar) ? { thumbnail: { url: avatar } } : {}),
+        }] });
+    }
+    return { ...state, lastPullRequestNumber: latest, pending };
 }
 
 export async function saveState(path: string, state: WatchState): Promise<void> {
@@ -241,6 +282,7 @@ export function startGitHubCommitWatch(client: Client): void {
                 if (state) await deliverPending(state, send, () => saveState(statePath, state!));
                 const initialized = Boolean(state);
                 state = await planUpdates(state, repository, threadId, request);
+                state = await planPullRequests(state, request);
                 await saveState(statePath, state);
                 await deliverPending(state, send, () => saveState(statePath, state!));
                 if (!initialized) console.log(`[GitHub watch] Baseline saved for ${repository}: ${Object.keys(state.heads).length} branches; thread ${threadId}.`);

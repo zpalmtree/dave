@@ -67,3 +67,11 @@ additional Discord permissions. Configuration and API failures appear in PM2 log
 with the `[GitHub watch]` prefix. No webhook or public inbound endpoint is needed.
 
 Existing text outbox entries remain deliverable after the embed migration.
+
+Newly opened pull requests (including drafts) are announced in green embeds with
+PR number/title, author avatar, source/target branches, and a PR link. The first
+successful PR check establishes a baseline without posting existing PRs. A stored
+PR-number watermark survives restarts and prevents repeat notifications. Checks
+include closed PRs so PRs opened and closed/merged between polls are still shown,
+with their current status noted. Reopening or editing an existing PR does not
+produce another opening notification. This requires Pull requests: read access.

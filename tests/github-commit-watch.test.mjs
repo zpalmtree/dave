@@ -231,3 +231,41 @@ test('mixed, missing, or untrusted avatars are omitted', async () => {
     const result = await integration({ commits: [{ ...commit('c'), author: { ...author, avatar_url: 'https://example.com/avatar' } }] });
     assert.equal(result.pending[0].embeds[0].thumbnail, undefined);
 });
+
+const { planPullRequests } = await import('../dist/GitHubCommitWatch.js');
+const openedPR = number => ({ ...pr, number, title: 'Add settings', state: 'open', merged_at: null, draft: false, user: { login: 'dev', avatar_url: 'https://avatars.githubusercontent.com/u/1' } });
+test('PR monitoring migrates existing state without flooding historical PRs', async () => {
+    const result = await planPullRequests(state({ main: 'a' }), async () => [openedPR(5), openedPR(4)]);
+    assert.equal(result.lastPullRequestNumber, 5);
+    assert.deepEqual(result.pending, []);
+});
+test('new PRs produce compact green embeds with author, branches and PR links only once', async () => {
+    const before = { ...state({}), lastPullRequestNumber: 3 };
+    const result = await planPullRequests(before, async () => [openedPR(5), { ...openedPR(4), draft: true }, openedPR(3)]);
+    assert.equal(result.pending.length, 2);
+    const embed = result.pending[0].embeds[0];
+    assert.match(embed.title, /Draft PR opened #4/);
+    assert.equal(embed.url, 'https://github.com/Xazware/Pooners/pull/4');
+    assert.match(embed.description, /dev.*opened/);
+    assert.match(embed.description, /codex\/title-harpoon-transition → main/);
+    assert.equal(embed.thumbnail.url, 'https://avatars.githubusercontent.com/u/1');
+    assert.equal(embed.color, 0x238636);
+    const again = await planPullRequests({ ...result, pending: [] }, async () => [openedPR(5)]);
+    assert.deepEqual(again.pending, []);
+});
+test('PR listing paginates and catches PRs closed between checks', async () => {
+    const result = await planPullRequests({ ...state({}), lastPullRequestNumber: 1 }, async path => path.endsWith('page=1') ? Array.from({ length: 100 }, (_, i) => openedPR(102-i)) : [{ ...openedPR(2), state: 'closed', merged_at: '2026-09-05' }, openedPR(1)]);
+    assert.equal(result.pending.length, 101);
+    assert.match(result.pending[0].embeds[0].description, /Already merged/);
+});
+test('PR failures preserve progress and existing queued commit posts', async () => {
+    const before = { ...state({}), lastPullRequestNumber: 3, pending: ['commit'] };
+    await assert.rejects(planPullRequests(before, async () => { throw new Error('timeout'); }), /timeout/);
+    assert.equal(before.lastPullRequestNumber, 3);
+    const denied = await planPullRequests(before, async () => { throw Object.assign(new Error('denied'), { status: 403 }); });
+    assert.deepEqual(denied, before);
+});
+test('commit polling preserves PR progress across restarts', async () => {
+    const result = await planEmbeds({ ...state({ main: 'a' }), lastPullRequestNumber: 4 }, repo, thread, async () => [branch('main', 'a')]);
+    assert.equal(result.lastPullRequestNumber, 4);
+});
