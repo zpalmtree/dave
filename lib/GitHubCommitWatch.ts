@@ -16,7 +16,7 @@ interface PullRequest {
     number: number;
     merged_at: string | null;
     merge_commit_sha: string | null;
-    merged_by?: { login: string } | null;
+    merged_by?: { login: string; avatar_url?: string } | null;
     head: { ref: string };
     base: { ref: string };
 }
@@ -51,7 +51,7 @@ const plain = (value: string, limit: number) => escapeMarkdown(value.replace(/[\
 function mergeFormatter(repository: string, request: Request) {
     const cache = new Map<string, PullRequest[]>();
     let pullAccess = true;
-    return async (commit: Commit, destination: string): Promise<string | undefined> => {
+    return async (commit: Commit, destination: string, onMergerAvatar: (url: string) => void): Promise<string | undefined> => {
         let pulls = cache.get(commit.sha);
         if (!pulls && pullAccess) {
             pulls = [];
@@ -73,8 +73,9 @@ function mergeFormatter(repository: string, request: Request) {
         if (pull) {
             const detail: PullRequest = await request(`/pulls/${pull.number}`);
             const actor = detail.merged_by?.login;
-            const action = actor ? `${plain(actor, 100)} merged branch` : 'Merged branch';
-            return `🔀 **${action} ${plain(pull.head.ref, 180)} into ${plain(pull.base.ref, 180)}**\n[PR #${pull.number}](https://github.com/${repository}/pull/${pull.number})`;
+            const avatar = detail.merged_by?.avatar_url;
+            if (avatar && /^https:\/\/avatars\.githubusercontent\.com\//.test(avatar)) onMergerAvatar(avatar);
+            return `**Branch [${plain(pull.head.ref, 180)}](https://github.com/${repository}/tree/${encodeURIComponent(pull.head.ref)}) merged into ${plain(pull.base.ref, 180)}**\n${actor ? `Merged by ${plain(actor, 100)} · ` : ''}[PR #${pull.number}](https://github.com/${repository}/pull/${pull.number})`;
         }
         if ((commit.parents?.length || 0) < 2) return undefined;
         // An older PR merge carried into another branch is not a new PR merge there.
@@ -82,10 +83,10 @@ function mergeFormatter(repository: string, request: Request) {
         const subject = commit.commit.message.split('\n')[0];
         const local = /^Merge (?:remote-tracking )?branch '([^']+)'(?: into (.+))?$/.exec(subject);
         if (local) {
-            const actor = commit.committer?.login || commit.commit.committer?.name;
+            const actor = commit.commit.committer?.name || commit.committer?.login;
             // Without an explicit target, Git's subject cannot prove the original destination.
             const target = local[2] ? ` into ${plain(local[2], 180)}` : '';
-            return `🔀 **${actor ? `${plain(actor, 100)} merged branch` : 'Merged branch'} ${plain(local[1], 180)}${target}**`;
+            return `**Branch [${plain(local[1], 180)}](https://github.com/${repository}/tree/${encodeURIComponent(local[1].replace(/^origin\//, ''))}) merged${target}**${actor ? `\nMerge committed by ${plain(actor, 100)}` : ''}`;
         }
         return '🔀 **Merge commit**';
     };
@@ -111,6 +112,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
         }
         const entries: string[] = [];
         const mergeLabels: string[] = [];
+        const mergerAvatars = new Set<string>();
         const commits: Commit[] = [];
         let rewritten = false;
         let ahead = false;
@@ -133,7 +135,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             entries.push(`${!previous ? 'Branch tip' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
         }
         for (const commit of commits) {
-            const merge = await formatMerge(commit, branch.name);
+            const merge = await formatMerge(commit, branch.name, url => mergerAvatars.add(url));
             if (merge) mergeLabels.push(merge);
             const content = `[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${plain(commit.commit.message.split('\n')[0], 1000)} — ${plain(commit.commit.author?.name || 'Unknown author', 150)}`;
             entries.push(content.length > 2000 ? `${content.slice(0, 1999)}…` : content);
@@ -144,8 +146,26 @@ export async function planUpdates(state: WatchState | undefined, repository: str
         const sources = previous && ahead && !rewritten
             ? Object.entries(state.heads).filter(([name, sha]) => name !== branch.name && added.has(sha)).map(([name]) => name)
             : [];
-        if (sources.length) {
-            for (const source of sources) {
+        // A branch tip already contained in another candidate arrived through that
+        // branch; it is not evidence of an additional direct merge.
+        const parents = new Map(commits.map(commit => [commit.sha, commit.parents || []]));
+        const contains = (tip: string, ancestor: string): boolean => {
+            const stack = [tip];
+            const visited = new Set<string>();
+            while (stack.length) {
+                const sha = stack.pop()!;
+                if (visited.has(sha)) continue;
+                visited.add(sha);
+                for (const parent of parents.get(sha) || []) {
+                    if (parent.sha === ancestor) return true;
+                    stack.push(parent.sha);
+                }
+            }
+            return false;
+        };
+        const directSources = sources.filter(source => !sources.some(other => other !== source && contains(state.heads[other], state.heads[source])));
+        if (directSources.length) {
+            for (const source of directSources) {
                 if (mergeLabels.some(label => label.includes(plain(source, 180)))) continue;
                 mergeLabels.push(`**Branch [${plain(source, 180)}](https://github.com/${repository}/tree/${encodeURIComponent(source)}) merged into ${plain(branch.name, 180)}**`);
             }
@@ -173,7 +193,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
         const author = commits[0]?.author;
         const avatar = author && /^https:\/\/avatars\.githubusercontent\.com\//.test(author.avatar_url)
             && commits.every(commit => commit.author?.login === author.login)
-            ? author.avatar_url : undefined;
+            ? author.avatar_url : mergerAvatars.size === 1 ? [...mergerAvatars][0] : undefined;
         for (const description of pages) {
             pending.push({ embeds: [{
                 ...(previous && mergeLabels.length ? {} : { title }),

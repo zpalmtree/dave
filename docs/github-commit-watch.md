@@ -83,3 +83,11 @@ are ignored, repeated links in one message are deduplicated, and at most three
 PRs are previewed per message. Angle-bracket links (`<https://...>`) suppress
 previews. Preview replies never ping the sender. No public OpenGraph service is
 used, and private PR details are not expanded in other channels.
+
+PR merges use the same linked branch heading as other merges, followed by one
+compact merger/PR metadata line. Mixed-author PR merge batches may use the
+identified merger's avatar. Direct Git merge metadata uses the recorded Git
+committer name rather than presenting GitHub's web-flow account as the merger.
+Tracked source tips reachable through another source candidate are suppressed as
+inherited changes, avoiding separate settings-branch announcements when merging
+main after main already incorporated settings.

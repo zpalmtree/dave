@@ -4,7 +4,7 @@ import { planUpdates as planEmbeds, notificationOptions, deliverPending, listBra
 // Existing detection checks inspect individual sections inside the grouped embeds.
 async function planUpdates(...args) {
     const result = await planEmbeds(...args);
-    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split(/\n(?!\[PR #)/).filter(Boolean))) };
+    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split(/\n(?!\[PR #|Merged by |Merge committed by )/).filter(Boolean))) };
 }
 const repo = 'Xazware/Pooners';
 const thread = '1544486384629452831';
@@ -102,14 +102,14 @@ async function mergedUpdate({ parents = 2, pulls = [pr], subject = 'Custom title
 }
 test('PR merges highlight actual merger, source, destination and link despite custom subject', async () => {
     const result = await mergedUpdate();
-    assert.match(result.pending[0], /🔀 \*\*xaz merged branch codex\/title-harpoon-transition into main\*\*/);
+    assert.match(result.pending[0], /\*\*Branch \[codex\/title-harpoon-transition\].*merged into main\*\*/);
     assert.match(result.pending[0], /PR #4/);
     assert.match(result.pending.join('\n'), /Custom title/);
     assert.doesNotMatch(result.pending[0], /git-committer merged/);
 });
 test('single-parent squash and rebase results receive PR merge highlights', async () => {
     const result = await mergedUpdate({ parents: 1 });
-    assert.match(result.pending[0], /xaz merged branch/);
+    assert.match(result.pending[0], /Merged by xaz/);
 });
 test('associated open PRs and non-merge commits are not labeled as merges', async () => {
     for (const pulls of [[{ ...pr, merged_at: null }], [{ ...pr, merge_commit_sha: 'other' }]]) {
@@ -124,11 +124,11 @@ test('older PR merges inherited by another branch are only labeled merge commits
 });
 test('direct Git merges label branch and committer without a PR', async () => {
     const result = await mergedUpdate({ pulls: [], subject: "Merge branch 'topic' into main" });
-    assert.match(result.pending[0], /git-committer merged branch topic into main/);
+    assert.match(result.pending[0], /Branch \[topic\].*merged into main/);
 });
 test('merge subjects do not invent an unspecified destination', async () => {
     const result = await mergedUpdate({ pulls: [], subject: "Merge branch 'topic'" });
-    assert.match(result.pending[0], /merged branch topic/);
+    assert.match(result.pending[0], /Branch \[topic\].*merged/);
     assert.doesNotMatch(result.pending[0], /into main/);
 });
 test('missing PR access retains generic merge labeling and commit delivery', async () => {
@@ -142,7 +142,7 @@ test('transient PR lookup and detail failures retry before advancing the cursor'
 test('long commit summaries plus merge metadata fit Discord message limits', async () => {
     const result = await mergedUpdate({ subject: '*'.repeat(1000) });
     assert.ok(result.pending[0].length <= 2000);
-    assert.match(result.pending[0], /xaz merged branch/);
+    assert.match(result.pending[0], /Merged by xaz/);
 });
 
 async function integration({ oldHeads = { main: 'a', topic: 'c' }, branches = [branch('main', 'c'), branch('topic', 'c')], status = 'ahead', commits = [commit('b'), commit('c')] } = {}) {
@@ -294,4 +294,25 @@ test('unavailable PR previews are skipped without stopping other previews', asyn
     });
     assert.equal(embeds.length, 1);
     assert.match(embeds[0].title, /#5/);
+});
+test('merging main does not separately announce settings inherited through main', async () => {
+    const c = (sha, parents, message = 'Change') => ({ ...commit(sha), parents: parents.map(sha => ({ sha })), commit: { message, author: { name: 'Dev' } } });
+    const result = await integration({
+        oldHeads: { feature: 'old', main: 'main-tip', settings: 'settings-tip' },
+        branches: [branch('feature', 'new'), branch('main', 'main-tip'), branch('settings', 'settings-tip')],
+        commits: [c('settings-tip', ['old']), c('main-tip', ['old', 'settings-tip']), c('new', ['old', 'main-tip'], "Merge branch 'main' into feature")],
+    });
+    const description = result.pending[0].embeds[0].description;
+    assert.match(description, /Branch \[main\].*merged into feature/);
+    assert.doesNotMatch(description, /Branch \[settings\]/);
+});
+test('mixed-author PR merge can display the explicitly identified merger avatar', async () => {
+    const merged = { ...commit('merge'), parents: [{sha:'a'}, {sha:'b'}] };
+    const result = await planEmbeds(state({ main: 'old' }), repo, thread, async path => {
+        if (path.startsWith('/branches')) return [branch('main','merge')];
+        if (path.startsWith('/compare')) return {status:'ahead',commits:[commit('other'), merged]};
+        if (path.includes('/pulls?')) return path.includes('/merge/') ? [pr] : [];
+        return {...pr,merged_by:{login:'xaz',avatar_url:'https://avatars.githubusercontent.com/u/1'}};
+    });
+    assert.equal(result.pending[0].embeds[0].thumbnail.url,'https://avatars.githubusercontent.com/u/1');
 });
