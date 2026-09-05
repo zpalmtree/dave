@@ -213,3 +213,18 @@ test('a subsequent merge in the same poll does not hide the earlier branch integ
     const result = await integration({ branches: [branch('main', 'd'), branch('topic', 'c')], commits: [commit('b'), commit('c'), merged] });
     assert.match(result.pending[0].embeds[0].description, /Branch \[topic\]\(https:\/\/github.com\/Xazware\/Pooners\/tree\/topic\) merged into main/);
 });
+test('single-author batches include the GitHub avatar without restoring the project heading', async () => {
+    const author = { login: 'zpalmtree', avatar_url: 'https://avatars.githubusercontent.com/u/123?v=4' };
+    const result = await integration({ commits: [{ ...commit('b'), author }, { ...commit('c'), author }] });
+    assert.deepEqual(result.pending[0].embeds[0].thumbnail, { url: author.avatar_url });
+    assert.equal(result.pending[0].embeds[0].author, undefined);
+});
+test('mixed, missing, or untrusted avatars are omitted', async () => {
+    const author = { login: 'one', avatar_url: 'https://avatars.githubusercontent.com/u/123?v=4' };
+    for (const other of [undefined, { ...author, login: 'two' }]) {
+        const result = await integration({ commits: [{ ...commit('b'), author }, { ...commit('c'), author: other }] });
+        assert.equal(result.pending[0].embeds[0].thumbnail, undefined);
+    }
+    const result = await integration({ commits: [{ ...commit('c'), author: { ...author, avatar_url: 'https://example.com/avatar' } }] });
+    assert.equal(result.pending[0].embeds[0].thumbnail, undefined);
+});
