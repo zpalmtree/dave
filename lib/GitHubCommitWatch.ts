@@ -153,7 +153,7 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             }
         }
         const title = `Commits · ${branch.name}`.slice(0, 256);
-        const sections = [...mergeLabels, ...entries];
+        const sections = [...mergeLabels.map((label, index) => index === mergeLabels.length - 1 ? `${label}\n` : label), ...entries];
         const pages: string[] = [];
         let description = '';
         for (const section of sections) {
