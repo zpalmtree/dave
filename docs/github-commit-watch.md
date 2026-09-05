@@ -5,7 +5,9 @@ The bot polls every 60 seconds after each completed check. It watches every bran
 first-line summaries, authors, and branch names in grouped Discord embeds.
 Merge updates use purple accents and a single linked branch heading; ordinary
 updates use blue. Repository headings and footers are omitted and commits use single line
-breaks for compact spacing. Large batches split
+breaks for compact spacing. A single blank line separates the merge heading from
+the commits. When all commits share a GitHub author, their avatar appears as a
+thumbnail; mixed or unknown authors omit the thumbnail. Large batches split
 into bounded pages. Mentions are disabled. The bot needs Embed Links permission.
 
 Merged PRs receive a prominent line such as **xaz merged branch

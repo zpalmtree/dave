@@ -8,6 +8,7 @@ interface Branch { name: string; commit: { sha: string } }
 interface Commit {
     sha: string;
     parents?: { sha: string }[];
+    author?: { login: string; avatar_url: string } | null;
     committer?: { login: string } | null;
     commit: { message: string; author: { name: string } | null; committer?: { name: string } | null };
 }
@@ -168,10 +169,15 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             }
         }
         if (description) pages.push(description);
+        const author = commits[0]?.author;
+        const avatar = author && /^https:\/\/avatars\.githubusercontent\.com\//.test(author.avatar_url)
+            && commits.every(commit => commit.author?.login === author.login)
+            ? author.avatar_url : undefined;
         for (const description of pages) {
             pending.push({ embeds: [{
                 ...(mergeLabels.length ? {} : { title }),
                 url: previous ? `https://github.com/${repository}/compare/${previous}...${head}` : `https://github.com/${repository}/commit/${head}`,
+                ...(avatar ? { thumbnail: { url: avatar } } : {}),
                 color: mergeLabels.length ? 0x8957e5 : 0x2f81f7,
                 description,
             }] });
