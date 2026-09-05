@@ -4,7 +4,7 @@ import { planUpdates as planEmbeds, notificationOptions, deliverPending, listBra
 // Existing detection checks inspect individual sections inside the grouped embeds.
 async function planUpdates(...args) {
     const result = await planEmbeds(...args);
-    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split('\n\n'))) };
+    return { ...result, pending: result.pending.flatMap(item => typeof item === 'string' ? [item] : item.embeds.flatMap(embed => embed.description.split(/\n(?!\[PR #)/))) };
 }
 const repo = 'Xazware/Pooners';
 const thread = '1544486384629452831';
@@ -156,16 +156,19 @@ test('fast-forward integration is highlighted in one purple embed with all commi
     assert.equal(result.pending.length, 1);
     const embed = result.pending[0].embeds[0];
     assert.equal(embed.color, 0x8957e5);
-    assert.match(embed.description, /topic → main/);
+    assert.equal(embed.author, undefined);
+    assert.equal(embed.footer, undefined);
+    assert.equal(embed.title, undefined);
+    assert.ok(!embed.description.includes('\n\n'));
+    assert.match(embed.description, /Branch \[topic\]\(https:\/\/github.com\/Xazware\/Pooners\/tree\/topic\) merged into main/);
     assert.match(embed.description, /commit\/b/);
     assert.match(embed.description, /commit\/c/);
-    assert.match(embed.footer.text, /inferred.*merger unknown/);
     assert.match(embed.url, /compare\/a\.\.\.c/);
 });
 test('integration still works after deleting or advancing the source branch', async () => {
     for (const branches of [[branch('main', 'c')], [branch('main', 'c'), branch('topic', 'd')]]) {
         const result = await integration({ branches });
-        assert.match(result.pending[0].embeds[0].description, /topic → main/);
+        assert.match(result.pending[0].embeds[0].description, /Branch \[topic\]\(https:\/\/github.com\/Xazware\/Pooners\/tree\/topic\) merged into main/);
     }
 });
 test('ordinary pushes and rewritten history do not imply branch integrations', async () => {
@@ -187,8 +190,8 @@ test('large batches paginate embeds without dropping commits or exceeding Discor
     for (const item of result.pending) {
         const embed = item.embeds[0];
         assert.ok(embed.description.length <= 4096);
-        assert.ok(embed.title.length <= 256);
-        assert.ok(embed.description.length + embed.title.length + embed.author.name.length + embed.footer.text.length <= 6000);
+        assert.ok((embed.title?.length || 0) <= 256);
+        assert.ok(embed.description.length + (embed.title?.length || 0) <= 6000);
     }
 });
 test('legacy text outbox entries and new embed entries both deliver with mentions disabled', async () => {
@@ -205,6 +208,5 @@ test('legacy text outbox entries and new embed entries both deliver with mention
 test('a subsequent merge in the same poll does not hide the earlier branch integration', async () => {
     const merged = { ...commit('d'), parents: [{ sha: 'c' }, { sha: 'other' }] };
     const result = await integration({ branches: [branch('main', 'd'), branch('topic', 'c')], commits: [commit('b'), commit('c'), merged] });
-    assert.match(result.pending[0].embeds[0].description, /topic → main/);
-    assert.match(result.pending[0].embeds[0].footer.text, /Integration inferred/);
+    assert.match(result.pending[0].embeds[0].description, /Branch \[topic\]\(https:\/\/github.com\/Xazware\/Pooners\/tree\/topic\) merged into main/);
 });
