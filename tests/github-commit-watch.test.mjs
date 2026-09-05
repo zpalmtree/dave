@@ -35,15 +35,18 @@ test('fetches every compare page and tracks main and feature branches', async ()
     assert.match(result.pending[101], /feature/);
 });
 test('new branches announce creation and compare against default branch', async () => {
-    const result = await planUpdates(state({ main: 'a' }), repo, thread, async path => {
+    const result = await planEmbeds(state({ main: 'a' }), repo, thread, async path => {
         if (path.includes('/pulls?')) return [];
         if (path.startsWith('/branches')) return [branch('main', 'a'), branch('topic/x', 'b')];
         if (!path) return { default_branch: 'main' };
         assert.match(path, /a\.\.\.b/);
         return { status: 'ahead', commits: [commit('b')] };
     });
-    assert.equal(result.pending.length, 2);
-    assert.match(result.pending[0], /New branch/);
+    assert.equal(result.pending.length, 1);
+    assert.equal(result.pending[0].embeds[0].title, 'New branch: topic/x');
+    assert.equal(result.pending[0].embeds[0].url, 'https://github.com/Xazware/Pooners/tree/topic%2Fx');
+    assert.ok(!result.pending[0].embeds[0].description.includes('New branch:'));
+    assert.match(result.pending[0].embeds[0].description, /Fix bug/);
 });
 test('deleted branches are removed and missing old SHAs are reported', async () => {
     const result = await planUpdates(state({ main: 'a', deleted: 'b' }), repo, thread, async path => {
