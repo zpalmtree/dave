@@ -15,6 +15,7 @@ import {
     handleGetFromME,
     numberWithCommas
 } from './Utilities.js';
+import { startGitHubCommitWatch } from './GitHubCommitWatch.js';
 import { getDiscordLoginRetryDelay } from './DiscordRetry.js';
 
 import {
@@ -226,6 +227,7 @@ function createDiscordClient(db: sqlite3.Database): Client {
         magicEdenStatUpdater(client);
         restoreTimers(db, client);
         startVideoGenerationService(client);
+        startGitHubCommitWatch(client);
 
         /* Backfill guild_id for existing log rows */
         const rows = await selectQuery(
