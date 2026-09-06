@@ -890,9 +890,11 @@ interface VideoRequestOptions {
 }
 
 export const OALGO_VIDEO_PLANNER_GUIDANCE = [
+    'Every OALGO dialogue turn must specify a clearly audible Mexican-American Spanglish accent in dialogue.delivery, including English-only lines and dialogue supplied verbatim by the user.',
+    'Use expressive, conversational Mexican Spanish-influenced vowels, rhythm, and intonation throughout the spoken performance, preserving the accent through complaints, shouts, and emotional changes. Avoid a neutral American narrator or flat text-to-speech delivery.',
     'When the requested action or source image supports dialogue, give the OALGO character playful Mexican-American slang and code-switching.',
     'Naturally enrich suitable dialogue with phrases such as “o algo,” “mayne,” “wey,” “puta pinche,” and “no mames wey” without mechanically forcing every phrase into every line.',
-    'Preserve any dialogue the user explicitly requested verbatim and apply this voice only to new or adaptable OALGO dialogue.',
+    'Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable OALGO wording, but always retain the Spanglish accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.',
 ].join(' ');
 
 export const MEXIMUTT_VIDEO_PLANNER_GUIDANCE = [
