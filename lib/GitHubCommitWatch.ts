@@ -46,6 +46,10 @@ export async function listBranches(request: Request): Promise<Branch[]> {
 }
 
 const plain = (value: string, limit: number) => escapeMarkdown(value.replace(/[\r\n]+/g, ' ').slice(0, limit));
+const commitSummary = (commit: Commit) => {
+    const subject = commit.commit.message.split('\n')[0];
+    return `${plain(subject, 160)}${subject.length > 160 ? '…' : ''}`;
+};
 
 // Resolve PR metadata once per SHA per poll, even when it appears on several branches.
 function mergeFormatter(repository: string, request: Request) {
@@ -99,24 +103,22 @@ export async function planUpdates(state: WatchState | undefined, repository: str
     if (state.repository !== repository || state.threadId !== threadId) throw new Error('Watch state destination differs from configuration. Use a new state file.');
     if (state.pending.length) throw new Error('Deliver pending messages before polling.');
     const pending: WatchNotification[] = [];
-    let defaultBranch: string | undefined;
     const formatMerge = mergeFormatter(repository, request);
     for (const branch of branches) {
         const previous = state.heads[branch.name];
         const head = branch.commit.sha;
         if (previous === head) continue;
-        let base = previous;
-        if (!base) {
-            defaultBranch ??= (await request('')).default_branch;
-            base = state.heads[defaultBranch!] || heads[defaultBranch!];
-        }
+        const base = previous;
         const entries: string[] = [];
         const mergeLabels: string[] = [];
         const mergerAvatars = new Set<string>();
         const commits: Commit[] = [];
         let rewritten = false;
         let ahead = false;
-        if (base && base !== head) {
+        if (!previous) {
+            // Discovery establishes a baseline; inherited history is not a new push.
+            commits.push(await request(`/commits/${encodeURIComponent(head)}`));
+        } else if (base && base !== head) {
             try {
                 for (let page = 1; ; page++) {
                     const comparison = await request(`/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=100&page=${page}`);
@@ -135,10 +137,17 @@ export async function planUpdates(state: WatchState | undefined, repository: str
             entries.push(`${!previous ? 'Branch tip' : rewritten ? 'Branch history rewritten' : 'Branch updated'}: [${head.slice(0, 7)}](https://github.com/${repository}/commit/${head})`);
         }
         for (const commit of commits) {
-            const merge = await formatMerge(commit, branch.name, url => mergerAvatars.add(url));
+            const merge = previous && await formatMerge(commit, branch.name, url => mergerAvatars.add(url));
             if (merge) mergeLabels.push(merge);
-            const content = `[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${plain(commit.commit.message.split('\n')[0], 1000)} — ${plain(commit.commit.author?.name || 'Unknown author', 150)}`;
-            entries.push(content.length > 2000 ? `${content.slice(0, 1999)}…` : content);
+        }
+        const sharedAuthor = commits[0]?.commit.author?.name;
+        const singleAuthor = sharedAuthor && commits.every(commit => commit.commit.author?.name === sharedAuthor);
+        for (const commit of commits.slice(-3)) {
+            entries.push(`[${commit.sha.slice(0, 7)}](https://github.com/${repository}/commit/${commit.sha}) ${commitSummary(commit)}${singleAuthor ? '' : ` — ${plain(commit.commit.author?.name || 'Unknown author', 70)}`}`);
+        }
+        if (singleAuthor) entries.push(`By ${plain(sharedAuthor, 70)}`);
+        if (commits.length > 3) {
+            entries.push(`[View all ${commits.length} commits · ${commits.length - 3} more](https://github.com/${repository}/compare/${previous}...${head})`);
         }
         // Only pre-existing branch tips provide evidence of integration. Matching newly
         // created refs could just be a branch being created from the destination.
