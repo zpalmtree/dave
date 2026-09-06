@@ -24,29 +24,40 @@ test('unchanged branches do not fetch commits', async () => {
     assert.deepEqual(result.pending, []);
 });
 test('fetches every compare page and tracks main and feature branches', async () => {
+    const comparisons = [];
     const result = await planUpdates(state({ main: 'a', feature: 'b' }), repo, thread, async path => {
         if (path.includes('/pulls?')) return [];
         if (path.startsWith('/branches')) return [branch('main', 'c'), branch('feature', 'd')];
+        comparisons.push(path);
         if (path.includes('a...c') && path.endsWith('page=1')) return { status: 'ahead', commits: Array.from({ length: 100 }, (_, i) => commit(`sha${i}`)) };
         return { status: 'ahead', commits: [commit(path.includes('a...c') ? 'last' : 'feature')] };
     });
-    assert.equal(result.pending.length, 102);
-    assert.match(result.pending[100], /last/);
-    assert.match(result.pending[101], /feature/);
+    assert.equal(comparisons.length, 3);
+    assert.match(result.pending.join('\n'), /last/);
+    assert.match(result.pending.join('\n'), /feature/);
+    assert.match(result.pending.join('\n'), /View all 101 commits · 98 more/);
+    assert.deepEqual(result.heads, { main: 'c', feature: 'd' });
 });
-test('new branches announce creation and compare against default branch', async () => {
+test('new branches announce only the tip without comparing or announcing inherited merges', async () => {
     const result = await planEmbeds(state({ main: 'a' }), repo, thread, async path => {
         if (path.includes('/pulls?')) return [];
         if (path.startsWith('/branches')) return [branch('main', 'a'), branch('topic/x', 'b')];
-        if (!path) return { default_branch: 'main' };
-        assert.match(path, /a\.\.\.b/);
-        return { status: 'ahead', commits: [commit('b')] };
+        assert.equal(path, '/commits/b');
+        return { ...commit('b'), parents: [{ sha: 'old' }, { sha: 'older' }] };
     });
     assert.equal(result.pending.length, 1);
     assert.equal(result.pending[0].embeds[0].title, 'New branch: topic/x');
     assert.equal(result.pending[0].embeds[0].url, 'https://github.com/Xazware/Pooners/tree/topic%2Fx');
     assert.ok(!result.pending[0].embeds[0].description.includes('New branch:'));
     assert.match(result.pending[0].embeds[0].description, /Fix bug/);
+    assert.doesNotMatch(result.pending[0].embeds[0].description, /merged|Branch tip/);
+    assert.equal(result.pending[0].embeds[0].color, 0x2f81f7);
+    assert.equal(result.heads['topic/x'], 'b');
+    const again = await planEmbeds({ ...result, pending: [] }, repo, thread, async path => {
+        assert.match(path, /^\/branches/);
+        return [branch('main', 'a'), branch('topic/x', 'b')];
+    });
+    assert.deepEqual(again.pending, []);
 });
 test('deleted branches are removed and missing old SHAs are reported', async () => {
     const result = await planUpdates(state({ main: 'a', deleted: 'b' }), repo, thread, async path => {
@@ -150,6 +161,7 @@ async function integration({ oldHeads = { main: 'a', topic: 'c' }, branches = [b
         if (path.startsWith('/branches')) return branches;
         if (path.includes('/pulls?')) return [];
         if (path.startsWith('/compare')) return { status, commits };
+        if (path.startsWith('/commits/')) return commit(path.split('/').pop());
         if (!path) return { default_branch: 'main' };
         throw new Error(`Unexpected request ${path}`);
     });
@@ -188,17 +200,43 @@ test('new refs sharing the new destination tip are not mistaken for source branc
     const result = await integration({ oldHeads: { main: 'a' } });
     assert.doesNotMatch(result.pending[0].embeds[0].description, /integration/);
 });
-test('large batches paginate embeds without dropping commits or exceeding Discord limits', async () => {
+test('large batches show three recent shortened summaries and a full comparison in one embed', async () => {
     const commits = Array.from({ length: 80 }, (_, i) => ({ ...commit(`sha${i}`), commit: { message: '*'.repeat(1000), author: { name: 'Author' } } }));
     const result = await integration({ oldHeads: { main: 'a' }, branches: [branch('main', 'z')], commits });
     const text = result.pending.map(item => item.embeds[0].description).join('\n');
-    for (const c of commits) assert.ok(text.includes(`/commit/${c.sha})`));
+    assert.equal(result.pending.length, 1);
+    assert.equal((text.match(/\/commit\//g) || []).length, 3);
+    for (const c of commits.slice(-3)) assert.ok(text.includes(`/commit/${c.sha})`));
+    assert.ok(!text.includes('/commit/sha0)'));
+    assert.match(text, /View all 80 commits · 77 more.*\/compare\/a\.\.\.z/);
+    assert.equal((text.match(/Author/g) || []).length, 1);
+    assert.ok(text.length < 1500);
+    assert.ok(text.includes('…'));
     for (const item of result.pending) {
         const embed = item.embeds[0];
         assert.ok(embed.description.length <= 4096);
         assert.ok((embed.title?.length || 0) <= 256);
         assert.ok(embed.description.length + (embed.title?.length || 0) <= 6000);
     }
+});
+test('merge detection still sees commits omitted from the short preview', async () => {
+    const result = await integration({
+        branches: [branch('main', 'f'), branch('topic', 'c')],
+        commits: ['b', 'c', 'd', 'e', 'f'].map(commit),
+    });
+    const description = result.pending[0].embeds[0].description;
+    assert.match(description, /Branch \[topic\].*merged into main/);
+    assert.doesNotMatch(description, /\/commit\/c\)/);
+    assert.match(description, /View all 5 commits · 2 more/);
+});
+test('mixed commit authors remain attributed individually', async () => {
+    const result = await integration({ commits: [commit('b'), {
+        ...commit('c'), commit: { message: 'Another change', author: { name: 'Other' } },
+    }] });
+    const description = result.pending[0].embeds[0].description;
+    assert.match(description, /Fix bug — Dev/);
+    assert.match(description, /Another change — Other/);
+    assert.doesNotMatch(description, /\nBy /);
 });
 test('legacy text outbox entries and new embed entries both deliver with mentions disabled', async () => {
     assert.deepEqual(notificationOptions('old pending message'), { content: 'old pending message', allowedMentions: { parse: [] } });

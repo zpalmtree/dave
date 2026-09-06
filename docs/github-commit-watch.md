@@ -3,12 +3,16 @@
 The bot polls every 60 seconds after each completed check. It watches every branch
 (including the default branch), discovers new branches, and posts commit links,
 first-line summaries, authors, and branch names in grouped Discord embeds.
+New branches show only their latest commit, establishing a baseline without
+replaying inherited history or old merges. Pushes show at most the three most
+recent commits, with summaries capped at 160 characters and a link to the full
+comparison for larger batches. A shared author is named once per update.
 Merge updates use purple accents and a single linked branch heading; ordinary
 updates use blue. Repository headings and footers are omitted and commits use single line
 breaks for compact spacing. A single blank line separates the merge heading from
 the commits. When all commits share a GitHub author, their avatar appears as a
-thumbnail; mixed or unknown authors omit the thumbnail. Large batches split
-into bounded pages. Mentions are disabled. The bot needs Embed Links permission.
+thumbnail; mixed or unknown authors omit the thumbnail. Merge metadata still
+uses bounded pages if necessary. Mentions are disabled. The bot needs Embed Links permission.
 
 Merged PRs receive a prominent line such as **xaz merged branch
 codex/title-harpoon-transition into main**, followed by a PR link. The actor is
@@ -55,8 +59,8 @@ Successful sends are checkpointed individually; failed sends retry on the next
 poll. A crash between Discord accepting a message and saving its checkpoint can
 repeat that message. Never run two instances of the selected bot with this file.
 
-New branches compare against the previously observed default-branch tip. Rewrites
-are labeled, and missing old SHAs fall back to announcing the current tip.
+New branches fetch only their current tip. Rewrites are labeled, and missing old
+SHAs fall back to announcing the current tip.
 Branch and comparison API results are paginated. API failures preserve progress.
 A branch created and deleted entirely between polls cannot be observed; polling
 also cannot recover commits force-pushed away before they were observed.
