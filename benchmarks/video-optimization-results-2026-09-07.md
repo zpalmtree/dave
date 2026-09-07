@@ -241,11 +241,60 @@ worker already forwards that guidance unchanged, so no desktop source change or
 additional inference stage was needed. Both OALGO cloud-comparison pairs are now
 available and await their separate human ratings.
 
+## OALGO attachment reaction follow-up
+
+The user preferred B's accent and attachment inclusion in the refund pair, but
+A's expressions. They reported that A omitted the woman and neither clip looked
+toward the woman or clock. These are dimension-specific qualitative observations;
+no overall preference, numerical score, or formal material-failure rating has
+been inferred. This pair predates the separately approved Stargate voice change.
+
+Inspection of the saved inputs confirms that A's starting composite omitted the
+woman, while B's included her and the bedside props. Both plans explicitly kept
+OALGO's gaze on the camera throughout. The composition instructions also favored
+preserving the base portrait's framing/background and allowed a salient object
+to stand in for the attached subject. These are actionable input failures; the
+observations do not establish that a different planner model would fix them.
+
+Composition guidance now preserves the main attached subjects and their
+relationships to important props, allowing wider framing and the attached
+setting. OALGO planning guidance names gaze targets and reaction timing in shot
+visuals and distinguishes facial identity from a frozen expression. Explicit
+continuous-eye-contact or stillness requests retain precedence. Production
+models, reasoning effort, renderer profile, and number of inference stages are
+unchanged. The longer guidance remains below the broker's 8,000-character cap.
+
+One new production-model composite visibly preserves the sleeping woman, clock,
+MONDAY papers, and OALGO. Two Sol-low diagnostic plans reuse the original complete
+starting image to isolate planning from that new composition. The refund plan
+speaks to camera, turns eyes and head toward the woman and clock, returns to the
+camera, and slowly raises one eyebrow. The explicit continuous-eye-contact
+control retains camera gaze throughout. Both preserve the exact five spoken
+words and requested eight-second duration. Their gaze instructions survive
+compilation into H3 prompts; the reaction compiles to 192 frames. The control
+also calls OALGO seated, an unsupported pose description superseded by the
+compiler's frame-zero image authority, so this is not a claim of perfect plans.
+
+The composite cost $0.141724 and took 29.41 seconds; the reaction plan cost
+$0.0607732 and took 35.10 seconds; the eye-contact control cost $0.0601632 and
+took 33.21 seconds. All three calls are metered, totaling $0.2626604. These single
+samples do not establish a cost, latency, or quality improvement across prompts.
+Build and all 279 repository tests pass. No desktop source changes are required.
+Inputs, usage, inspection, and compiled plans are retained in
+`oalgo-refund-reaction/`, with the user's quote in
+`human-review/oalgo-refund-feedback.json`.
+
+One separate eight-second standard-H3 diagnostic uses the original complete
+starting image, seed, duration, and frozen generator. It changes visual staging
+and uses the previously approved voice. The original cloud-comparison manifest
+and human ratings are preserved. Rendered gaze, expression, and audible quality
+must be reviewed; plan compliance alone is not a rendered-quality result.
+
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
-$13.7297 in token-priced charges and $8.6015 in unresolved reservations, or
-$22.3312 committed against the $50 cap. Authenticated OpenAI minute-level usage
+$13.9923 in token-priced charges and $8.6015 in unresolved reservations, or
+$22.5938 committed against the $50 cap. Authenticated OpenAI minute-level usage
 exports account for five additional Astra requests and one Sol judge request
 after subtracting recorded usage. Their residual token-priced costs are $1.0850
 and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;

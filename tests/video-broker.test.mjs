@@ -94,7 +94,7 @@ test('long video estimates scale by full segment cost and live job progress repl
 test('OALGO composite instructions preserve both inputs as one scene', () => {
     const plan = oalgoSourceImageCompositePlan('OALGO races toward the finish line.');
     assert.match(plan.keyframe.prompt, /OALGO base image/);
-    assert.match(plan.keyframe.prompt, /Integrate the salient person, character, animal, or object/);
+    assert.match(plan.keyframe.prompt, /Integrate the main subject or subjects from Reference 2/);
     assert.match(plan.keyframe.prompt, /never a split screen, side-by-side layout, pasted rectangle, or collage/);
     assert.match(plan.keyframe.prompt, /races toward the finish line/);
     assert.equal(plan.keyframe.motion_contract.camera_relation.includes('OALGO'), true);
