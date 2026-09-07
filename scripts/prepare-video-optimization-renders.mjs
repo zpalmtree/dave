@@ -29,7 +29,10 @@ async function frame(ledger, plan, references, id, aspectRatio, fingerprint, pol
         await writeFile(path, image.bytes);
         return { path, mimeType: image.mimeType, asset_hash: stableHash(image.bytes, 64), review_status: image.reviewStatus };
     });
-    if (!result.ok || !result.accounting_complete) throw new Error(`Incomplete render asset ${id}.`);
+    // A canceled image hedge may leave a fully reserved unknown bill. The saved
+    // image can still support a paired renderer test; release gates require all
+    // billing to be reconciled before any production promotion.
+    if (!result.ok) throw new Error(`Failed render asset ${id}.`);
     if (stableHash(await readFile(result.value.path), 64) !== result.value.asset_hash) throw new Error(`Changed render asset ${id}.`);
     return result.value;
 }

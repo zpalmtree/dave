@@ -116,6 +116,7 @@ export async function writeOptimizationReport(directory, state, corpus, fingerpr
         screening_contract_changed: Boolean(screeningSelection && screeningSelection.fingerprint !== fingerprint),
         budget_blocks: (state.budget_blocks || []).filter(value => value.fingerprint === fingerprint),
         accounting: ledgerTotals(state), budget_usd: state.budget_usd, screen, holdout, finalists,
+        execution: { screening_case_concurrency: 1, holdout_case_concurrency: 2, maximum_concurrent_holdout_calls: 4 },
         production_changes: false, final_video_review: 'pending',
         conclusion: 'No automatic promotion. Model scores are screening evidence; human frame/video review and monitored canaries remain required.' };
     await saveJsonAtomic(resolve(directory, 'report.json'), report);
@@ -174,11 +175,12 @@ async function main() {
             if (phase === 'holdout') for (const command of ['minimax', 'oalgo']) {
                 for (const testCase of cases.filter(value => value.command === command).slice(0, 4)) work.push({ testCase, repeat: 1 });
             }
-            for (const { testCase, repeat } of work) {
-                if (stopRequested) break;
+            let reporting = Promise.resolve();
+            await mapWithConcurrency(work, phase === 'holdout' ? 2 : 1, async ({ testCase, repeat }) => {
+                if (stopRequested) return;
                 const candidates = phase === 'screen' ? Object.keys(PLANNER_CANDIDATES)
                     : [CONTROL, existing.finalists[testCase.command]].filter(Boolean);
-                if (phase === 'holdout' && candidates.length !== 2) continue;
+                if (phase === 'holdout' && candidates.length !== 2) return;
                 const generated = new Map();
                 await mapWithConcurrency(stableShuffle(candidates, testCase.id).filter(candidate =>
                     availability[PLANNER_CANDIDATES[candidate].model]?.available), 2, async candidate => {
@@ -206,8 +208,11 @@ async function main() {
                             }
                         }
                     });
-                await writeOptimizationReport(runDirectory, ledger.state, corpus, fingerprint);
-            }
+                // Reports share an atomic-save path; serialize their writes while
+                // independent prompt pairs overlap. The ledger serializes billing.
+                reporting = reporting.then(() => writeOptimizationReport(runDirectory, ledger.state, corpus, fingerprint));
+                await reporting;
+            });
         }
     } catch (error) {
         ledger.state.status = error instanceof ExperimentBudgetError ? 'budget_exhausted' : 'incomplete';
