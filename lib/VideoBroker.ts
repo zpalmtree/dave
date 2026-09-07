@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import sqlite3 from 'sqlite3';
 import { WebSocket, WebSocketServer } from 'ws';
 
+import { configuredVideoOptimization, type VideoOptimizationSelection } from './VideoOptimizationRollout.js';
 import {
     ACTIVE_VIDEO_STATUSES,
     UNFINISHED_VIDEO_STATUSES,
@@ -175,10 +176,14 @@ interface ProvisionalKeyframePrefetch {
 interface JobRow {
     id: number;
     public_id: string;
+    optimization_json: string | null;
     idempotency_key: string;
     model: VideoModelId;
     prompt: string;
     planner_guidance: string | null;
+    command_variant: string | null;
+    source_mode: string | null;
+    requested_at: number | null;
     requested_duration_seconds: number | null;
     delivery_limit_bytes: number;
     prompt_tease: string | null;
@@ -833,7 +838,7 @@ export function videoSegmentUsesFrameZeroIdentity(
         .test(targetText);
 }
 
-function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: number): Record<string, any> | null {
+export function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentIndex: number): Record<string, any> | null {
     const segment = Array.isArray(plan?.segments) ? plan.segments[segmentIndex - 1] : null;
     const firstShot = Array.isArray(segment?.shots) ? segment.shots[0] : null;
     if (!segment || !firstShot || !['cut', 'dissolve'].includes(String(segment.transition))) return null;
@@ -1035,9 +1040,9 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
             reason: 'Combine the built-in OALGO art with the user-supplied visual reference.',
             prompt: [
                 'Create one cohesive square image based primarily on Reference 1, the OALGO base image.',
-                'Preserve the base character, caricature drawing style, face, body, Mexican flag clothing and emblem, city background, palette, and overall composition so OALGO remains immediately recognizable.',
-                'Integrate the salient person, character, animal, or object from Reference 2 naturally into the same illustrated scene while preserving its recognizable appearance.',
-                'Render a unified scene with consistent perspective, lighting, outlines, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
+                'Use the actual OALGO base image as visual ground truth. Preserve its recognizable face, body, Mexican flag clothing and emblem, rendering style, palette, and visible background; do not invent a city or change a photographic reference into a drawing.',
+                'Integrate the salient person, character, animal, or object from Reference 2 naturally into the same scene while preserving its recognizable appearance.',
+                'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
                 requestedAction,
             ].join(' '),
             reference_requirements: [],
@@ -1063,7 +1068,7 @@ async function composeOalgoSourceImages(
         {
             label: 'OALGO base image',
             kind: 'style',
-            visualFactsToPreserve: 'Preserve the complete base scene, recognizable caricature, Mexican flag clothing and emblem, city background, drawing style, palette, and composition.',
+            visualFactsToPreserve: 'Preserve the recognizable face and body, Mexican flag clothing and emblem, actual visible background, rendering style, palette, and composition of this reference.',
             bytes: readFileSync(base.path),
             mimeType: base.mimeType,
             sourceUrl: 'built-in:oalgo',
@@ -1336,6 +1341,8 @@ export class VideoBroker {
             ['variant_id', "TEXT NOT NULL DEFAULT 'production-v1'"],
             ['planner_fingerprint', 'TEXT'],
             ['keyframe_strategy', 'TEXT'],
+            ['command_variant', 'TEXT'], ['source_mode', 'TEXT'], ['requested_at', 'REAL'],
+            ['optimization_json', 'TEXT'],
         ] as const) {
             if (!columnNames.has(name)) {
                 await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
@@ -1612,6 +1619,22 @@ export class VideoBroker {
             created_at INTEGER NOT NULL,
             acked_at INTEGER
         )`);
+        const usageColumns = new Set((await this.all<{ name: string }>('PRAGMA table_info(video_usage_events)')).map(row => row.name));
+        for (const [name, definition] of [
+            ['pricing_status', "TEXT NOT NULL DEFAULT 'historical_estimate'"],
+            ['pricing_date', 'TEXT'], ['raw_usage_json', 'TEXT'],
+        ]) {
+            if (!usageColumns.has(name)) await this.run(`ALTER TABLE video_usage_events ADD COLUMN ${name} ${definition}`);
+        }
+        await this.run(`CREATE TABLE IF NOT EXISTS video_submission_metrics (
+            public_id TEXT PRIMARY KEY, command_variant TEXT NOT NULL, source_mode TEXT NOT NULL,
+            requested_at REAL NOT NULL, received_at REAL NOT NULL, completed_at REAL,
+            outcome TEXT NOT NULL DEFAULT 'preparing', job_public_id TEXT
+        )`);
+        const submissionColumns = new Set((await this.all<{ name: string }>('PRAGMA table_info(video_submission_metrics)')).map(row => row.name));
+        for (const column of ['source_download_seconds', 'source_composition_seconds']) {
+            if (!submissionColumns.has(column)) await this.run(`ALTER TABLE video_submission_metrics ADD COLUMN ${column} REAL`);
+        }
         await this.run(`CREATE INDEX IF NOT EXISTS video_usage_events_delivery_idx
             ON video_usage_events(origin_bot_id, acked_at, sequence)`);
     }
@@ -1994,14 +2017,32 @@ export class VideoBroker {
         if ((userBeforeDownload?.count || 0) >= VIDEO_MAX_USER_JOBS) {
             return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
         }
+        const receivedAt = Date.now() / 1000;
+        const suppliedRequestedAt = Number(body.requested_at);
+        const requestedAt = Number.isFinite(suppliedRequestedAt) && suppliedRequestedAt <= receivedAt
+            && suppliedRequestedAt > receivedAt - 86400 ? suppliedRequestedAt : receivedAt;
+        const commandVariant = String(body.command_variant || (
+            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'oalgo' : VIDEO_MODELS[body.model as VideoModelId].command
+        ));
+        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo', 'meximutt'] : [])].includes(commandVariant)) {
+            return { status: 400, body: { error: 'Invalid video command variant.' } };
+        }
+        const sourceMode = compositeDescriptor ? 'preset_composite'
+            : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset' : 'attachment') : 'generated';
         const publicId = randomUUID();
+        const optimization = body.model === 'minimax' ? configuredVideoOptimization(commandVariant, publicId) : null;
+        await this.run(`INSERT INTO video_submission_metrics(public_id, command_variant, source_mode, requested_at, received_at)
+            VALUES(?,?,?,?,?)`, [publicId, commandVariant, sourceMode, requestedAt, receivedAt]);
+        const submissionHooks = this.providerHooks({
+            public_id: publicId, model: body.model, command_variant: commandVariant,
+            origin_bot_id: String(body.origin_bot_id), requester_id: String(body.requester_id),
+            channel_id: String(body.channel_id), guild_id: body.guild_id ? String(body.guild_id) : null,
+        });
         const directory = resolve(this.options.resultsDir, publicId);
         let sourceImage: StoredVideoSourceImage | null = null;
         let sourceImageDownloadSeconds: number | null = null;
         let sourceImageCompositionSeconds: number | null = null;
         let sourceImageComposition: 'generated' | 'fallback' | null = null;
-        const compositionAttempts: VideoProviderAttempt[] = [];
-        const compositionUsages: VideoProviderUsage[] = [];
         if (sourceDescriptor) {
             const sourceImageStarted = Date.now();
             try {
@@ -2018,18 +2059,13 @@ export class VideoBroker {
                     sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
                     const compositionStarted = Date.now();
                     const hooks: VideoProviderHooks = {
-                        onAttempt: attempt => {
-                            compositionAttempts.push({
-                                ...attempt,
-                                stage: `source_image_composite_${attempt.stage}`,
-                            });
-                        },
-                        onUsage: usage => {
-                            compositionUsages.push({
-                                ...usage,
-                                stage: `source_image_composite_${usage.stage}`,
-                            });
-                        },
+                        ...optimization?.options,
+                        onAttempt: attempt => submissionHooks.onAttempt?.({
+                            ...attempt, stage: `source_image_composite_${attempt.stage}`,
+                        }),
+                        onUsage: usage => submissionHooks.onUsage?.({
+                            ...usage, stage: `source_image_composite_${usage.stage}`,
+                        }),
                     };
                     try {
                         const composed = await (
@@ -2038,8 +2074,9 @@ export class VideoBroker {
                         sourceImage = storeCompositedSourceImage(composed, directory);
                         sourceImageComposition = 'generated';
                     } catch (error) {
+                        if (error instanceof VideoUsagePersistenceError) throw error;
                         sourceImageComposition = 'fallback';
-                        compositionAttempts.push({
+                        await submissionHooks.onAttempt?.({
                             stage: 'source_image_composite_fallback',
                             attempt: 1,
                             outcome: 'error',
@@ -2069,10 +2106,14 @@ export class VideoBroker {
                 }
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
+                await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
                 return {
                     status: 400,
                     body: { error: `Could not use the starting image: ${error instanceof Error ? error.message : String(error)}` },
                 };
+            } finally {
+                await this.run('UPDATE video_submission_metrics SET source_download_seconds=?, source_composition_seconds=? WHERE public_id=?',
+                    [sourceImageDownloadSeconds, sourceImageCompositionSeconds, publicId]);
             }
         }
         const result = await this.withWriteLock(async () => {
@@ -2113,8 +2154,8 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_image_path, source_image_mime, source_image_bytes,
-                        experiment_id, variant_id
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                        experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2137,8 +2178,10 @@ export class VideoBroker {
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
-                        experimentLabel(process.env.VIDEO_EXPERIMENT_ID, null),
-                        experimentLabel(process.env.VIDEO_PIPELINE_VARIANT, 'production-v1'),
+                        optimization?.experimentId || experimentLabel(process.env.VIDEO_EXPERIMENT_ID, null),
+                        optimization?.variantId || experimentLabel(process.env.VIDEO_PIPELINE_VARIANT, 'production-v1'),
+                        commandVariant, sourceMode, requestedAt,
+                        optimization ? JSON.stringify(optimization) : null,
                     ],
                 );
                 if (sourceImageDownloadSeconds !== null) {
@@ -2172,18 +2215,15 @@ export class VideoBroker {
                     source_image_composition: sourceImageComposition,
                 },
             };
+        }).catch(async error => {
+            await this.run("UPDATE video_submission_metrics SET outcome='error', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
+            throw error;
         });
+        await this.run('UPDATE video_submission_metrics SET outcome=?, completed_at=?, job_public_id=? WHERE public_id=?', [
+            result.status === 201 ? 'queued' : result.status === 200 ? 'duplicate' : 'rejected',
+            Date.now() / 1000, result.body.job?.id || null, publicId,
+        ]);
         if (result.status === 201) {
-            const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
-            if (job) {
-                const hooks = this.providerHooks(job);
-                for (const attempt of compositionAttempts) {
-                    await hooks.onAttempt?.(attempt);
-                }
-                for (const usage of compositionUsages) {
-                    await hooks.onUsage?.(usage);
-                }
-            }
             if (this.worker?.currentJob) await this.scheduleNextQueuedPreparation();
             await this.dispatchNext();
         }
@@ -2606,9 +2646,14 @@ export class VideoBroker {
         };
     }
 
-    private providerHooks(job: JobRow): VideoProviderHooks {
+    private providerHooks(job: Pick<JobRow, 'public_id' | 'origin_bot_id' | 'requester_id' | 'channel_id' | 'guild_id' | 'model' | 'command_variant'>): VideoProviderHooks {
         return {
             onUsage: async (usage: VideoProviderUsage) => {
+                let cost = 0;
+                let pricingStatus = usage.usageMissing ? 'usage_missing' : 'estimated';
+                try { cost = videoUsageCost(usage); }
+                catch { pricingStatus = 'unknown_price'; }
+                if (pricingStatus !== 'estimated') console.warn(`[Video usage] ${pricingStatus}: ${usage.model}/${usage.stage}`);
                 const eventId = [
                     job.public_id,
                     usage.stage,
@@ -2622,8 +2667,8 @@ export class VideoBroker {
                         event_id, job_public_id, origin_bot_id, user_id, channel_id, guild_id,
                         command, stage, attempt, outcome, provider, model, service_tier,
                         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                        images, web_searches, cost, created_at
-                     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                        images, web_searches, cost, created_at, pricing_status, pricing_date, raw_usage_json
+                     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         eventId,
                         job.public_id,
@@ -2631,7 +2676,7 @@ export class VideoBroker {
                         job.requester_id,
                         job.channel_id,
                         job.guild_id,
-                        VIDEO_MODELS[job.model].command,
+                        job.command_variant || VIDEO_MODELS[job.model].command,
                         usage.stage,
                         Math.max(1, Math.round(usage.attempt)),
                         usage.outcome,
@@ -2644,8 +2689,9 @@ export class VideoBroker {
                         integer(usage.cacheWriteTokens),
                         integer(usage.images),
                         integer(usage.webSearches),
-                        videoUsageCost(usage),
-                        nowSeconds(),
+                        cost, nowSeconds(), pricingStatus,
+                        usage.pricingDate || new Date().toISOString().slice(0, 10),
+                        usage.rawUsage ? JSON.stringify(usage.rawUsage) : null,
                     ],
                 ).catch((error) => {
                     throw new VideoUsagePersistenceError(
@@ -2686,7 +2732,11 @@ export class VideoBroker {
         };
     }
 
-    private frontierOptions(job: JobRow, _criticalPath: boolean): VideoFrontierCallOptions {
+    private optimization(job: JobRow): VideoOptimizationSelection | null {
+        return job.optimization_json ? JSON.parse(job.optimization_json) : null;
+    }
+
+    private frontierOptions(job: JobRow, _criticalPath: boolean): VideoKeyframeOptions {
         const plannerStrategy = configuredVideoPlannerStrategy(job.channel_id);
         const configured = configuredVideoPlannerVariant(process.env, plannerStrategy);
         const plannerGuidance = [job.planner_guidance]
@@ -2697,6 +2747,7 @@ export class VideoBroker {
             serviceTier: configuredVideoOpenAIServiceTier(),
             ...configured,
             plannerStrategy,
+            ...this.optimization(job)?.options,
             ...(plannerGuidance ? { plannerGuidance } : {}),
             ...(job.requested_duration_seconds !== null ? {
                 requestedDurationSeconds: job.requested_duration_seconds,
@@ -2975,21 +3026,18 @@ export class VideoBroker {
                         const reasonCode = /^[a-z_]+$/.test(error.reasonCode)
                             ? error.reasonCode
                             : 'other';
-                        const rejectionStrategy = configuredVideoPlannerStrategy(job.channel_id);
-                        const rejectionVariant = configuredVideoPlannerVariant(
-                            process.env,
-                            rejectionStrategy,
-                        );
+                        const rejectionVariant = this.frontierOptions(job, criticalPath);
+                        const rejectionStrategy = rejectionVariant.plannerStrategy || 'single-pass';
                         await this.run(
                             `UPDATE video_jobs SET planner_model = ?, planner_fingerprint = ?, updated_at = ?
                              WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
                             [
                                 `${FRONTIER_REJECTION_PREFIX}${reasonCode}`,
                                 videoPlannerFingerprint(
-                                    rejectionVariant.plannerModel,
+                                    rejectionVariant.plannerModel || VIDEO_PLANNER_MODEL,
                                     rejectionVariant.analysisReasoningEffort,
                                     rejectionVariant.screenplayReasoningEffort,
-                                    '',
+                                    rejectionVariant.plannerGuidance || '',
                                     rejectionStrategy,
                                 ),
                                 nowSeconds(),
@@ -3280,6 +3328,7 @@ export class VideoBroker {
                         identity ? [identity] : [],
                         {
                             serviceTier: configuredVideoOpenAIServiceTier(),
+                            ...this.frontierOptions(job, false),
                             ...hooks,
                             ...configuredVideoKeyframeVariant(),
                             strategy: this.keyframeStrategy(job),
@@ -4239,6 +4288,9 @@ export class VideoBroker {
                 requested_duration_seconds: row.requested_duration_seconds,
                 delivery_limit_bytes: row.delivery_limit_bytes,
                 profile: 'maximum',
+                planner_guidance: row.planner_guidance,
+                command_variant: row.command_variant,
+                renderer_profile: this.optimization(row)?.rendererProfile,
                 has_source_image: Boolean(row.source_image_path),
                 lease_id: leaseId,
                 estimate_low_seconds: row.estimate_low_seconds,

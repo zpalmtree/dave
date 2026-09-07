@@ -38,6 +38,10 @@ export const REVIEW_PAGE = `<!doctype html>
     .reviewer-grid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(320px,.75fr); min-height:630px; }
     .image-wrap { display:flex; align-items:center; justify-content:center; padding:20px; min-height:520px; background:#050608; }
     .image-wrap img { display:block; max-width:100%; max-height:72vh; object-fit:contain; border-radius:8px; }
+    .references { display:flex; gap:12px; flex-wrap:wrap; padding:16px 20px; border-top:1px solid var(--line); }
+    .references figure { margin:0; flex:1; min-width:140px; }
+    .references img { width:100%; height:180px; object-fit:contain; background:#050608; border-radius:8px; }
+    .references figcaption { color:var(--muted); font-size:12px; margin-top:6px; }
     .decision { padding:22px; border-left:1px solid var(--line); }
     .decision h2 { margin:0 0 6px; font-size:16px; }
     .hint { color:var(--muted); font-size:13px; margin:0 0 18px; }
@@ -185,7 +189,22 @@ export const REVIEW_PAGE = `<!doctype html>
       ]);
       const image = node('img',{src:endpoint(entry.image_url),alt:'Candidate starting frame for blinded human review'});
       image.addEventListener('error',()=>{ image.alt='The review image failed to load.'; });
-      return node('div',{class:'card'},[promptBlock(entry.prompt),node('div',{class:'reviewer-grid'},[node('div',{class:'image-wrap'},[image]),decisions])]);
+      const references = (entry.references || []).map(reference=>node('figure',{},[
+        node('img',{src:endpoint(reference.image_url),alt:reference.label}),node('figcaption',{text:reference.label})
+      ]));
+      const separator = entry.prompt.indexOf('\\n\\nRequested intent:');
+      const original = separator < 0 ? entry.prompt : entry.prompt.slice(0,separator);
+      const contract = separator < 0 ? '' : entry.prompt.slice(separator + 2);
+      const frame = contract.match(/^Frame-zero specification: (.*)$/m)?.[1] || '';
+      let motion = {};
+      try { motion = JSON.parse(contract.match(/^Motion contract: (.*)$/m)?.[1] || '{}'); } catch {}
+      const heading = promptBlock(original);
+      if (motion.first_second_action) heading.append(node('p',{class:'hint',style:'margin:12px 0 0',text:'First movement: ' + motion.first_second_action}));
+      const requirements = frame ? node('details',{},[node('summary',{text:'Opening frame requirements'}),node('div',{},[
+        node('p',{text:frame}),...['subject_orientation','gaze_direction','travel_direction','camera_relation'].filter(field=>motion[field]).map(field=>node('p',{text:field.replaceAll('_',' ') + ': ' + motion[field]}))
+      ])]) : null;
+      const visual = node('div',{},[node('div',{class:'image-wrap'},[image]),references.length ? node('div',{class:'references'},references) : null,requirements]);
+      return node('div',{class:'card'},[heading,node('div',{class:'reviewer-grid'},[visual,decisions])]);
     }
 
     function notesField(entry) {

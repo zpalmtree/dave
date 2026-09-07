@@ -54,7 +54,7 @@ export function lowerConfidenceBound(values, z = 1.96) {
 }
 
 export function stableHash(value, length = 16) {
-    return createHash('sha256').update(String(value)).digest('hex').slice(0, length);
+    return createHash('sha256').update(Buffer.isBuffer(value) ? value : String(value)).digest('hex').slice(0, length);
 }
 
 function seededUnit(seed) {
@@ -84,7 +84,7 @@ export function normalizeOpenAIUsage(body, attributes = {}) {
         provider: 'openai',
         model: String(body?.model || attributes.model || 'unknown'),
         serviceTier: String(body?.service_tier || attributes.serviceTier || 'default'),
-        inputTokens: Math.max(0, totalInput - cached),
+        inputTokens: Math.max(0, totalInput - cached - finite(details.cache_write_tokens)),
         outputTokens: Math.max(0, finite(usage.output_tokens)),
         cacheReadTokens: cached,
         cacheWriteTokens: Math.max(0, finite(details.cache_write_tokens)),
@@ -325,7 +325,7 @@ export function plannerGate(
     const candidateMaterialFailures = relevantHuman.filter(value => value.material_failures?.includes(candidate)).length;
     const controlMaterialFailures = relevantHuman.filter(value => value.material_failures?.includes(controlCandidate)).length;
     if (requireHumanAdjudication && pendingHuman) reasons.push('pending_human_adjudication');
-    if (humanAdjudications) {
+    if (humanAdjudications && relevantHuman.length > 0 && pendingHuman === 0) {
         if (candidateMaterialFailures > controlMaterialFailures + 1) reasons.push('additional_human_confirmed_critical_failures');
     } else if (summary.critical_failures > control.critical_failures + 1) {
         reasons.push('additional_critical_failures');
@@ -461,8 +461,10 @@ export function finalVideoGate(packet, key) {
     const keys = new Map((key?.pairs || []).map(value => [value.pair_id, value.labels || {}]));
     const rows = (packet?.pairs || []).map(pair => {
         const labels = keys.get(pair.pair_id) || {};
-        const complete = ['A', 'B'].every(label => Number.isFinite(Number(pair.overall?.[label])))
-            && ['A', 'B', 'tie'].includes(pair.preferred);
+        const complete = ['A', 'B'].every(label => typeof pair.overall?.[label] === 'number'
+            && Number.isFinite(pair.overall[label]) && typeof pair.material_failure?.[label] === 'boolean')
+            && ['A', 'B', 'tie'].includes(pair.preferred)
+            && Object.values(labels).includes('candidate') && Object.values(labels).includes('control');
         const candidateLabel = Object.entries(labels).find(([_label, value]) => value === 'candidate')?.[0];
         const controlLabel = Object.entries(labels).find(([_label, value]) => value === 'control')?.[0];
         return {

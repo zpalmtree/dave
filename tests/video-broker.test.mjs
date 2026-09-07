@@ -687,6 +687,46 @@ test('source-image download does not hold the enqueue write lock', async () => {
     }
 });
 
+test('concurrent duplicate OALGO submissions retain both paid composition records', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-race-'));
+    let arrived = 0, release;
+    const ready = new Promise(resolve => { release = resolve; });
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot-secret', workerToken: 'worker-secret',
+        sourceImageDownloader: async (_descriptor, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source.png'); writeFileSync(path, 'fixture');
+            return { path, mimeType: 'image/png', bytes: 7 };
+        },
+        sourceImageComposer: async (_base, _attached, _prompt, hooks) => {
+            if (++arrived === 2) release();
+            await ready;
+            await hooks.onUsage({ stage: 'candidate', attempt: 1, provider: 'test', model: 'test-image',
+                images: 1, outcome: 'success', costOverride: 0.01, rawUsage: { output_tokens: 10 } });
+            return { bytes: Buffer.from('fixture'), mimeType: 'image/png', provider: 'test', model: 'test-image' };
+        } });
+    await broker.start();
+    try {
+        const submit = () => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', command_variant: 'oalgo', prompt: 'Test', requested_at: Date.now() / 1000 - 2,
+                requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel', command_message_id: 'same-message', status_message_id: 'status',
+                source_image: { preset: 'oalgo' }, source_image_composite: {
+                    url: 'https://cdn.discordapp.com/attachments/1/2/attached.png', mime_type: 'image/png', bytes: 7 } }) });
+        const responses = await Promise.all([submit(), submit()]);
+        assert.deepEqual(responses.map(response => response.status).sort(), [200, 201]);
+        const submissions = await broker.all('SELECT * FROM video_submission_metrics');
+        assert.deepEqual(submissions.map(row => row.outcome).sort(), ['duplicate', 'queued']);
+        assert.ok(submissions.every(row => row.command_variant === 'oalgo' && row.source_mode === 'preset_composite'
+            && row.requested_at < row.received_at && row.source_composition_seconds !== null));
+        const usage = await broker.all('SELECT * FROM video_usage_events');
+        assert.equal(usage.length, 2);
+        assert.equal(usage.reduce((sum, row) => sum + row.cost, 0), 0.02);
+        assert.ok(usage.every(row => row.command === 'oalgo' && row.raw_usage_json && row.pricing_status === 'estimated'));
+        assert.equal((await broker.get('SELECT COUNT(*) AS count FROM video_jobs')).count, 1);
+    } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('OALGO jobs use the preset, AI-composite an attachment, and fall back safely', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-'));
     const dbPath = join(directory, 'queue.sqlite3');

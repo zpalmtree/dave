@@ -1,0 +1,285 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -1443,6 +1443,7 @@
+         metavar="auto|SECONDS",
+         help="Total finished length; auto selects the shortest viable screenplay",
+     )
++    parser.add_argument("--planner-guidance", default="", help="Binding character/delivery guidance, separate from verbatim user dialogue")
+     parser.add_argument("--seed", type=int, help="Fixed seed; random when omitted")
+     parser.add_argument(
+         "--aspect",
+@@ -1535,6 +1536,12 @@
+         type=Path,
+         help="Precomputed structured screenplay from the trusted remote planner",
+     )
++    parser.add_argument(
++        "--experiment-contract", type=Path,
++        help="Require identical compiled scenes and frozen assets for a renderer comparison",
++    )
++    parser.add_argument("--preserve-base-segmentation", action="store_true",
++                        help="Keep base H3 scene splitting when an approved FastH3 canary runs")
+     parser.add_argument(
+         "--local-plan-output",
+         type=Path,
+@@ -1701,6 +1708,16 @@
+         parser.error(
+             "--local-plan-output cannot be combined with resume, frontier, literal mode, or segment keyframes"
+         )
++    if args.experiment_contract is not None and (
++        args.model != "h3" or args.frontier_plan is None or args.resume is not None
++        or not args.benchmark_label or args.keyframe != "never" or args.enhance is False
++        or args.fast_duration_aware or args.turbo4 or args.loop_close or args.last_frame
++        or args.deferred_segment_keyframe or args.h3_segment_cap is not None
++        or args.local_plan_output is not None
++    ):
++        parser.error("--experiment-contract requires fresh H3 frontier renders with fixed duration and supplied assets")
++    if args.preserve_base_segmentation and (args.model != "h3" or not args.fast or args.fast_duration_aware):
++        parser.error("--preserve-base-segmentation requires H3 fast with duration fitting disabled")
+     return args
+ 
+ 
+@@ -3045,6 +3062,7 @@
+     image_path: Path | None,
+     requested_duration: float | None,
+     model: str,
++    planner_guidance: str = "",
+ ) -> dict[str, Any]:
+     duration_context = (
+         f"Caller-specified finished duration: {requested_duration:g} seconds."
+@@ -3054,7 +3072,8 @@
+     image_context = f"\n{SOURCE_IMAGE_USER_CONTEXT}" if image_path is not None else ""
+     user_message: dict[str, Any] = {
+         "role": "user",
+-        "content": f"{duration_context}{image_context}\nUser idea: {raw_prompt}",
++        "content": f"{duration_context}{image_context}\nUser idea: {raw_prompt}"
++        + (f"\nBinding character/delivery guidance (not dialogue to recite): {planner_guidance}" if planner_guidance else ""),
+     }
+     if image_path is not None:
+         user_message["images"] = [base64.b64encode(image_path.read_bytes()).decode("ascii")]
+@@ -4204,6 +4223,7 @@
+     aspect: str,
+     models: tuple[str, ...],
+     conservative_analysis_only: bool = False,
++    planner_guidance: str = "",
+ ) -> dict[str, Any]:
+     analysis_model = PROMPT_INTENT_MODEL
+     if conservative_analysis_only:
+@@ -4215,7 +4235,8 @@
+     else:
+         try:
+             analysis = analyze_video_intent(
+-                raw_prompt, image_path, requested_duration, PROMPT_INTENT_MODEL
++                raw_prompt, image_path, requested_duration, PROMPT_INTENT_MODEL,
++                **({"planner_guidance": planner_guidance} if planner_guidance else {}),
+             )
+         except VideoGenError as exc:
+             print(
+@@ -4228,6 +4249,9 @@
+                 flush=True,
+             )
+             analysis = conservative_semantic_analysis(raw_prompt)
++    if planner_guidance:
++        analysis = copy.deepcopy(analysis)
++        analysis["planner_guidance"] = planner_guidance
+     if image_path is not None:
+         analysis = copy.deepcopy(analysis)
+         analysis["keyframe_recommended"] = False
+@@ -7307,12 +7331,45 @@
+     raise VideoGenError("--resume must point to a run directory or .plan.json")
+ 
+ 
++def experiment_input_identity(args: argparse.Namespace) -> dict[str, Any]:
++    def digest(path: Path | None) -> str | None:
++        return hashlib.sha256(path.read_bytes()).hexdigest() if path else None
++    return {
++        "generator_sha256": digest(Path(__file__)),
++        "template_sha256": {name: digest(TEMPLATE_DIR / name) for name in ("h3_t2v.json", "h3_i2v.json")},
++        "plan_sha256": digest(args.frontier_plan),
++        "raw_prompt": args.prompt,
++        "seed": args.seed,
++        "aspect": nearest_aspect(args.image) if args.aspect == "auto" else args.aspect,
++        "requested_duration": args.duration,
++        "image_sha256": digest(args.image),
++        "segment_image_sha256": {str(index): digest(path) for index, path in sorted(args.segment_keyframe)},
++    }
++
++
++def validate_experiment_inputs(args: argparse.Namespace) -> dict[str, Any] | None:
++    if args.experiment_contract is None:
++        return None
++    contract = json.loads(args.experiment_contract.read_text(encoding="utf-8"))
++    if contract.get("schema_version") != 1 or contract.get("inputs") != experiment_input_identity(args):
++        raise VideoGenError("Renderer experiment input/code fingerprint changed; prepare a new comparison")
++    if not isinstance(contract.get("compiled_h3"), list) or not contract["compiled_h3"]:
++        raise VideoGenError("Renderer experiment has no frozen compiled scenes")
++    return contract
++
++
++def validate_experiment_compilation(contract: dict[str, Any] | None, compiled: list[dict[str, Any]]) -> None:
++    if contract is not None and compiled != contract["compiled_h3"]:
++        raise VideoGenError("Renderer experiment changed compiled scenes, prompts or frame counts; refusing inference")
++
++
+ def main() -> int:
+     for stream in (sys.stdout, sys.stderr):
+         reconfigure = getattr(stream, "reconfigure", None)
+         if callable(reconfigure):
+             reconfigure(encoding="utf-8", errors="replace")
+     args = parse_args()
++    experiment_contract = validate_experiment_inputs(args)
+     started_process: subprocess.Popen[bytes] | None = None
+     log_handle: Any | None = None
+     temp_references: list[Path] = []
+@@ -7342,6 +7399,7 @@
+                 aspect,
+                 models,
+                 conservative_analysis_only=bool(args.conservative_semantic_analysis),
++                planner_guidance=args.planner_guidance,
+             )
+             destination = args.local_plan_output.expanduser().resolve()
+             write_json(destination, plan)
+@@ -7480,17 +7538,19 @@
+                         models,
+                     )
+                 except VideoGenError as exc:
++                    if experiment_contract is not None:
++                        raise
+                     print(
+                         f"WARNING: frontier screenplay failed local validation ({exc}); "
+                         "planning locally.",
+                         flush=True,
+                     )
+                     free_comfy_memory(args.server)
+-                    plan = create_video_plan(args.prompt, args.image, args.duration, aspect, models)
++                    plan = create_video_plan(args.prompt, args.image, args.duration, aspect, models, planner_guidance=args.planner_guidance)
+             else:
+                 print("Prompt mode: model-planned screenplay.", flush=True)
+                 free_comfy_memory(args.server)
+-                plan = create_video_plan(args.prompt, args.image, args.duration, aspect, models)
++                plan = create_video_plan(args.prompt, args.image, args.duration, aspect, models, planner_guidance=args.planner_guidance)
+             if args.h3_segment_cap is not None:
+                 plan = split_h3_segments_for_benchmark(plan, args.h3_segment_cap)
+                 print(
+@@ -7501,7 +7561,7 @@
+                 )
+             elif (
+                 models == ("h3",)
+-                and not args.fast
++                and (not args.fast or args.preserve_base_segmentation)
+                 and not args.turbo4
+                 and not args.benchmark_label
+                 and not segment_keyframe_targets
+@@ -7681,7 +7741,9 @@
+                 },
+                 "plan": plan,
+                 "compiled_models": compiled_models,
++                "experiment_contract": experiment_contract,
+             }
++            validate_experiment_compilation(experiment_contract, compiled_models.get("h3", []))
+             write_json(plan_path, artifact)
+             write_json(state_path, state)
+             if args.keyframe_only:
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -89,6 +89,20 @@
+ 
+ class WorkerPlanMismatch(RuntimeError):
+     """The worker and broker are using different screenplays for one job."""
++
++
++def planner_guidance_args(job: dict[str, Any]) -> list[str]:
++    guidance = str(job.get("planner_guidance") or "").strip()
++    return ["--planner-guidance", guidance] if guidance else []
++
++
++def optimization_renderer_args(job: dict[str, Any]) -> list[str]:
++    profile = job.get("renderer_profile")
++    if not profile:
++        return []
++    if job.get("model") != "minimax" or profile != "fasth3-fixed-duration":
++        raise RuntimeError("Unsupported broker renderer experiment")
++    return ["--fast", "--no-fast-duration-aware", "--preserve-base-segmentation"]
+ 
+ 
+ def requested_duration_args(job: dict[str, Any]) -> list[str]:
+@@ -1765,6 +1779,8 @@
+             "-s",
+             str(GENERATOR),
+             *MODEL_ARGS[str(job["model"])],
++            *optimization_renderer_args(job),
++            *planner_guidance_args(job),
+             *requested_duration_args(job),
+             "--local-plan-output",
+             str(plan_path),
+@@ -2185,6 +2201,7 @@
+             "-s",
+             str(GENERATOR),
+             *MODEL_ARGS[str(job["model"])],
++            *planner_guidance_args(job),
+             *requested_duration_args(job),
+             *planner_args,
+             *keyframe_args,
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -2749,16 +2749,28 @@
+             mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
+         ):
+             video_gen.create_video_plan(
+-                "Five dogs march together.", None, 5.0, "16:9", ("h3",)
++                "Five dogs march together.", None, 5.0, "16:9", ("h3",),
++                planner_guidance="Use OALGO's grumpy delivery only when speech is requested.",
+             )
+ 
+         planner_user = planner_messages[0][1]["content"]
+         self.assertNotIn(video_gen.SOURCE_IMAGE_USER_CONTEXT, planner_user)
+         self.assertIn("Target aspect: 16:9.", planner_user)
+         self.assertIn("User request: Five dogs march together.", planner_user)
++        self.assertIn("Use OALGO's grumpy delivery only when speech is requested.", planner_user)
+ 
+ 
+ class CompilerTests(unittest.TestCase):
++    def test_renderer_contract_rejects_changed_frames_or_prompts(self):
++        prepared = video_gen.prepare_model_segments("unused", sample_plan(), "h3", None, {}, True, 1)
++        contract = {"compiled_h3": prepared}
++        video_gen.validate_experiment_compilation(contract, prepared)
++        for field, value in (("frame_count", 1), ("prompt", "Changed scene")):
++            changed = json.loads(json.dumps(prepared))
++            changed[0][field] = value
++            with self.assertRaisesRegex(video_gen.VideoGenError, "refusing inference"):
++                video_gen.validate_experiment_compilation(contract, changed)
++
+     def test_keyframe_graph_uses_requested_benchmark_steps(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -494,6 +494,7 @@
+                         "id": "job-1",
+                         "model": "minimaxfast",
+                         "prompt": "A literal test prompt",
++                        "planner_guidance": "Keep OALGO's grumpy Mexican-accented delivery.",
+                         "requested_duration_seconds": 15,
+                     },
+                     Path(temporary) / "worker.log",
+@@ -502,10 +503,21 @@
+ 
+         self.assertIsNotNone(result)
+         self.assertNotIn("--conservative-semantic-analysis", captured)
++        self.assertIn("A literal test prompt", captured)
++        self.assertEqual(captured[captured.index("--planner-guidance") + 1],
++                         "Keep OALGO's grumpy Mexican-accented delivery.")
+         self.assertEqual(
+             captured[captured.index("--duration") + 1],
+             "15",
+         )
++
++    def test_fast_renderer_canary_keeps_duration_and_base_scene_splitting(self):
++        self.assertEqual(video_worker.optimization_renderer_args({"model": "minimax"}), [])
++        args = video_worker.optimization_renderer_args({"model": "minimax", "renderer_profile": "fasth3-fixed-duration"})
++        self.assertIn("--no-fast-duration-aware", args)
++        self.assertIn("--preserve-base-segmentation", args)
++        with self.assertRaisesRegex(RuntimeError, "Unsupported"):
++            video_worker.optimization_renderer_args({"model": "ltx", "renderer_profile": "fasth3-fixed-duration"})
+ 
+     def test_local_planning_failure_runs_literal_renderer_instead_of_failing_job(self):
+         worker = DesktopVideoWorker.__new__(DesktopVideoWorker)

@@ -2,11 +2,14 @@ import { createHash } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 
 import { AI_MODELS } from './AIModels.js';
+import { VIDEO_TEXT_MODELS, videoTextModelCapabilities } from './VideoModelCapabilities.js';
 import { config } from './Config.js';
-import { VIDEO_IMAGE_ONLY_AUTO_PROMPT, VIDEO_MODELS, VideoModelId } from './VideoProtocol.js';
+import { VIDEO_IMAGE_ONLY_AUTO_PROMPT, VIDEO_MODELS, VideoModelId, requestedVideoDurationSeconds, videoPromptContentNumbers } from './VideoProtocol.js';
 import {
     VideoFrontierCallOptions,
     VideoUsagePersistenceError,
+    openAIVideoUsage,
+    videoRequestInputTokenBound,
     requestedOpenAIServiceTier,
     resolvedOpenAIServiceTier,
 } from './VideoUsage.js';
@@ -64,7 +67,7 @@ export const UNIQUE_US_PRESIDENTS = [
 export type VideoPlannerStrategy = 'two-pass' | 'single-pass';
 
 export function supportsSinglePassVideoPlanning(model: string): boolean {
-    return model === 'gpt-5.6' || model.startsWith('gpt-5.6-');
+    return VIDEO_TEXT_MODELS[model]?.singlePass === true;
 }
 
 export function configuredVideoPlannerStrategy(
@@ -84,9 +87,8 @@ export function configuredVideoPlannerVariant(
     analysisReasoningEffort: 'low' | 'medium' | 'high';
     screenplayReasoningEffort: 'low' | 'medium' | 'high';
 } {
-    const plannerModel = environment.VIDEO_PLANNER_MODEL === VIDEO_PLANNER_FAST_MODEL
-        ? VIDEO_PLANNER_FAST_MODEL
-        : VIDEO_PLANNER_MODEL;
+    const plannerModel = environment.VIDEO_PLANNER_MODEL || VIDEO_PLANNER_MODEL;
+    videoTextModelCapabilities(plannerModel);
     const effort = (name: string): 'low' | 'medium' | 'high' => {
         const value = environment[name];
         if (value === 'low' || value === 'medium' || value === 'high') return value;
@@ -1515,6 +1517,7 @@ export function validateFrontierVideoPlanForKeyframe(
     rawPrompt = '',
     requestedDurationSeconds?: number | null,
 ): void {
+    requestedDurationSeconds ??= requestedVideoDurationSeconds(rawPrompt);
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
         throw new Error('GPT-5.6 Sol returned no screenplay segments.');
     }
@@ -1649,7 +1652,7 @@ export function validateFrontierVideoPlanForKeyframe(
         if (missingQuotes.length) {
             throw new Error(`GPT-5.6 Sol omitted quoted wording: ${missingQuotes.join(' | ')}`);
         }
-        const missingNumbers = [...new Set(rawPrompt.match(/\b\d+(?:\.\d+)?\b/g) || [])].filter(number => {
+        const missingNumbers = videoPromptContentNumbers(rawPrompt).filter(number => {
             if (new RegExp(`(^|\\D)${number.replace('.', '\\.')}($|\\D)`).test(semantic)) return false;
             const integer = Number(number);
             return !Number.isInteger(integer) || integer < 0 || integer >= NUMBER_WORDS.length
@@ -1749,13 +1752,18 @@ async function requestGeminiPlannerResponse(
 ): Promise<any> {
     const plannerModel = String(payload.model || VIDEO_PLANNER_FAST_MODEL);
     const client = new GoogleGenAI({ apiKey: config.geminiApiKey, apiVersion: 'v1alpha' });
+    const maxAttempts = options.maxRequestAttempts || 2;
     let lastError: unknown;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         const started = Date.now();
         let outcome: 'success' | 'error' = 'error';
         let detail: string | undefined;
         try {
-            const request = (includeSchema: boolean) => client.models.generateContent({
+            const request = async (includeSchema: boolean) => {
+                await options.beforeRequest?.({ stage, attempt, provider: 'google', model: plannerModel,
+                    serviceTier: 'default', maxInputTokens: videoRequestInputTokenBound(payload),
+                    maxOutputTokens: Number(payload.max_output_tokens || 16_000) });
+                return client.models.generateContent({
                 model: plannerModel,
                 contents: geminiPlannerContents(payload.input),
                 config: {
@@ -1773,7 +1781,8 @@ async function requestGeminiPlannerResponse(
                         thinkingLevel: String(payload.reasoning?.effort || 'high').toUpperCase() as any,
                     },
                 },
-            });
+                });
+            };
             let response;
             try {
                 response = await request(true);
@@ -1807,6 +1816,8 @@ async function requestGeminiPlannerResponse(
                 ),
                 outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
                 cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
+                rawUsage: usage as unknown as Record<string, unknown>,
+                usageMissing: !usage,
             });
             if (!outputText) throw new Error('Gemini Flash returned no structured planner output.');
             outcome = 'success';
@@ -1827,7 +1838,7 @@ async function requestGeminiPlannerResponse(
             detail = error instanceof Error ? error.message : String(error);
             if (error instanceof VideoUsagePersistenceError) throw error;
             const transient = /timeout|timed out|aborted|network|socket|fetch|\b(408|409|429|5\d\d)\b/i.test(detail);
-            if (signal.aborted || !transient || attempt >= 2) throw error;
+            if (signal.aborted || !transient || attempt >= maxAttempts) throw error;
         } finally {
             await options.onAttempt?.({
                 stage,
@@ -1996,9 +2007,10 @@ async function requestSolResponse(
 ): Promise<any> {
     const plannerModel = String(payload.model || VIDEO_PLANNER_MODEL);
     const requestedTier = requestedOpenAIServiceTier(options.serviceTier);
+    const maxAttempts = options.maxRequestAttempts || 2;
     let lastError: unknown;
     let expandOutputBudget = false;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         const started = Date.now();
         let outcome: 'success' | 'error' = 'error';
         let serviceTier = requestedTier || 'default';
@@ -2011,6 +2023,9 @@ async function requestSolResponse(
                 : payload;
             const streamProvisionalKeyframe = stage === 'single_pass'
                 && Boolean(options.onProvisionalKeyframe);
+            await options.beforeRequest?.({ stage, attempt, provider: 'openai', model: plannerModel,
+                serviceTier: requestedTier, maxInputTokens: videoRequestInputTokenBound(attemptPayload),
+                maxOutputTokens: Number(attemptPayload.max_output_tokens) });
             const response = await fetch('https://api.openai.com/v1/responses', {
                 method: 'POST',
                 signal,
@@ -2034,8 +2049,7 @@ async function requestSolResponse(
             const unexpectedState = response.ok && responseStatus !== 'completed';
             const logicalSuccess = response.ok && !unexpectedState;
             const usage = body?.usage;
-            if (usage) {
-                const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
+            if (usage || response.ok) {
                 await options.onUsage?.({
                     stage,
                     attempt,
@@ -2043,9 +2057,7 @@ async function requestSolResponse(
                     provider: 'openai',
                     model: String(body.model || plannerModel),
                     serviceTier,
-                    inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
-                    outputTokens: Number(usage.output_tokens || 0),
-                    cacheReadTokens: cached,
+                    ...openAIVideoUsage(body),
                 });
             }
             if (!response.ok) {
@@ -2053,7 +2065,7 @@ async function requestSolResponse(
                 const error = new Error(detail);
                 lastError = error;
                 retryable = transientOpenAIStatus(response.status);
-                if (attempt < 2 && retryable) continue;
+                if (attempt < maxAttempts && retryable) continue;
                 throw error;
             }
             if (unexpectedState) {
@@ -2064,7 +2076,7 @@ async function requestSolResponse(
                 lastError = error;
                 retryable = incomplete || /server|timeout|rate/i.test(reason);
                 expandOutputBudget = incomplete && reason === 'max_output_tokens';
-                if (attempt < 2 && retryable) continue;
+                if (attempt < maxAttempts && retryable) continue;
                 throw error;
             }
             outcome = 'success';
@@ -2073,7 +2085,7 @@ async function requestSolResponse(
             lastError = error;
             detail = error instanceof Error ? error.message : String(error);
             if (error instanceof VideoUsagePersistenceError) throw error;
-            if (signal.aborted || !retryable || attempt >= 2) throw error;
+            if (signal.aborted || !retryable || attempt >= maxAttempts) throw error;
         } finally {
             await options.onAttempt?.({
                 stage,
@@ -2090,7 +2102,7 @@ async function requestSolResponse(
     throw lastError instanceof Error ? lastError : new Error('OpenAI request failed.');
 }
 
-async function requestPlannerResponse(
+export async function requestPlannerResponse(
     payload: Record<string, any>,
     signal: AbortSignal,
     stage: string,
@@ -2303,6 +2315,7 @@ export async function createFrontierVideoPlan(
 ): Promise<Record<string, unknown>> {
     const defaultConfigured = configuredVideoPlannerVariant();
     const plannerModel = options.plannerModel || defaultConfigured.plannerModel;
+    videoTextModelCapabilities(plannerModel);
     const plannerProvider = plannerModel.startsWith('gemini-') ? 'google' : 'openai';
     const plannerStrategy: VideoPlannerStrategy = options.plannerStrategy === 'single-pass'
         && supportsSinglePassVideoPlanning(plannerModel)
@@ -2327,6 +2340,13 @@ export async function createFrontierVideoPlan(
     const attributed = <T extends Record<string, any>>(plan: T): T => {
         (plan as any)._planner_model = plannerModel;
         (plan as any)._planner_fingerprint = plannerFingerprint;
+        (plan as any)._planner_configuration = {
+            model: plannerModel, strategy: plannerStrategy,
+            analysis_effort: analysisReasoningEffort, screenplay_effort: screenplayReasoningEffort,
+            service_tier: options.serviceTier || 'default',
+            streaming_first_frame: videoTextModelCapabilities(plannerModel).streamingFirstFrame
+                && Boolean(options.onProvisionalKeyframe),
+        };
         return plan;
     };
     const definition = VIDEO_MODELS[model];

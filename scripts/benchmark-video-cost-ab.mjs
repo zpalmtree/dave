@@ -684,32 +684,18 @@ async function buildReport(options, state) {
     const reviewerTierRatio = standardCounterfactualRatio(
         groupCalls(state, 'reviewer').filter(call => call.experiment === 'tier-reviewer' && call.arm === 'sol-high-fast'),
     );
-    const monthlyBaseline = { planning: 31, reviewer: 19.13, image_fallback: 7.10 };
     const monthlyProjection = {
-        baseline_usd: Object.values(monthlyBaseline).reduce((sum, value) => sum + value, 0),
-        planning_usd: monthlyBaseline.planning * planningTierRatio
-            * modelCostRatio(selectedPlannerSummary, plannerSummaries.find(value => value.candidate === 'sol-medium-standard')),
-        reviewer_usd: monthlyBaseline.reviewer * reviewerTierRatio
-            * modelCostRatio(selectedReviewerSummary, reviewerControl),
-        image_fallback_usd: monthlyBaseline.image_fallback,
-        source: 'Observed non-translation MiniMax 30-day stage mix as of 2026-08-31; model ratios use this local benchmark.',
+        baseline_usd: null, projected_usd: null, savings_fraction: null,
+        source: 'Unavailable: supply a dated, reconciled production baseline. Historical constants are not measurements.',
     };
-    monthlyProjection.projected_usd = monthlyProjection.planning_usd
-        + monthlyProjection.reviewer_usd + monthlyProjection.image_fallback_usd;
-    monthlyProjection.savings_fraction = 1 - monthlyProjection.projected_usd / monthlyProjection.baseline_usd;
     const recommendation = {
-        service_tier: 'default',
-        fast_removed: true,
+        service_tier: 'default', fast_removed: false,
         reviewer: qualifiedReviewer?.arm || 'sol-high-standard',
-        planner: qualifiedPlanner?.arm || 'sol-medium-standard',
+        planner: qualifiedPlanner?.arm || 'sol-low-standard',
         ready_for_final_video_gate: Boolean(reviewerControl && qualifiedPlanner),
         final_video_gate_passed: finalGate.qualifies,
         deploy_authorized: false,
-        note: reviewerControl && qualifiedPlanner && finalGate.qualifies
-            ? 'All local gates pass. A separate user decision and production-change plan are still required.'
-            : reviewerControl && qualifiedPlanner
-                ? 'Run the initial 12-video blinded gate; add up to 8 videos only if the first six pairs are ambiguous.'
-            : 'Evidence gates are incomplete or failed; do not deploy model changes. Removing Fast remains the only unconditional recommendation.',
+        note: 'Historical benchmark report only. Use the metered video optimization campaign for current model and renderer decisions; missing measurements never imply savings.',
     };
     const report = {
         schema_version: 1,
@@ -762,9 +748,9 @@ async function buildReport(options, state) {
         '',
         '## Recommendation',
         '',
-        `Use ${recommendation.service_tier}; Fast is excluded. Planner: ${recommendation.planner}. Reviewer: ${recommendation.reviewer}.`,
+        `Recorded service tier: ${recommendation.service_tier}. Planner: ${recommendation.planner}. Reviewer: ${recommendation.reviewer}.`,
         '',
-        `Projected non-translation MiniMax spend: ${formatMoney(monthlyProjection.projected_usd)} per 30 days versus ${formatMoney(monthlyProjection.baseline_usd)} (${(100 * monthlyProjection.savings_fraction).toFixed(1)}% lower).`,
+        monthlyProjection.source,
         '',
         `Adaptive final-video gate: ${finalGate.qualifies ? 'pass' : finalGate.reasons.join(', ')}.`,
         '',
