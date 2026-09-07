@@ -219,13 +219,33 @@ service time. Its completed GPUq job, output manifest, effective prompt, seed,
 frozen contract and video hash were verified before recovering a missing wrapper
 completion record; no repeat render was needed. Both control and candidate pass
 Windows Chrome playback checks with no console errors. The blind accent review
-is now available; the voice change remains unproven until listening feedback.
+is complete. The user preferred B, the candidate, and marked dialogue clarity,
+lip synchronization and visual storytelling acceptable. This supports the
+specific voice description on this scene and seed; it does not establish an
+accent success rate across other prompts.
+
+OALGO planning guidance now supplies the exact preferred delivery as its default,
+with performance changes permitted for explicitly requested emotions. The broker
+also preserves up to 8,000 guidance characters: its previous 2,000-character cap
+cut off most voice rules in the 2,992-character visual-story guidance. The revised
+guidance is 3,385 characters. The reviewed accent trial used the complete cue,
+so this is a separate production-submission issue, not an explanation for the
+trial's weaker control voice.
+
+A fresh production-guidance Sol-low plan preserved all supplied English words
+and copied the tested delivery exactly into all three turns. All three cues
+also compiled outside H3 spoken-text tags. That call cost $0.06268 and took 45.49
+seconds; its 15-second plan has not been rendered. The full 279-test suite passes,
+including broker storage of the complete longer character guidance. The desktop
+worker already forwards that guidance unchanged, so no desktop source change or
+additional inference stage was needed. Both OALGO cloud-comparison pairs are now
+available and await their separate human ratings.
 
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
-$13.6670 in token-priced charges and $8.6015 in unresolved reservations, or
-$22.2685 committed against the $50 cap. Authenticated OpenAI minute-level usage
+$13.7297 in token-priced charges and $8.6015 in unresolved reservations, or
+$22.3312 committed against the $50 cap. Authenticated OpenAI minute-level usage
 exports account for five additional Astra requests and one Sol judge request
 after subtracting recorded usage. Their residual token-priced costs are $1.0850
 and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;
