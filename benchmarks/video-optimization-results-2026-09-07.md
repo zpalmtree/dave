@@ -117,6 +117,33 @@ control/candidate assets are reused after explicit code and input-hash checks.
 A read-only provider billing request returned HTTP 403 with the configured key;
 unresolved reservations remain held and no production candidate is enabled.
 
+## Completed MiniMax full-video review
+
+The user reviewed both standard-H3 MiniMax pairs. The cheaper cloud arm changes
+the frame reviewer to Flash-low; planning remains Sol-low.
+
+| Case | Control score | Candidate score | Human findings |
+| --- | ---: | ---: | --- |
+| Three arcade racers | 5 | 5 | Both materially failed: speech came after stopping, and the finish line was blocked. |
+| Handwritten note on Mars | 7 | 5 | Candidate materially failed by adding a second astronaut; control had no marked material failure. |
+
+The user preferred the candidate in the tied racing pair and the control in the
+astronaut pair. These preferences and both material-failure flags are preserved
+as submitted. The candidate's mean score difference is -1 point across two
+pairs, with a bootstrap interval of [-2, 0]. It fails the prespecified quality
+gate, so MiniMax's cloud candidate is not eligible for a canary. Renderer service
+time was also about 13.5% higher on average across these two single-run pairs;
+this small comparison does not establish general latency behavior.
+
+The saved racing plans already specify speech while racing, followed by boosting
+and crossing the finish line. Both astronaut keyframes visibly contain one
+astronaut, and both saved plans refer to the same astronaut throughout. The
+late dialogue and extra astronaut conflict with those inputs. These checks
+do not establish that the cheaper reviewer itself caused the failures or
+that a more expensive planner would resolve them. Keep the rejected renders as
+regression examples for dialogue/action timing, finish-line clearance and cast
+continuity. OALGO's two cloud pairs remain pending, with their evidence separate.
+
 ## OALGO visual storytelling regression
 
 The user reported that production job `f53e3fdc` spoke the Project Stargate
@@ -173,7 +200,7 @@ the intended audible result. H3's
 supports describing voice identity and accent outside the spoken-text tags.
 It does not establish the effectiveness of a particular wording.
 
-A separate follow-up diagnostic queues one 12.25-second standard-H3 clip with
+A separate follow-up diagnostic rendered one 12.256-second standard-H3 clip with
 no cloud calls. The first scene of the reviewed revision is reused as the
 control: its effective prompt, 294 frames, seed, image, generator, templates,
 and compiled scene were checked against the saved render. The candidate changes
@@ -187,7 +214,12 @@ The trial is outside cloud-policy qualification and does not alter the original
 `oalgo-stargate/accent-test/`. A blind listening review must establish a suitable
 accent without material dialogue, lip-sync or visual regressions before changing
 default guidance. One scene and seed cannot establish reliability across prompts.
-The voice change remains an unproven candidate while the render is queued.
+The candidate completed with 294 video frames and 523.821 seconds of renderer
+service time. Its completed GPUq job, output manifest, effective prompt, seed,
+frozen contract and video hash were verified before recovering a missing wrapper
+completion record; no repeat render was needed. Both control and candidate pass
+Windows Chrome playback checks with no console errors. The blind accent review
+is now available; the voice change remains unproven until listening feedback.
 
 ## Billing reconciliation
 
