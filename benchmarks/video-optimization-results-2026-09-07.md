@@ -47,7 +47,7 @@ model, reviewer, composite or renderer canary. Live results and accounting are
 retained under `artifacts/video-optimization/2026-09-07/`, including the raw usage
 ledger, paired judgments, code hashes, compiler audits and frozen render inputs.
 
-## Renderer timing results
+## Archived fast-command timing results
 
 All eight isolated renders completed through GPUq. Each pair used the same
 source images, compiled prompts, seed, scene layout and frame counts. FastH3
@@ -66,9 +66,15 @@ to an unchanged source snapshot; the completed base render was reused after
 hash verification. All four scene compilations were also verified unchanged
 under the desktop duration-validator fix.
 
-**No renderer promotion yet.** Four blinded video pairs are ready for human
-visual and audio review. The 24-frame labels are also pending. Recorded API
+**Renderer promotion withdrawn after user clarification.** FastH3 is already
+exposed by `$minimaxfast`, and the user has found its quality tradeoff unsuitable
+for the normal commands. These timings describe that existing tradeoff; they
+are not a newly achieved normal-command improvement. The four video comparisons
+are archived and need no human ratings. Future AI configuration comparisons use
+standard H3 for both arms, and legacy renderer release files are rejected.
+
+The 24-frame labels remain pending. Recorded API
 charges are $12.7356, with $8.6015 held for seven unresolved billing records:
 $21.3371 committed against the authorized $50 cap. These reservations remain
-held; they have not been treated as free calls. No additional cloud-policy or
-combined renders were prepared without component qualification.
+held; they have not been treated as free calls. No additional AI configuration renders were prepared without component
+qualification.

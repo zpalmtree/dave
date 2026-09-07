@@ -7,14 +7,14 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configuredVideoPlannerVariant, supportsSinglePassVideoPlanning, requestPlannerResponse, validateFrontierVideoPlanForKeyframe } from '../dist/VideoFrontierPlanner.js';
-import { requestedVideoDurationSeconds, videoPromptContentNumbers } from '../dist/VideoProtocol.js';
+import { requestedVideoDurationSeconds, videoPromptContentNumbers, VIDEO_MODELS } from '../dist/VideoProtocol.js';
 import { openAIVideoUsage, videoUsageCost } from '../dist/VideoUsage.js';
 import { VideoExperimentLedger, ledgerTotals, executionFingerprint } from '../scripts/video-experiment-ledger.mjs';
 import { blindedPlan, bootstrapMeanInterval, summarizeOptimization } from '../scripts/video-optimization-analysis.mjs';
-import { rendererArguments, validateRenderManifest, renderInputFingerprint } from '../scripts/video-optimization-renders.mjs';
+import { rendererArguments, validateRenderManifest, renderInputFingerprint, normalH3OptimizationManifest } from '../scripts/video-optimization-renders.mjs';
 import { reviewerEvidence } from '../scripts/benchmark-video-optimization-images.mjs';
 import { selectVideoOptimization } from '../dist/VideoOptimizationRollout.js';
-import { assessVideoComponent } from '../scripts/report-video-optimization.mjs';
+import { assessVideoComponent, buildOptimizationRelease } from '../scripts/report-video-optimization.mjs';
 
 test('requested models are explicit and Astra/Flash retain single-pass capability', () => {
     for (const model of ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gemini-3.8-flash']) {
@@ -179,11 +179,53 @@ test('canaries stay off without evidence and require distinct reviewed deliverie
     arm.delivery_reviews = Array.from({ length: 30 }, (_, i) => ({ job_id: String(i), review_complete: true, delivered: true, material_failure: false }));
     arm.percentage = 100;
     assert.equal(selectVideoOptimization(release, 'oalgo', '0').options.plannerModel, 'gemini-3.8-flash');
+    arm.renderer = 'fasth3-fixed-duration';
+    arm.evidence.renderer_passed = true;
+    assert.equal(selectVideoOptimization(release, 'oalgo', '0'), null, 'A legacy mixed renderer arm must fail closed');
+    delete arm.planner;
+    assert.equal(selectVideoOptimization(release, 'oalgo', '0'), null, 'A legacy renderer-only arm must fail closed');
+    delete arm.renderer;
+    arm.planner = { model: 'gemini-3.8-flash', effort: 'low' };
     arm.delivery_reviews[0].material_failure = true;
     assert.equal(selectVideoOptimization(release, 'oalgo', '0'), null);
     arm.delivery_reviews[0].material_failure = false;
     arm.evidence.human_video_review_complete = false;
     assert.equal(selectVideoOptimization(release, 'oalgo', '0'), null);
+});
+
+test('cloud qualification preserves standard H3 and does not require archived FastH3 reviews', () => {
+    const base = { seed: 1, prompt: 'Test', command: 'oalgo', contract_path: 'same.json' };
+    const manifest = { renders: [
+        { ...base, id: 'base', renderer_profile: 'h3-base' },
+        { ...base, id: 'fast', renderer_profile: 'fasth3-fixed-duration' },
+        { ...base, id: 'cloud', renderer_profile: 'h3-base', cloud_policy: { reviewer: 'sol-low' } },
+    ], pairs: [
+        { id: 'old', command: 'oalgo', component: 'renderer', control: 'base', candidate: 'fast' },
+        { id: 'new', command: 'oalgo', component: 'cloud', control: 'base', candidate: 'cloud' },
+    ] };
+    const scoped = normalH3OptimizationManifest(manifest);
+    assert.deepEqual(scoped.renders.map(row => row.id), ['base', 'cloud']);
+    assert.deepEqual(scoped.pairs.map(row => row.id), ['new']);
+    assert.equal(manifest.renders.length, 3, 'Historical manifest is preserved');
+    validateRenderManifest({ renders: [manifest.renders[0]], pairs: [] });
+    const input = { manifest, planners: { holdout: [] }, accounting: { unresolved: 0, committed_usd: 20 },
+        images: { reviewers: ['sol-high', 'sol-low', 'flash-low'].map(candidate => ({ candidate,
+            human_labels_complete: true, accounting_complete: true, eligible_for_video_review: candidate === 'sol-low' })) },
+        components: [{ command: 'oalgo', component: 'cloud', passed: true }] };
+    const release = buildOptimizationRelease(input);
+    assert.equal(release.commands.oalgo.reviewer.model, 'gpt-5.6-sol');
+    assert.equal(release.commands.oalgo.renderer, undefined);
+    assert.ok(Array.from({ length: 1000 }, (_, i) => selectVideoOptimization(release, 'oalgo', String(i))).some(Boolean));
+    input.components = [{ command: 'oalgo', component: 'renderer', passed: true }];
+    assert.deepEqual(buildOptimizationRelease(input).commands, {}, 'Historical renderer wins cannot qualify');
+    input.components = [{ command: 'oalgo', component: 'cloud', passed: true }];
+    input.accounting.unresolved = 1;
+    assert.deepEqual(buildOptimizationRelease(input).commands, {}, 'Billing gate still applies');
+    input.accounting.unresolved = 0;
+    input.images.reviewers[0].human_labels_complete = false;
+    assert.deepEqual(buildOptimizationRelease(input).commands, {}, 'Human frame gate still applies');
+    assert.ok(VIDEO_MODELS.minimaxfast.generatorArgs.includes('--fast'));
+    assert.ok(!VIDEO_MODELS.minimax.generatorArgs.includes('--fast'));
 });
 
 test('duration directives are enforced as timing while visible counts and quotes remain binding', () => {

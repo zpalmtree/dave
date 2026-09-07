@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { saveJsonAtomic, stableHash, stableShuffle, mean } from './video-cost-ab-lib.mjs';
 import { bootstrapMeanInterval, PLANNER_CANDIDATES } from './video-optimization-analysis.mjs';
 import { ledgerTotals } from './video-experiment-ledger.mjs';
-import { renderInputFingerprint, validateRenderManifest } from './video-optimization-renders.mjs';
+import { renderInputFingerprint, normalH3OptimizationManifest } from './video-optimization-renders.mjs';
 
 const argument = (name, fallback) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
 const readJson = async (path, fallback) => {
@@ -45,10 +45,37 @@ export function assessVideoComponent(manifest, state, packet, key, command, comp
         passed: Boolean(quality && (component === 'renderer' ? faster : true)), rows };
 }
 
+export function buildOptimizationRelease({ manifest, components, planners, images, accounting }) {
+    const release = { schema_version: 1, experiment_id: 'video-optimization-2026-09-07', commands: {} };
+    const scoped = normalH3OptimizationManifest(manifest);
+    const framesComplete = images.reviewers?.length === 3 && images.reviewers.every(row => row.human_labels_complete && row.accounting_complete);
+    if (accounting.unresolved || accounting.committed_usd > 50 || !framesComplete) return release;
+    for (const command of ['minimax', 'oalgo']) {
+        const policy = scoped.renders.find(render => render.command === command && render.cloud_policy)?.cloud_policy;
+        const planner = policy?.planner && planners.holdout.find(row => row.command === command && row.candidate === policy.planner && row.qualifies);
+        const cloud = components.find(row => row.command === command && row.component === 'cloud');
+        const cloudPass = Boolean(policy && (policy.planner || policy.reviewer || policy.composite) && cloud?.passed
+            && (!policy.planner || planner)
+            && (!policy.reviewer || images.reviewers.some(row => row.candidate === policy.reviewer && row.eligible_for_video_review))
+            && (!policy.composite || images.composites?.some(row => row.candidate === 'flash' && row.eligible_for_video_review)));
+        if (!cloudPass) continue;
+        release.commands[command] = { percentage: 10, delivery_reviews: [],
+            ...(policy.planner ? { planner: PLANNER_CANDIDATES[policy.planner] } : {}),
+            ...(policy.reviewer ? { reviewer: { model: policy.reviewer === 'flash-low' ? 'gemini-3.8-flash' : 'gpt-5.6-sol', effort: 'low' } } : {}),
+            ...(policy.composite ? { composite: { model: 'gemini-3.1-flash-image', size: '1K' } } : {}),
+            evidence: { decision: 'qualified', accounting_complete: true, human_video_review_complete: true,
+                human_frame_review_complete: true, planner_holdout_passed: Boolean(planner),
+                reviewer_passed: Boolean(policy.reviewer), composite_passed: Boolean(policy.composite),
+                report_sha256: stableHash(JSON.stringify({ planners, images, manifest: scoped,
+                    components: components.filter(row => row.component === 'cloud'), accounting }), 64) } };
+    }
+    return release;
+}
+
 async function main() {
+    if (process.argv.includes('--prepare-combined')) throw new Error('FastH3 and combined renderer tests are outside this campaign; use cloud comparisons on standard H3.');
     const directory = resolve(argument('run-dir', 'artifacts/video-optimization/2026-09-07'));
-    const manifest = await readJson(resolve(directory, 'render-manifest.json'));
-    validateRenderManifest(manifest);
+    const manifest = normalH3OptimizationManifest(await readJson(resolve(directory, 'render-manifest.json')));
     const state = await readJson(resolve(directory, 'optimization-render-state.json'), { renders: {} });
     for (const spec of manifest.renders) {
         const saved = state.renders[spec.id];
@@ -74,55 +101,16 @@ async function main() {
     }
     await saveJsonAtomic(path, packet);
     await saveJsonAtomic(resolve(directory, 'human-review/final-videos-key.json'), key);
-    const components = ['minimax', 'oalgo'].flatMap(command => ['renderer', 'cloud', 'combined'].map(component =>
-        assessVideoComponent(manifest, state, packet, key, command, component)));
-    if (process.argv.includes('--prepare-combined')) {
-        for (const command of ['minimax', 'oalgo']) {
-            if (!['renderer', 'cloud'].every(component => components.some(row => row.command === command && row.component === component && row.passed))) continue;
-            if (manifest.pairs.some(pair => pair.command === command && pair.component === 'combined')) continue;
-            const cloudPair = manifest.pairs.find(pair => pair.command === command && pair.component === 'cloud');
-            const cloudRender = manifest.renders.find(render => render.id === cloudPair.candidate);
-            const id = `${cloudRender.id}-combined`;
-            manifest.renders.push({ ...cloudRender, id, renderer_profile: 'fasth3-fixed-duration' });
-            manifest.pairs.push({ id, command, component: 'combined', control: cloudPair.control, candidate: id });
-            manifest.component_review_passed = true;
-        }
-        if (manifest.renders.length > 14 || manifest.pairs.length > 10) throw new Error('Combined stage exceeds the approved render allocation.');
-        await saveJsonAtomic(resolve(directory, 'render-manifest.json'), manifest);
-    }
+    const components = ['minimax', 'oalgo'].map(command =>
+        assessVideoComponent(manifest, state, packet, key, command, 'cloud'));
     const planners = await readJson(resolve(directory, 'report.json'));
     const images = await readJson(resolve(directory, 'image-report.json'), {});
-    const framesComplete = images.reviewers?.length === 3 && images.reviewers.every(row => row.human_labels_complete && row.accounting_complete);
-    const ledger = await readJson(resolve(directory, 'ledger.json'));
-    const accounting = ledgerTotals(ledger);
-    const release = { schema_version: 1, experiment_id: 'video-optimization-2026-09-07', commands: {} };
-    for (const command of ['minimax', 'oalgo']) {
-        const policy = manifest.renders.find(render => render.command === command && render.cloud_policy)?.cloud_policy;
-        const planner = policy?.planner && planners.holdout.find(row => row.command === command && row.candidate === policy.planner && row.qualifies);
-        const cloud = components.find(row => row.command === command && row.component === 'cloud');
-        const renderer = components.find(row => row.command === command && row.component === 'renderer');
-        const combined = components.find(row => row.command === command && row.component === 'combined');
-        if (accounting.unresolved || accounting.committed_usd > 50 || !framesComplete) continue;
-        const cloudPass = Boolean(policy && cloud.passed && (!policy.planner || planner)
-            && (!policy.reviewer || images.reviewers.some(row => row.candidate === policy.reviewer && row.eligible_for_video_review))
-            && (!policy.composite || images.composites.some(row => row.candidate === 'flash' && row.eligible_for_video_review)));
-        const rendererPass = renderer.passed;
-        if (!cloudPass && !rendererPass) continue;
-        // Joint changes require the additional combined video, not just two isolated wins.
-        const jointly = cloudPass && rendererPass && combined.passed;
-        release.commands[command] = { percentage: 10, delivery_reviews: [],
-            ...(cloudPass && policy.planner ? { planner: PLANNER_CANDIDATES[policy.planner] } : {}),
-            ...(cloudPass && policy.reviewer ? { reviewer: { model: policy.reviewer === 'flash-low' ? 'gemini-3.8-flash' : 'gpt-5.6-sol', effort: 'low' } } : {}),
-            ...(cloudPass && policy.composite ? { composite: { model: 'gemini-3.1-flash-image', size: '1K' } } : {}),
-            ...((!cloudPass || jointly) && rendererPass ? { renderer: 'fasth3-fixed-duration' } : {}),
-            evidence: { decision: 'qualified', accounting_complete: true, human_video_review_complete: true,
-                human_frame_review_complete: true, planner_holdout_passed: Boolean(cloudPass && planner), renderer_passed: rendererPass,
-                reviewer_passed: Boolean(cloudPass && policy.reviewer), composite_passed: Boolean(cloudPass && policy.composite),
-                report_sha256: stableHash(JSON.stringify({ planners, images, manifest, components, accounting }), 64) } };
-    }
-    const decision = { schema_version: 1, accounting, components,
+    const accounting = ledgerTotals(await readJson(resolve(directory, 'ledger.json')));
+    const release = buildOptimizationRelease({ manifest, components, planners, images, accounting });
+    const decision = { schema_version: 1, optimization_scope: 'cloud-only-standard-h3', accounting, components,
+        excluded_components: ['renderer', 'combined'],
         status: Object.keys(release.commands).length ? 'eligible_for_canary' : 'inconclusive',
-        production_changed: false, note: 'A generated release file is inactive until VIDEO_OPTIMIZATION_RELEASE_FILE points to it. Incomplete human review or unresolved billing prevents qualification.' };
+        production_changed: false, note: 'FastH3 remains exclusive to the fast command; archived renderer reviews are not required. Cloud candidates still require human frame/video review and complete billing. A generated release is inactive until VIDEO_OPTIMIZATION_RELEASE_FILE points to it.' };
     await saveJsonAtomic(resolve(directory, 'decision.json'), decision);
     const previousRelease = await readJson(resolve(directory, 'canary-release.json'), { commands: {} });
     for (const [command, arm] of Object.entries(release.commands)) {

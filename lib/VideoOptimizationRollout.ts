@@ -7,7 +7,6 @@ export interface VideoOptimizationSelection {
     experimentId: string;
     variantId: string;
     options: VideoKeyframeOptions;
-    rendererProfile?: 'fasth3-fixed-duration';
 }
 
 /** An audited release file is opt-in; absent/incomplete evidence always keeps the control. */
@@ -17,6 +16,9 @@ export function selectVideoOptimization(
     if (release?.schema_version !== 1 || !/^[a-zA-Z0-9_-]{1,80}$/.test(release.experiment_id || '')) return null;
     const arm = release.commands?.[command];
     if (!['minimax', 'oalgo'].includes(command) || !arm || ![10, 50, 100].includes(arm.percentage)) return null;
+    // FastH3 belongs to the explicit fast command. Reject old renderer releases,
+    // including mixed cloud/renderer arms, instead of silently changing them.
+    if (arm.renderer != null) return null;
     const proof = arm.evidence;
     if (!proof || proof.decision !== 'qualified' || proof.accounting_complete !== true
         || proof.human_video_review_complete !== true || !/^[a-f0-9]{64}$/.test(proof.report_sha256 || '')) return null;
@@ -47,10 +49,8 @@ export function selectVideoOptimization(
             || arm.composite.model !== 'gemini-3.1-flash-image' || arm.composite.size !== '1K') return null;
         Object.assign(options, { geminiModel: arm.composite.model, imageSize: arm.composite.size });
     }
-    if (arm.renderer && (arm.renderer !== 'fasth3-fixed-duration' || proof.renderer_passed !== true)) return null;
-    if (!arm.planner && !arm.reviewer && !arm.composite && !arm.renderer) return null;
-    return { experimentId: release.experiment_id, variantId: `${command}-candidate`, options,
-        ...(arm.renderer ? { rendererProfile: arm.renderer } : {}) };
+    if (!arm.planner && !arm.reviewer && !arm.composite) return null;
+    return { experimentId: release.experiment_id, variantId: `${command}-candidate`, options };
 }
 
 export function configuredVideoOptimization(command: string, jobId: string): VideoOptimizationSelection | null {
