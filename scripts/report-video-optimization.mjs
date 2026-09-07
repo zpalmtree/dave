@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { saveJsonAtomic, stableHash, stableShuffle, mean } from './video-cost-ab-lib.mjs';
 import { bootstrapMeanInterval, PLANNER_CANDIDATES } from './video-optimization-analysis.mjs';
 import { ledgerTotals } from './video-experiment-ledger.mjs';
+import { renderInputFingerprint, validateRenderManifest } from './video-optimization-renders.mjs';
 
 const argument = (name, fallback) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
 const readJson = async (path, fallback) => {
@@ -47,7 +48,14 @@ export function assessVideoComponent(manifest, state, packet, key, command, comp
 async function main() {
     const directory = resolve(argument('run-dir', 'artifacts/video-optimization/2026-09-07'));
     const manifest = await readJson(resolve(directory, 'render-manifest.json'));
+    validateRenderManifest(manifest);
     const state = await readJson(resolve(directory, 'optimization-render-state.json'), { renders: {} });
+    for (const spec of manifest.renders) {
+        const saved = state.renders[spec.id];
+        if (!saved) continue;
+        const { fingerprint } = await renderInputFingerprint(spec);
+        if (saved.fingerprint !== fingerprint) throw new Error(`Stale rendered evidence for ${spec.id}; render the current inputs before reporting.`);
+    }
     const path = resolve(directory, 'human-review/final-videos.json');
     const previous = await readJson(path, { pairs: [] });
     const packet = { schema_version: 1, blinded: true, pairs: [] }, key = { schema_version: 1, pairs: [] };
@@ -110,7 +118,7 @@ async function main() {
             evidence: { decision: 'qualified', accounting_complete: true, human_video_review_complete: true,
                 human_frame_review_complete: true, planner_holdout_passed: Boolean(cloudPass && planner), renderer_passed: rendererPass,
                 reviewer_passed: Boolean(cloudPass && policy.reviewer), composite_passed: Boolean(cloudPass && policy.composite),
-                report_sha256: stableHash(JSON.stringify({ planners, components, accounting }), 64) } };
+                report_sha256: stableHash(JSON.stringify({ planners, images, manifest, components, accounting }), 64) } };
     }
     const decision = { schema_version: 1, accounting, components,
         status: Object.keys(release.commands).length ? 'eligible_for_canary' : 'inconclusive',
