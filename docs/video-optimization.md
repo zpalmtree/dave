@@ -20,6 +20,8 @@ $50 across all phases, retries, image generation and judges.
 - Total-duration directives are checked against timing fields. For example,
   “Make it 12 seconds” no longer requires the number 12 to appear in the scene.
   Object counts, quoted words and exact finished-duration checks remain binding.
+  This also applies to the desktop validator: the CPU audit improved from 95/96
+  accepted holdout plans to 96/96 after correcting its matching number check.
 - Optional canary configuration is captured per job, including planner/reviewer
   settings and the fixed-duration FastH3 profile. Defaults stay unchanged without
   a qualified release file.
@@ -128,6 +130,11 @@ composite. Control and FastH3 reuse the exact same compiled scenes, prompts,
 frame counts, seed, aspect and assets. The desktop validates these before
 inference and refuses local replanning or resume under an experiment contract.
 Production-equivalent scene splitting is frozen before comparing profiles.
+The manifest can specify `generator_path`, and preparation accepts `--generator`.
+The September 7 run uses the identical-byte snapshot
+`/mnt/d/AI/ComfyUI_windows_portable/video_gen/video_gen.optimization_20260907.py`
+so later validator fixes do not alter an ongoing renderer comparison. All four
+frozen scene compilations were also verified unchanged under the fixed validator.
 
 FastH3 is the current **4-step VSA** renderer, not the older 8-step Turbo model.
 Use `--fast --no-fast-duration-aware`; duration compression would confound a
@@ -170,3 +177,6 @@ back to control. Existing jobs retain their captured configuration.
 Desktop source changes are archived in `desktop/video-optimization.patch`, with
 before/after hashes for the live files. Both Git branches must receive the same
 functional change and be deployed with `scripts/deploy-bots.sh --with-broker`.
+
+The completed planner findings are recorded in
+[the September 7 results](../benchmarks/video-optimization-results-2026-09-07.md).

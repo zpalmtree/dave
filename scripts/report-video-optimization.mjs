@@ -53,7 +53,7 @@ async function main() {
     for (const spec of manifest.renders) {
         const saved = state.renders[spec.id];
         if (!saved) continue;
-        const { fingerprint } = await renderInputFingerprint(spec);
+        const { fingerprint } = await renderInputFingerprint(spec, manifest.generator_path);
         if (saved.fingerprint !== fingerprint) throw new Error(`Stale rendered evidence for ${spec.id}; render the current inputs before reporting.`);
     }
     const path = resolve(directory, 'human-review/final-videos.json');

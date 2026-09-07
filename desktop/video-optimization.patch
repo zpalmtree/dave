@@ -38,7 +38,59 @@
      return args
  
  
-@@ -3045,6 +3062,7 @@
+@@ -2371,6 +2388,42 @@
+             )
+             parts.extend(str(line.get("text", "")) for line in shot.get("dialogue", []))
+     return "\n".join(parts)
++
++
++def video_prompt_content_numbers(raw_prompt: str, requested_duration: float | None) -> list[str]:
++    """Total runtime belongs in timing fields; other numbers remain scene requirements."""
++    content = raw_prompt
++    if requested_duration is not None:
++        text = re.sub(r"[‐‑‒–—]", "-", raw_prompt)
++        text = re.sub(r'''"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)''',
++                      lambda match: " " * len(match[0]), text)
++        amount = r"(\d+(?:\.\d+)?)"
++        unit = r"(seconds?|secs?|minutes?|mins?)"
++        patterns = [
++            rf"\b(?:make|keep)\s+(?:it|(?:the|this)\s+(?:video|clip|animation|film|short))\s+(?:exactly\s+)?{amount}\s*{unit}\b",
++            rf"\b(?:total(?:\s+(?:video\s+)?)?(?:duration|runtime|length)|duration|runtime|length)\s*(?:of|=|:|is|be)?\s*{amount}\s*{unit}\b",
++            rf"\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\s+(?:with\s+)?(?:a\s+)?(?:total\s+)?(?:duration|runtime|length)?\s*(?:of|=|:|is|be|lasting|lasts|should\s+be|must\s+be)?\s*{amount}\s*{unit}\b",
++            rf"\b{amount}\s*{unit}\s*(?:long|in\s+total|total|overall)\b",
++        ]
++        matches = [match for pattern in patterns if (match := re.search(pattern, text, re.IGNORECASE))]
++        if not matches:
++            for match in re.finditer(rf"\b{amount}\s*(?:-\s*)?{unit}\b", text, re.IGNORECASE):
++                after = text[match.end():match.end() + 100]
++                media = re.search(r"\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\b", after, re.IGNORECASE)
++                if not media:
++                    continue
++                bridge = after[:media.start()]
++                if re.search(r"\b(?:then|after|before|followed|pause|wait|hold)\b", bridge, re.IGNORECASE) or re.search(rf"\b{amount}\s*(?:-\s*)?{unit}\b", bridge, re.IGNORECASE):
++                    continue
++                matches.append(match)
++                break
++        if matches:
++            match = matches[0]
++            seconds = float(match[1]) * (60 if match[2].lower().startswith("min") else 1)
++            if abs(seconds - requested_duration) < 1e-6:
++                start, end = match.span(1)
++                content = raw_prompt[:start] + " " * (end - start) + raw_prompt[end:]
++    return list(dict.fromkeys(re.findall(r"\b\d+(?:\.\d+)?\b", content)))
+ 
+ 
+ def shot_plan_text(plan: dict[str, Any]) -> str:
+@@ -3005,7 +3058,7 @@
+               and spoken_words(raw_prompt) in planned_dialogue):
+             raise VideoGenError("planner recited the visual creative brief as dialogue")
+     missing_numbers = []
+-    for number in dict.fromkeys(re.findall(r"\b\d+(?:\.\d+)?\b", raw_prompt)):
++    for number in video_prompt_content_numbers(raw_prompt, requested_duration):
+         preserved = bool(re.search(rf"(?<!\d){re.escape(number)}(?!\d)", semantic))
+         if not preserved and number.isdigit():
+             word = NUMBER_WORDS.get(int(number))
+@@ -3045,6 +3098,7 @@
      image_path: Path | None,
      requested_duration: float | None,
      model: str,
@@ -46,7 +98,7 @@
  ) -> dict[str, Any]:
      duration_context = (
          f"Caller-specified finished duration: {requested_duration:g} seconds."
-@@ -3054,7 +3072,8 @@
+@@ -3054,7 +3108,8 @@
      image_context = f"\n{SOURCE_IMAGE_USER_CONTEXT}" if image_path is not None else ""
      user_message: dict[str, Any] = {
          "role": "user",
@@ -56,7 +108,7 @@
      }
      if image_path is not None:
          user_message["images"] = [base64.b64encode(image_path.read_bytes()).decode("ascii")]
-@@ -4204,6 +4223,7 @@
+@@ -4204,6 +4259,7 @@
      aspect: str,
      models: tuple[str, ...],
      conservative_analysis_only: bool = False,
@@ -64,7 +116,7 @@
  ) -> dict[str, Any]:
      analysis_model = PROMPT_INTENT_MODEL
      if conservative_analysis_only:
-@@ -4215,7 +4235,8 @@
+@@ -4215,7 +4271,8 @@
      else:
          try:
              analysis = analyze_video_intent(
@@ -74,7 +126,7 @@
              )
          except VideoGenError as exc:
              print(
-@@ -4228,6 +4249,9 @@
+@@ -4228,6 +4285,9 @@
                  flush=True,
              )
              analysis = conservative_semantic_analysis(raw_prompt)
@@ -84,7 +136,7 @@
      if image_path is not None:
          analysis = copy.deepcopy(analysis)
          analysis["keyframe_recommended"] = False
-@@ -7307,12 +7331,45 @@
+@@ -7307,12 +7367,45 @@
      raise VideoGenError("--resume must point to a run directory or .plan.json")
  
  
@@ -130,7 +182,7 @@
      started_process: subprocess.Popen[bytes] | None = None
      log_handle: Any | None = None
      temp_references: list[Path] = []
-@@ -7342,6 +7399,7 @@
+@@ -7342,6 +7435,7 @@
                  aspect,
                  models,
                  conservative_analysis_only=bool(args.conservative_semantic_analysis),
@@ -138,7 +190,7 @@
              )
              destination = args.local_plan_output.expanduser().resolve()
              write_json(destination, plan)
-@@ -7480,17 +7538,19 @@
+@@ -7480,17 +7574,19 @@
                          models,
                      )
                  except VideoGenError as exc:
@@ -160,7 +212,7 @@
              if args.h3_segment_cap is not None:
                  plan = split_h3_segments_for_benchmark(plan, args.h3_segment_cap)
                  print(
-@@ -7501,7 +7561,7 @@
+@@ -7501,7 +7597,7 @@
                  )
              elif (
                  models == ("h3",)
@@ -169,7 +221,7 @@
                  and not args.turbo4
                  and not args.benchmark_label
                  and not segment_keyframe_targets
-@@ -7681,7 +7741,9 @@
+@@ -7681,7 +7777,9 @@
                  },
                  "plan": plan,
                  "compiled_models": compiled_models,
@@ -221,7 +273,35 @@
              *keyframe_args,
 --- a/test_video_gen.py
 +++ b/test_video_gen.py
-@@ -2749,16 +2749,28 @@
+@@ -62,6 +62,27 @@
+ 
+ 
+ class DurationTests(unittest.TestCase):
++    def test_total_duration_is_checked_as_timing_not_scene_content(self):
++        prompt = "Five dogs march together and then stop. Make it 12 seconds."
++        result = video_gen.validate_plan_shape(sample_plan(), prompt, 12.0, 15.0, 5.0)
++        self.assertEqual(result["target_total_seconds"], 12.0)
++        with self.assertRaisesRegex(video_gen.VideoGenError, "explicit numbers"):
++            video_gen.validate_plan_shape(sample_plan(), prompt, 10.0, 15.0, 5.0)
++        with self.assertRaisesRegex(video_gen.VideoGenError, "explicit numbers"):
++            video_gen.validate_plan_shape(sample_plan(), "Show 12 dogs. Make it 12 seconds.", 12.0, 15.0, 5.0)
++
++    def test_runtime_number_mask_preserves_quotes_counts_and_beat_timings(self):
++        for prompt, duration, expected in [
++            ('Show the number "12". Make it 12 seconds.', 12, ["12"]),
++            ('A sign says "Make it 12 seconds". Make it 5 seconds.', 5, ["12"]),
++            ("A 12-second video of five dogs.", 12, []),
++            ("Make a 1.5 minute video of five dogs.", 90, []),
++            ("Wait 12 seconds, then show a 5-second video.", 5, ["12"]),
++            ("Show 12 dogs in a 12-second video.", 12, ["12"]),
++        ]:
++            with self.subTest(prompt=prompt):
++                self.assertEqual(video_gen.video_prompt_content_numbers(prompt, duration), expected)
++
+     def test_parse_duration(self):
+         self.assertIsNone(video_gen.parse_duration("auto"))
+         self.assertEqual(video_gen.parse_duration("7.5"), 7.5)
+@@ -2749,16 +2770,28 @@
              mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
          ):
              video_gen.create_video_plan(
