@@ -18,6 +18,7 @@ import {
     videoFailureDisposition,
 } from '../dist/VideoBroker.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
+import { OALGO_VIDEO_PLANNER_GUIDANCE, MEXIMUTT_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 
 function socketInbox(socket) {
     const queue = [];
@@ -788,7 +789,7 @@ test('OALGO jobs use the preset, AI-composite an attachment, and fall back safel
         return { status: response.status, body: await response.json() };
     };
     try {
-        const generated = await submit('generated', 'Use OALGO dialogue.');
+        const generated = await submit('generated', MEXIMUTT_VIDEO_PLANNER_GUIDANCE);
         assert.equal(generated.status, 201);
         assert.equal(generated.body.job.has_source_image, true);
         assert.equal(generated.body.source_image_composition, 'generated');
@@ -811,10 +812,11 @@ test('OALGO jobs use the preset, AI-composite an attachment, and fall back safel
                 );
             });
         });
-        assert.equal(guidance, 'Use OALGO dialogue.');
+        assert.equal(guidance, MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
+            'the complete character guidance must survive broker storage, including voice rules after character 2,000');
 
         failComposition = true;
-        const fallback = await submit('fallback', 'Keep the slang natural.');
+        const fallback = await submit('fallback', OALGO_VIDEO_PLANNER_GUIDANCE);
         assert.equal(fallback.status, 201);
         assert.equal(fallback.body.job.has_source_image, true);
         assert.equal(fallback.body.source_image_composition, 'fallback');

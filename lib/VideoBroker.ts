@@ -1944,7 +1944,9 @@ export class VideoBroker {
         const plannerGuidance = sanitizeVideoWorkerText(
             body.planner_guidance,
             '',
-            2000,
+            // OALGO/Meximutt combine visual-story and voice guidance. The old
+            // 2,000-character cap silently removed their trailing voice rules.
+            8000,
         ).trim() || null;
         const deliveryLimit = Number(
             body.delivery_limit_bytes ?? VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
