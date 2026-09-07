@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+import { fetchGcp2Snapshot, Gcp2Response } from './Gcp2.js';
 
 import { Canvas, createCanvas } from 'canvas';
 
@@ -17,7 +17,6 @@ const DOT_GRAPH_HEIGHT = 150;
 
 const SHADOW_BLUR = 2.75;
 
-const GCP2_API_URL = 'https://rng.observer/api/gcp2';
 const GCP2_CACHE_MS = 5000;
 const DOT_GRAPH_MAX_TIMESPAN = 86400;
 const DOT_GRAPH_MIN_CORE_HEIGHT = 0.55 / DOT_GRAPH_HEIGHT;
@@ -59,20 +58,6 @@ const COLORS: {color1: string, color2: string}[] = [
 // generate dot color stops
 let DOT_IMAGES: Canvas[] = [];
 let DOT_COLORS: { tail: number, mc: Canvas }[] = [];
-
-interface Gcp2Aggregate {
-    end_epoch: number | string
-    netvar_aggregate: string
-}
-
-interface Gcp2Response {
-    currentNetvar?: {
-        netvar?: { netvar: string }[]
-    }
-    netvarAggregate24H?: {
-        aggregates?: Gcp2Aggregate[]
-    }
-}
 
 interface DotGraphPoint {
     epoch: number
@@ -183,32 +168,7 @@ async function fetchGcp2Data(): Promise<Gcp2Response> {
         return gcp2Cache.promise;
     }
 
-    const promise = (async () => {
-        const response = await fetch(GCP2_API_URL, {
-            headers: {
-                accept: 'application/json',
-                'user-agent': 'dave-discord-bot/1.1',
-            },
-        });
-
-        const body = await response.text();
-
-        if (!response.ok) {
-            throw new Error(`GCP 2.0 API returned ${response.status} ${response.statusText}`);
-        }
-
-        try {
-            const parsed = JSON.parse(body);
-
-            if (!parsed || typeof parsed !== 'object') {
-                throw new Error('response root is not an object');
-            }
-
-            return parsed as Gcp2Response;
-        } catch (err) {
-            throw new Error(`GCP 2.0 API returned invalid JSON: ${(err as Error).message}`);
-        }
-    })();
+    const promise = fetchGcp2Snapshot();
 
     gcp2Cache = {
         expiresAt: now + GCP2_CACHE_MS,
