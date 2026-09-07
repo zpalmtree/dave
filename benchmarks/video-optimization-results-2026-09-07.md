@@ -46,3 +46,29 @@ full-video comparisons remain separate gates; this planner result enables no
 model, reviewer, composite or renderer canary. Live results and accounting are
 retained under `artifacts/video-optimization/2026-09-07/`, including the raw usage
 ledger, paired judgments, code hashes, compiler audits and frozen render inputs.
+
+## Renderer timing results
+
+All eight isolated renders completed through GPUq. Each pair used the same
+source images, compiled prompts, seed, scene layout and frame counts. FastH3
+used the current four-step VSA profile with duration compression disabled.
+
+| Anchor | Base service seconds | FastH3 service seconds | Reduction | Both output durations |
+| --- | ---: | ---: | ---: | ---: |
+| MiniMax racers | 475.193 | 95.180 | 80.0% | 10.144s |
+| MiniMax note | 468.224 | 92.221 | 80.3% | 10.000s |
+| OALGO refund | 241.050 | 64.107 | 73.4% | 8.000s |
+| OALGO attachment/sign | 131.478 | 46.463 | 64.7% | 6.592s |
+
+Service time excludes GPU admission wait and is not total Discord request
+latency. A queued attempt was canceled before execution to bind the benchmark
+to an unchanged source snapshot; the completed base render was reused after
+hash verification. All four scene compilations were also verified unchanged
+under the desktop duration-validator fix.
+
+**No renderer promotion yet.** Four blinded video pairs are ready for human
+visual and audio review. The 24-frame labels are also pending. Recorded API
+charges are $12.7356, with $8.6015 held for seven unresolved billing records:
+$21.3371 committed against the authorized $50 cap. These reservations remain
+held; they have not been treated as free calls. No additional cloud-policy or
+combined renders were prepared without component qualification.
