@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Script } from 'node:vm';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { REVIEW_PAGE } from '../scripts/video-cost-ab-review-ui.mjs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configuredVideoPlannerVariant, supportsSinglePassVideoPlanning, requestPlannerResponse, validateFrontierVideoPlanForKeyframe } from '../dist/VideoFrontierPlanner.js';
@@ -15,6 +17,7 @@ import { rendererArguments, validateRenderManifest, renderInputFingerprint, norm
 import { reviewerEvidence } from '../scripts/benchmark-video-optimization-images.mjs';
 import { selectVideoOptimization } from '../dist/VideoOptimizationRollout.js';
 import { assessVideoComponent, buildOptimizationRelease } from '../scripts/report-video-optimization.mjs';
+import { renderAnchorCase } from '../scripts/prepare-video-optimization-renders.mjs';
 
 test('requested models are explicit and Astra/Flash retain single-pass capability', () => {
     for (const model of ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gemini-3.8-flash']) {
@@ -162,6 +165,35 @@ test('render evidence binds policy and frozen input bytes before human labels ca
 test('unlabeled frames never become human ground truth', () => {
     const evidence = reviewerEvidence([], { cases: Array.from({ length: 24 }, (_, i) => ({ case_id: String(i), human_acceptable: null })) });
     assert.ok(evidence.every(row => !row.human_labels_complete && row.false_accepts === null && !row.accounting_complete));
+});
+
+test('incomplete image checkpoints cannot erase completed human ratings or a prior report', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'video-image-report-'));
+    const packet = JSON.stringify({ schema_version: 1, cases: [{ case_id: 'already-reviewed', human_acceptable: true, material_failure: false }] });
+    const report = JSON.stringify({ fingerprint: 'a'.repeat(64), preserved: true });
+    try {
+        await mkdir(join(directory, 'human-review'));
+        await writeFile(join(directory, 'human-review/reviewer.json'), packet);
+        await writeFile(join(directory, 'image-report.json'), report);
+        await writeFile(join(directory, 'image-manifest.json'), JSON.stringify({ retained: [], generate: [] }));
+        await assert.rejects(promisify(execFile)(process.execPath, ['scripts/benchmark-video-optimization-images.mjs',
+            '--phase=report', `--run-dir=${directory}`]), /Incomplete frame evidence/);
+        assert.equal(await readFile(join(directory, 'human-review/reviewer.json'), 'utf8'), packet);
+        assert.equal(await readFile(join(directory, 'image-report.json'), 'utf8'), report);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('OALGO composite comparisons exercise a second attachment under a new case identity', () => {
+    const original = { id: 'oalgo-screen-refund', command: 'oalgo', prompt: 'Demand a refund.', source_image: 'oalgo.png' };
+    assert.equal(renderAnchorCase(original, { reviewer: 'flash-low' }), original);
+    const attached = renderAnchorCase(original, { reviewer: 'flash-low', composite: true });
+    assert.notEqual(attached.id, original.id);
+    assert.equal(attached.source_image, original.source_image);
+    assert.ok(attached.attachment_image.endsWith('case-2-gemini-pro-2k.jpg'));
+    assert.ok(attached.prompt.startsWith(original.prompt));
+    assert.ok(!original.attachment_image, 'Historical control case is preserved');
+    const minimax = { ...original, id: 'minimax-screen-racers', command: 'minimax' };
+    assert.equal(renderAnchorCase(minimax, { composite: true }), minimax);
 });
 
 test('canaries stay off without evidence and require distinct reviewed deliveries to expand', () => {

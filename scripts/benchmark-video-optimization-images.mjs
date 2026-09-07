@@ -57,6 +57,9 @@ async function buildManifest() {
 }
 
 async function writePacket(cases) {
+    if (cases.length !== 24 || new Set(cases.map(entry => entry.id)).size !== 24) {
+        throw new Error('Incomplete frame evidence; existing human labels and reports are preserved. Use --phase=report --evidence-fingerprint=<original> for archived evidence.');
+    }
     const path = resolve(directory, 'human-review/reviewer.json');
     let existing;
     try { existing = JSON.parse(await readFile(path, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -69,6 +72,11 @@ async function writePacket(cases) {
             references: entry.references, context_hash: entry.context_hash, human_acceptable: previous?.human_acceptable ?? null,
             material_failure: previous?.material_failure ?? null, notes: previous?.notes || '' };
     }) };
+    if (existing?.cases.some(previous => (typeof previous.human_acceptable === 'boolean' || typeof previous.material_failure === 'boolean')
+        && !packet.cases.some(entry => entry.case_id === previous.case_id && entry.asset_hash === previous.asset_hash
+            && entry.context_hash === previous.context_hash && entry.prompt === previous.prompt))) {
+        throw new Error('Frame or review context changed; existing human labels and reports are preserved. Use a separate run directory for new evidence.');
+    }
     await saveJsonAtomic(path, packet);
     const plannerPath = resolve(directory, 'human-review/planner.json');
     try { await access(plannerPath); } catch { await saveJsonAtomic(plannerPath, { schema_version: 1, blinded: true, cases: [] }); }
@@ -127,7 +135,11 @@ async function main() {
     if (!['run', 'report'].includes(phase)) throw new Error('Use --phase=prepare|run|report.');
     const manifestPath = resolve(directory, 'image-manifest.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    const fingerprint = await executionFingerprint([...paths, manifestPath]);
+    const codeFingerprint = await executionFingerprint([...paths, manifestPath]);
+    const fingerprint = argument('evidence-fingerprint', codeFingerprint);
+    if (!/^[a-f0-9]{64}$/.test(fingerprint) || (phase !== 'report' && fingerprint !== codeFingerprint)) {
+        throw new Error('--evidence-fingerprint accepts an original 64-character fingerprint only with --phase=report.');
+    }
     const ledger = await VideoExperimentLedger.open(directory, { phaseCapUsd: 25 });
     const cases = [...manifest.retained];
     let packet;
@@ -174,12 +186,14 @@ async function main() {
         }
     } finally {
         try {
-            if (!packet) packet = await writePacket(cases);
-            else packet = JSON.parse(await readFile(resolve(directory, 'human-review/reviewer.json'), 'utf8'));
-            const calls = Object.values(ledger.state.calls).filter(call => call.fingerprint === fingerprint);
-            await saveJsonAtomic(resolve(directory, 'image-report.json'), { schema_version: 1, fingerprint, accounting: ledgerTotals(ledger.state),
-                ...imageComponentEvidence(calls, packet),
-                conclusion: 'Human labels, paired composite inspection and final videos are required. No automatic promotion. Frames share prompt families; 24 frames are not 24 independent prompts.' });
+            if (packet) {
+                packet = JSON.parse(await readFile(resolve(directory, 'human-review/reviewer.json'), 'utf8'));
+                const calls = Object.values(ledger.state.calls).filter(call => call.fingerprint === fingerprint);
+                await saveJsonAtomic(resolve(directory, 'image-report.json'), { schema_version: 1, fingerprint,
+                    current_code_fingerprint: codeFingerprint, historical_evidence: fingerprint !== codeFingerprint,
+                    accounting: ledgerTotals(ledger.state), ...imageComponentEvidence(calls, packet),
+                    conclusion: 'Human labels, paired composite inspection and final videos are required. No automatic promotion. Frames share prompt families; 24 frames are not 24 independent prompts. Historical evidence retains its original code fingerprint.' });
+            }
         } finally { await ledger.close(); }
     }
 }

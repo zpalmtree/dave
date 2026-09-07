@@ -19,6 +19,12 @@ $50 across all phases, retries, image generation and judges.
   retains both paid composition records, even when only one job is created.
 - OALGO composition uses the actual photographic preset as its visual reference.
   Local fallback receives character/delivery guidance separately from the prompt.
+- Spoken-word fidelity and visual storytelling are separate requirements. OALGO
+  enacts the subject matter of a boast or rant while preserving appropriate
+  dialogue. The source portrait fixes frame zero and recurring identity; later
+  framing and surroundings may develop. Visual action should accompany the
+  relevant spoken phrases rather than follow a full recitation as a long silent
+  replay. Explicit static-performance requests and simple greetings remain valid.
 - Total-duration directives are checked against timing fields. For example,
   “Make it 12 seconds” no longer requires the number 12 to appear in the scene.
   Object counts, quoted words and exact finished-duration checks remain binding.
@@ -115,6 +121,19 @@ The local review page hides provider identities and displays the reference
 images. Only a human supplies its labels. Missing labels are never converted
 to agreement or acceptance.
 
+After a source change, report the frozen image experiment with its original
+fingerprint instead of regenerating paid evidence:
+
+```bash
+node scripts/benchmark-video-optimization-images.mjs --phase=report --evidence-fingerprint=664bb1b90ec3da1f0159763d8f24d7c96b7b66416c200f488d8dfa1a404abc28
+```
+
+The report retains that evidence fingerprint and separately records the current
+code fingerprint. Missing checkpoints or changed image/reference/prompt context
+fail without overwriting completed human ratings or the prior report. The
+September 7 audit reconstructed the original fingerprint from Git and confirmed
+that only broker renderer dispatch had changed when those ratings were saved.
+
 ## Video comparisons using standard H3
 
 After the human frame labels and planner holdout qualify an AI configuration,
@@ -135,6 +154,14 @@ requested duration. Changes to AI-generated plans and images belong to the
 configuration being evaluated. Each render binds its compiled scenes, prompts
 and assets to a frozen contract; the desktop refuses local replanning or resume
 under a mismatched contract. GPUq governs every render.
+
+When the composite candidate qualifies, the refund anchor gets a second fixed
+attachment and a new case ID for both arms. Its original preset-only scene does
+not exercise composition or frame review. The original control is retained;
+both attachment arms are prepared anew. This keeps two meaningful OALGO video
+comparisons and stays within the original 14-video allocation, counting archived
+FastH3 renders. Existing control assets and renders are reused only after
+verifying their input hashes; their original API charges remain in the ledger.
 
 The manifest can specify `generator_path`, and preparation accepts `--generator`.
 The September 7 controls use the identical-byte snapshot
