@@ -1,7 +1,7 @@
 {
   "video_gen.py": {
     "before_sha256": "7cd0a6a8d8ab81ab577765de54ef007b4e454610c98a82167229ecbdfd1aef32",
-    "after_sha256": "e6e8127c7a24f6e6d926228469b3b2c39c722793153ce37785b0e33ee4099a6c"
+    "after_sha256": "65757f6e8232e537cfcf5460ce7f0b4964b6d2d1457bde50e8edce720866c1fa"
   },
   "video_worker.py": {
     "before_sha256": "7150f96f6ed4cfea8936843e80191c267d494dad0d6a563493731ad7f659ca49",

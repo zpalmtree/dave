@@ -19,6 +19,13 @@ const directory = resolve(argument('run-dir', 'artifacts/video-optimization/2026
 const ANCHORS = ['minimax-screen-racers', 'minimax-screen-note', 'oalgo-screen-refund', 'oalgo-screen-sign'];
 let generatorPath;
 
+export function renderAnchorCase(testCase, policy) {
+    if (testCase.id !== 'oalgo-screen-refund' || !policy.composite) return testCase;
+    return { ...testCase, id: `${testCase.id}-attachment`,
+        prompt: `${testCase.prompt} React to the main subject from the attached image and keep it recognizable in the scene.`,
+        attachment_image: resolve('artifacts/video-keyframe-benchmarks/2026-08-25T11-16-53.002Z/images/case-2-gemini-pro-2k.jpg') };
+}
+
 async function frame(ledger, plan, references, id, aspectRatio, fingerprint, policy = {}) {
     const result = await ledger.checkpoint({ kind: 'render_frame', case_id: id, fingerprint,
         policy, plan_hash: stableHash(JSON.stringify(plan), 64), reference_hashes: references.map(reference => stableHash(reference.bytes, 64)) },
@@ -43,8 +50,9 @@ async function prepareVariant(ledger, testCase, plan, candidate, fingerprint, po
     const target = resolve(directory, 'render-inputs', id);
     await mkdir(target, { recursive: true });
     let first = testCase.source_image ? { path: resolve(testCase.source_image), mimeType: 'image/png' } : null;
-    if (testCase.id === 'oalgo-screen-sign') {
-        const attachment = resolve('artifacts/video-keyframe-benchmarks/2026-08-25T11-16-53.002Z/images/case-1-gemini-pro-2k.jpg');
+    const attachment = testCase.attachment_image || (testCase.id === 'oalgo-screen-sign'
+        ? resolve('artifacts/video-keyframe-benchmarks/2026-08-25T11-16-53.002Z/images/case-1-gemini-pro-2k.jpg') : null);
+    if (attachment) {
         const references = [{ bytes: await readFile(first.path), mimeType: 'image/png', kind: 'style', label: 'OALGO base image',
             visualFactsToPreserve: 'Preserve recognizable face, body, Mexican flag clothing and emblem, actual background, rendering style and palette.' },
         { bytes: await readFile(attachment), mimeType: 'image/jpeg', kind: 'object', label: 'User-attached image',
@@ -85,7 +93,7 @@ async function prepareVariant(ledger, testCase, plan, candidate, fingerprint, po
             label: 'Recurring cast identity from frame zero', kind: 'identity',
             visualFactsToPreserve: 'Preserve the recognizable recurring cast in this new shot.',
             sourceUrl: 'experiment-frame-zero', contextUrl: 'experiment-frame-zero' }],
-        `${id}-segment-${index + 1}`, testCase.id === 'oalgo-screen-sign' ? '1:1' : testCase.source_image ? '2:3' : '16:9', fingerprint, reviewer);
+        `${id}-segment-${index + 1}`, attachment ? '1:1' : testCase.source_image ? '2:3' : '16:9', fingerprint, reviewer);
         segmentImages[index + 1] = image.path;
     }
     const planPath = resolve(target, 'planner-output.json');
@@ -122,22 +130,23 @@ async function main() {
         const sourceFingerprint = report.screening_fingerprint || plannerFingerprint;
         const calls = Object.values(ledger.state.calls).filter(call => call.kind === 'planner' && call.fingerprint === sourceFingerprint);
         for (const id of ANCHORS) {
-            const testCase = corpus.find(value => value.id === id);
+            const originalCase = corpus.find(value => value.id === id);
             const control = calls.find(call => call.case_id === id && call.candidate === CONTROL && call.ok && call.accounting_complete);
             if (!control) throw new Error(`Missing valid control plan: ${id}`);
-            const base = await prepareVariant(ledger, testCase, control.value, CONTROL, fingerprint);
-            const baseId = `${id}-base`;
-            renders.push({ ...base, id: baseId, renderer_profile: 'h3-base' });
-            const candidate = report.finalists[testCase.command];
-            const qualified = !controlOnly && report.holdout.some(row => row.command === testCase.command && row.candidate === candidate && row.qualifies);
+            const candidate = report.finalists[originalCase.command];
+            const qualified = !controlOnly && report.holdout.some(row => row.command === originalCase.command && row.candidate === candidate && row.qualifies);
             const treatment = calls.find(call => call.case_id === id && call.candidate === candidate && call.ok && call.accounting_complete);
             const policy = { ...(qualified ? { planner: candidate } : {}),
-                ...(!controlOnly && reviewer ? { reviewer } : {}), ...(!controlOnly && testCase.command === 'oalgo' && composite ? { composite: true } : {}) };
+                ...(!controlOnly && reviewer ? { reviewer } : {}), ...(!controlOnly && originalCase.command === 'oalgo' && composite ? { composite: true } : {}) };
+            const testCase = renderAnchorCase(originalCase, policy);
+            const base = await prepareVariant(ledger, testCase, control.value, CONTROL, fingerprint);
+            const baseId = `${testCase.id}-base`;
+            renders.push({ ...base, id: baseId, renderer_profile: 'h3-base' });
             if (Object.keys(policy).length) {
                 const next = await prepareVariant(ledger, testCase, qualified && treatment ? treatment.value : control.value, 'cloud-policy', fingerprint, policy);
-                const nextId = `${id}-cloud`;
+                const nextId = `${testCase.id}-cloud`;
                 renders.push({ ...next, id: nextId, cloud_policy: policy, renderer_profile: 'h3-base' });
-                pairs.push({ id: `${id}-cloud`, command: testCase.command, component: 'cloud', control: baseId, candidate: nextId });
+                pairs.push({ id: `${testCase.id}-cloud`, command: testCase.command, component: 'cloud', control: baseId, candidate: nextId });
             }
         }
         await saveJsonAtomic(resolve(directory, 'render-manifest.json'), { schema_version: 1, fingerprint,

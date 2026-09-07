@@ -41,8 +41,8 @@ fingerprint and reused unchanged paid generations. Screening before the broker
 duration fix remains hypothesis-selection evidence; the corrected holdout is
 the qualification evidence.
 
-All 72 frame-reviewer calls completed across 24 frames. Human frame labels and
-full-video comparisons remain separate gates; this planner result enables no
+All 72 frame-reviewer calls completed across 24 frames. Human frame labels are
+now complete; full-video comparisons remain a separate gate; this planner result enables no
 model, reviewer, composite or renderer canary. Live results and accounting are
 retained under `artifacts/video-optimization/2026-09-07/`, including the raw usage
 ledger, paired judgments, code hashes, compiler audits and frozen render inputs.
@@ -73,8 +73,76 @@ are not a newly achieved normal-command improvement. The four video comparisons
 are archived and need no human ratings. Future AI configuration comparisons use
 standard H3 for both arms, and legacy renderer release files are rejected.
 
-The 24-frame labels remain pending. Recorded API
+The 24-frame labels are complete; their results follow below. Recorded API
 charges are $12.7356, with $8.6015 held for seven unresolved billing records:
 $21.3371 committed against the authorized $50 cap. These reservations remain
 held; they have not been treated as free calls. No additional AI configuration renders were prepared without component
 qualification.
+
+
+## Completed human frame review
+
+The user accepted 22 of 24 frames and marked both rejected frames as material
+failures. All three reviewers returned valid, fully metered decisions for all
+24 frames. The same saved images and review context were verified before using
+the completed human labels.
+
+| Reviewer | Mean API cost | p95 seconds | False accepts | False rejects |
+| --- | ---: | ---: | ---: | ---: |
+| Sol high, control | $0.04486 | 49.41 | 0 | 15 |
+| Sol low | $0.03316 | 23.36 | 0 | 15 |
+| Flash low | $0.00246 | 14.39 | 0 | 3 |
+
+Flash low qualifies for video testing: about 94.5% lower review cost and 70.9%
+lower p95 review latency, with fewer false rejections on this set. Sol low also
+passes the component gate, but Flash is the cheaper eligible finalist. Only two
+human-rejected frames were present; zero observed false accepts does not
+establish a reliable false-accept rate for other failures or prompt families.
+
+| OALGO composite configuration | Human accepted | Material failures | Mean API cost | p95 seconds |
+| --- | ---: | ---: | ---: | ---: |
+| Pro image, 2K | 3/4 | 1 | $0.14073 | 74.32 |
+| Flash image, 1K | 4/4 | 0 | $0.06843 | 73.43 |
+
+Flash image at 1K qualifies for video testing with about 51.4% lower composite
+cost and similar latency. Four paired composites are pilot evidence. The next
+comparisons keep Sol-low planning and standard H3 rendering, change frame
+review to Flash-low, and use Flash image at 1K for OALGO attachments. Both OALGO
+video cases include an attachment so they exercise composition.
+
+A source fingerprint change was audited against the original Git source.
+Historical image evidence retains its original fingerprint; no human labels
+were discarded and no completed image tests were repeated. Original paid
+control/candidate assets are reused after explicit code and input-hash checks.
+A read-only provider billing request returned HTTP 403 with the configured key;
+unresolved reservations remain held and no production candidate is enabled.
+
+## OALGO visual storytelling regression
+
+The user reported that production job `f53e3fdc` spoke the Project Stargate
+prompt correctly but showed only a talking head. Its saved Sol-low plan
+explicitly required a locked close-up, no added text or graphics, and no
+background changes. Its analysis listed the distinctive ideas but never turned
+them into visual action. This failure was already present in the screenplay.
+
+Cloud and desktop fallback guidance now separates spoken-word preservation from
+visual subject-matter coverage. OALGO keeps his identity and opening frame while
+the camera, environment and actions develop the premise. Explicit requests for
+a static monologue still take precedence. The model and reasoning effort stay
+at Sol-low; the change adds no extra planning stage.
+
+The first revised Stargate plan supplied the missing visuals but extended the
+video to 47 seconds, placing much of the action after the speech. After adding
+guidance to stage action alongside the corresponding phrases, two new plans
+finished at 25 and 26 seconds. Both preserved every original spoken word in
+order and included technology completion, prestige/upgrades and cosmic rivalry
+in shot visuals. The first used American symbols; the repeat explicitly staged
+a separate US flag. The static-greeting control stayed a single five-second
+locked portrait with exactly the requested greeting.
+
+These are inspected plans, not proof of rendered quality or general benchmark
+improvements. The two final Stargate planning calls took 51.9 and 67.4 seconds
+and cost $0.1062 and $0.0577, including cache effects. Their richer staging also
+requires more generated footage than the original 15-second portrait. The first
+final plan is selected for a standard-H3 preview; the repeat remains evidence.
+All plans and usage are retained in the campaign ledger and `oalgo-stargate/`.
