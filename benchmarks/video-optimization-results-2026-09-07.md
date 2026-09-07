@@ -153,9 +153,43 @@ wrapper work. Sampled output frames show the computing facility, branching
 technology diagram, completion glow, gold upgraded branches and a final cosmic
 reveal. The character turns and gestures. The sampled frames establish American
 star/color motifs, but do not establish a distinct US flag. Both original and
-revised videos passed browser playback checks with no console errors. Human
-review of the full dialogue, lip synchronization and pacing remains pending.
+revised videos passed browser playback checks with no console errors. The user
+subsequently called the revision "muchbetter" but reported that it did not have
+a very good Spanglish accent. This is qualitative feedback, not numerical
+dialogue, lip-synchronization or pacing scores.
 This one diagnostic has unequal durations and does not establish a speed gain.
+
+The reviewed revision was uploaded to Discord as a reply to the original request:
+[revised Stargate video](https://discord.com/channels/579913226129637376/746507379310461010/1546646014524657675).
+The attachment's filename and 9,742,735-byte size were verified after posting.
+
+## OALGO accent follow-up
+
+The saved H3 effective prompt contains the requested Mexican-American Spanglish
+delivery, including Mexican Spanish-influenced vowels, rhythm and intonation.
+The accent instruction reached the renderer; its presence did not guarantee
+the intended audible result. H3's
+[official prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md)
+supports describing voice identity and accent outside the spoken-text tags.
+It does not establish the effectiveness of a particular wording.
+
+A separate follow-up diagnostic queues one 12.25-second standard-H3 clip with
+no cloud calls. The first scene of the reviewed revision is reused as the
+control: its effective prompt, 294 frames, seed, image, generator, templates,
+and compiled scene were checked against the saved render. The candidate changes
+only the delivery description to a concrete adult male voice with a strong
+Mexican Spanish accent in English. Dialogue text and language, visuals, camera,
+effects and timing remain identical in the compiled inputs. All English words
+are preserved; no Spanish filler or phonetic respelling is introduced.
+
+The trial is outside cloud-policy qualification and does not alter the original
+14-video optimization manifest. Its frozen inputs and reuse audit are saved in
+`oalgo-stargate/accent-test/`. A blind listening review must establish a suitable
+accent without material dialogue, lip-sync or visual regressions before changing
+default guidance. One scene and seed cannot establish reliability across prompts.
+The voice change remains an unproven candidate while the render is queued.
+
+## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
 $13.6670 in token-priced charges and $8.6015 in unresolved reservations, or
