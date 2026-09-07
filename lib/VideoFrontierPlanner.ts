@@ -198,7 +198,10 @@ export const VIDEO_PLAN_SCHEMA = {
                                         required: ['speaker_id', 'language', 'delivery', 'text'],
                                         properties: {
                                             speaker_id: { type: 'string' },
-                                            language: { type: 'string' },
+                                            language: {
+                                                type: 'string',
+                                                description: 'Spoken language name only, such as English, Spanish, or Spanish-English code-switching. The renderer voices any extra words placed here, so never add notes such as "as written" or "verbatim".',
+                                            },
                                             delivery: { type: 'string' },
                                             text: { type: 'string' },
                                         },
@@ -456,7 +459,7 @@ For a seamless loop, define the complete frame-zero state and physically return 
 
 Make every transformation mechanically legible. If disconnected letters or parts become one rigid object, show their own material visibly bridge, expand, compress, fold, or lock together before it moves as a unit. Match sound to the achieved state: a hanging-open hatch creaks or settles at its hinge, while an impact requires visible contact. For explanatory graphics, stopping or conserving a flow halts future loss and retains unused material at the source; never imply conservation by reversing already expelled material upstream unless time reversal is requested.
 
-Treat explicit speaking intent as authority to write speech. First distinguish production direction from diegetic wording. A request that itself reads like something a character would say—including a first-person confession, direct address, greeting, plea, boast, rant, chant, catchphrase, or speaker-name colon line—is spoken wording even without quotation marks or a verb such as "says." This requires evidence of a speech act in the wording, such as first person, direct address, an explicit vocal cue, or a speaker label. Unquoted third-person narrative or scene prose is visual direction even when it is emotional, inflammatory, slogan-like, or written in a dramatic voice. For example, "and there she was, the captain herself leading the fleet into a better tomorrow" describes a scene; it does not ask a narrator to recite that sentence. Do not invent a narrator or visible speaker merely to read the creative brief aloud. Preserve actual supplied spoken wording verbatim in dialogue and infer a visible speaker whose mouth movement and performance match it. Terse labels such as sound:, audio:, ambience:, music:, style:, scene:, and shot: are production directions, not speakers. When the user asks subjects to speak, talk, discuss, converse, argue, debate, interview, narrate, announce, shout, sing, or otherwise vocalize but leaves some or all wording unspecified, write the shortest natural original dialogue or lyrics needed to express the requested topic and interaction. You may also add concise original in-world dialogue when it improves a character-driven, narrative, confrontational, absurd, or comedic screenplay, even if the user did not explicitly request speech. Prefer a memorable line, reaction, or brief exchange that advances the scene; never use dialogue merely to have a narrator recite or closely paraphrase the creative brief. Give distinct participants concise turn-taking lines, identify the correct speaker and language, and make the corresponding shot.visual describe visible speaking or singing with synchronized mouth movement. If the user supplies quoted spoken wording, reproduce that wording verbatim for its intended turn: never paraphrase, censor, translate, extend, or pad a quoted line. For MiniMax H3, put a single short user-supplied line in the first shot of its segment and reserve a clean 0.35-second visual lead-in before it begins: from 00:00.000 until 00:00.350 there is no human voice, mumbling, or mouth movement. Apply this lead-in consistently in shot.visual and keyframe.motion_contract.first_second_action; neither may say or imply that speech begins immediately. Use dialogue.delivery only for vocal and performance qualities, never timing instructions such as "begins immediately." Retain later placement only when the user explicitly sequences or delays the line. This priority does not apply to generated punchlines or multi-turn dialogue whose timing serves the story. Respect explicit requests for silence or no dialogue. The shot.audio field contains only ambience, sound effects, and non-speech sound; all words belong in dialogue.
+Treat explicit speaking intent as authority to write speech. First distinguish production direction from diegetic wording. A request that itself reads like something a character would say—including a first-person confession, direct address, greeting, plea, boast, rant, chant, catchphrase, or speaker-name colon line—is spoken wording even without quotation marks or a verb such as "says." This requires evidence of a speech act in the wording, such as first person, direct address, an explicit vocal cue, or a speaker label. Unquoted third-person narrative or scene prose is visual direction even when it is emotional, inflammatory, slogan-like, or written in a dramatic voice. For example, "and there she was, the captain herself leading the fleet into a better tomorrow" describes a scene; it does not ask a narrator to recite that sentence. Do not invent a narrator or visible speaker merely to read the creative brief aloud. Preserve actual supplied spoken wording verbatim in dialogue and infer a visible speaker whose mouth movement and performance match it. Terse labels such as sound:, audio:, ambience:, music:, style:, scene:, and shot: are production directions, not speakers. When the user asks subjects to speak, talk, discuss, converse, argue, debate, interview, narrate, announce, shout, sing, or otherwise vocalize but leaves some or all wording unspecified, write the shortest natural original dialogue or lyrics needed to express the requested topic and interaction. You may also add concise original in-world dialogue when it improves a character-driven, narrative, confrontational, absurd, or comedic screenplay, even if the user did not explicitly request speech. Prefer a memorable line, reaction, or brief exchange that advances the scene; never use dialogue merely to have a narrator recite or closely paraphrase the creative brief. Give distinct participants concise turn-taking lines, identify the correct speaker and language, and make the corresponding shot.visual describe visible speaking or singing with synchronized mouth movement. Set dialogue.language to the spoken language name alone, such as English, Spanish, or Spanish-English code-switching; never append fidelity or accent notes such as "as written" or "verbatim" there, because the renderer voices every extra word in that field. Express accent and performance through dialogue.delivery; verbatim fidelity is already secured by copying the wording into dialogue.text. If the user supplies quoted spoken wording, reproduce that wording verbatim for its intended turn: never paraphrase, censor, translate, extend, or pad a quoted line. For MiniMax H3, put a single short user-supplied line in the first shot of its segment and reserve a clean 0.35-second visual lead-in before it begins: from 00:00.000 until 00:00.350 there is no human voice, mumbling, or mouth movement. Apply this lead-in consistently in shot.visual and keyframe.motion_contract.first_second_action; neither may say or imply that speech begins immediately. Use dialogue.delivery only for vocal and performance qualities, never timing instructions such as "begins immediately." Retain later placement only when the user explicitly sequences or delays the line. This priority does not apply to generated punchlines or multi-turn dialogue whose timing serves the story. Respect explicit requests for silence or no dialogue. The shot.audio field contains only ambience, sound effects, and non-speech sound; all words belong in dialogue.
 
 For MiniMax H3, a dialogue turn can overrun its authored shot boundary by several frames and shorten the following shot. When explicit user sequencing requires a later line and a continuity-critical or payoff shot follows in the same segment, reserve a small overflow margin by nominally starting the following shot a few frames early; do not take that margin from the following payoff. If the line needs the full authored window, extend the duration or move the following payoff to a new segment instead.
 
@@ -724,6 +727,46 @@ export function reconcileFrontierKeyframeMotionGeometry(plan: any): number {
     if (prompt === original) return 0;
     keyframe.prompt = prompt;
     return 1;
+}
+
+const DIALOGUE_LANGUAGE_ALIASES: Record<string, string> = {
+    en: 'English', eng: 'English', english: 'English',
+    es: 'Spanish', spa: 'Spanish', spanish: 'Spanish',
+    fr: 'French', fra: 'French', french: 'French',
+    de: 'German', deu: 'German', german: 'German',
+    hi: 'Hindi', hin: 'Hindi', hindi: 'Hindi',
+    zh: 'Chinese', zho: 'Chinese', chinese: 'Chinese',
+    ja: 'Japanese', jpn: 'Japanese', japanese: 'Japanese',
+    ko: 'Korean', kor: 'Korean', korean: 'Korean',
+    it: 'Italian', ita: 'Italian', italian: 'Italian',
+    pt: 'Portuguese', por: 'Portuguese', portuguese: 'Portuguese',
+    ru: 'Russian', rus: 'Russian', russian: 'Russian',
+    ar: 'Arabic', ara: 'Arabic', arabic: 'Arabic',
+};
+// Standalone fidelity words that never form part of a language name.
+const DIALOGUE_LANGUAGE_NOISE = /\b(?:verbatim|literal(?:ly)?|exact(?:ly)?|unchanged|unaltered|untranslated|written|typed|text|wording|spelling|supplied|given|provided|requested)\b/gi;
+// Words that open a fidelity, accent, or delivery clause after the language name.
+const DIALOGUE_LANGUAGE_CLAUSE = /\b(?:as|with|in|but|per|only|without|no|not|using|for|from|to|so|that|which|spoken|delivered|read)\b[\s\S]*$/i;
+const DIALOGUE_LANGUAGE_PLACEHOLDERS = new Set(['n/a', 'na', 'none', 'default', 'same', 'unspecified', 'auto']);
+
+/**
+ * Renderers voice whatever sits in the dialogue language tag (MiniMax H3 spoke
+ * "as written" aloud from "English as written"), so reduce the planner's value
+ * to a bare language name.
+ */
+export function normalizedDialogueLanguage(value: unknown): string {
+    const language = String(value ?? '')
+        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+        .split(/[,;:]|\s[-\u2013\u2014]\s/)[0]
+        .replace(DIALOGUE_LANGUAGE_NOISE, ' ')
+        .replace(DIALOGUE_LANGUAGE_CLAUSE, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[\s.,;:\-\u2013\u2014/]+|[\s.,;:\-\u2013\u2014/]+$/g, '');
+    const key = language.toLowerCase();
+    if (!key || DIALOGUE_LANGUAGE_PLACEHOLDERS.has(key)) return 'English';
+    const code = key.match(/^([a-z]{2,3})(?:[-_][a-z]{2,4})?$/);
+    if (code && DIALOGUE_LANGUAGE_ALIASES[code[1]]) return DIALOGUE_LANGUAGE_ALIASES[code[1]];
+    return DIALOGUE_LANGUAGE_ALIASES[key] ?? language;
 }
 
 function spokenWords(value: string): string {
@@ -1038,7 +1081,7 @@ export function expandExhaustiveSequentialPlan(
         const line = assignedLine(index);
         const dialogue = line ? [{
             speaker_id: member,
-            language: String(line.language || 'English').trim(),
+            language: normalizedDialogueLanguage(line.language),
             delivery: String(line.delivery || 'clear natural delivery').trim(),
             text: String(line.text).trim(),
         }] : [];
@@ -1273,7 +1316,7 @@ export function compileBestEffortFrontierVideoPlan(
                 .filter((line: any) => line && typeof line === 'object' && String(line.text || '').trim())
                 .map((line: any, lineIndex: number) => ({
                     speaker_id: String(line.speaker_id || `speaker-${shotIndex + 1}-${lineIndex + 1}`).trim(),
-                    language: String(line.language || 'English').trim(),
+                    language: normalizedDialogueLanguage(line.language),
                     delivery: String(line.delivery || 'clear natural delivery').trim(),
                     text: String(line.text).trim(),
                 }));
