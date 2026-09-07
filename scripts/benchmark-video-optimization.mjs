@@ -79,13 +79,14 @@ async function judgePair(ledger, testCase, candidate, control, treatment, finger
         const reversed = (Number.parseInt(stableHash(`${testCase.id}:${repeat}`, 2), 16) + index) % 2;
         const labels = reversed ? { A: treatment.value, B: control.value } : { A: control.value, B: treatment.value };
         const input = { command: testCase.command, request: testCase.prompt,
+            requested_duration_seconds: requestedVideoDurationSeconds(testCase.prompt),
             guidance: testCase.command === 'oalgo' ? OALGO_VIDEO_PLANNER_GUIDANCE : '',
             plans: Object.fromEntries(Object.entries(labels).map(([key, plan]) => [key, blindedPlan(plan)])) };
         await ledger.checkpoint({ kind: 'judge', command: testCase.command, split: testCase.split,
             case_id: testCase.id, candidate, judge, repeat, fingerprint, judge_fingerprint: judgeFingerprint(), input_hash: stableHash(JSON.stringify(input), 64),
         }, async hooks => {
             const response = await requestPlannerResponse({ model: judge, reasoning: { effort: 'medium' },
-                instructions: 'Compare these blinded screenplays for a local MiniMax H3 video. Score concrete adherence, feasible timing, complete requested actions, exact quoted words and visible text, closed cast/count, identity, speech assignment, continuity and creative execution. No invented duration or voice requirements. Penalize lost actions, unsupported dialogue, stacked impossible action, needless padding and destructive compression. Do not reward length or infer model identity. Character delivery must be planned but its audible quality cannot be proven from JSON. A material failure is a specific omitted or contradicted binding requirement. Scores are 0 to 10. Return exactly the schema.',
+                instructions: 'Compare these blinded screenplays for a local MiniMax H3 video. Score concrete adherence, feasible timing, complete requested actions, exact quoted words and visible text, closed cast/count, identity, speech assignment, continuity and creative execution. A null requested_duration_seconds means automatic duration: the planner is required to choose a feasible runtime, and choosing a concrete duration is allowed. A numeric requested_duration_seconds is a binding finished-duration requirement. Do not invent extra duration or voice requirements beyond the request and supplied guidance. Penalize lost actions, unsupported dialogue, stacked impossible action, needless padding and destructive compression. Do not reward length or infer model identity. Character delivery must be planned but its audible quality cannot be proven from JSON. A material failure must identify a specific binding requirement from the request or guidance that the plan omits or contradicts; ordinary choices left to the planner are not failures. Scores are 0 to 10. Return exactly the schema.',
                 input: [{ role: 'user', content: [{ type: 'input_text', text: JSON.stringify(input) }] }],
                 text: { format: { type: 'json_schema', name: 'paired_plan_ratings', strict: true, schema: judgeSchema } },
                 max_output_tokens: 3000, store: false,

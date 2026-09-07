@@ -63,6 +63,11 @@ work, $40 for holdout work and $50 for render preparation. A call that cannot fi
 does not run; missing comparisons remain inconclusive. Completed generation
 checkpoints include model settings, code/contract hashes and source-image bytes.
 Judge checkpoints separately fingerprint the blinded evaluation procedure.
+An early holdout judgment incorrectly treated choosing an automatic runtime as a
+binding-requirement failure. The corrected rubric explicitly distinguishes an
+unspecified duration from a requested total. Old judgments remain in the ledger;
+qualification uses fresh judgments under the corrected rubric and reuses the
+unchanged paid plans.
 
 ```bash
 yarn build
