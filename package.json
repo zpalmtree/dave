@@ -13,6 +13,7 @@
     "benchmark:video-keyframes": "yarn build && node scripts/benchmark-video-keyframes.mjs",
     "benchmark:video-keyframe-reviewers": "yarn build && node scripts/benchmark-video-keyframe-reviewers.mjs",
     "benchmark:video-cost-ab": "yarn build && node scripts/benchmark-video-cost-ab.mjs",
+    "benchmark:video-optimization": "yarn build && node scripts/benchmark-video-optimization.mjs",
     "benchmark:video-cost-ab-renders": "yarn build && node scripts/run-video-cost-ab-renders.mjs",
     "benchmark:video-cost-ab-prepare-renders": "node scripts/prepare-video-cost-ab-renders.mjs",
     "review:video-cost-ab": "node scripts/serve-video-cost-ab-review.mjs",

@@ -3,9 +3,13 @@ import { GoogleGenAI, type GenerateContentResponse } from '@google/genai';
 import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
 import { VideoKeyframeReference } from './VideoKeyframeReferences.js';
+import { requestPlannerResponse } from './VideoFrontierPlanner.js';
+import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
 import {
     VideoFrontierCallOptions,
     VideoUsagePersistenceError,
+    openAIVideoUsage,
+    videoRequestInputTokenBound,
     requestedOpenAIServiceTier,
     resolvedOpenAIServiceTier,
 } from './VideoUsage.js';
@@ -231,7 +235,15 @@ async function generateGeminiKeyframe(
             },
         },
     ]));
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    options.abortSignal?.addEventListener('abort', cancel, { once: true });
+    if (options.abortSignal?.aborted) controller.abort();
+    const generationTimeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
     try {
+        await options.beforeRequest?.({ stage: 'keyframe_candidate_gemini', attempt, provider: 'google',
+            model: geminiModel, maxInputTokens: videoRequestInputTokenBound({ prompt, references: references.map(reference => ({ type: 'input_image' })) }),
+            maxOutputTokens: 32768, maxImages: 1 });
         const generation = client.models.generateContent({
             model: geminiModel,
             contents: [{
@@ -245,7 +257,8 @@ async function generateGeminiKeyframe(
                 ],
             }],
             config: {
-                abortSignal: options.abortSignal,
+                abortSignal: controller.signal,
+                maxOutputTokens: 32768,
                 responseModalities: ['IMAGE'],
                 imageConfig: {
                     aspectRatio: options.aspectRatio || '16:9',
@@ -253,24 +266,18 @@ async function generateGeminiKeyframe(
                 },
             },
         });
-        let timeout: NodeJS.Timeout | undefined;
-        const response: GenerateContentResponse = await Promise.race([
-            generation,
-            new Promise<never>((_resolve, reject) => {
-                timeout = setTimeout(() => reject(new Error('Gemini first-frame generation timed out.')), 3 * 60 * 1000);
-            }),
-        ]).finally(() => {
-            if (timeout) clearTimeout(timeout);
-        });
+        const response: GenerateContentResponse = await generation;
         const imagePart = response.candidates
             ?.flatMap(candidate => candidate.content?.parts || [])
             .find(part => part.inlineData?.mimeType?.startsWith('image/') && part.inlineData?.data);
         const usage = response.usageMetadata;
         const inputTokens = Number(usage?.promptTokenCount || 0);
         const thoughtTokens = Number(usage?.thoughtsTokenCount || 0);
-        const flashImagePrice = geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL
-            ? 0.0336
-            : imageSize === '1K' ? 0.067 : 0.101;
+        const imageCount = imagePart?.inlineData?.data ? 1 : 0;
+        const imageTokens = (usage?.candidatesTokensDetails || [])
+            .filter(value => String(value.modality).toUpperCase() === 'IMAGE')
+            .reduce((sum, value) => sum + Number(value.tokenCount || 0), 0)
+            || imageCount * (geminiModel === VIDEO_KEYFRAME_MODEL || imageSize === '1K' ? 1120 : 1680);
         await options.onUsage?.({
             stage: 'keyframe_candidate_gemini',
             attempt,
@@ -278,16 +285,13 @@ async function generateGeminiKeyframe(
             provider: 'google',
             model: geminiModel,
             serviceTier: 'default',
-            inputTokens,
-            outputTokens: geminiModel === VIDEO_KEYFRAME_MODEL
-                ? Number(usage?.candidatesTokenCount || 0) + thoughtTokens
-                : thoughtTokens,
-            images: imagePart?.inlineData?.data ? 1 : 0,
-            costOverride: imagePart?.inlineData?.data && geminiModel !== VIDEO_KEYFRAME_MODEL
-                ? inputTokens * (geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL ? 0.25 : 0.5) / 1_000_000
-                    + thoughtTokens * (geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL ? 1.5 : 3) / 1_000_000
-                    + flashImagePrice
-                : undefined,
+            inputTokens: Math.max(0, inputTokens - Number(usage?.cachedContentTokenCount || 0)),
+            cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
+            rawUsage: usage as unknown as Record<string, unknown>,
+            usageMissing: !usage,
+            outputTokens: Math.max(0, Number(usage?.candidatesTokenCount || 0) - imageTokens) + thoughtTokens,
+            imageOutputTokens: imageTokens,
+            images: imageCount,
         });
         if (!imagePart?.inlineData?.data) {
             throw new Error(geminiNoImageDetail(response));
@@ -308,6 +312,8 @@ async function generateGeminiKeyframe(
         }
         throw error;
     } finally {
+        clearTimeout(generationTimeout);
+        options.abortSignal?.removeEventListener('abort', cancel);
         await options.onAttempt?.({
             stage: 'keyframe_candidate_gemini',
             attempt,
@@ -346,6 +352,9 @@ async function generateOpenAIKeyframe(
         };
         const outputSize = outputSizes[aspectRatio];
         const fullPrompt = `Output aspect ratio: ${aspectRatio}.\n${referenceContract(references)}\n\n${prompt}`;
+        await options.beforeRequest?.({ stage: 'keyframe_candidate_openai', attempt, provider: 'openai',
+            model: VIDEO_KEYFRAME_FALLBACK_MODEL, maxInputTokens: videoRequestInputTokenBound({ fullPrompt, references: references.map(() => ({ type: 'input_image' })) }),
+            maxOutputTokens: 32768, maxImages: 1 });
         let response;
         if (references.length) {
             const form = new FormData();
@@ -406,7 +415,9 @@ async function generateOpenAIKeyframe(
                 outputTokens: Number(usage?.output_tokens || 0),
                 cacheReadTokens: cached,
                 images: encoded ? 1 : 0,
-                costOverride: encoded ? 0.165 : undefined,
+                imageInputTokens: Number(usage?.input_tokens_details?.image_tokens || 0),
+                imageOutputTokens: Number(usage?.output_tokens || 0) || (encoded ? 5500 : 0),
+                rawUsage: usage, usageMissing: !usage,
             });
         }
         if (!response.ok) {
@@ -461,6 +472,7 @@ export async function reviewVideoKeyframe(
     attempt = 1,
 ): Promise<VideoKeyframeReview> {
     const reviewModel = options.reviewModel || VIDEO_KEYFRAME_REVIEW_MODEL;
+    const reviewProvider = videoTextModelCapabilities(reviewModel).provider;
     const reviewReasoningEffort = options.reviewReasoningEffort || 'high';
     const reviewImageDetail = options.reviewImageDetail || 'high';
     const reviewMaxOutputTokens = Math.max(256, Math.min(128_000, Math.floor(
@@ -481,14 +493,7 @@ export async function reviewVideoKeyframe(
         controller.abort();
     }, reviewTimeoutMs);
     try {
-        const response = await fetch('https://api.openai.com/v1/responses', {
-            method: 'POST',
-            signal: controller.signal,
-            headers: {
-                authorization: `Bearer ${config.openaiApiKey}`,
-                'content-type': 'application/json',
-            },
-            body: JSON.stringify({
+        const body: any = await requestPlannerResponse({
                 model: reviewModel,
                 ...(requestedOpenAIServiceTier(options.serviceTier)
                     ? { service_tier: requestedOpenAIServiceTier(options.serviceTier) }
@@ -547,23 +552,15 @@ export async function reviewVideoKeyframe(
                 },
                 max_output_tokens: reviewMaxOutputTokens,
                 store: false,
-            }),
+            }, controller.signal, 'keyframe_review', {
+            ...options,
+            maxRequestAttempts: 1,
+            onProvisionalKeyframe: undefined,
+            onAttempt: undefined,
+            onUsage: async event => options.onUsage?.({ ...event, attempt }),
         });
-        const body: any = await response.json();
         clearTimeout(timeout);
-        resolvedTier = resolvedOpenAIServiceTier(body, options.serviceTier);
-        if (!response.ok) {
-            if (body?.usage) {
-                const cached = Number(body.usage.input_tokens_details?.cached_tokens || 0);
-                await options.onUsage?.({
-                    stage: 'keyframe_review', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
-                    inputTokens: Math.max(0, Number(body.usage.input_tokens || 0) - cached),
-                    outputTokens: Number(body.usage.output_tokens || 0), cacheReadTokens: cached,
-                });
-            }
-            throw new Error(body?.error?.message || `OpenAI review returned HTTP ${response.status}.`);
-        }
+        resolvedTier = reviewProvider === 'google' ? 'default' : resolvedOpenAIServiceTier(body, options.serviceTier);
         const usage = body?.usage;
         let review: any;
         try {
@@ -580,28 +577,10 @@ export async function reviewVideoKeyframe(
             // review axis. Production structured output always supplies it.
             review.identity_preserved = review.identity_preserved === true;
         } catch (error) {
-            if (usage) {
-                const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
-                await options.onUsage?.({
-                    stage: 'keyframe_review', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
-                    inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
-                    outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
-                });
-            }
             throw error;
         }
         outcome = review.acceptable ? 'accepted' : 'rejected';
         detail = videoKeyframeReviewDetail(review);
-        if (usage) {
-            const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
-            await options.onUsage?.({
-                stage: 'keyframe_review', attempt, outcome, provider: 'openai',
-                model: String(body.model || reviewModel), serviceTier: resolvedTier,
-                inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
-                outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
-            });
-        }
         console.log(
             `[Video keyframe review] ${reviewModel}: ${Number(usage?.input_tokens || 0)} input, `
             + `${Number(usage?.output_tokens || 0)} output tokens; ${review.acceptable ? 'accepted' : 'rejected'}`,
@@ -616,7 +595,7 @@ export async function reviewVideoKeyframe(
     } finally {
         clearTimeout(timeout);
         await options.onAttempt?.({
-            stage: 'keyframe_review', attempt, outcome, provider: 'openai',
+            stage: 'keyframe_review', attempt, outcome, provider: reviewProvider,
             model: reviewModel, serviceTier: resolvedTier,
             durationSeconds: (Date.now() - started) / 1000, detail,
         });
@@ -644,7 +623,7 @@ async function optionalReview(
         stage: 'keyframe_review_gate',
         attempt: nextAttempt(),
         outcome: 'unreviewed',
-        provider: 'openai',
+        provider: videoTextModelCapabilities(options.reviewModel || VIDEO_KEYFRAME_REVIEW_MODEL).provider,
         model: options.reviewModel || VIDEO_KEYFRAME_REVIEW_MODEL,
         serviceTier: requestedOpenAIServiceTier(options.serviceTier) || 'default',
         durationSeconds: 0,
@@ -681,14 +660,7 @@ async function compareVideoKeyframes(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
     try {
-        const response = await fetch('https://api.openai.com/v1/responses', {
-            method: 'POST',
-            signal: controller.signal,
-            headers: {
-                authorization: `Bearer ${config.openaiApiKey}`,
-                'content-type': 'application/json',
-            },
-            body: JSON.stringify({
+        const body: any = await requestPlannerResponse({
                 model: reviewModel,
                 ...(requestedOpenAIServiceTier(options.serviceTier)
                     ? { service_tier: requestedOpenAIServiceTier(options.serviceTier) }
@@ -731,23 +703,11 @@ async function compareVideoKeyframes(
                 },
                 max_output_tokens: reviewMaxOutputTokens,
                 store: false,
-            }),
-        });
-        const body: any = await response.json();
+            }, controller.signal, 'keyframe_comparison', {
+                ...options, maxRequestAttempts: 1,
+                onUsage: usage => options.onUsage?.({ ...usage, attempt }), onAttempt: undefined,
+            });
         resolvedTier = resolvedOpenAIServiceTier(body, options.serviceTier);
-        const usage = body?.usage;
-        if (!response.ok) {
-            if (usage) {
-                const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
-                await options.onUsage?.({
-                    stage: 'keyframe_comparison', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
-                    inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
-                    outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
-                });
-            }
-            throw new Error(body?.error?.message || `OpenAI comparison returned HTTP ${response.status}.`);
-        }
         let comparison: any;
         try {
             comparison = JSON.parse(responseOutputText(body));
@@ -758,30 +718,12 @@ async function compareVideoKeyframes(
                 throw new Error('First-frame comparator returned invalid structured output.');
             }
         } catch (error) {
-            if (usage) {
-                const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
-                await options.onUsage?.({
-                    stage: 'keyframe_comparison', attempt, outcome: 'error', provider: 'openai',
-                    model: String(body.model || reviewModel), serviceTier: resolvedTier,
-                    inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
-                    outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
-                });
-            }
             throw error;
         }
         outcome = comparison.acceptable && comparison.selected !== 'none' ? 'accepted' : 'rejected';
         detail = outcome === 'rejected'
             ? videoKeyframeReviewDetail(comparison as VideoKeyframeReview)
             : undefined;
-        if (usage) {
-            const cached = Number(usage.input_tokens_details?.cached_tokens || 0);
-            await options.onUsage?.({
-                stage: 'keyframe_comparison', attempt, outcome, provider: 'openai',
-                model: String(body.model || reviewModel), serviceTier: resolvedTier,
-                inputTokens: Math.max(0, Number(usage.input_tokens || 0) - cached),
-                outputTokens: Number(usage.output_tokens || 0), cacheReadTokens: cached,
-            });
-        }
         return comparison as VideoKeyframeComparison;
     } catch (error) {
         detail = error instanceof Error ? error.message : String(error);
@@ -789,7 +731,7 @@ async function compareVideoKeyframes(
     } finally {
         clearTimeout(timeout);
         await options.onAttempt?.({
-            stage: 'keyframe_comparison', attempt, outcome, provider: 'openai',
+            stage: 'keyframe_comparison', attempt, outcome, provider: videoTextModelCapabilities(reviewModel).provider,
             model: reviewModel, serviceTier: resolvedTier,
             durationSeconds: (Date.now() - started) / 1000, detail,
         });

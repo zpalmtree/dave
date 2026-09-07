@@ -884,6 +884,7 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 }
 
 interface VideoRequestOptions {
+    commandVariant?: 'oalgo' | 'meximutt';
     presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
     compositeAttachedImage?: boolean;
     plannerGuidance?: string;
@@ -944,6 +945,8 @@ export async function handleVideoRequest(
             body: JSON.stringify({
                 model,
                 prompt,
+                command_variant: options.commandVariant || VIDEO_MODELS[model].command,
+                requested_at: msg.createdTimestamp / 1000,
                 requester_id: msg.author.id,
                 origin_bot_id: msg.client.user.id,
                 channel_id: msg.channel.id,
@@ -1005,6 +1008,7 @@ export async function handleMinimaxVideo(msg: Message, prompt: string): Promise<
 
 export async function handleOalgoVideo(msg: Message, prompt: string): Promise<void> {
     await handleVideoRequest('minimax', msg, prompt, {
+        commandVariant: 'oalgo',
         presetSourceImage: 'oalgo',
         compositeAttachedImage: true,
         plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
@@ -1013,6 +1017,7 @@ export async function handleOalgoVideo(msg: Message, prompt: string): Promise<vo
 
 export async function handleMeximuttVideo(msg: Message, prompt: string): Promise<void> {
     await handleVideoRequest('minimax', msg, prompt, {
+        commandVariant: 'meximutt',
         presetSourceImage: 'oalgo',
         compositeAttachedImage: true,
         plannerGuidance: MEXIMUTT_VIDEO_PLANNER_GUIDANCE,

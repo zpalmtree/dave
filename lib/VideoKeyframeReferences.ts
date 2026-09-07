@@ -5,7 +5,7 @@ import { join } from 'path';
 import fetch from 'node-fetch';
 
 import { config } from './Config.js';
-import { VideoProviderHooks, VideoUsagePersistenceError } from './VideoUsage.js';
+import { VideoProviderHooks, VideoUsagePersistenceError, videoRequestInputTokenBound } from './VideoUsage.js';
 import {
     ImageSearchResult,
     DownloadedImage,
@@ -156,6 +156,10 @@ async function validateAmbiguousVideoKeyframeReference(
     try {
         const mimeType = mimeTypeForExtension(image.extension);
         const client = new GoogleGenAI({ apiKey: config.geminiApiKey, apiVersion: 'v1alpha' });
+        await hooks.beforeRequest?.({ stage: 'keyframe_reference_validation', attempt,
+            provider: 'google', model: VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL,
+            maxInputTokens: videoRequestInputTokenBound({ requirement, title: result.title, image: { type: 'input_image' } }),
+            maxOutputTokens: 100 });
         const response = await client.models.generateContent({
             model: VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL,
             contents: [{
@@ -192,12 +196,6 @@ async function validateAmbiguousVideoKeyframeReference(
                 maxOutputTokens: 100,
             },
         });
-        const parsed = JSON.parse(response.text || '{}');
-        if (typeof parsed?.usable !== 'boolean') {
-            throw new Error('Reference relevance gate returned invalid structured output.');
-        }
-        outcome = parsed.usable ? 'accepted' : 'rejected';
-        if (!parsed.usable) detail = 'Ambiguous public reference did not establish the declared target.';
         const usage = response.usageMetadata;
         await hooks.onUsage?.({
             stage: 'keyframe_reference_validation',
@@ -207,8 +205,15 @@ async function validateAmbiguousVideoKeyframeReference(
             model: VIDEO_KEYFRAME_REFERENCE_VALIDATION_MODEL,
             serviceTier: 'default',
             inputTokens: Number(usage?.promptTokenCount || 0),
-            outputTokens: Number(usage?.candidatesTokenCount || 0),
+            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
+            rawUsage: usage as unknown as Record<string, unknown>, usageMissing: !usage,
         });
+        const parsed = JSON.parse(response.text || '{}');
+        if (typeof parsed?.usable !== 'boolean') {
+            throw new Error('Reference relevance gate returned invalid structured output.');
+        }
+        outcome = parsed.usable ? 'accepted' : 'rejected';
+        if (!parsed.usable) detail = 'Ambiguous public reference did not establish the declared target.';
         return parsed.usable;
     } catch (error) {
         detail = error instanceof Error ? error.message : String(error);
@@ -333,6 +338,9 @@ export async function resolveVideoKeyframeReferences(
                 let searchOutcome: 'success' | 'error' = 'error';
                 let searchDetail: string | undefined;
                 const attempt = requirementIndex * 2 + retry + 1;
+                await hooks.beforeRequest?.({ stage: 'keyframe_reference_search', attempt,
+                    provider: 'google', model: 'google-custom-search',
+                    maxInputTokens: 0, maxOutputTokens: 0, maxWebSearches: 1 });
                 try {
                     results = await searchImages(requirement.searchQuery);
                     searchOutcome = 'success';

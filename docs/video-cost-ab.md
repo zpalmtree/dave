@@ -1,5 +1,10 @@
 # Local MiniMax cost/quality A/B benchmark
 
+For the current shared-budget MiniMax/OALGO campaign, use
+[Measured MiniMax and OALGO optimization](video-optimization.md). This page
+documents the older harness and its historical corpora; its paid commands do
+not share the new campaign ledger.
+
 This benchmark is local-only. It does not allocate production traffic, change
 the bot configuration, push branches, or deploy services. Paid phases call the
 OpenAI API, checkpoint every completed response, and stop before the configured

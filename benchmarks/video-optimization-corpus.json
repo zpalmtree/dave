@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "description": "Development and held-out command-specific cases; never tune on holdout outputs.",
+  "cases": [
+    {
+      "id": "minimax-screen-duck",
+      "command": "minimax",
+      "split": "screen",
+      "prompt": "A duck becomes mayor. No dialogue."
+    },
+    {
+      "id": "minimax-screen-racers",
+      "command": "minimax",
+      "split": "screen",
+      "prompt": "Exactly three arcade racers speed toward a neon finish line while one says \"Not today!\""
+    },
+    {
+      "id": "minimax-screen-note",
+      "command": "minimax",
+      "split": "screen",
+      "prompt": "An astronaut finds a handwritten note on Mars that says \"back in five minutes\". No speech."
+    },
+    {
+      "id": "minimax-screen-chef",
+      "command": "minimax",
+      "split": "screen",
+      "prompt": "Two rival chefs discover they are both cooking for the same very judgmental cat."
+    },
+    {
+      "id": "oalgo-screen-refund",
+      "command": "oalgo",
+      "split": "screen",
+      "prompt": "OALGO looks into the camera, says exactly \"I want my money back.\", then slowly raises one eyebrow. Make it 8 seconds.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-screen-silent",
+      "command": "oalgo",
+      "split": "screen",
+      "prompt": "OALGO silently inspects a tiny trophy, grins, and proudly holds it toward the camera. No speech or subtitles.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-screen-phone",
+      "command": "oalgo",
+      "split": "screen",
+      "prompt": "OALGO celebrates a winning trade, receives a phone notification that reverses it, and reacts with an original short complaint. Make it 12 seconds.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-screen-sign",
+      "command": "oalgo",
+      "split": "screen",
+      "prompt": "OALGO points to a card reading \"NO REFUNDS\", then says exactly \"Read the sign.\" Preserve both texts verbatim.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "minimax-holdout-1",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A sleepy lighthouse keeper notices the lamp has become a miniature sun and carefully puts on sunglasses. No dialogue."
+    },
+    {
+      "id": "minimax-holdout-2",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "In 10 seconds, exactly two robots exchange a red umbrella in the rain. Neither robot changes color. No speech."
+    },
+    {
+      "id": "minimax-holdout-3",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A tiny detective opens a matchbox and finds a glowing forest. Show opening, discovery, then a visible surprised reaction."
+    },
+    {
+      "id": "minimax-holdout-4",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A continuous shot follows a paper boat through a puddle and ends at a storm drain. Stop before the boat falls in."
+    },
+    {
+      "id": "minimax-holdout-5",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "Two bakers argue over a burnt loaf. The first says \"Your turn.\" The second replies \"No chance.\" Preserve those words and speakers."
+    },
+    {
+      "id": "minimax-holdout-6",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A theater marquee clearly reads \"TONIGHT ONLY\". A single moth lands between the words. No other visible text."
+    },
+    {
+      "id": "minimax-holdout-7",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "An orange cat taps a blue bell exactly three times, then sits. Keep the bell on the left throughout."
+    },
+    {
+      "id": "minimax-holdout-8",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A silent claymation gardener offers water to a mechanical flower; it opens and reveals a small clockwork bee."
+    },
+    {
+      "id": "minimax-holdout-9",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "Make an 8-second loop of a glass marble circling a wooden bowl. Match the opening and closing composition. No cuts."
+    },
+    {
+      "id": "minimax-holdout-10",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A camera tracks a green bicycle left to right as it crosses a bridge. The cyclist keeps facing forward."
+    },
+    {
+      "id": "minimax-holdout-11",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A split scene sequence: a child draws a star, a match cut reveals the same shape on a spaceship window, then Earth appears outside. No dialogue."
+    },
+    {
+      "id": "minimax-holdout-12",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A bookstore owner says exactly \"We close at six.\" A wall sign reads \"OPEN\". Do not convert the sign to subtitles."
+    },
+    {
+      "id": "minimax-holdout-13",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "Exactly four penguins slide in a line, stop together, and bow together. No extra penguins or speech."
+    },
+    {
+      "id": "minimax-holdout-14",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "In 15 seconds show a chef placing a cake, a dog sneaking closer, and the chef catching the dog before it touches the cake."
+    },
+    {
+      "id": "minimax-holdout-15",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A red balloon escapes a street magician and is caught by a passing cyclist. Keep the balloon red and show the handoff."
+    },
+    {
+      "id": "minimax-holdout-16",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A formal perfume advertisement reveals the bottle is a tiny watering can. Elegant lighting, one short visual joke, no narration."
+    },
+    {
+      "id": "minimax-holdout-17",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A candle flame turns into a small golden fish that swims through the air and returns to the wick. One continuous shot."
+    },
+    {
+      "id": "minimax-holdout-18",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A stagehand quietly replaces a moon prop with a giant cookie. The audience is unseen. No dialogue or readable words."
+    },
+    {
+      "id": "minimax-holdout-19",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A worried astronaut whispers exactly \"Did you hear that?\" while a loose wrench slowly rotates behind them. No second speaker."
+    },
+    {
+      "id": "minimax-holdout-20",
+      "command": "minimax",
+      "split": "holdout",
+      "prompt": "A dog waits at an empty bus stop. A tiny bus arrives and a mouse driver opens the door. Show the dog noticing the impossible scale."
+    },
+    {
+      "id": "oalgo-holdout-1",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO says exactly \"Everything is fine.\" while his smile slowly turns into disbelief. Keep the wording unchanged.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-2",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO silently balances a coin on his finger, loses it, and catches it against his chest. No speech, captions or narration.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-3",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO presents an empty wallet to the camera and delivers one original short joke about trading fees.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-4",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "In 10 seconds, OALGO reads a phone notification, looks up, and says exactly \"Not again.\"",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-5",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO writes \"SOLD OUT\" on a small card and holds it toward the camera. No spoken dialogue.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-6",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO greets a second character who stays offscreen. Only OALGO speaks, saying exactly \"You came back.\"",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-7",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO moves from a disappointed whisper into a triumphant shout using the exact line \"I knew it!\" once.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-8",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "A close shot of OALGO inspecting a toy rocket cuts to a wider view as he sets it on a table. Preserve his face and clothing.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-9",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO proudly displays exactly two gold coins, gives one away offscreen, and shows the single remaining coin.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-10",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO says exactly \"No more shortcuts.\" while carefully tying a red ribbon around a tiny gift.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-11",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO notices his coffee cup is empty, looks accusingly at the camera, and improvises one brief playful complaint.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-12",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "In 8 seconds OALGO silently points left, realizes the prize is on his right, and turns only his eyes toward it.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-13",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO holds a placard reading \"PLAN B\" and says exactly \"We have a plan.\" Do not add subtitles.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-14",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO excitedly counts down \"Three, two, one!\" and blows out one birthday candle. Keep every word.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-15",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO tries to look serious while a paper crown slowly slides over one eyebrow. No dialogue.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-16",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO says exactly \"That was the last one.\" after discovering an empty snack bag. Keep the accent through the disappointed delivery.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-17",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO unwraps a tiny trophy, examines it, and delivers a brief original acceptance speech. Make it 12 seconds.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-18",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO first appears in a close-up, then a deliberate cut shows him seated at a table with the same face and flag clothing.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-19",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO silently offers a folded paper bird to the camera; it flaps once and he looks pleasantly surprised.",
+      "source_image": "images/oalgo.png"
+    },
+    {
+      "id": "oalgo-holdout-20",
+      "command": "oalgo",
+      "split": "holdout",
+      "prompt": "OALGO looks from a falling chart on his phone to the camera and says exactly \"I can explain.\" No translation or added words.",
+      "source_image": "images/oalgo.png"
+    }
+  ]
+}

@@ -282,11 +282,13 @@ function videoDurationSeconds(value: string, unit: string): number | null {
  * beat timings are deliberately ignored unless a complete 0:00-based timeline
  * supplies the total endpoint.
  */
-export function requestedVideoDurationSeconds(prompt: string): number | null {
-    const text = String(prompt || '').replace(/[‐‑‒–—]/g, '-');
+function videoDurationRequirement(prompt: string): { seconds: number; numberRange: [number, number] | null } | null {
+    const text = String(prompt || '').replace(/[‐‑‒–—]/g, '-')
+        .replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)/g, quote => ' '.repeat(quote.length));
     const unit = '(seconds?|secs?|minutes?|mins?)';
     const amount = '(\\d+(?:\\.\\d+)?)';
     const explicitPatterns = [
+        new RegExp(`\\b(?:make|keep)\\s+(?:it|(?:the|this)\\s+(?:video|clip|animation|film|short))\\s+(?:exactly\\s+)?${amount}\\s*${unit}\\b`, 'i'),
         new RegExp(`\\b(?:total(?:\\s+(?:video\\s+)?)?(?:duration|runtime|length)|duration|runtime|length)\\s*(?:of|=|:|is|be)?\\s*${amount}\\s*${unit}\\b`, 'i'),
         new RegExp(`\\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\\s+(?:with\\s+)?(?:a\\s+)?(?:total\\s+)?(?:duration|runtime|length)?\\s*(?:of|=|:|is|be|lasting|lasts|should\\s+be|must\\s+be)?\\s*${amount}\\s*${unit}\\b`, 'i'),
         new RegExp(`\\b${amount}\\s*${unit}\\s*(?:long|in\\s+total|total|overall)\\b`, 'i'),
@@ -295,7 +297,10 @@ export function requestedVideoDurationSeconds(prompt: string): number | null {
         const match = expression.exec(text);
         if (!match) continue;
         const seconds = videoDurationSeconds(match[1], match[2]);
-        if (seconds !== null) return seconds;
+        if (seconds !== null) {
+            const start = match.index + match[0].indexOf(match[1]);
+            return { seconds, numberRange: [start, start + match[1].length] };
+        }
     }
 
     const modifier = new RegExp(`\\b${amount}\\s*(?:-\\s*)?${unit}\\b`, 'gi');
@@ -308,7 +313,7 @@ export function requestedVideoDurationSeconds(prompt: string): number | null {
         if (/\b(?:then|after|before|followed|pause|wait|hold)\b/i.test(bridge)
             || new RegExp(`\\b${amount}\\s*(?:-\\s*)?${unit}\\b`, 'i').test(bridge)) continue;
         const seconds = videoDurationSeconds(candidate[1], candidate[2]);
-        if (seconds !== null) return seconds;
+        if (seconds !== null) return { seconds, numberRange: [candidate.index, candidate.index + candidate[1].length] };
     }
 
     const timeline = /\b(\d{1,2}):([0-5]\d(?:\.\d+)?)\s*-\s*(\d{1,2}):([0-5]\d(?:\.\d+)?)\b/g;
@@ -321,7 +326,18 @@ export function requestedVideoDurationSeconds(prompt: string): number | null {
         if (start === 0) beginsAtZero = true;
         if (finish > start) endpoint = Math.max(endpoint, finish);
     }
-    return beginsAtZero && endpoint > 0 ? endpoint : null;
+    return beginsAtZero && endpoint > 0 ? { seconds: endpoint, numberRange: null } : null;
+}
+
+export function requestedVideoDurationSeconds(prompt: string): number | null {
+    return videoDurationRequirement(prompt)?.seconds ?? null;
+}
+
+/** A total-duration directive belongs in timing fields, not in visible/spoken content. */
+export function videoPromptContentNumbers(prompt: string): string[] {
+    const range = videoDurationRequirement(prompt)?.numberRange;
+    const content = range ? prompt.slice(0, range[0]) + ' '.repeat(range[1] - range[0]) + prompt.slice(range[1]) : prompt;
+    return [...new Set(content.match(/\b\d+(?:\.\d+)?\b/g) || [])];
 }
 
 export function sanitizeVideoWorkerText(

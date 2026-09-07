@@ -116,10 +116,10 @@ export async function createReviewServer({ runDirectory, port = 4317, readOnly =
                 return json(response, 200, sanitizePlannerPacket(await loadPacket(plannerPath)));
             }
 
-            const imageMatch = /^\/api\/reviewer\/(r-\d+)\/image$/.exec(url.pathname);
+            const imageMatch = /^\/api\/reviewer\/(r-\d+)\/(?:image|reference\/(\d+))$/.exec(url.pathname);
             if (request.method === 'GET' && imageMatch) {
                 const packet = await loadPacket(reviewerPath);
-                const imagePath = reviewerImagePath(packet, imageMatch[1]);
+                const imagePath = reviewerImagePath(packet, imageMatch[1], imageMatch[2] === undefined ? undefined : Number(imageMatch[2]));
                 const info = await stat(imagePath);
                 response.writeHead(200, {
                     ...securityHeaders(imageContentType(imagePath)),

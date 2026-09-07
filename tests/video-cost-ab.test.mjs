@@ -47,11 +47,11 @@ test('prices GPT-5.6 family cache and service tiers at current rates', () => {
         model: 'gpt-5.6-sol', inputTokens: 1_000_000, outputTokens: 1_000_000,
         cacheReadTokens: 1_000_000, cacheWriteTokens: 1_000_000,
     };
-    assert.equal(videoUsageCost({ ...usage, serviceTier: 'default' }), 29.4);
-    assert.equal(videoUsageCost({ ...usage, serviceTier: 'priority' }), 58.8);
-    assert.equal(videoUsageCost({ ...usage, serviceTier: 'flex' }), 14.7);
-    assert.equal(videoUsageCost({ ...usage, model: 'gpt-5.6-terra' }), 16.7);
-    assert.equal(videoUsageCost({ ...usage, model: 'gpt-5.6-luna' }), 1.67);
+    assert.equal(videoUsageCost({ ...usage, serviceTier: 'default' }), 48.8);
+    assert.equal(videoUsageCost({ ...usage, serviceTier: 'priority' }), 97.6);
+    assert.equal(videoUsageCost({ ...usage, serviceTier: 'flex' }), 24.4);
+    assert.equal(videoUsageCost({ ...usage, model: 'gpt-5.6-terra' }), 27.4);
+    assert.equal(videoUsageCost({ ...usage, model: 'gpt-5.6-luna' }), 2.74);
 });
 
 test('maps requested and resolved OpenAI service tiers without treating default as Fast', () => {

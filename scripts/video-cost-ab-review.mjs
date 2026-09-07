@@ -20,7 +20,7 @@ function fingerprint(values) {
 
 export function reviewerPacketFingerprint(packet) {
     assertPacket(packet, 'reviewer');
-    return fingerprint(packet.cases.map(entry => [entry.case_id, entry.image_path]));
+    return fingerprint(packet.cases.map(entry => [entry.case_id, entry.prompt, entry.image_path, entry.references]));
 }
 
 export function plannerPacketFingerprint(packet) {
@@ -38,6 +38,10 @@ export function sanitizeReviewerPacket(packet) {
             public_id: reviewerPublicId(index),
             prompt: String(entry.prompt || ''),
             image_url: `/api/reviewer/${reviewerPublicId(index)}/image`,
+            ...(entry.references?.length ? { references: entry.references.map((reference, referenceIndex) => ({
+                label: String(reference.label || `Reference ${referenceIndex + 1}`),
+                image_url: `/api/reviewer/${reviewerPublicId(index)}/reference/${referenceIndex}`,
+            })) } : {}),
             human_acceptable: typeof entry.human_acceptable === 'boolean' ? entry.human_acceptable : null,
             material_failure: typeof entry.material_failure === 'boolean' ? entry.material_failure : null,
             notes: String(entry.notes || ''),
@@ -162,11 +166,13 @@ export function applyPlannerRatings(packet, payload) {
     };
 }
 
-export function reviewerImagePath(packet, publicId) {
+export function reviewerImagePath(packet, publicId, referenceIndex) {
     assertPacket(packet, 'reviewer');
     const match = /^r-(\d+)$/.exec(String(publicId));
     const index = match ? Number(match[1]) - 1 : -1;
-    const path = packet.cases[index]?.image_path;
+    const path = referenceIndex === undefined ? packet.cases[index]?.image_path
+        : Number.isSafeInteger(referenceIndex) && referenceIndex >= 0
+            ? packet.cases[index]?.references?.[referenceIndex]?.image_path : null;
     if (!path || typeof path !== 'string') throw new Error('Unknown reviewer image.');
     return path;
 }
