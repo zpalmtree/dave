@@ -17,6 +17,7 @@ const exec = promisify(execFile);
 const argument = (name, fallback) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
 const directory = resolve(argument('run-dir', 'artifacts/video-optimization/2026-09-07'));
 const ANCHORS = ['minimax-screen-racers', 'minimax-screen-note', 'oalgo-screen-refund', 'oalgo-screen-sign'];
+let generatorPath;
 
 async function frame(ledger, plan, references, id, aspectRatio, fingerprint, policy = {}) {
     const result = await ledger.checkpoint({ kind: 'render_frame', case_id: id, fingerprint,
@@ -95,11 +96,15 @@ async function prepareVariant(ledger, testCase, plan, candidate, fingerprint, po
         seed: Number.parseInt(stableHash(testCase.id, 8), 16), aspect: first ? 'auto' : '16:9' };
     const path = resolve(target, 'spec.json');
     await saveJsonAtomic(path, spec);
-    await exec('python3', ['scripts/prepare-video-render-contract.py', `--spec=${path}`, `--output=${target}`]);
+    await exec('python3', ['scripts/prepare-video-render-contract.py', `--spec=${path}`, `--output=${target}`, `--generator=${generatorPath}`]);
     return JSON.parse(await readFile(resolve(target, 'render-spec.json'), 'utf8'));
 }
 
 async function main() {
+    const previous = JSON.parse(await readFile(resolve(directory, 'render-manifest.json'), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return '{}'; throw error;
+    }));
+    generatorPath = resolve(argument('generator', previous.generator_path || '/mnt/d/AI/ComfyUI_windows_portable/video_gen/video_gen.py'));
     const corpus = JSON.parse(await readFile('benchmarks/video-optimization-corpus.json', 'utf8')).cases;
     const report = JSON.parse(await readFile(resolve(directory, 'report.json'), 'utf8'));
     const plannerFingerprint = await campaignFingerprint();
@@ -138,6 +143,7 @@ async function main() {
             }
         }
         await saveJsonAtomic(resolve(directory, 'render-manifest.json'), { schema_version: 1, fingerprint,
+            generator_path: generatorPath,
             planner_fingerprint: plannerFingerprint, screening_fingerprint: sourceFingerprint,
             component_review_passed: false, renders, pairs });
         console.log(`Prepared ${renders.length} unique videos and ${pairs.length} comparisons. Combined tests wait for component review.`);

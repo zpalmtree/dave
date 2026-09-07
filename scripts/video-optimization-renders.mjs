@@ -58,6 +58,7 @@ async function main() {
     const path = resolve(argument('manifest', ''));
     const manifest = JSON.parse(await readFile(path, 'utf8'));
     validateRenderManifest(manifest);
+    const generator = manifest.generator_path || GENERATOR;
     const output = resolve(dirname(path), 'optimization-render-state.json');
     let state;
     try { state = JSON.parse(await readFile(output, 'utf8')); }
@@ -68,14 +69,14 @@ async function main() {
         // Combined comparisons are allowed only after recorded component approval.
         if (manifest.pairs.some(pair => pair.component === 'combined' && pair.candidate === spec.id)
             && manifest.component_review_passed !== true) continue;
-        const { contract, fingerprint } = await renderInputFingerprint(spec);
+        const { contract, fingerprint } = await renderInputFingerprint(spec, generator);
         const saved = state.renders[spec.id];
         if (!dry && saved?.fingerprint === fingerprint && saved.video_path
             && await hashFile(saved.video_path).catch(() => null) === saved.video_sha256) {
             console.log(`Reusing verified render ${spec.id}`); continue;
         }
         let args = rendererArguments(buildGpuqRenderArguments({ pythonPath: PYTHON,
-            generatorPath: await windowsPath(GENERATOR), prompt: spec.prompt, planPath: await windowsPath(spec.plan_path),
+            generatorPath: await windowsPath(generator), prompt: spec.prompt, planPath: await windowsPath(spec.plan_path),
             imagePath: spec.keyframe_path ? await windowsPath(spec.keyframe_path) : null,
             seed: spec.seed, benchmarkLabel: `optimization-${spec.id}` }), spec, await windowsPath(spec.contract_path));
         for (const [index, image] of Object.entries(spec.segment_keyframes || {})) args.splice(-1, 0, '--segment-keyframe', `${index}=${await windowsPath(image)}`);
