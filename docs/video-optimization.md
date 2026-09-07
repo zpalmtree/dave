@@ -1,7 +1,9 @@
 # Measured MiniMax and OALGO optimization
 
 The September 7 campaign compares cost, service time and prompt adherence while
-keeping Sol low / single-pass / standard as the production planning control.
+keeping Sol low / single-pass / standard as the production planning control
+and standard H3 as the renderer for both arms. FastH3 stays opt-in through
+`$minimaxfast`; its known speed/quality tradeoff is outside this campaign.
 No candidate is enabled by running a benchmark. The authorized API budget is
 $50 across all phases, retries, image generation and judges.
 
@@ -22,9 +24,9 @@ $50 across all phases, retries, image generation and judges.
   Object counts, quoted words and exact finished-duration checks remain binding.
   This also applies to the desktop validator: the CPU audit improved from 95/96
   accepted holdout plans to 96/96 after correcting its matching number check.
-- Optional canary configuration is captured per job, including planner/reviewer
-  settings and the fixed-duration FastH3 profile. Defaults stay unchanged without
-  a qualified release file.
+- Optional canary configuration captures planner, reviewer and composite settings
+  per job. Release files that request a renderer change are rejected, including
+  older mixed cloud/renderer releases. Defaults need a qualified release file.
 
 ## Evidence and pricing
 
@@ -113,42 +115,43 @@ The local review page hides provider identities and displays the reference
 images. Only a human supplies its labels. Missing labels are never converted
 to agreement or acceptance.
 
-## Fixed renderer comparisons
+## Video comparisons using standard H3
+
+After the human frame labels and planner holdout qualify an AI configuration,
+prepare and compare it with the control on standard H3:
 
 ```bash
-node scripts/prepare-video-optimization-renders.mjs --run-dir=artifacts/video-optimization/2026-09-07 --control-only
+node scripts/prepare-video-optimization-renders.mjs --run-dir=artifacts/video-optimization/2026-09-07
 node scripts/video-optimization-renders.mjs --manifest=artifacts/video-optimization/2026-09-07/render-manifest.json --dry-run
 node scripts/video-optimization-renders.mjs --manifest=artifacts/video-optimization/2026-09-07/render-manifest.json
 node scripts/report-video-optimization.mjs --run-dir=artifacts/video-optimization/2026-09-07
 node scripts/serve-video-cost-ab-final-review.mjs --run-dir=artifacts/video-optimization/2026-09-07 --port=4329
 ```
 
-The control-only preparation can run before holdout completion. Remove that flag
-after component qualification to add cloud-policy comparisons. Four fixed anchor
-prompts cover two MiniMax cases and two OALGO cases, including an attachment
-composite. Control and FastH3 reuse the exact same compiled scenes, prompts,
-frame counts, seed, aspect and assets. The desktop validates these before
-inference and refuses local replanning or resume under an experiment contract.
-Production-equivalent scene splitting is frozen before comparing profiles.
+Preparation also accepts `--control-only` to prepare only baseline inputs. Four
+fixed anchor prompts cover two MiniMax cases and two OALGO cases, including an
+attachment composite. Both arms use standard H3, the same seed and the same
+requested duration. Changes to AI-generated plans and images belong to the
+configuration being evaluated. Each render binds its compiled scenes, prompts
+and assets to a frozen contract; the desktop refuses local replanning or resume
+under a mismatched contract. GPUq governs every render.
+
 The manifest can specify `generator_path`, and preparation accepts `--generator`.
-The September 7 run uses the identical-byte snapshot
-`/mnt/d/AI/ComfyUI_windows_portable/video_gen/video_gen.optimization_20260907.py`
-so later validator fixes do not alter an ongoing renderer comparison. All four
-frozen scene compilations were also verified unchanged under the fixed validator.
+The September 7 controls use the identical-byte snapshot
+`/mnt/d/AI/ComfyUI_windows_portable/video_gen/video_gen.optimization_20260907.py`.
+Saved renders are reused only when their complete input fingerprint still
+matches. Preserve existing artifacts and API charges when preparation changes.
 
-FastH3 is the current **4-step VSA** renderer, not the older 8-step Turbo model.
-Use `--fast --no-fast-duration-aware`; duration compression would confound a
-renderer speed comparison. The production canary also preserves base scene
-splitting. Every render runs through GPUq with Gaming Mode hold and fail-on-
-preemption policies. Reports retain both queue-inclusive wall time and renderer
-service timing, plus the underlying manifests. Never infer speed from frame
-count reductions or queue wait.
+The four completed base/FastH3 comparisons are historical measurements of the
+existing fast-command tradeoff. Their videos and timings remain archived; their
+human ratings are not required. The runner and report exclude renderer and
+combined comparisons from old manifests, and preparation creates no FastH3
+candidates. `--prepare-combined` is retired. Those speed measurements do not
+establish an improvement to either normal command.
 
-After both isolated components pass human video review, run the report with
-`--prepare-combined` and rerun the renderer. It adds at most one combined test
-per command. There are at most 10 comparisons and 14 unique videos. Full videos
-with audio are the final evidence for dialogue, accent, identity and motion;
-frame-zero screenshots cannot establish those properties.
+Any qualifying AI configuration still needs two human-reviewed full-video pairs
+per command on standard H3. Full videos with audio establish dialogue, accent,
+identity and motion; frame-zero screenshots cannot establish those properties.
 
 ## Gates and rollout
 
@@ -159,8 +162,8 @@ or service-time savings with the other measure no more than 5% worse. A quality
 upgrade needs at least +0.5/10 with a positive lower bound, at most 20% extra cost
 and at most 10% extra time. Reviewer/composite pilots require complete human
 labels, no additional false acceptance/rejection or material failure, and the
-same efficiency thresholds. Renderer pilots require at least 20% service-time
-improvement at equal output duration and no material human-confirmed failure.
+same efficiency thresholds. Full-video review tests the selected AI configuration
+with the standard renderer. FastH3 review is not a qualification gate.
 
 `report-video-optimization.mjs` writes `decision.json` and an inactive
 `canary-release.json`. Unresolved campaign billing, incomplete human labels or

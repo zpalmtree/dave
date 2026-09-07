@@ -23,7 +23,7 @@ export function rendererArguments(base, spec, contractPath) {
 
 export function validateRenderManifest(manifest) {
     if (!Array.isArray(manifest.renders) || !manifest.renders.length || manifest.renders.length > 14
-        || !Array.isArray(manifest.pairs) || !manifest.pairs.length || manifest.pairs.length > 10) throw new Error('Campaign permits at most 14 unique videos and 10 pairs.');
+        || !Array.isArray(manifest.pairs) || manifest.pairs.length > 10) throw new Error('Campaign permits at most 14 unique videos and 10 pairs.');
     const ids = new Set(manifest.renders.map(item => item.id));
     if (ids.size !== manifest.renders.length || ids.has(undefined)) throw new Error('Duplicate/missing render IDs.');
     for (const pair of manifest.pairs) {
@@ -37,6 +37,13 @@ export function validateRenderManifest(manifest) {
         if (pair.component === 'cloud' && (control.renderer_profile !== 'h3-base' || candidate.renderer_profile !== 'h3-base')) throw new Error('Cloud comparisons require base H3 for both plans.');
         if (!['renderer', 'cloud', 'combined'].includes(pair.component)) throw new Error('Unknown comparison component.');
     }
+}
+
+export function normalH3OptimizationManifest(manifest) {
+    validateRenderManifest(manifest);
+    return { ...manifest, optimization_scope: 'cloud-only-standard-h3',
+        renders: manifest.renders.filter(render => render.renderer_profile === 'h3-base'),
+        pairs: manifest.pairs.filter(pair => pair.component === 'cloud') };
 }
 
 export async function renderInputFingerprint(spec, generator = GENERATOR) {
@@ -56,8 +63,7 @@ export async function renderInputFingerprint(spec, generator = GENERATOR) {
 
 async function main() {
     const path = resolve(argument('manifest', ''));
-    const manifest = JSON.parse(await readFile(path, 'utf8'));
-    validateRenderManifest(manifest);
+    const manifest = normalH3OptimizationManifest(JSON.parse(await readFile(path, 'utf8')));
     const generator = manifest.generator_path || GENERATOR;
     const output = resolve(dirname(path), 'optimization-render-state.json');
     let state;
@@ -66,9 +72,6 @@ async function main() {
     const dry = process.argv.includes('--dry-run');
     if (!dry) await exec('gpuq', ['status']);
     for (const spec of manifest.renders) {
-        // Combined comparisons are allowed only after recorded component approval.
-        if (manifest.pairs.some(pair => pair.component === 'combined' && pair.candidate === spec.id)
-            && manifest.component_review_passed !== true) continue;
         const { contract, fingerprint } = await renderInputFingerprint(spec, generator);
         const saved = state.renders[spec.id];
         if (!dry && saved?.fingerprint === fingerprint && saved.video_path

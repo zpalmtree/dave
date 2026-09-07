@@ -4290,7 +4290,6 @@ export class VideoBroker {
                 profile: 'maximum',
                 planner_guidance: row.planner_guidance,
                 command_variant: row.command_variant,
-                renderer_profile: this.optimization(row)?.rendererProfile,
                 has_source_image: Boolean(row.source_image_path),
                 lease_id: leaseId,
                 estimate_low_seconds: row.estimate_low_seconds,

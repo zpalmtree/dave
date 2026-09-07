@@ -126,10 +126,8 @@ async function main() {
             const control = calls.find(call => call.case_id === id && call.candidate === CONTROL && call.ok && call.accounting_complete);
             if (!control) throw new Error(`Missing valid control plan: ${id}`);
             const base = await prepareVariant(ledger, testCase, control.value, CONTROL, fingerprint);
-            const baseId = `${id}-base`, fastId = `${id}-fast`;
-            renders.push({ ...base, id: baseId, renderer_profile: 'h3-base' },
-                { ...base, id: fastId, renderer_profile: 'fasth3-fixed-duration' });
-            pairs.push({ id: `${id}-renderer`, command: testCase.command, component: 'renderer', control: baseId, candidate: fastId });
+            const baseId = `${id}-base`;
+            renders.push({ ...base, id: baseId, renderer_profile: 'h3-base' });
             const candidate = report.finalists[testCase.command];
             const qualified = !controlOnly && report.holdout.some(row => row.command === testCase.command && row.candidate === candidate && row.qualifies);
             const treatment = calls.find(call => call.case_id === id && call.candidate === candidate && call.ok && call.accounting_complete);
@@ -145,8 +143,8 @@ async function main() {
         await saveJsonAtomic(resolve(directory, 'render-manifest.json'), { schema_version: 1, fingerprint,
             generator_path: generatorPath,
             planner_fingerprint: plannerFingerprint, screening_fingerprint: sourceFingerprint,
-            component_review_passed: false, renders, pairs });
-        console.log(`Prepared ${renders.length} unique videos and ${pairs.length} comparisons. Combined tests wait for component review.`);
+            optimization_scope: 'cloud-only-standard-h3', renders, pairs });
+        console.log(`Prepared ${renders.length} unique videos and ${pairs.length} cloud comparisons, all using standard H3.`);
     } finally { await ledger.close(); }
 }
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

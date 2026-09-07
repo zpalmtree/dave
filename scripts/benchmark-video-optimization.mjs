@@ -157,7 +157,7 @@ async function main() {
     if (phase === 'dry-run') {
         await saveJsonAtomic(resolve(runDirectory, 'campaign-manifest.json'), {
             schema_version: 1, fingerprint, corpus, candidates: PLANNER_CANDIDATES, cumulative_caps_usd: CAPS,
-            budget_usd: 50, renderer_profiles: ['h3-base', 'fasth3-fixed-duration'], maximum_video_pairs: 10,
+            budget_usd: 50, optimization_scope: 'cloud-only-standard-h3', renderer_profiles: ['h3-base'], maximum_video_pairs: 10,
             maximum_unique_videos: 14, human_labels_required: true, paid_calls: 0,
         });
         console.log(`Validated campaign manifest: ${runDirectory}`);
