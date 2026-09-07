@@ -73,9 +73,9 @@ are not a newly achieved normal-command improvement. The four video comparisons
 are archived and need no human ratings. Future AI configuration comparisons use
 standard H3 for both arms, and legacy renderer release files are rejected.
 
-The 24-frame labels are complete; their results follow below. Recorded API
-charges are $12.7356, with $8.6015 held for seven unresolved billing records:
-$21.3371 committed against the authorized $50 cap. These reservations remain
+At the frame-review checkpoint, recorded API charges were $12.7356, with
+$8.6015 held for seven unresolved billing records: $21.3371 committed against
+the authorized $50 cap. These reservations remain
 held; they have not been treated as free calls. No additional AI configuration renders were prepared without component
 qualification.
 
@@ -146,3 +146,23 @@ and cost $0.1062 and $0.0577, including cache effects. Their richer staging also
 requires more generated footage than the original 15-second portrait. The first
 final plan is selected for a standard-H3 preview; the repeat remains evidence.
 All plans and usage are retained in the campaign ledger and `oalgo-stargate/`.
+
+The selected standard-H3 preview completed at 25.952 seconds, with 1,128.061
+seconds of renderer service time and 1,271.847 seconds including admission and
+wrapper work. Sampled output frames show the computing facility, branching
+technology diagram, completion glow, gold upgraded branches and a final cosmic
+reveal. The character turns and gestures. The sampled frames establish American
+star/color motifs, but do not establish a distinct US flag. Both original and
+revised videos passed browser playback checks with no console errors. Human
+review of the full dialogue, lip synchronization and pacing remains pending.
+This one diagnostic has unequal durations and does not establish a speed gain.
+
+After render preparation and the targeted planning checks, the ledger records
+$13.6670 in token-priced charges and $8.6015 in unresolved reservations, or
+$22.2685 committed against the $50 cap. Authenticated OpenAI minute-level usage
+exports account for five additional Astra requests and one Sol judge request
+after subtracting recorded usage. Their residual token-priced costs are $1.0850
+and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;
+minute buckets do not establish individual request costs. These exports are
+retained as reconciliation evidence, with no reservation released or promotion
+gate changed. The canceled Google image call still lacks attributable billing.
