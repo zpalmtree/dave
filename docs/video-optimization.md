@@ -81,6 +81,8 @@ command, with a second run on the first four fixed holdout cases. Two providers
 judge plans with opposite, randomized label order. Neither model names nor
 timing metadata is disclosed. Confidence intervals resample prompt-level paired
 differences; repeated calls and the two judges are not independent prompts.
+The holdout overlaps two prompt pairs, with at most four provider calls in flight;
+each arm uses the same concurrency setting. Ledger and report writes are serialized.
 
 The first screen exposed a duration-validator defect. `screen-selection.json`
 archives that screen as hypothesis-selection evidence. Subsequent reports label
