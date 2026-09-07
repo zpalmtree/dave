@@ -50,6 +50,7 @@ import {
     UNIQUE_US_PRESIDENTS,
     FrontierPlannerRejectedError,
     compileBestEffortFrontierVideoPlan,
+    normalizedDialogueLanguage,
     createFrontierVideoPlan,
     geminiCompatibleResponseSchema,
     configuredVideoPlannerStrategy,
@@ -1500,6 +1501,40 @@ test('two protected-dialogue fidelity failures route local instead of compiling 
     } finally {
         globalThis.fetch = originalFetch;
     }
+});
+
+test('dialogue language keeps only the language name', () => {
+    const cases = [
+        ['English as written', 'English'],
+        ['English (verbatim)', 'English'],
+        ['English, exactly as supplied', 'English'],
+        ['English with a Mexican-American Spanglish accent', 'English'],
+        ['verbatim Spanish', 'Spanish'],
+        ['en-US', 'English'],
+        ['es', 'Spanish'],
+        ['Spanish-English code-switching', 'Spanish-English code-switching'],
+        ['Mexican Spanish', 'Mexican Spanish'],
+        ['', 'English'],
+        ['N/A', 'English'],
+        [undefined, 'English'],
+    ];
+    for (const [value, expected] of cases) {
+        assert.equal(normalizedDialogueLanguage(value), expected, `language ${JSON.stringify(value)}`);
+    }
+});
+
+test('best-effort compiler strips fidelity notes from dialogue.language', () => {
+    const plan = frontierPlan([{
+        speaker_id: 'OALGO',
+        language: 'English as written',
+        delivery: 'Clearly audible Mexican-American Spanglish accent.',
+        text: 'Hello, Astra.',
+    }]);
+    const compiled = compileBestEffortFrontierVideoPlan(
+        plan, frontierAnalysis('generated'), 'OALGO greets Astra.', 'minimax',
+    );
+    assert.equal(compiled.segments[0].shots[0].dialogue[0].language, 'English');
+    assert.equal(compiled.segments[0].shots[0].dialogue[0].text, 'Hello, Astra.');
 });
 
 test('best-effort compiler truncates automatic screenplays to two minutes', () => {
