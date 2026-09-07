@@ -30,12 +30,28 @@ export function validateRenderManifest(manifest) {
         const control = manifest.renders.find(item => item.id === pair.control);
         const candidate = manifest.renders.find(item => item.id === pair.candidate);
         if (!control || !candidate || control.id === candidate.id || control.seed !== candidate.seed
-            || control.prompt !== candidate.prompt || control.command !== candidate.command) throw new Error('Invalid paired prompt/seed/command.');
+            || control.prompt !== candidate.prompt || control.command !== candidate.command
+            || pair.command !== control.command || !['minimax', 'oalgo'].includes(pair.command)) throw new Error('Invalid paired prompt/seed/command.');
         if (pair.component === 'renderer' && (control.contract_path !== candidate.contract_path
             || control.renderer_profile !== 'h3-base' || candidate.renderer_profile !== 'fasth3-fixed-duration')) throw new Error('Renderer comparisons require one identical contract and base/FastH3 profiles.');
         if (pair.component === 'cloud' && (control.renderer_profile !== 'h3-base' || candidate.renderer_profile !== 'h3-base')) throw new Error('Cloud comparisons require base H3 for both plans.');
         if (!['renderer', 'cloud', 'combined'].includes(pair.component)) throw new Error('Unknown comparison component.');
     }
+}
+
+export async function renderInputFingerprint(spec, generator = GENERATOR) {
+    const contract = JSON.parse(await readFile(spec.contract_path, 'utf8'));
+    const hashes = { generator: await hashFile(generator), plan: await hashFile(spec.plan_path),
+        image: spec.keyframe_path ? await hashFile(spec.keyframe_path) : null,
+        contract: await hashFile(spec.contract_path), segment_images: {} };
+    for (const [name, hash] of Object.entries(contract.inputs.template_sha256 || {})) {
+        if (await hashFile(resolve(dirname(generator), 'templates', name)) !== hash) throw new Error('H3 workflow template changed.');
+    }
+    for (const [index, image] of Object.entries(spec.segment_keyframes || {})) hashes.segment_images[index] = await hashFile(image);
+    if (hashes.generator !== contract.inputs.generator_sha256 || hashes.plan !== contract.inputs.plan_sha256
+        || hashes.image !== contract.inputs.image_sha256
+        || JSON.stringify(hashes.segment_images) !== JSON.stringify(contract.inputs.segment_image_sha256)) throw new Error(`Changed frozen inputs: ${spec.id}`);
+    return { contract, fingerprint: stableHash(JSON.stringify({ spec, hashes }), 64) };
 }
 
 async function main() {
@@ -52,18 +68,7 @@ async function main() {
         // Combined comparisons are allowed only after recorded component approval.
         if (manifest.pairs.some(pair => pair.component === 'combined' && pair.candidate === spec.id)
             && manifest.component_review_passed !== true) continue;
-        const contract = JSON.parse(await readFile(spec.contract_path, 'utf8'));
-        const hashes = { generator: await hashFile(GENERATOR), plan: await hashFile(spec.plan_path),
-            image: spec.keyframe_path ? await hashFile(spec.keyframe_path) : null,
-            contract: await hashFile(spec.contract_path), segment_images: {} };
-        for (const [name, hash] of Object.entries(contract.inputs.template_sha256 || {})) {
-            if (await hashFile(resolve(dirname(GENERATOR), 'templates', name)) !== hash) throw new Error('H3 workflow template changed.');
-        }
-        for (const [index, image] of Object.entries(spec.segment_keyframes || {})) hashes.segment_images[index] = await hashFile(image);
-        if (hashes.generator !== contract.inputs.generator_sha256 || hashes.plan !== contract.inputs.plan_sha256
-            || hashes.image !== contract.inputs.image_sha256
-            || JSON.stringify(hashes.segment_images) !== JSON.stringify(contract.inputs.segment_image_sha256)) throw new Error(`Changed frozen inputs: ${spec.id}`);
-        const fingerprint = stableHash(JSON.stringify({ spec, hashes }), 64);
+        const { contract, fingerprint } = await renderInputFingerprint(spec);
         const saved = state.renders[spec.id];
         if (!dry && saved?.fingerprint === fingerprint && saved.video_path
             && await hashFile(saved.video_path).catch(() => null) === saved.video_sha256) {

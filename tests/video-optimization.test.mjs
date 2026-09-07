@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Script } from 'node:vm';
+import { createHash } from 'node:crypto';
 import { REVIEW_PAGE } from '../scripts/video-cost-ab-review-ui.mjs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,7 @@ import { requestedVideoDurationSeconds, videoPromptContentNumbers } from '../dis
 import { openAIVideoUsage, videoUsageCost } from '../dist/VideoUsage.js';
 import { VideoExperimentLedger, ledgerTotals, executionFingerprint } from '../scripts/video-experiment-ledger.mjs';
 import { blindedPlan, bootstrapMeanInterval, summarizeOptimization } from '../scripts/video-optimization-analysis.mjs';
-import { rendererArguments, validateRenderManifest } from '../scripts/video-optimization-renders.mjs';
+import { rendererArguments, validateRenderManifest, renderInputFingerprint } from '../scripts/video-optimization-renders.mjs';
 import { reviewerEvidence } from '../scripts/benchmark-video-optimization-images.mjs';
 import { selectVideoOptimization } from '../dist/VideoOptimizationRollout.js';
 import { assessVideoComponent } from '../scripts/report-video-optimization.mjs';
@@ -134,8 +135,28 @@ test('FastH3 comparison fixes duration and refuses mismatched contracts', () => 
     const manifest = { renders: [{ ...base, id: 'a', renderer_profile: 'h3-base' }, { ...base, id: 'b', renderer_profile: 'fasth3-fixed-duration' }],
         pairs: [{ id: 'ab', command: 'oalgo', control: 'a', candidate: 'b', component: 'renderer' }] };
     validateRenderManifest(manifest);
+    manifest.pairs[0].command = 'minimax';
+    assert.throws(() => validateRenderManifest(manifest), /paired prompt\/seed\/command/);
+    manifest.pairs[0].command = 'oalgo';
     manifest.renders[1].contract_path = 'different.json';
     assert.throws(() => validateRenderManifest(manifest), /identical contract/);
+});
+
+test('render evidence binds policy and frozen input bytes before human labels can be reused', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'video-render-evidence-'));
+    const digest = value => createHash('sha256').update(value).digest('hex');
+    try {
+        const generator = join(directory, 'video_gen.py'), plan = join(directory, 'plan.json'), contract = join(directory, 'contract.json');
+        await writeFile(generator, 'generator'); await writeFile(plan, 'plan');
+        await writeFile(contract, JSON.stringify({ inputs: { generator_sha256: digest('generator'), plan_sha256: digest('plan'),
+            image_sha256: null, segment_image_sha256: {}, template_sha256: {} } }));
+        const spec = { id: 'test', plan_path: plan, contract_path: contract, cloud_policy: { reviewer: 'sol-low' } };
+        const original = await renderInputFingerprint(spec, generator);
+        const changed = await renderInputFingerprint({ ...spec, cloud_policy: { reviewer: 'flash-low' } }, generator);
+        assert.notEqual(original.fingerprint, changed.fingerprint);
+        await writeFile(plan, 'revised plan');
+        await assert.rejects(renderInputFingerprint(spec, generator), /Changed frozen inputs/);
+    } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('unlabeled frames never become human ground truth', () => {
