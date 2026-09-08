@@ -453,7 +453,7 @@ Make cast continuity explicit in each shot's visual and camera fields, including
 
 When a character reads or inspects information on a physical surface, make the information face that character and align their gaze with its readable side. Specify the written/display side, its orientation, the reader's eyeline, and the camera position in the relevant shot.visual and shot.camera. Let the audience share the reader's view from beside or behind the same shoulder, or use that reader's subjective insert; if a shoulder or hand appears, identify it as belonging to that sole reader with a coherent connection to their body. A front-facing character holding text outward to the camera is presenting it to the viewer, not reading it. Use that outward pose when presentation is requested, or after an explicit physical rotation following the read; never make both sides of an opaque page simultaneously readable or add a second reader to solve the camera angle. Preserve deliberate unreadability or concealed information when requested.
 
-Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow, but both the sum of target_seconds (generated footage) and output_seconds (finished runtime) must stay inside the supplied total limit. If the complete roster cannot fit at the per-segment minimum, reject it as unfulfillable instead of trimming only output_seconds, silently sampling, or exceeding the generation budget. For ordinary segments set output_seconds equal to target_seconds and overlay_label to N/A.
+Treat prompt_analysis.coverage_contract as binding. Never abbreviate exhaustive membership with examples, "etc.", a representative sample, or a montage that merely implies the rest. For sequential exhaustive coverage, one independently generated segment must represent one member; put that member's complete display name in segment.overlay_label when per_member_label is true, otherwise use N/A. The generated keyframe and shot visuals must reserve a blank, opaque nameplate region with no readable identity text because the exact overlay is composited after generation. When per_member_dialogue is true, that segment contains the assigned member's own dialogue turn. Exhaustive members are never disposable overflow, but both the sum of target_seconds (generated footage) and output_seconds (finished runtime) must stay inside the supplied total limit. If the complete roster cannot fit at the per-segment minimum, reject it as unfulfillable instead of trimming only output_seconds, silently sampling, or exceeding the generation budget. For ordinary segments set output_seconds equal to target_seconds and overlay_label to N/A. For simultaneous coverage, use each complete coverage_contract.members name verbatim in at least one shot.visual where that participant is actually visible, and use the same name for its dialogue.speaker_id. Stage their individual positions and actions together when they share the frame. Shorthand colors, pronouns, a group count, a continuity inventory, or spoken mentions alone do not establish visual coverage. These names are cast identifiers in production directions; do not add on-screen labels, extra shots, or repeated dialogue to include them.
 
 For a vague one-line premise, develop one decisive representative mini-story with a setup, primary action, and payoff. Do not dramatize every item in prompt_analysis.actions or inferred_staging, and do not turn words such as "always" into a repetitive survey unless the request actually calls for a montage or progression. For insertion, docking, entering, dressing, or fitting actions, trace the moving subject's leading edge, orientation, destination opening, and travel direction before writing the keyframe; they must agree physically through the first shot without an unexplained rotation. Do not invent a face or speaking anatomy solely to support generated dialogue.
 
@@ -857,7 +857,7 @@ function singlePassSchemaForMaximum(maximum: number): Record<string, unknown> {
     return schema;
 }
 
-function semanticPlanText(plan: any): string {
+function semanticPlanParts(plan: any): string[] {
     const parts = [String(plan?.intent || ''), String(plan?.continuity_bible || '')];
     for (const segment of plan?.segments || []) {
         parts.push(
@@ -870,7 +870,11 @@ function semanticPlanText(plan: any): string {
             parts.push(...(shot?.dialogue || []).map((line: any) => String(line?.text || '')));
         }
     }
-    return parts.join('\n');
+    return parts;
+}
+
+function semanticPlanText(plan: any): string {
+    return semanticPlanParts(plan).join('\n');
 }
 
 const REJECTED_SALVAGE_STOP_WORDS = new Set([
@@ -938,7 +942,25 @@ function dialogueFloorSeconds(segment: any): number {
 }
 
 function normalizedCoverageMember(value: unknown): string {
-    return String(value || '').trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').toLocaleLowerCase();
+    return String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
+function coveredRosterMembers(plan: any, members: string[]): Set<string> {
+    // Match complete names, longest first, so "Racer 10" cannot cover "Racer 1"
+    // and a single mention of "Ann Lee" cannot also cover a separate "Ann".
+    const names = [...members].sort((left, right) => right.length - left.length)
+        .map(member => member.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const expression = new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.join('|')})(?![\\p{L}\\p{N}])`, 'gu');
+    const covered = new Set<string>();
+    // Preserve continuity-defined identities used by existing screenplays.
+    // Check each field separately: whitespace normalization must not assemble
+    // a member name across unrelated fields or shots.
+    for (const part of semanticPlanParts(plan)) {
+        for (const match of normalizedCoverageMember(part).matchAll(expression)) {
+            covered.add(match[0]);
+        }
+    }
+    return covered;
 }
 
 function coverageContract(value: any): any | null {
@@ -994,13 +1016,16 @@ function validateCoverageContract(plan: any, analysis: any): void {
         throw new Error('The exhaustive coverage contract did not resolve a complete roster.');
     }
     const normalizedMembers = members.map(normalizedCoverageMember);
+    if (normalizedMembers.some((member: string) => !member)) {
+        throw new Error('The exhaustive coverage contract requires complete roster member names.');
+    }
     if (new Set(normalizedMembers).size !== normalizedMembers.length) {
         throw new Error('The exhaustive coverage contract contains duplicate roster members.');
     }
     if (String(contract.presentation || '') !== 'sequential') {
-        const semantic = semanticPlanText(plan).toLocaleLowerCase();
-        const missing = members.filter((member: string) =>
-            !semantic.includes(member.toLocaleLowerCase()));
+        const covered = coveredRosterMembers(plan, normalizedMembers);
+        const missing = members.filter((_member: string, index: number) =>
+            !covered.has(normalizedMembers[index]));
         if (missing.length) {
             throw new Error(`The screenplay omitted exhaustive roster members: ${missing.join(' | ')}`);
         }

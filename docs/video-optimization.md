@@ -30,6 +30,12 @@ $50 across all phases, retries, image generation and judges.
   Object counts, quoted words and exact finished-duration checks remain binding.
   This also applies to the desktop validator: the CPU audit improved from 95/96
   accepted holdout plans to 96/96 after correcting its matching number check.
+- Simultaneous rosters use stable complete names in shot directions and speaker
+  IDs. Validation tolerates case, spacing, hyphens and underscores, matches whole
+  names, and prevents one longer name from satisfying a separate shorter member.
+  Existing continuity-defined identities remain valid. A captured race diagnostic
+  reduced four planning calls to one after removing shorthand naming mismatches;
+  this is a targeted result, not a general model-speed or video-quality claim.
 - Optional canary configuration captures planner, reviewer and composite settings
   per job. Release files that request a renderer change are rejected, including
   older mixed cloud/renderer releases. Defaults need a qualified release file.

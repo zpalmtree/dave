@@ -1625,6 +1625,96 @@ test('broker rejects a representative screenplay for an explicit every-president
     );
 });
 
+function simultaneousRosterPlan(members, visual) {
+    const plan = frontierPlan();
+    plan.prompt_analysis = frontierAnalysis();
+    plan.prompt_analysis.coverage_contract = {
+        mode: 'exhaustive', members, presentation: 'simultaneous',
+        per_member_dialogue: false, per_member_label: false,
+    };
+    plan.segments[0].shots[0].visual = visual;
+    return plan;
+}
+
+test('simultaneous roster coverage tolerates formatting without rewriting the plan', () => {
+    const plan = simultaneousRosterPlan(
+        ['Cyan-suited racer', 'Magenta Racer', 'Yellow_Racer'],
+        'CYAN suited racer leads Magenta   Racer and Yellow-Racer toward the finish.',
+    );
+    const before = structuredClone(plan);
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'));
+    assert.deepEqual(plan, before);
+});
+
+test('simultaneous coverage preserves continuity-defined cast identities in existing screenplays', () => {
+    const plan = simultaneousRosterPlan(['Robot 1', 'Robot 2'],
+        'The cobalt-blue robot hands an umbrella to the warm-yellow robot.');
+    plan.continuity_bible = 'Exactly two robots remain visible: Robot 1 is cobalt blue and Robot 2 is warm yellow.';
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'));
+});
+
+test('a roster copied only into analysis does not establish screenplay coverage', () => {
+    const plan = simultaneousRosterPlan(['Cyan Racer', 'Yellow Racer'], 'Cyan Racer races toward the finish.');
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'), /omitted exhaustive roster members: Yellow Racer/);
+});
+
+test('simultaneous roster coverage rejects missing, partial and ambiguous names', () => {
+    for (const [members, visual, missing] of [
+        [['Cyan Racer', 'Yellow Racer'], 'Cyan Racer leads the group of two racers.', 'Yellow Racer'],
+        [['Cyan Racer', 'Yellow Racer'], 'Cyan Racer leads yellow toward the finish.', 'Yellow Racer'],
+        [['Racer 1', 'Racer 10'], 'Racer 10 speeds down the track.', 'Racer 1'],
+        [['Ann', 'Ann Lee'], 'Ann Lee runs down the track.', 'Ann'],
+        [['Lee'], 'Leela runs down the track.', 'Lee'],
+        [['王'], '王明 runs down the track.', '王'],
+        [['C++'], 'CCC runs down the track.', 'C++'],
+    ]) {
+        const plan = simultaneousRosterPlan(members, visual);
+        assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'), error => {
+            assert.equal(error.message, `The screenplay omitted exhaustive roster members: ${missing}`);
+            return true;
+        });
+    }
+    const plan = simultaneousRosterPlan(['Ann', 'Ann Lee', 'C++', '王'], 'Ann Lee and Ann run beside C++ and 王.');
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'));
+});
+
+test('simultaneous roster matching never assembles a name across different shots', () => {
+    const plan = simultaneousRosterPlan(['Cyan Racer'], 'Cyan');
+    plan.segments[0].shots[0].camera = 'Racer';
+    plan.segments[0].shots.push({ ...plan.segments[0].shots[0], visual: 'Racer' });
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'), /omitted exhaustive roster members: Cyan Racer/);
+});
+
+test('simultaneous roster coverage rejects duplicate and empty normalized names', () => {
+    const duplicate = simultaneousRosterPlan(['Cyan_Racer', 'cyan-racer'], 'Cyan Racer runs.');
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(duplicate, 'minimax'), /duplicate roster members/);
+    const empty = simultaneousRosterPlan(['---'], 'A racer runs.');
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(empty, 'minimax'), /requires complete roster member names/);
+});
+
+test('single-pass and two-pass planners request stable visual roster names and accept full coverage', async t => {
+    for (const plannerStrategy of ['single-pass', 'two-pass']) {
+        const plan = simultaneousRosterPlan(['Cyan Racer', 'Magenta Racer', 'Yellow Racer'],
+            'Cyan Racer and Yellow Racer race alongside Magenta Racer toward the finish.');
+        const prompt_analysis = plan.prompt_analysis;
+        delete plan.prompt_analysis;
+        const replies = plannerStrategy === 'single-pass' ? [{ prompt_analysis, plan }] : [prompt_analysis, plan];
+        const requests = [];
+        const mock = t.mock.method(globalThis, 'fetch', async (_url, init) => {
+            requests.push(JSON.parse(init.body));
+            assert.ok(replies.length, 'No unnecessary retry or repair should be requested.');
+            return jsonResponse({ status: 'completed', output_text: JSON.stringify(replies.shift()), model: VIDEO_PLANNER_MODEL });
+        });
+        try {
+            const result = await createFrontierVideoPlan('Exactly three arcade racers approach a finish line.',
+                'minimax', 'roster-regression', undefined, { plannerStrategy });
+            assert.equal(requests.length, plannerStrategy === 'single-pass' ? 1 : 2);
+            assert.match(requests.at(-1).instructions, /use each complete coverage_contract\.members name verbatim in at least one shot\.visual/);
+            assert.match(result.segments[0].shots[0].visual, /Cyan Racer and Yellow Racer race alongside Magenta Racer/);
+        } finally { mock.mock.restore(); }
+    }
+});
+
 test('exhaustive sequential coverage rejects silent roster omission', () => {
     const analysis = frontierAnalysis('verbatim');
     analysis.dialogue_contract.lines = [{
