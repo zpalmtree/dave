@@ -505,11 +505,65 @@ to override the user's preference. The result does not qualify a cloud-model or
 renderer-policy promotion. Raw feedback, video hashes, and the acceptance decision
 are preserved in `minimax-adherence/note-reading/`.
 
+## Roster validation retry follow-up
+
+A fresh capture reproduced the race plan's four-call path. The combined draft
+visibly stages cyan, magenta and yellow racers, but its coverage contract names
+them "Cyan Racer", "Magenta Racer" and "Yellow Racer". Shorthand color references
+cause the exact substring check to reject cyan and yellow. The fallback draft
+also visibly stages all three, but uses "cyan racer" where the new independent
+analysis requires "Cyan-suited racer", and similarly for the other two. Neither
+captured rejection is an actual cast omission. The earlier 125.11-second run
+saved the same error pattern but not the rejected drafts; their contents cannot
+be reconstructed from that log.
+
+The planner now uses complete roster names in visual directions and the same
+names as speaker IDs. This prevents the observed mismatch without inferring
+aliases from isolated colors or asking another model to judge coverage. The
+validator also normalizes case, spaces, hyphens and underscores, matches complete
+names, and matches longer roster names first. Tests reject real omissions,
+"Racer 10" satisfying "Racer 1", one "Ann Lee" satisfying a separate "Ann",
+duplicate names, empty normalized names, and names assembled across fields.
+
+| Fresh run | Provider calls | Planning elapsed | Token-priced cost |
+| --- | ---: | ---: | ---: |
+| Existing planner | 4 | 143.54 seconds | $0.2753576 |
+| Stable names, first run | 1 | 36.25 seconds | $0.0868570 |
+| Stable names, final implementation | 1 | 31.38 seconds | $0.0399196 |
+
+All use the same image, prompt, Sol-low entry configuration, and ten-second
+request. The normal fallback and repair path remains enabled.
+The captured fallback analysis, screenplay and repair requests use high reasoning
+effort; accepting the complete first draft avoids those three expensive calls.
+The last run has
+9,769 cached input tokens, so its lower cost is not solely a retry reduction.
+Both guided drafts keep exactly "Not today!", visibly moving speech, all three
+color-identified racers and a later finish crossing. Inspection against the
+source image supports plan adherence, not a new rendered-video quality score.
+Three runs of one prompt do not establish general speed or cost savings.
+
+An intermediate shot-only validation rule rejected two otherwise-complete robot
+plans whose names are defined in continuity. It was removed. The final validator
+preserves the results of all 190 archived plans, including 12 exhaustive rosters.
+The first guided run used that intermediate rule; its unchanged candidate also
+passes the final validator. The second guided run used the final implementation
+with the same new planning instructions. The final replay and regression tests
+preserve support for continuity-defined identities; text matching still cannot
+prove an actor appears in generated footage.
+
+Build and all 286 repository tests pass. The desktop generator has no equivalent
+simultaneous-roster substring gate, so no desktop source or renderer change is
+required. Captured responses, source snapshots, usage, replay decisions and plan
+inspection are in `minimax-adherence/roster-validation/`. These six settled API
+requests cost $0.4021342 in total; no new render or model-policy promotion is
+part of this correction.
+
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
-$14.5976 in token-priced charges and $8.6015 in unresolved reservations, or
-$23.1991 committed against the $50 cap. Authenticated OpenAI minute-level usage
+$14.9997 in token-priced charges and $8.6015 in unresolved reservations, or
+$23.6012 committed against the $50 cap, including the roster diagnostics.
+Authenticated OpenAI minute-level usage
 exports account for five additional Astra requests and one Sol judge request
 after subtracting recorded usage. Their residual token-priced costs are $1.0850
 and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;
