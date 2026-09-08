@@ -316,8 +316,45 @@ turn toward the woman's side of the scene, a return to camera, and a closer
 facial reaction in the later shot. The woman remains visible. They do not
 establish a distinct clock-specific glance or exact one-eyebrow compliance.
 Both earlier and second-revision videos pass Windows Chrome playback checks.
-Accent, dialogue and expression preference await the user's review; no overall
-quality pass or cloud-model promotion has been inferred from these samples.
+The user preferred the new right-hand revision overall, but found its voice
+slightly worse. The initially ambiguous "B" label was explicitly clarified as
+the new right-hand clip before assigning the feedback. No numeric scores,
+material-failure rating, or separate dialogue/lip-sync acceptance was supplied.
+This supports retaining the revised staging while investigating its voice;
+it does not qualify a cloud-model change.
+
+## Refund voice isolation
+
+The earlier and preferred-revision comparison changed visual staging, shot
+count, sound descriptions and voice delivery together. It cannot attribute the
+reported voice regression to the delivery description alone. A separate test
+therefore reuses the preferred revision-2 render as control and copies the
+earlier clip's exact complaint-delivery description into its otherwise unchanged
+plan. The candidate retains both shots, camera instructions, soundscape, timing,
+exact English words, source image, seed, templates and frozen standard-H3
+generator. Deep comparison verifies that the compiled H3 input differs only in
+the delivery description. It remains eight seconds and 192 frames.
+
+This test requires one additional local render and no cloud-model calls. The
+comparison uses fresh Voice A / Voice B labels and separate voice, dialogue,
+lip-sync and reaction review fields. Changing voice instructions can still
+change the generated facial performance, so visual checks remain necessary.
+Production voice guidance stays unchanged pending this isolated comparison;
+the earlier Stargate voice approval and original cloud-policy ratings remain
+separate. Inputs and feedback are retained under
+`oalgo-refund-reaction/voice-test/` and
+`human-review/oalgo-refund-latest-feedback.json`.
+
+The delivery-only candidate completed at 800x800, eight seconds and 192 frames,
+with 191.676 seconds of renderer service time and 322.874 seconds including
+admission and wrapper work. It matches the frozen candidate input. Both audio
+and video decoded-stream hashes differ from the control, so this is not a
+duplicate file or a container-only difference. Sampled frames retain the woman,
+directional head turn and later closer facial reaction. Both videos pass Windows
+Chrome playback checks with no console errors. All four dropdowns, including
+every Yes option, are present, and desktop/mobile layout checks pass. Listening
+preference and dialogue/lip-sync acceptance remain unreviewed; no new voice
+default has been selected. The experiment added no cloud requests or charges.
 
 ## Billing reconciliation
 
