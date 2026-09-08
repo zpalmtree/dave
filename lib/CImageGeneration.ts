@@ -4,7 +4,7 @@ export type CImageOutputFormat = 'png' | 'jpeg';
 
 export type CImageGenerationTool = {
     type: 'image_generation';
-    model: typeof AI_MODELS.openAIImage;
+    model: typeof AI_MODELS.openAICImage;
     moderation: 'low';
     output_format: CImageOutputFormat;
     output_compression?: number;
@@ -21,7 +21,7 @@ export function buildCImageGenerationTool(
 
     return {
         type: 'image_generation',
-        model: AI_MODELS.openAIImage,
+        model: AI_MODELS.openAICImage,
         moderation: 'low',
         output_format: effectiveOutputFormat,
         ...(effectiveOutputFormat === 'jpeg' ? { output_compression: 50 } : {}),
