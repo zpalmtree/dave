@@ -494,6 +494,17 @@ Yes, and desktop/mobile layout checks pass. Reading geometry is now assessed
 separately from audience readability, cast count, and overall preference; no new
 human scores or acceptance have been inferred.
 
+The user then preferred the new reading-angle revision and marked all five
+checks Yes: physically possible reading, one astronaut, discovery, readable note
+text, and silence. Retain the deployed reading-geometry correction and close this
+targeted comparison without another render or cloud call. This is an overall
+preference and five affirmative checks at one scene and seed; no numeric score,
+material-failure rating, or separate visor-appearance rating was supplied. The
+earlier frame-inspection concern remains recorded without treating it as a reason
+to override the user's preference. The result does not qualify a cloud-model or
+renderer-policy promotion. Raw feedback, video hashes, and the acceptance decision
+are preserved in `minimax-adherence/note-reading/`.
+
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
