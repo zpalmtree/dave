@@ -440,11 +440,65 @@ clips play in Windows Chrome without console errors, and all acceptance fields
 include Yes. The two comparisons remain separate from the original campaign's
 ratings and do not change its failed cloud-policy promotion decision.
 
+The user subsequently preferred the revised race. Moving speech, a clear finish,
+three-racer continuity, and the combined dialogue/lip-sync check are all Yes;
+the speaking racer's win is only Partly. Retain the action and speaker-binding
+changes without claiming full winner clarity or a model-policy promotion.
+
+The user preferred the earlier astronaut clip. The revised clip receives Yes for
+one astronaut, readable note text, and silence, but only Partly for discovery.
+Their reason is a physical contradiction the frame inspection missed: the note
+faces the camera while the astronaut also faces the camera, so the astronaut
+cannot read its written side. The earlier over-shoulder angle lets actor and
+viewer read the same surface. Correct cast count and audience-readable text
+therefore do not make the revised scene an overall improvement. Raw reviews and
+video-hash mappings remain in `minimax-adherence/*-human-review.json`.
+
+## Reading geometry follow-up
+
+The cloud and desktop fallback planners now distinguish a character reading a
+physical surface from presenting it to the audience. Reading requires the written
+side to face the reader, a matching eyeline, and an audience view beside/behind
+that same shoulder or through the reader's subjective view. Visible hands and
+shoulders must still belong to the same identified body. Explicit presentation
+remains allowed, as does turning the page outward after an actual reading beat.
+This adds planning guidance, with no renderer, voice, or model-default change.
+
+Two fresh Sol-low checks cost $0.1128836, with two settled requests. The reading
+plan ($0.083117, 31.08 seconds) uses a three-second approach, four-second connected
+pickup turning the written side toward the visor, and three-second over-left-
+shoulder reading shot sharing the readable side. The explicit-presentation
+control ($0.0297666, 21.09 seconds) retains a frontal shot with the note held
+outward to the audience. Both preserve silence and ten seconds. The reading
+directions survive compilation into the 243-frame H3 input. These are plan checks;
+the prior failure demonstrates why actor-readable geometry still needs video
+inspection and human review.
+
+One new standard-H3 render reuses the original image, seed, templates and duration,
+and compares against the earlier over-shoulder clip the user preferred. The
+rejected outward-presentation clip and its review remain intact. Build and all
+279 repository tests pass; the desktop suite runs 212 tests with one skip and no
+failures, and the updated cumulative desktop patch reproduces its audited live
+source. Evidence is retained in `minimax-adherence/note-reading/`.
+
+The follow-up completes at 1344x768 and ten delivered seconds, with 243 generated
+and 240 delivered frames. Renderer service takes 507.038 seconds and total elapsed
+time is 574.870 seconds; these single-run timings do not establish a speed gain.
+Sampled frames now show the paper's blank back during the middle reading setup,
+then an over-shoulder view sharing its written face with the astronaut. The hand
+belongs to the same visible astronaut and the phrase is readable. The face also
+becomes visible during the middle shot, changing the reflective visor appearance
+without a request; that remains a continuity concern for review. Both comparison
+clips play in Windows Chrome without console errors, all acceptance fields have
+Yes, and desktop/mobile layout checks pass. Reading geometry is now assessed
+separately from audience readability, cast count, and overall preference; no new
+human scores or acceptance have been inferred.
+
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
-$14.4847 in token-priced charges and $8.6015 in unresolved reservations, or
-$23.0862 committed against the $50 cap. Authenticated OpenAI minute-level usage
+$14.5976 in token-priced charges and $8.6015 in unresolved reservations, or
+$23.1991 committed against the $50 cap. Authenticated OpenAI minute-level usage
 exports account for five additional Astra requests and one Sol judge request
 after subtracting recorded usage. Their residual token-priced costs are $1.0850
 and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;
