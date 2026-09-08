@@ -13,6 +13,7 @@ test('uses the audited production model for each provider capability', () => {
         openAIChat: 'gpt-5.6-sol',
         openAITranscription: 'gpt-transcribe',
         openAIImage: 'gpt-image-2',
+        openAICImage: 'gpt-image-2.5-flare',
         geminiChat: 'gemini-3.7-flash',
         geminiPromptClassifier: 'gemini-3.5-flash-lite',
         geminiImage: 'gemini-3-pro-image',
