@@ -339,7 +339,7 @@ This test requires one additional local render and no cloud-model calls. The
 comparison uses fresh Voice A / Voice B labels and separate voice, dialogue,
 lip-sync and reaction review fields. Changing voice instructions can still
 change the generated facial performance, so visual checks remain necessary.
-Production voice guidance stays unchanged pending this isolated comparison;
+Production voice guidance is retained following this isolated comparison;
 the earlier Stargate voice approval and original cloud-policy ratings remain
 separate. Inputs and feedback are retained under
 `oalgo-refund-reaction/voice-test/` and
@@ -352,9 +352,17 @@ and video decoded-stream hashes differ from the control, so this is not a
 duplicate file or a container-only difference. Sampled frames retain the woman,
 directional head turn and later closer facial reaction. Both videos pass Windows
 Chrome playback checks with no console errors. All four dropdowns, including
-every Yes option, are present, and desktop/mobile layout checks pass. Listening
-preference and dialogue/lip-sync acceptance remain unreviewed; no new voice
-default has been selected. The experiment added no cloud requests or charges.
+every Yes option, are present, and desktop/mobile layout checks pass. The
+experiment added no cloud requests or charges.
+
+The user preferred the left clip, while describing the two as nearly identical.
+The saved label mapping identifies the left clip as Voice A, the reused
+revision-2 control with the current production delivery. This is a weak
+qualitative preference at one scene and seed, not evidence of a large voice
+improvement or general superiority. Retain the current voice with the preferred
+revised staging and close this comparison without another voice render. Separate
+dialogue, lip-sync and reaction acceptance checks were not supplied and have not
+been inferred. The result does not qualify a cloud-policy change.
 
 ## Billing reconciliation
 
