@@ -290,11 +290,40 @@ and uses the previously approved voice. The original cloud-comparison manifest
 and human ratings are preserved. Rendered gaze, expression, and audible quality
 must be reviewed; plan compliance alone is not a rendered-quality result.
 
+That first diagnostic completed at 800x800, 192 frames and eight seconds, with
+197.129 seconds of renderer service time. Both earlier and revised clips played
+in Windows Chrome. Sampled frames preserve the woman and props and show facial
+changes, but only a small downward movement: they do not establish a clear look
+toward either target. Later mouth opening also does not establish the planned
+dialogue-first timing. This is recorded as a failed gaze check, not a quality pass.
+
+A second guidance revision asks for a clear directional head turn and separates
+ordered speech and reaction into successive shots. Its new Sol-low plan puts
+the look toward the woman/clock before the line in the first shot, then devotes
+the second shot to the silent eyebrow reaction. This is not the initially
+proposed gaze-only silent shot; the actual model output and its limits are
+retained. The explicit-eye-contact control also uses two shots and preserves
+continuous camera gaze. Both keep the exact line and eight-second duration.
+The reaction compiles to 192 frames with dialogue only in the first shot.
+The two calls cost $0.0611132 / $0.0570632 and took 36.90 / 29.14 seconds.
+All 279 tests pass again. One additional standard-H3 diagnostic tests this
+staging, keeping the original image, seed and frozen generator; it is a combined
+staging revision, not evidence isolating shot count, head-turn wording or voice.
+
+The second clip completed at 800x800, 192 frames and eight seconds, using 206.623
+seconds of renderer service time. Sampled frames now show a directional head
+turn toward the woman's side of the scene, a return to camera, and a closer
+facial reaction in the later shot. The woman remains visible. They do not
+establish a distinct clock-specific glance or exact one-eyebrow compliance.
+Both earlier and second-revision videos pass Windows Chrome playback checks.
+Accent, dialogue and expression preference await the user's review; no overall
+quality pass or cloud-model promotion has been inferred from these samples.
+
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
-$13.9923 in token-priced charges and $8.6015 in unresolved reservations, or
-$22.5938 committed against the $50 cap. Authenticated OpenAI minute-level usage
+$14.1105 in token-priced charges and $8.6015 in unresolved reservations, or
+$22.7120 committed against the $50 cap. Authenticated OpenAI minute-level usage
 exports account for five additional Astra requests and one Sol judge request
 after subtracting recorded usage. Their residual token-priced costs are $1.0850
 and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;
