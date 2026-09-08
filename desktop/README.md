@@ -6,7 +6,8 @@ The live generator is outside this repository at
 tested changes without copying credentials or the desktop's model files.
 
 `video-optimization.patch` covers local planner guidance, frozen render
-contracts, the guarded FastH3 canary profile, and their tests.
+contracts, the guarded FastH3 canary profile, H3 named-speaker binding,
+dialogue/action staging and close-up cast ownership, and their tests.
 `video-optimization-hashes.json` records the exact before/after source bytes.
 
 ```bash

@@ -364,11 +364,87 @@ revised staging and close this comparison without another voice render. Separate
 dialogue, lip-sync and reaction acceptance checks were not supplied and have not
 been inferred. The result does not qualify a cloud-policy change.
 
+## MiniMax action timing and cast continuity
+
+The reviewed race clips delayed “Not today!” until the vehicles stopped and
+obstructed the finish. The astronaut candidate introduced a second astronaut.
+Their saved inputs show two concrete weaknesses: the H3 compiler used the named
+speaker only as a lookup key and emitted a generic delivery-based speaker instead;
+the astronaut shots combined foreground hands with a facing helmet without clear
+body ownership. These are plausible contributors, not isolated causal findings.
+
+The compiler now binds each original speaker name to its stable S1/S2 voice ID,
+keeping identity and delivery outside the exact spoken-content tag. This follows
+the speaker-format guidance in the
+[official MiniMax H3 prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md).
+The cloud planner and desktop fallback also receive the same instructions to
+keep simultaneous motion and speech together, reserve a later shot for a competing
+finish/stop payoff, preserve an open travel path, and identify body ownership
+through prop close-ups. Deliberately delayed speech, continuous-shot requests,
+and intended additional characters remain allowed. Standard H3, cloud-model
+defaults, and OALGO's selected delivery remain unchanged; no production model
+stage was added.
+
+Four fresh Sol-low diagnostic plans cost $0.3741662 across seven requests, all
+settled. The race required single-pass fallback and a two-pass screenplay repair
+for exhaustive roster validation: $0.2638552 and 125.11 seconds including retries.
+Its final plan places the moving shout in a four-second first shot and the open
+finish in a six-second second shot. The astronaut plan costs $0.048297 and takes
+33.32 seconds, with discovery, a connected side-view pickup, and a readable-note
+reaction. Its final helmet-behind-paper close-up still requires video inspection;
+plan text alone does not establish that duplication is fixed.
+
+The deliberately delayed-line control ($0.034832, 24.29 seconds) keeps crossing
+and stopping silent, then speaks in shot 3. The two-person control ($0.027182,
+17.94 seconds) retains both astronauts and their distinct hands in one side-view
+shot. Compiled race input preserves the named magenta speaker and the exact words
+once, in the first shot. These are diagnostic plan checks, not evidence of a
+general cost, latency, or rendered-quality improvement.
+
+Build and all 279 repository tests pass. The desktop suite runs 212 tests with
+one skip and no failures, including new tests for named cast, stable voice IDs
+across shots, and delayed dialogue. The cumulative desktop patch applies to the
+audited original files and reproduces the tested live hashes. The existing frozen
+campaign generator and unrelated working-tree changes remain untouched. All
+inputs, usage, compiled contracts, and assessments are retained in
+`artifacts/video-optimization/2026-09-07/minimax-adherence/`.
+
+Two new standard-H3 diagnostics reuse each failed clip's original image and seed,
+with the same 243 generated frames. Planning and compilation change together;
+this comparison does not isolate either change or qualify a cloud-model promotion.
+
+The revised race completes at 1344x768 and 10.144 seconds, matching the earlier
+clip's displayed duration and dimensions. Renderer service takes 570.158 seconds,
+versus 557.856 for the earlier failed clip; the new run takes 782.194 seconds
+including startup, admission and wrapper work. One sample does not establish a
+latency trend. Sampled frames show the magenta racer's speaking close-up with
+changing roadside scenery, followed by all three racers continuing through an
+open arch. The later arch gains invented lettering resembling “DEFIANT”; an early
+arch leaves the view before that later arch appears, and a win by the speaking
+racer is not conclusively established. This is partial visual improvement, not
+a complete adherence pass. Exact audible wording, timing and lip sync await
+listening and human review. Both race clips play in Windows Chrome, with no
+console errors or horizontal overflow at desktop and mobile widths. The review
+uses fixed Earlier/left and Revised/right labels and explicit Yes/Partly/No
+choices; no human ratings were created during verification.
+
+The astronaut follow-up completes at 1344x768 and ten delivered seconds, matching
+its earlier clip (243 generated frames, 240 delivered frames). Renderer service
+takes 509.707 seconds versus 513.096 earlier; total elapsed time is 773.063 seconds,
+including waiting behind another desktop GPU job. Sampled frames keep one visible
+astronaut through the approach, connected pickup and frontal note close-up, with
+“back in five minutes” readable at 7–9 seconds and no second opposing astronaut
+body. This supports a visible cast-continuity improvement at this image and seed;
+full-video preference and absence of speech await human review. Both astronaut
+clips play in Windows Chrome without console errors, and all acceptance fields
+include Yes. The two comparisons remain separate from the original campaign's
+ratings and do not change its failed cloud-policy promotion decision.
+
 ## Billing reconciliation
 
 After render preparation and the targeted planning checks, the ledger records
-$14.1105 in token-priced charges and $8.6015 in unresolved reservations, or
-$22.7120 committed against the $50 cap. Authenticated OpenAI minute-level usage
+$14.4847 in token-priced charges and $8.6015 in unresolved reservations, or
+$23.0862 committed against the $50 cap. Authenticated OpenAI minute-level usage
 exports account for five additional Astra requests and one Sol judge request
 after subtracting recorded usage. Their residual token-priced costs are $1.0850
 and $0.0235 respectively. Astra's overlapping calls have aggregate attribution;
