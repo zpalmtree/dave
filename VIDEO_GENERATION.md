@@ -34,7 +34,8 @@ always shows a rough ETA from model history and current bot queue depth, includi
 on the first acknowledgement. Plan-aware timing refines it later. Offline,
 dispatch-paused, and desktop GPU-queue states are labeled with the assumption
 behind the projection. The queue accepts at most three unfinished jobs per user
-and twenty globally.
+and twenty globally. The configured god user bypasses the per-user limit; the
+global cap still applies.
 
 If Windows records an NVIDIA `nvlddmkm` recovery while a render fails, the
 desktop worker treats it as a GPU-driver reset rather than an ordinary retry.

@@ -960,6 +960,7 @@ export async function handleVideoRequest(
                 command_variant: options.commandVariant || VIDEO_MODELS[model].command,
                 requested_at: msg.createdTimestamp / 1000,
                 requester_id: msg.author.id,
+                is_admin: msg.author.id === config.god,
                 origin_bot_id: msg.client.user.id,
                 channel_id: msg.channel.id,
                 guild_id: msg.guild?.id || null,
