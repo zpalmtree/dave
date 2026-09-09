@@ -2017,7 +2017,9 @@ export class VideoBroker {
         if ((globalBeforeDownload?.count || 0) >= VIDEO_MAX_GLOBAL_JOBS) {
             return { status: 409, body: { error: `The video queue is full (${VIDEO_MAX_GLOBAL_JOBS} jobs).` } };
         }
-        if ((userBeforeDownload?.count || 0) >= VIDEO_MAX_USER_JOBS) {
+        // Only authenticated bots reach enqueue; they derive this flag from config.god.
+        const bypassUserLimit = body.is_admin === true;
+        if (!bypassUserLimit && (userBeforeDownload?.count || 0) >= VIDEO_MAX_USER_JOBS) {
             return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
         }
         const receivedAt = Date.now() / 1000;
@@ -2141,7 +2143,7 @@ export class VideoBroker {
                  AND status IN (${statusPlaceholders(UNFINISHED_VIDEO_STATUSES)})`,
                 [String(body.requester_id), ...UNFINISHED_VIDEO_STATUSES],
             );
-            if ((user?.count || 0) >= VIDEO_MAX_USER_JOBS) {
+            if (!bypassUserLimit && (user?.count || 0) >= VIDEO_MAX_USER_JOBS) {
                 if (sourceImage) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
             }

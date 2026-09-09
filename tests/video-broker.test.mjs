@@ -19,6 +19,50 @@ import {
 } from '../dist/VideoBroker.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { OALGO_VIDEO_PLANNER_GUIDANCE, MEXIMUTT_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
+import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtocol.js';
+
+test('authenticated owner submissions bypass the personal limit but retain the global cap', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-owner-limit-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+    });
+    await broker.start();
+    let sequence = 0;
+    const submit = async (requester, isAdmin, token = 'bot-secret') => {
+        const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+            body: JSON.stringify({
+                model: 'ltx', prompt: 'A cat walks', requester_id: requester, is_admin: isAdmin,
+                origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: `limit-${++sequence}`, status_message_id: `status-${sequence}`,
+            }),
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    try {
+        assert.equal((await submit('owner', true, 'worker-secret')).status, 401);
+        for (let index = 0; index < VIDEO_MAX_USER_JOBS; index++) {
+            assert.equal((await submit('ordinary-user', false)).status, 201);
+        }
+        for (const flag of [undefined, false, 'true', 1]) {
+            const rejected = await submit('ordinary-user', flag);
+            assert.equal(rejected.status, 409);
+            assert.match(rejected.body.error, /unfinished video jobs/);
+        }
+        for (let index = VIDEO_MAX_USER_JOBS; index < VIDEO_MAX_GLOBAL_JOBS; index++) {
+            assert.equal((await submit('owner', true)).status, 201);
+        }
+        const full = await submit('owner', true);
+        assert.equal(full.status, 409);
+        assert.match(full.body.error, /video queue is full/);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
 
 function socketInbox(socket) {
     const queue = [];
