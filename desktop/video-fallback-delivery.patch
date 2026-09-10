@@ -1,0 +1,169 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -1061,13 +1061,9 @@
+                 reason_code = str(value.get("reason_code") or "").strip()
+             except (OSError, ValueError, json.JSONDecodeError):
+                 pass
+-            if reason_code == "plan_mismatch":
+-                raise VideoGenError(
+-                    "Broker screenplay changed before a derived identity frame was generated; "
+-                    "aborting instead of silently rendering the cut with T2V."
+-                )
+             print(
+                 "WARNING: deferred identity continuity frame failed"
++                + (f" [{reason_code}]" if reason_code else "")
+                 + (f" ({detail})" if detail else "")
+                 + "; using the configured cut fallback.",
+                 flush=True,
+@@ -2835,7 +2831,7 @@
+             dialogue = shot.get("dialogue", [])
+             if not isinstance(dialogue, list):
+                 raise VideoGenError(f"planner shot {index + 1}.{shot_index + 1} dialogue is invalid")
+-            if dialogue and re.search(
++            if re.search(
+                 r"\b(?:voice|speaker|character|person|man|woman)\s+"
+                 r"(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|"
+                 r"announces?|narrates?|sings?)\b|"
+@@ -3621,7 +3617,7 @@
+             spoken_words(line) and spoken_words(line) in spoken_words(beat_audio)
+             for line in filtered_dialogue
+         )
+-        if filtered_dialogue and (
++        if (
+             audio_repeats_dialogue
+             or re.search(
+                 r"\b(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|"
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -759,6 +759,8 @@
+     if generated_duration > 0:
+         output_metrics["generated_duration_seconds"] = round(generated_duration, 3)
+     for value in segment_manifests:
++        if value.get("deferred_keyframe_status") == "failed":
++            flags["continuity_frame_fallback"] = True
+         segment_index = int(float(value["segment_index"]))
+         metadata = {
+             key: value[key]
+@@ -2123,8 +2125,8 @@
+                     failure_detail = str(exc) or failure_detail
+                     failure_reason_code = "plan_mismatch"
+                     print(
+-                        f"ERROR: Identity continuity frame plan mismatch for segment "
+-                        f"{segment_index} ({exc}); refusing silent T2V fallback.",
++                        f"WARNING: Identity continuity frame plan mismatch for segment "
++                        f"{segment_index} ({exc}); using the configured cut fallback.",
+                         flush=True,
+                     )
+                     return segment_index, None
+@@ -2345,9 +2347,12 @@
+         if segment_index > 1:
+             plan_identity = str(job.get("plan_identity") or "")
+             if not re.fullmatch(r"[0-9a-f]{64}", plan_identity):
+-                raise WorkerPlanMismatch(
+-                    "No broker-confirmed screenplay identity is available for derived frames."
++                print(
++                    "WARNING: No broker-confirmed screenplay identity is available for "
++                    "derived frames; using the configured cut fallback.",
++                    flush=True,
+                 )
++                return None
+             headers["X-Video-Plan-Identity"] = plan_identity
+         timeout = aiohttp.ClientTimeout(total=8 * 60, connect=20)
+         if not self.http_session:
+@@ -2588,6 +2593,10 @@
+                 "event": "complete",
+                 "job_id": job_id,
+                 "runtime_seconds": runtime_seconds,
++                **({"generation_notice": (
++                    "Some scene continuity frames were unavailable; the video was completed "
++                    "using the original identity anchor where available."
++                )} if manifest_flags.get("continuity_frame_fallback") else {}),
+             }
+         )
+         self.clear_journal()
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -2511,6 +2511,26 @@
+         self.assertNotIn("brief silent visual beat", compiled)
+         self.assertEqual(compiled.count("hello friend"), 1)
+ 
++    def test_speech_in_audio_is_invalid_even_without_structured_dialogue(self):
++        plan = sample_plan(audio="A digital snap. The robotic voice says: 'Render complete.'")
++        with self.assertRaisesRegex(video_gen.VideoGenError, "non-speech audio"):
++            video_gen.validate_plan_shape(plan, "Five dogs march together and then stop.", 5.0, 15.0, 5.0)
++
++    def test_semantic_fallback_cleans_speech_from_an_empty_dialogue_beat(self):
++        prompt = "Five dogs transform into a line drawing."
++        analysis = video_gen.conservative_semantic_analysis(prompt)
++        analysis["scene_beats"] = [{
++            "transition": "start", "target_seconds": 5.0,
++            "visual": prompt, "camera": "The camera pulls back.",
++            "audio": "A digital snap. The robotic voice says: 'Render complete.'",
++            "dialogue": [],
++        }]
++        fallback = video_gen.fallback_video_plan(prompt, analysis, 5.0, 15.0, 5.0)
++        result = video_gen.validate_plan_shape(fallback, prompt, 5.0, 15.0, 5.0)
++        shot = result["segments"][0]["shots"][0]
++        self.assertEqual(shot["dialogue"], [])
++        self.assertNotIn("Render complete", shot["audio"])
++
+     def test_semantic_fallback_removes_verbatim_dialogue_repeated_in_audio(self):
+         prompt = 'A president says "Present." in a character selection screen.'
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+@@ -2933,11 +2953,10 @@
+                 '{"error":"screenplay changed","reason_code":"plan_mismatch"}',
+                 encoding="utf-8",
+             )
+-            with self.assertRaisesRegex(
+-                video_gen.VideoGenError,
+-                "aborting instead of silently rendering",
+-            ):
+-                video_gen.wait_for_deferred_segment_keyframe(frame, 0.1)
++            with mock.patch("builtins.print") as warning:
++                self.assertIsNone(video_gen.wait_for_deferred_segment_keyframe(frame, 0.1))
++            self.assertIn("plan_mismatch", warning.call_args.args[0])
++            self.assertIn("configured cut fallback", warning.call_args.args[0])
+ 
+     def test_deferred_keyframe_boundary_wait_is_capped_independently(self):
+         with mock.patch.object(
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -687,6 +687,19 @@
+                 2,
+                 "16:9",
+             ))
++
++    def test_unconfirmed_local_plan_skips_derived_frames_without_a_request(self):
++        worker = DesktopVideoWorker.__new__(DesktopVideoWorker)
++        worker.broker_url = "wss://example.invalid/v1/worker"
++        worker.http_session = mock.Mock()
++        worker.worker_headers = mock.Mock(return_value={})
++        for identity in (None, "", "invalid"):
++            with self.subTest(identity=identity), mock.patch("builtins.print") as warning:
++                self.assertIsNone(asyncio.run(worker.request_job_keyframe(
++                    {"id": "job-123", "plan_identity": identity}, 4, "2:3",
++                )))
++                self.assertIn("configured cut fallback", warning.call_args.args[0])
++        worker.http_session.post.assert_not_called()
+ 
+     def test_reference_aspect_is_preserved_for_derived_frames(self):
+         from PIL import Image
+@@ -1214,6 +1227,18 @@
+         self.assertNotIn("private prompt", serialized)
+         self.assertNotIn(r"D:\private", serialized)
+ 
++    def test_failed_continuity_frame_is_reported_for_delivery_notice(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            run_dir = Path(temporary)
++            output = run_dir / "h3_final.mp4"
++            output.write_bytes(b"video")
++            (run_dir / "segment_04.generation.json").write_text(json.dumps({
++                "segment_index": 4, "timing": {"total_seconds": 10},
++                "deferred_keyframe_status": "failed",
++            }))
++            _, _, flags = manifest_metrics(run_dir, output)
++        self.assertTrue(flags["continuity_frame_fallback"])
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

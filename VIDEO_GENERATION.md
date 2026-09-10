@@ -113,7 +113,12 @@ new shot-specific frame zero. The generated frame matches the video's aspect
 ratio, is reviewed for recurring-cast identity and motion-ready composition, and
 the desktop renders that segment as I2V. Physically continuous `continue`
 segments still inherit the preceding segment's final frame. If a derived frame
-is unavailable or rejected by a provider, only that segment falls back to T2V.
+is unavailable, rejected by a provider, or cannot be tied to the worker's
+screenplay, that segment uses the original identity anchor when available and
+otherwise falls back to T2V. Missing screenplay confirmation is not treated as
+evidence that the screenplay changed. Mismatched derived frames are never used,
+but their failure does not abort the remaining video. Deferred-frame fallbacks
+are recorded in the render manifests and disclosed in the Discord delivery notice.
 
 The worker downloads any already-generated screenplay and frames before it asks
 for a durable `gpuq` reservation. Cloud preparation therefore overlaps the

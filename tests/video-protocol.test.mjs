@@ -1042,6 +1042,15 @@ function jsonResponse(value) {
     });
 }
 
+test('broker rejects speech in an empty-dialogue audio field and accepts its repaired fallback', () => {
+    const plan = frontierPlan();
+    const shot = plan.segments[0].shots[0];
+    shot.audio = "A digital snap. The robotic voice says: 'Render complete.'";
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'), /non-speech audio/);
+    shot.audio = 'Subtle environmental ambience with no additional foreground sounds.';
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'));
+});
+
 test('frontier planner retries incomplete structured output with a larger token budget', async () => {
     const requests = [];
     const replies = [

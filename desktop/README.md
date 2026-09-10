@@ -1,5 +1,27 @@
 # Desktop video optimization changes
 
+## Continuity-frame fallback and delivery repair
+
+`video-fallback-delivery.patch` fixes local validation of speech accidentally
+placed in an audio field with empty dialogue, cleans that speech from semantic
+fallbacks, and skips derived-frame requests without a confirmed screenplay ID.
+Even a confirmed plan mismatch discards the derived frame and uses the configured
+cut fallback instead of aborting the video. Completed renders report this
+fallback to the broker for the Discord delivery notice.
+
+The patch and `video-fallback-delivery-hashes.json` archive the live September 10
+changes and regression tests. Apply only to the recorded baseline:
+
+```bash
+python3 scripts/apply-video-fallback-delivery-desktop.py --check
+python3 scripts/apply-video-fallback-delivery-desktop.py
+```
+
+Reload the supervised worker child while idle after installing. Existing saved
+runs with `plan_mismatch` frame-failure markers can resume using `video_gen.py
+--resume RUN_DIRECTORY`; the generator reuses validated completed clips.
+Launch that recovery through `gpuq` like any other render.
+
 The live generator is outside this repository at
 `D:\AI\ComfyUI_windows_portable\video_gen` (WSL:
 `/mnt/d/AI/ComfyUI_windows_portable/video_gen`). This directory archives the
