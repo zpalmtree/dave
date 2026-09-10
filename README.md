@@ -2,6 +2,9 @@
 
 Dave is a chat bot. It runs on Discord and Uproar (uproar.chat) at the same time; the Uproar side is optional and stays off until you configure it (see [Uproar](#uproar-uproarchat) below).
 
+The operator-hosted Discord bots' data practices and privacy contact are described
+in the [Dave and Sluglicious privacy policy](PRIVACY.md).
+
 ## Prerequisites
 
 * yarn
