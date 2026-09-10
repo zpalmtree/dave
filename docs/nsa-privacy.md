@@ -50,6 +50,13 @@ operator-managed SQLite database. Audio and generated artifacts, including chat
 context exports, are stored in S3-compatible object storage. Temporary audio
 files and diagnostic logs may also exist on the host.
 
+The production database, temporary files, application logs and retained
+migration backups use encrypted storage. Audio and generated artifacts in
+Amazon S3 use AES-256 server-side encryption. Authorized application processes
+can decrypt data to provide the meeting features. These controls do not make
+an exported download link safe to share publicly, or establish erasure of
+historical hosting-provider snapshots.
+
 Summaries and minutes are posted to the configured Discord output channel and
 detail threads. Their audience is determined by Discord channel permissions.
 Authorized meeting managers can request exports with signed download links;
@@ -90,8 +97,9 @@ continue to post in the associated recorded chat.
 
 Access to team outputs should be limited through Discord permissions and
 operator-controlled hosting and storage credentials. This policy does not
-claim that all stored data is encrypted by the application. Do not share export
-links outside their intended audience.
+promise that encryption prevents access by an authorized operator or a
+compromised running service. Do not share export links outside their intended
+audience.
 
 ## Changes
 
