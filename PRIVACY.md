@@ -78,6 +78,14 @@ Some data is held in process memory, and some is written to operator-managed
 databases, files, media-job storage and logs. Saved feature data, command
 arguments and operational records can persist across bot restarts.
 
+The operator-managed bot and verification servers now use encrypted storage
+for application databases, temporary files, media-job files, application logs
+and retained migration backups. Older server database copies and the local
+development database copies identified during the migration were also moved
+to encrypted storage. This does not establish encryption of separate desktop
+media-worker storage, AI-provider systems, or historical hosting-provider
+snapshots. Encryption of the desktop worker's storage remains unverified.
+
 The summary cache is capped at 5,000 messages per channel. Summary requests use
 a 12-hour history window; that window is not a 12-hour expiry for the cache.
 In-memory caches disappear when their process restarts, but the bot may retrieve
@@ -107,7 +115,7 @@ not prevent the ordinary-message features described above.
 Avoid sharing confidential material with a bot feature or in a channel whose
 content you do not want that feature to process. Hosting credentials and bot
 tokens are not part of the public source. This policy does not claim that every
-stored record is encrypted by the application or automatically deleted.
+stored copy across those separate systems is encrypted or automatically deleted.
 
 ## Changes
 

@@ -48,6 +48,10 @@ tail -n 50 ~/.local/share/discord-data/logs/APP_NAME-error.log
 
 Load the server's configured Node version before running PM2. Routine Dave
 changes still deploy both branches through `scripts/deploy-bots.sh`.
+The production launch commands execute the deployed build and load the private
+bot environment; they no longer run Git, install packages or build at startup.
+Build tools belong to deployment, so dependency installation for builds must
+include development dependencies even when runtime `NODE_ENV` is production.
 Meeting-bot's ecosystem configuration selects the launcher when the host's
 storage configuration exists. Its deployment must continue to preserve the
 remote `.env`, SQLite files and `tmp` directory.
@@ -74,3 +78,34 @@ Migrating and removing the original named files does not prove erasure of old
 cloud snapshots, discarded filesystem blocks or other unmanaged copies. Those
 are separate retention considerations. This server storage change also does
 not establish encryption on a separate desktop media worker or AI provider.
+
+## Migration verification, 10 September 2026
+
+Both hosts passed disposable SQLite WAL, integrity, wrong-key rejection and
+ciphertext-backup recovery tests. The runtime launcher passed unmount/remount
+and missing-key fail-closed tests. Eleven server databases, including legacy
+copies and verifier backups, passed integrity and recovered row-count checks.
+The verifier's separate electron-log directory was migrated with a separately
+verified encrypted backup. Four inactive local SQLite copies were encrypted
+after byte-identical recovery checks and a test confirming SQLite places WAL
+files beside the real encrypted target when accessed through a symlink.
+
+The source repositories, data and historical application logs on both hosts
+retain their original paths through symlinks. The original named plaintext
+copies were removed only after backup verification and successful application
+startup. Current deployment paths were exercised after the migration; NSA's
+15 tests passed locally and remotely. The video worker reconciled its active
+lease after the broker restart. No full-host reboot was performed.
+
+Local database symlinks require `~/.local/bin/discord-storage ensure` after a
+WSL restart; they fail to open while encrypted storage is unavailable. Server
+PM2 launchers perform this unlock automatically. Recovery credentials are in
+the operator's private `~/.local/share/discord-storage-recovery` directory;
+ciphertext backup transfers are stored separately under
+`~/.local/share/discord-storage-backups`.
+
+NSA's earliest and latest sampled S3 audio/artifact objects all returned
+`AES256`, with creation dates between April and September 2026. This is sample
+verification, not a per-object scan of the entire archive. AWS automatically
+encrypts all new S3 objects, and the application now requests SSE-S3 explicitly.
+See [AWS's SSE-S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingServerSideEncryption.html).
