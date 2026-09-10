@@ -684,7 +684,8 @@ async function saveBase64ImageToFile(base64Data: string, mimeType: string): Prom
     const randomName = crypto.randomBytes(16).toString('hex');
     const extension = mimeType.split('/')[1] || 'png';
     const filename = `gemini_${randomName}.${extension}`;
-    const tempDir = '/tmp';
+    const { tmpdir } = await import('os');
+    const tempDir = tmpdir();
     const filePath = path.join(tempDir, filename);
 
     // Create temp directory if it doesn't exist
