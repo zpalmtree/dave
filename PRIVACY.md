@@ -82,9 +82,12 @@ The operator-managed bot and verification servers now use encrypted storage
 for application databases, temporary files, media-job files, application logs
 and retained migration backups. Older server database copies and the local
 development database copies identified during the migration were also moved
-to encrypted storage. This does not establish encryption of separate desktop
-media-worker storage, AI-provider systems, or historical hosting-provider
-snapshots. Encryption of the desktop worker's storage remains unverified.
+to encrypted storage. The operator-managed Windows media worker uses Windows
+Encrypting File System (EFS) for its working files, input/output media,
+temporary files, logs and GPU coordinator records. Its migration backup is
+stored in the operator's encrypted filesystem. These protections do not
+establish encryption of AI-provider systems or historical hosting-provider
+snapshots.
 
 The summary cache is capped at 5,000 messages per channel. Summary requests use
 a 12-hour history window; that window is not a 12-hour expiry for the cache.
