@@ -76,8 +76,8 @@ When fulfilling deletion requests, account for retained migration backups too.
 
 Migrating and removing the original named files does not prove erasure of old
 cloud snapshots, discarded filesystem blocks or other unmanaged copies. Those
-are separate retention considerations. This server storage change also does
-not establish encryption on a separate desktop media worker or AI provider.
+are separate retention considerations. The desktop worker's separate storage
+protection is described below; this does not establish encryption at AI providers.
 
 ## Migration verification, 10 September 2026
 
@@ -109,3 +109,43 @@ NSA's earliest and latest sampled S3 audio/artifact objects all returned
 verification, not a per-object scan of the entire archive. AWS automatically
 encrypts all new S3 objects, and the application now requests SSE-S3 explicitly.
 See [AWS's SSE-S3 documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingServerSideEncryption.html).
+
+## Windows media worker
+
+The desktop's D: volume is not protected by whole-volume encryption. Windows
+Encrypting File System (EFS) instead protects data files in these trees:
+
+- `D:\AI\ComfyUI_windows_portable\video_gen`, including plans and worker logs.
+- `D:\AI\ComfyUI_windows_portable\ComfyUI\input`, `output`, `temp` and `user`.
+- `%LOCALAPPDATA%\GpuQ`, including coordinator SQLite records and captured logs.
+
+Directory encryption makes newly created files inherit EFS. Files in scope were
+checked individually, and inheritance was tested in each root. Exceptions are
+the currently open `video_worker.instance.lock` (runtime lock metadata) and
+`video_worker.json` (broker URL, worker ID and token).
+Windows denied encryption of the credential file under its read-only ACL;
+that ACL was preserved. These exceptions are not message or media storage.
+Git repository metadata was also encrypted. Model weights and the embedded
+Python installation were not migrated.
+
+The runtime keeps its original paths and uses the Windows user's EFS key. EFS
+protects file contents, not filenames, and does not prevent access by the
+signed-in user or software running as that user. Do not move these files to a
+filesystem that does not support EFS without arranging equivalent protection.
+
+The password-protected EFS recovery certificate was exported and checked for a
+matching private key before migration. Recovery files are in the user's private
+`%LOCALAPPDATA%\DiscordStorageRecovery` directory, with an additional private
+copy at `~/.local/share/discord-storage-recovery/windows-efs` in WSL. Keep the
+certificate and its recovery password out of source control and public tickets.
+
+The pre-migration copy is under the WSL encrypted mount at
+`~/.local/share/discord-data/windows-video-backup-20260910`. The GPU coordinator
+database was copied with SQLite's backup API and passed integrity checks.
+Representative source files matched their backup bytes before encryption and
+were checked again afterward. The live coordinator database passed integrity
+checks after encryption. A render active during migration completed and was
+delivered, and normal job dispatch was restored after encryption inheritance
+was verified in the generated-output directory.
+This backup was taken while the worker was live;
+it is not a promise that every in-flight render can be restored and resumed.
