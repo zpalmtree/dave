@@ -4204,10 +4204,19 @@ export class VideoBroker {
                 const runtimeSeconds = Number(message.runtime_seconds) > 0
                     ? Number(message.runtime_seconds)
                     : null;
+                const deliveryNotice = sanitizeVideoWorkerText(message.generation_notice, '', 1000).trim();
+                let plannerJson = row.planner_json;
+                if (deliveryNotice) {
+                    const plan = plannerJson ? JSON.parse(plannerJson) : {};
+                    plan.generation_notice = [
+                        String(plan.generation_notice || '').trim(), deliveryNotice,
+                    ].filter(Boolean).join(' ');
+                    plannerJson = JSON.stringify(plan);
+                }
                 await this.run(
                     `UPDATE video_jobs SET status = 'ready', stage = 'Ready for Discord delivery', progress = 1,
-                     runtime_seconds = ?, completed_at = ?, updated_at = ? WHERE public_id = ?`,
-                    [runtimeSeconds, nowSeconds(), nowSeconds(), jobId],
+                     runtime_seconds = ?, planner_json = ?, completed_at = ?, updated_at = ? WHERE public_id = ?`,
+                    [runtimeSeconds, plannerJson, nowSeconds(), nowSeconds(), jobId],
                 );
                 if (runtimeSeconds !== null) {
                     const processingRuntime = Math.max(

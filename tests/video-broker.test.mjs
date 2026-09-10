@@ -503,12 +503,14 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             event: 'complete',
             job_id: lease.job.id,
             runtime_seconds: 65.625,
+            generation_notice: 'Continuity frames were unavailable; completed using the original identity anchor.',
         }));
         const completed = await eventually(
             () => botFetch('/v1/users/runtime-user/jobs'),
             value => value.body.jobs[0].status === 'ready',
         );
         assert.equal(completed.body.jobs[0].runtime_seconds, 65.625);
+        assert.match(completed.body.jobs[0].generation_notice, /completed using the original identity anchor/);
         const delivered = await botFetch(`/v1/jobs/${lease.job.id}/delivered`, {
             method: 'POST',
             body: JSON.stringify({ duration_seconds: 1.25 }),
