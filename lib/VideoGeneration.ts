@@ -290,6 +290,9 @@ export function videoSourceImageFromMessages(
 export function videoPromptFromMessages(commandPrompt: string, referencedMessage: Message | null): string {
     const current = commandPrompt.trim();
     const referenced = referencedMessage?.content?.trim() || '';
+    if (current && referenced) {
+        return `Context from the replied message:\n${referenced}\n\nCurrent instruction (takes priority):\n${current}`;
+    }
     return current || referenced;
 }
 
