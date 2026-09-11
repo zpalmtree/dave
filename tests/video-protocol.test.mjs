@@ -1738,6 +1738,42 @@ test('exhaustive sequential coverage rejects silent roster omission', () => {
     );
 });
 
+test('exhaustive sequential coverage keeps authored per-member action segments', () => {
+    // Job 9f703f02: "3 fat woman doing 360 spins, each one progressively getting
+    // faster" became three identical selection-screen idles.
+    const analysis = frontierAnalysis();
+    analysis.coverage_contract = {
+        mode: 'exhaustive',
+        members: ['Woman 1', 'Woman 2', 'Woman 3'],
+        presentation: 'sequential',
+        per_member_dialogue: false,
+        per_member_label: false,
+    };
+    const actions = [
+        'Woman 1, a fat adult in red, completes one measured 360-degree spin.',
+        'Woman 2, a fat adult in teal, completes a distinctly faster 360-degree spin.',
+        'Woman 3, a fat adult in yellow, spins so fast she becomes a rotational blur.',
+    ];
+    const plan = frontierPlan();
+    plan.segments = actions.map((visual, index) => ({
+        ...structuredClone(plan.segments[0]),
+        title: `Spin ${index + 1}`,
+        transition: index === 0 ? 'start' : 'cut',
+        shots: [{ ...structuredClone(plan.segments[0].shots[0]), visual }],
+    }));
+    expandExhaustiveSequentialPlan(plan, analysis, 'minimax');
+    assert.deepEqual(plan.segments.map(segment => segment.shots[0].visual), actions);
+    assert.deepEqual(plan.segments.map(segment => segment.title), ['Woman 1', 'Woman 2', 'Woman 3']);
+    assert.equal(plan.segment_keyframes, undefined);
+    assert.doesNotMatch(plan.keyframe.prompt, /selected member|nameplate/);
+    plan.prompt_analysis = analysis;
+    validateFrontierVideoPlanForKeyframe(plan, 'minimax');
+
+    const compact = frontierPlan();
+    expandExhaustiveSequentialPlan(compact, analysis, 'minimax');
+    assert.deepEqual(compact.segments.map(segment => segment.title), ['Woman 1', 'Woman 2', 'Woman 3']);
+});
+
 test('best-effort compiler preserves required visible text and the visual motion spine', () => {
     const analysis = frontierAnalysis();
     analysis.visible_text_contract = {

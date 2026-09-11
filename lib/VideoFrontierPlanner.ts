@@ -1121,6 +1121,16 @@ export function expandExhaustiveSequentialPlan(
     const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
     requireExhaustiveGenerationBudget(members.length, minimum);
+    // The template below is for labeled or speaking rosters answered compactly.
+    // Keep a screenplay that already stages each member in its own segment, in
+    // order, so authored actions such as escalating spins are not replaced.
+    if (!contract.per_member_dialogue && !contract.per_member_label
+        && sourceSegments.length === members.length
+        && sourceSegments.every((segment: any, index: number) =>
+            coveredRosterMembers({ segments: [segment] }, normalized).has(normalized[index]))) {
+        for (const [index, segment] of sourceSegments.entries()) segment.title = members[index];
+        return plan;
+    }
     const presentation = String(promptAnalysis?.presentation || 'selection interface').trim();
     const blankNameplate = (
         'The interface has one opaque blank nameplate centered across the top, reserved for '
