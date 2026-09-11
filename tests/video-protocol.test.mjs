@@ -1939,7 +1939,7 @@ test('video commands accept exactly one supported attached start frame', () => {
     );
 });
 
-test('video commands use the current prompt while inheriting a replied-to image', () => {
+test('video commands combine reply context and current instructions while inheriting a replied-to image', () => {
     const replyAttachment = {
         url: 'https://cdn.discordapp.com/attachments/1/2/reply.png',
         contentType: 'image/png',
@@ -1963,7 +1963,7 @@ test('video commands use the current prompt while inheriting a replied-to image'
     );
     assert.equal(
         videoPromptFromMessages('Make it rainy.', reply),
-        'Make it rainy.',
+        'Context from the replied message:\nThree racers approach a neon finish line.\n\nCurrent instruction (takes priority):\nMake it rainy.',
     );
     assert.equal(
         videoSourceImageFromMessages(commandWithoutImage, reply).url,
@@ -1976,6 +1976,17 @@ test('video commands use the current prompt while inheriting a replied-to image'
         ).url,
         commandAttachment.url,
     );
+});
+
+test('video reply prompts preserve supplied text and handle missing or blank inputs', () => {
+    assert.equal(videoPromptFromMessages('  Make it rainy.  ', null), 'Make it rainy.');
+    assert.equal(videoPromptFromMessages('Make it rainy.', { content: ' \n ' }), 'Make it rainy.');
+    assert.equal(videoPromptFromMessages('  ', { content: '  Three racers.\nA neon finish line.  ' }),
+        'Three racers.\nA neon finish line.');
+    assert.equal(videoPromptFromMessages('  ', null), '');
+    assert.equal(videoPromptFromMessages('', { content: '' }), '');
+    assert.equal(videoPromptFromMessages('  Say "Not today!"\nThen run.  ', { content: '  A sunny racetrack.  ' }),
+        'Context from the replied message:\nA sunny racetrack.\n\nCurrent instruction (takes priority):\nSay "Not today!"\nThen run.');
 });
 
 test('frontier keyframe prompt binds frame-zero motion geometry', () => {
