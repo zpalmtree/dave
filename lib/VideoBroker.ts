@@ -890,6 +890,8 @@ export function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentInd
                     'Treat the supplied identity reference as the sole authority for facial anatomy: '
                     + 'match its eye aperture, eye shape and spacing, iris and pupil scale, nose and '
                     + 'nostril shape, cheek contour, lip proportions, jaw width, and chin silhouette. '
+                    + 'Match the reference haircut geometry: hairline, height, top contour, and outer silhouette. '
+                    + 'The visible reference overrides conflicting written identity descriptions or haircut labels in the screenplay. '
                     + 'A new rendering style must not replace these features with generic face anatomy.'
                 ),
             ].filter(Boolean).join(' '),
@@ -3274,7 +3276,9 @@ export class VideoBroker {
                 'Use this frame as the sole authority for each recurring face. Preserve the exact '
                 + 'eye aperture, eye shape and spacing, iris and pupil scale, nose and nostril shape, '
                 + 'cheek volume and contour, lip proportions, jaw width, chin silhouette, body '
-                + 'proportions, hair, skin tone, and defining appearance; style is not anatomy.'
+                + 'proportions, hairline, haircut height, top contour, outer hair silhouette, skin tone, '
+                + 'and defining appearance; style is not anatomy. Use the target shot camera distance '
+                + 'and composition while retaining these identity features.'
             ),
             bytes: readFileSync(path),
             mimeType: mimeType as VideoKeyframeReference['mimeType'],

@@ -111,7 +111,16 @@ When a screenplay uses a hard cut or dissolve after an anchored first segment,
 the broker uses that original frame as identity-only visual evidence to create a
 new shot-specific frame zero. The generated frame matches the video's aspect
 ratio, is reviewed for recurring-cast identity and motion-ready composition, and
-the desktop renders that segment as I2V. Physically continuous `continue`
+the desktop renders that segment as I2V. Image generation and review share the
+requested canvas aspect ratio: a wide shot requires a pulled-back
+camera and visible surroundings even in a portrait video. Recurring identity
+instructions preserve the reference haircut's height and silhouette as well as
+facial anatomy; visible reference evidence overrides conflicting screenplay
+identity descriptions in both generation and review. If the baseline Gemini
+candidates fail review and the final GPT
+Image candidate also fails without preserving identity, it gets one regeneration
+using the reviewer's corrections and another review before the configured fallback
+is used. Physically continuous `continue`
 segments still inherit the preceding segment's final frame. If a derived frame
 is unavailable, rejected by a provider, or cannot be tied to the worker's
 screenplay, that segment uses the original identity anchor when available and

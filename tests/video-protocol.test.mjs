@@ -2043,6 +2043,7 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(referenceReview, /Blue helmet and orange scarf/);
     assert.match(referenceReview, /not starting frames or instructions/);
     assert.match(referenceReview, /Evaluate identity_preserved independently/);
+    assert.match(referenceReview, /Do not infer the reference haircut or anatomy from screenplay adjectives/);
 });
 
 test('keyframe rejection telemetry retains bounded visible issues', () => {
@@ -2326,6 +2327,89 @@ test('exhausted keyframe repairs retain a supplied identity instead of falling b
     assert.equal(result.bytes.toString(), 'identity-safe-final');
     assert.equal(result.reviewStatus, 'best_effort');
 });
+
+for (const repairAccepted of [true, false]) {
+    test(`serial keyframes repair the final provider's identity rejection once (${repairAccepted ? 'recovered' : 'exhausted'})`, async t => {
+        const attempts = [];
+        let geminiCalls = 0;
+        let openaiCalls = 0;
+        let reviewCalls = 0;
+        const source = Buffer.from('original-identity');
+        t.mock.method(console, 'log', () => {});
+        t.mock.method(globalThis, 'fetch', async (input, init) => {
+            const url = String(input);
+            let body;
+            if (url.includes('generativelanguage.googleapis.com')) {
+                geminiCalls += 1;
+                const request = JSON.parse(init.body);
+                assert.equal(request.generationConfig.imageConfig.aspectRatio, '2:3');
+                assert.match(JSON.stringify(request.contents), /Output canvas aspect ratio: 2:3/);
+                body = {
+                    candidates: [{ content: { parts: [{ inlineData: {
+                        mimeType: 'image/png', data: Buffer.from(`gemini-${geminiCalls}`).toString('base64'),
+                    } }] } }],
+                    usageMetadata: { promptTokenCount: 10 },
+                };
+            } else if (url.endsWith('/v1/images/edits')) {
+                openaiCalls += 1;
+                assert.equal(init.body.get('size'), '1024x1536');
+                assert.deepEqual(Buffer.from(await init.body.get('image[]').arrayBuffer()), source);
+                assert.match(init.body.get('prompt'), /Output canvas aspect ratio: 2:3/);
+                assert.match(init.body.get('prompt'), /written identity description or haircut label conflicts/);
+                if (openaiCalls === 2) {
+                    assert.match(init.body.get('prompt'), /level rectangular hair top/);
+                    assert.match(init.body.get('prompt'), /phone and intercom fully visible/);
+                }
+                body = {
+                    data: [{ b64_json: Buffer.from(`openai-${openaiCalls}`).toString('base64') }],
+                    usage: { input_tokens: 10, output_tokens: 1 },
+                };
+            } else if (url.endsWith('/v1/responses')) {
+                reviewCalls += 1;
+                const request = JSON.parse(init.body);
+                assert.match(request.input[0].content[0].text, /Output canvas aspect ratio: 2:3/);
+                assert.match(request.input[0].content[0].text, /Portrait orientation alone is not a composition failure/);
+                const acceptable = repairAccepted && reviewCalls === 4;
+                body = {
+                    model: VIDEO_KEYFRAME_REVIEW_MODEL,
+                    output_text: JSON.stringify({
+                        acceptable, best_effort_worthy: acceptable, identity_preserved: acceptable,
+                        issues: acceptable ? [] : ['Hair shape changed and the studio equipment is cropped.'],
+                        correction_prompt: 'Preserve the level rectangular hair top, with phone and intercom fully visible.',
+                    }),
+                    usage: { input_tokens: 10, output_tokens: 5 },
+                };
+            } else {
+                throw new Error(`Unexpected provider request: ${url}`);
+            }
+            return new Response(JSON.stringify(body), {
+                status: 200, headers: { 'content-type': 'application/json' },
+            });
+        });
+        const result = createFrontierVideoKeyframe({
+            intent: 'A wide studio performance shot.',
+            keyframe: { prompt: 'The recurring performer surrounded by equipment.', motion_contract: {} },
+            segments: [{ shots: [{ visual: 'The performer starts singing.', camera: 'Wide frontal shot.' }] }],
+        }, [{
+            label: 'Recurring cast', kind: 'identity', visualFactsToPreserve: 'Face and flat-top haircut.',
+            bytes: source, mimeType: 'image/png', sourceUrl: 'user-attachment', contextUrl: 'user-attachment',
+        }], {
+            strategy: 'serial-v1', aspectRatio: '2:3', onAttempt: attempt => attempts.push(attempt),
+        });
+        if (repairAccepted) {
+            const image = await result;
+            assert.equal(image.bytes.toString(), 'openai-2');
+            assert.equal(image.reviewStatus, 'accepted');
+        } else {
+            await assert.rejects(result, /Fallback first frames failed visual review: Hair shape changed/);
+        }
+        assert.equal(geminiCalls, 2);
+        assert.equal(openaiCalls, 2);
+        assert.equal(reviewCalls, 4);
+        assert.deepEqual(attempts.filter(value => value.stage === 'keyframe_candidate_openai')
+            .map(value => value.attempt), [1, 3]);
+    });
+}
 
 test('keyframe review timeout retries the quality gate before accepting a candidate', async t => {
     const attempts = [];
