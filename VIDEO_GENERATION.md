@@ -10,6 +10,7 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 - `$ltx <prompt>` queues an automatic-length, maximum-quality LTX 2.5 video of up to two minutes.
 - `$minimax <prompt>` queues an automatic-length, maximum-quality MiniMax H3 video of up to two minutes.
 - `$oalgo <prompt>` (also `$minimutt`) runs the same MiniMax H3 pipeline with the built-in OALGO starting image and its character-specific dialogue guidance. `$meximutt <prompt>` uses that pipeline while requiring every spoken line to have an exaggerated cholo/ese-style Mexican-American Spanglish accent and hard-edged street cadence; generated dialogue aggressively code-switches and uses expressions such as “ese,” “güey,” “cabrón,” “pinche,” and “no mames.” If another image is attached or inherited from a reply, the bot first tries to AI-composite it with OALGO and falls back to the built-in image if composition fails.
+- A video command sent as a reply inherits the replied message's image, and its text becomes the prompt, or context for any text typed after the command, which takes priority. When the replied message was itself a reply, up to three earlier messages in that chain go to the planners as background guidance only, so their wording, quotes and numbers are never treated as literal requirements.
 - `$videoqueue` shows the caller's unfinished jobs, positions, progress, and ETA.
 - `$videoqueue cancel <short-id>` cancels one of the caller's jobs.
 - Each video job status has a ❌ reaction that its caller can click to cancel it.

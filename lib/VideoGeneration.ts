@@ -307,6 +307,37 @@ async function fetchReferencedVideoMessage(msg: Message): Promise<Message | null
     }
 }
 
+const VIDEO_REPLY_CHAIN_MAX_EARLIER_MESSAGES = 3;
+const VIDEO_REPLY_CHAIN_MESSAGE_MAX_CHARS = 400;
+
+/** Messages the replied-to message was itself answering, oldest first. */
+export async function fetchEarlierVideoReplyChain(referencedMessage: Message | null): Promise<Message[]> {
+    const earlier: Message[] = [];
+    let current = referencedMessage;
+    while (current && earlier.length < VIDEO_REPLY_CHAIN_MAX_EARLIER_MESSAGES) {
+        current = await fetchReferencedVideoMessage(current);
+        if (current) earlier.unshift(current);
+    }
+    return earlier;
+}
+
+// The prompt is checked for verbatim quotes, numbers, and durations by both
+// planners, so earlier chain messages travel as planner guidance instead.
+export function videoReplyChainGuidance(earlierMessages: Array<Pick<Message, 'content'>>): string {
+    const texts = earlierMessages
+        .map(message => truncatePrompt(
+            String(message.content || '').replace(/\s+/g, ' ').trim(),
+            VIDEO_REPLY_CHAIN_MESSAGE_MAX_CHARS,
+        ))
+        .filter(Boolean);
+    if (!texts.length) return '';
+    return [
+        'Reply-chain background, for context only: the message this request replies to was continuing an earlier Discord conversation.',
+        `Earlier messages, oldest first: ${texts.map((text, index) => `(${index + 1}) ${text}`).join(' ')}`,
+        'Use them to understand what the request is responding to and its tone. The user request alone defines what to show and say; do not recite, caption, or require the wording or numbers of these earlier messages.',
+    ].join(' ');
+}
+
 function percentage(value: number | null): string {
     if (value === null) return '';
     return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
@@ -920,6 +951,7 @@ export async function handleVideoRequest(
     options: VideoRequestOptions = {},
 ): Promise<void> {
     const referencedMessage = await fetchReferencedVideoMessage(msg);
+    const earlierReplyChain = fetchEarlierVideoReplyChain(referencedMessage);
     let attachedSourceImage: SubmittedVideoAttachmentSourceImage | null;
     try {
         attachedSourceImage = videoSourceImageFromMessages(msg, referencedMessage);
@@ -945,6 +977,9 @@ export async function handleVideoRequest(
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(initialVideoRequestStatus(model));
+    const plannerGuidance = [options.plannerGuidance, videoReplyChainGuidance(await earlierReplyChain)]
+        .filter(Boolean)
+        .join(' ');
     let response: { job: VideoJobView };
     try {
         response = await brokerRequest<{ job: VideoJobView }>(`/v1/jobs`, {
@@ -964,7 +999,7 @@ export async function handleVideoRequest(
                 status_message_id: pending.id,
                 source_image: sourceImage,
                 source_image_composite: compositeSourceImage,
-                planner_guidance: options.plannerGuidance,
+                planner_guidance: plannerGuidance || undefined,
             }),
         }, compositeSourceImage ? 7 * 60 * 1000 : 45_000);
     } catch (error) {
