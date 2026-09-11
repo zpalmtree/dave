@@ -12,7 +12,6 @@ import {
     globalVideoQueueEmbeds,
     initialVideoRequestStatus,
     isVideoCancellationReaction,
-    MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
     OALGO_VIDEO_PLANNER_GUIDANCE,
     completedVideoPost,
     failedVideoPost,
@@ -260,25 +259,14 @@ test('local video commands are declared as Discord-only', () => {
         assert.equal(command.discordOnly, true);
     }
     const oalgo = Commands.find(candidate => candidate.aliases.includes('oalgo'));
-    assert.deepEqual(oalgo.aliases, ['oalgo', 'minimutt']);
+    assert.deepEqual(oalgo.aliases, ['oalgo', 'meximutt', 'minimutt']);
     const meximutt = Commands.find(candidate => candidate.aliases.includes('meximutt'));
-    assert.deepEqual(meximutt.aliases, ['meximutt']);
-    assert.notEqual(meximutt.primaryCommand.implementation, oalgo.primaryCommand.implementation);
+    assert.equal(meximutt, oalgo, 'both aliases must resolve to the same command and handler');
+    assert.equal(Commands.filter(candidate => candidate.aliases.some(alias => ['oalgo', 'meximutt'].includes(alias))).length, 1);
     for (const phrase of ['o algo', 'mayne', 'wey', 'puta pinche', 'no mames wey']) {
         assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, new RegExp(phrase));
     }
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /explicitly requested verbatim/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /Every dialogue turn/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /Spanglish accent in dialogue\.delivery/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /including dialogue supplied verbatim/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /characters other than OALGO/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /exaggerated, unmistakable cholo\/ese-style Mexican-American Spanglish accent/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /hard-edged, streetwise cadence/);
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /bold, over-the-top street caricature/);
-    for (const phrase of ['ese', 'güey', 'cabrón', 'pinche', 'no mames']) {
-        assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, new RegExp(phrase));
-    }
-    assert.match(MEXIMUTT_VIDEO_PLANNER_GUIDANCE, /Keep user-supplied dialogue text verbatim/);
     assert.equal(Commands.some(candidate => candidate.aliases.includes('minimaxdraft')), false);
 });
 

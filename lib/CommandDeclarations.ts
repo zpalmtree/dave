@@ -123,7 +123,6 @@ import {
     discordOnlyGate,
     handleLtxFastVideo,
     handleLtxVideo,
-    handleMeximuttVideo,
     handleMinimaxFastVideo,
     handleMinimaxVideo,
     handleOalgoVideo,
@@ -161,7 +160,7 @@ const sharedCommands: Command[] = [
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
-        aliases: ['oalgo', 'minimutt'],
+        aliases: ['oalgo', 'meximutt', 'minimutt'],
         discordOnly: true,
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -170,18 +169,6 @@ const sharedCommands: Command[] = [
             examples: [{ value: 'oalgo celebrates a championship victory' }],
         },
         relatedCommands: ['minimax', 'minimaxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate, singleVideoResponderGate],
-    },
-    {
-        aliases: ['meximutt'],
-        discordOnly: true,
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMeximuttVideo,
-            description: 'Generate an OALGO MiniMax H3 video with every spoken line delivered in a Spanglish accent',
-            examples: [{ value: 'meximutt argues with a parking attendant' }],
-        },
-        relatedCommands: ['oalgo', 'minimax', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {

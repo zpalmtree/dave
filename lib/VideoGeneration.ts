@@ -887,7 +887,7 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 }
 
 interface VideoRequestOptions {
-    commandVariant?: 'oalgo' | 'meximutt';
+    commandVariant?: 'oalgo';
     presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
     compositeAttachedImage?: boolean;
     plannerGuidance?: string;
@@ -911,14 +911,6 @@ export const OALGO_VIDEO_PLANNER_GUIDANCE = [
     'When the requested action or source image supports dialogue, give the OALGO character playful Mexican-American slang and code-switching.',
     'Naturally enrich suitable dialogue with phrases such as “o algo,” “mayne,” “wey,” “puta pinche,” and “no mames wey” without mechanically forcing every phrase into every line.',
     'Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable OALGO wording, but always retain the Spanglish accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.',
-].join(' ');
-
-export const MEXIMUTT_VIDEO_PLANNER_GUIDANCE = [
-    OALGO_VIDEO_PLANNER_GUIDANCE,
-    'Every dialogue turn must have an exaggerated, unmistakable cholo/ese-style Mexican-American Spanglish accent in dialogue.delivery, including dialogue supplied verbatim by the user and dialogue spoken by characters other than OALGO.',
-    'For generated or adaptable dialogue, use a hard-edged, streetwise cadence, aggressively code-switch between Mexican Spanish and American English, and frequently work in expressions such as “ese,” “güey,” “cabrón,” “pinche,” and “no mames” instead of leaving any line in a generic voice.',
-    'Treat the voice as a bold, over-the-top street caricature rather than subtle or neutral delivery, while keeping the dialogue coherent and suited to the scene.',
-    'Keep user-supplied dialogue text verbatim; express its exaggerated Spanglish character through accent, cadence, and delivery without translating or rewriting its words.',
 ].join(' ');
 
 export async function handleVideoRequest(
@@ -1028,15 +1020,6 @@ export async function handleOalgoVideo(msg: Message, prompt: string): Promise<vo
         presetSourceImage: 'oalgo',
         compositeAttachedImage: true,
         plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
-    });
-}
-
-export async function handleMeximuttVideo(msg: Message, prompt: string): Promise<void> {
-    await handleVideoRequest('minimax', msg, prompt, {
-        commandVariant: 'meximutt',
-        presetSourceImage: 'oalgo',
-        compositeAttachedImage: true,
-        plannerGuidance: MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
     });
 }
 
