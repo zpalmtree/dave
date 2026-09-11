@@ -15,8 +15,10 @@ import {
     OALGO_VIDEO_PLANNER_GUIDANCE,
     completedVideoPost,
     failedVideoPost,
+    fetchEarlierVideoReplyChain,
     singleVideoResponderGate,
     videoPromptFromMessages,
+    videoReplyChainGuidance,
     videoJobDirection,
     videoSourceImageFromMessage,
     videoSourceImageFromMessages,
@@ -1975,6 +1977,83 @@ test('video reply prompts preserve supplied text and handle missing or blank inp
     assert.equal(videoPromptFromMessages('', { content: '' }), '');
     assert.equal(videoPromptFromMessages('  Say "Not today!"\nThen run.  ', { content: '  A sunny racetrack.  ' }),
         'Context from the replied message:\nA sunny racetrack.\n\nCurrent instruction (takes priority):\nSay "Not today!"\nThen run.');
+});
+
+function replyChainChannel(messages, failingIds = []) {
+    const channel = {
+        messages: {
+            fetched: [],
+            async fetch(id) {
+                channel.messages.fetched.push(id);
+                if (failingIds.includes(id)) throw new Error('Unknown Message');
+                return messages[id];
+            },
+        },
+    };
+    for (const [id, message] of Object.entries(messages)) {
+        message.id = id;
+        message.channel = channel;
+    }
+    return channel;
+}
+
+test('video replies walk earlier reply-chain messages oldest first within the depth limit', async () => {
+    const messages = {
+        a: { content: 'Root message.' },
+        b: { content: 'Second.', reference: { messageId: 'a' } },
+        c: { content: 'Third.', reference: { messageId: 'b' } },
+        d: { content: 'Fourth.', reference: { messageId: 'c' } },
+        e: { content: 'Replied message.', reference: { messageId: 'd' } },
+    };
+    const channel = replyChainChannel(messages);
+    assert.deepEqual(
+        (await fetchEarlierVideoReplyChain(messages.e)).map(message => message.id),
+        ['b', 'c', 'd'],
+    );
+    assert.deepEqual(channel.messages.fetched, ['d', 'c', 'b']);
+    assert.deepEqual((await fetchEarlierVideoReplyChain(messages.b)).map(message => message.id), ['a']);
+    assert.deepEqual(await fetchEarlierVideoReplyChain(messages.a), []);
+    assert.deepEqual(await fetchEarlierVideoReplyChain(null), []);
+});
+
+test('video reply-chain walk keeps messages fetched before a deleted ancestor', async () => {
+    const messages = {
+        b: { content: 'Second.', reference: { messageId: 'a' } },
+        c: { content: 'Replied message.', reference: { messageId: 'b' } },
+    };
+    const channel = replyChainChannel(messages, ['a']);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+        assert.deepEqual((await fetchEarlierVideoReplyChain(messages.c)).map(message => message.id), ['b']);
+    } finally {
+        console.warn = warn;
+    }
+    assert.deepEqual(channel.messages.fetched, ['b', 'a']);
+});
+
+test('video reply-chain guidance is compact background that excludes blank messages', () => {
+    assert.equal(videoReplyChainGuidance([]), '');
+    assert.equal(videoReplyChainGuidance([{ content: ' \n ' }, { content: '' }]), '');
+    const guidance = videoReplyChainGuidance([
+        { content: '  like I spend too much time\n\nall day working.  ' },
+        { content: '' },
+        { content: 'have you ever had to saw cut 12" cores?' },
+    ]);
+    assert.match(guidance, /^Reply-chain background, for context only:/);
+    assert.match(
+        guidance,
+        /Earlier messages, oldest first: \(1\) like I spend too much time all day working\. \(2\) have you ever had to saw cut 12" cores\? Use them/,
+    );
+    assert.match(guidance, /do not recite, caption, or require the wording or numbers/);
+    assert.doesNotMatch(guidance, /\n/);
+
+    const long = videoReplyChainGuidance([{ content: 'x'.repeat(1000) }]);
+    assert.match(long, new RegExp(`\\(1\\) ${'x'.repeat(399)}… Use them`));
+    const withOalgo = `${OALGO_VIDEO_PLANNER_GUIDANCE} ${videoReplyChainGuidance(
+        Array.from({ length: 3 }, () => ({ content: 'y'.repeat(1000) })),
+    )}`;
+    assert.ok(withOalgo.length <= 8000, `combined guidance is ${withOalgo.length} characters`);
 });
 
 test('frontier keyframe prompt binds frame-zero motion geometry', () => {
