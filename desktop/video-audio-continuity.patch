@@ -1,0 +1,374 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -163,10 +163,22 @@
+ 
+ VIDEO_PLAN_SCHEMA: dict[str, Any] = {
+     "type": "object",
+-    "required": ["intent", "continuity_bible", "keyframe", "segments"],
++    "required": ["intent", "continuity_bible", "speaker_profiles", "keyframe", "segments"],
+     "properties": {
+         "intent": {"type": "string"},
+         "continuity_bible": {"type": "string"},
++        "speaker_profiles": {
++            "type": "array",
++            "items": {
++                "type": "object",
++                "additionalProperties": False,
++                "required": ["speaker_id", "voice_description"],
++                "properties": {
++                    "speaker_id": {"type": "string"},
++                    "voice_description": {"type": "string"},
++                },
++            },
++        },
+         "keyframe": {
+             "type": "object",
+             "required": [
+@@ -231,6 +243,7 @@
+                     "title",
+                     "overlay_label",
+                     "transition",
++                    "audio_transition",
+                     "target_seconds",
+                     "output_seconds",
+                     "music",
+@@ -239,6 +252,7 @@
+                 "properties": {
+                     "title": {"type": "string"},
+                     "overlay_label": {"type": "string"},
++                    "audio_transition": {"type": "string", "enum": ["auto", "cut", "fade"]},
+                     "transition": {
+                         "type": "string",
+                         "enum": ["start", "continue", "cut", "dissolve"],
+@@ -420,6 +434,8 @@
+ 
+ INTENT_PLANNER_INSTRUCTION = """You are the screenplay-planning stage for a local audiovisual video generator. Convert the user's possibly vague, title-like, misspelled, metaphorical, or detailed request into the JSON schema supplied by the caller. The semantic analyst's named_references, reference_requirements, presentation_mode, preserved_features, substitutions, important-term visual requirements, and visible_proof are a binding creative contract. Retain every named_reference verbatim in the actual shot visual/camera directions and express every other requirement concretely there; continuity prose alone is insufficient. Copy the semantic analyst's reference_requirements into keyframe.reference_requirements when a generated keyframe is recommended; a reference guides only its declared target and is never frame zero, a storyboard, or authority to copy unrelated people, text, logos, pose, background, composition, or action. A request shaped like 'X, but instead of Y use Z' means retain X's explicit name, recognizable visual grammar, and mechanics while changing only Y. Do not simplify or euphemize a named format into a generic scene with the same broad subject. The keyframe object must follow the analyst's recommendation and contain a standalone text-to-image prompt for the exact still visible at 0.00 seconds: specify all visible subjects and their spatial arrangement, recognizable faces/identities, wardrobe, props, environment, lighting, lens, framing, presentation medium, and style. It must depict one frozen, motion-ready instant rather than a sequence. Define a precise motion_contract for the dominant subject's orientation, gaze, travel vector, camera relationship, and first second of action. Compose the still so that action can continue directly without turning around, reversing direction, snapping the gaze, teleporting, crossing the camera axis, or reframing. The first shot's visual and camera directions must explicitly continue the same contract. For a vehicle moving away in chase view, show it already pointing away/down-track with the camera behind it; for an approaching subject, show it already facing and traveling toward camera. If an input reference image is attached, infer its visible orientation and pose, return no reference requirements, and make the opening motion compatible with it. Silently consider plausible interpretations, then choose the most visually recognizable literal interpretation unless the user explicitly requests metaphor. Preserve every explicit subject, identity, count, relationship, time range, modifier, quoted line, and wording. Treat explicit vocal intent as authority to write speech: when the request calls for speaking, talking, discussing, conversation, arguing, debating, interviewing, narration, announcing, shouting, singing, or another vocal performance but leaves wording unspecified, write the shortest natural original dialogue or lyrics needed to convey the requested topic. Use distinct concise turns, the intended speaker, language, and delivery, and describe the matching visible mouth movement in shot.visual. Every quoted spoken line must appear verbatim in dialogue.text; never paraphrase, censor, translate, extend, or pad it. A character-driven, narrative, confrontational, absurd, or comedic scene may include concise original in-world dialogue even without an explicit vocal request. Use dialogue when it adds character, advances the action, or lands a joke; never turn the creative brief itself into a spoken line or closely paraphrased narration, and respect explicit silence or no-dialogue direction. Infer collective scale from ordinary meaning rather than defaulting to one isolated protagonist. Plan the shortest duration that makes every requested action and line legible; do not pad an underspecified idea to ten seconds. Put short dialogue near the beginning unless a delay is requested, allow a brief silent visual lead-in, and fill any remaining time with visible reaction or action rather than additional speech. A segment is one independently generated clip; shots inside a segment are directions that one generative pass must perform itself. Keep camera-angle, framing, or lens changes within the same continuous location, cast, lighting, and action as up to four shots in one segment. Every hard scene change involving a different location, time, cast, environment, independent action, or deliberately discontinuous visual state must begin a new segment even when the story fits the caller's per-segment maximum. Do not split a continuous action merely for another camera angle. The sum of automatic segment durations must not exceed the caller's total cap. A segment transition is start for the first segment, continue only when its opening should inherit and physically continue from the previous final frame, cut for a fresh hard scene, or dissolve only when a soft transition is creatively justified. Every shot must describe concrete visible action, camera behavior, and sound. Treat non-dialogue audio as a chronological production contract rather than a generic sound list: synchronize every important visible action to its audible result; describe the physical source, material or timbre, distance, acoustic space, stereo movement when relevant, and attack or decay; establish a continuous environmental bed; prioritize only a few readable foreground effects above lower ambience; and describe how intensity changes with the action. The shot.audio field is exclusively for non-speech ambience and sound effects: never put dialogue, voice, speaking, delivery, lip-sync, mouth movement, or a quoted line in shot.audio. Do not invent a non-diegetic score unless the user requests music or the named presentation inherently requires it; otherwise set segment.music exactly to N/A. When music is justified, specify instrumentation, tempo, dynamics, and how it yields to important action sounds instead of merely naming a mood. Do not communicate concepts through titles, captions, logos, or on-screen text unless explicitly requested. Output only valid JSON matching the schema; no markdown or explanation."""
+ 
++INTENT_PLANNER_INSTRUCTION += '\n\nDefine speaker_profiles once for the whole video, with one speaker_id and voice_description for each speaking character. Keep speaker_id identical across scenes. voice_description fixes accent, habitual pitch range, resonance, texture, and cadence; respect any supplied character voice description. Keep momentary emotion and performance in dialogue.delivery, without changing that underlying identity. Use an empty array for no speech. Reuse the same environmental sound description across shots in a continuous location, allowing intentional changes in distance and acoustics. Keep requested music instrumentation, tempo, and key consistent across segments.\nChoose segment.audio_transition independently from the picture transition: auto uses short seam fades at cuts and an audio crossfade at a picture dissolve; cut preserves an intentional abrupt sound change; fade uses short seam fades even across a picture dissolve. These are edits of the combined audio, not separate ambience tracks. Never rely on them to continue a spoken sentence or music phrase across independently generated clips; finish spoken turns before a segment boundary.'
++
+ INTENT_PLANNER_INSTRUCTION += (
+     " For MiniMax H3, put a single short user-supplied line in the first shot of its segment "
+     "and reserve a clean 0.35-second visual lead-in before it begins: no human voice, mumbling, or "
+@@ -2940,6 +2956,9 @@
+         "schema_version": 1,
+         "intent": str(plan["intent"]).strip(),
+         "continuity_bible": str(plan["continuity_bible"]).strip(),
++        "speaker_profiles": normalize_audio_continuity({
++            "speaker_profiles": plan.get("speaker_profiles", []), "segments": normalized,
++        }),
+         "keyframe": {
+             "recommended": bool(keyframe.get("recommended")),
+             "reason": str(keyframe["reason"]).strip(),
+@@ -4667,6 +4686,50 @@
+     return LANGUAGE_ALIASES.get(key, language)
+ 
+ 
++def normalize_audio_continuity(plan: dict[str, Any]) -> list[dict[str, str]]:
++    """Preserve explicit identities; migrate legacy plans from each speaker's first turn."""
++    profiles: dict[str, dict[str, str]] = {}
++    supplied = plan.get("speaker_profiles", [])
++    if not isinstance(supplied, list):
++        raise VideoGenError("speaker_profiles must be an array")
++    for profile in supplied:
++        if not isinstance(profile, dict):
++            raise VideoGenError("speaker profile must be an object")
++        speaker = str(profile.get("speaker_id") or "").strip()
++        voice = str(profile.get("voice_description") or "").strip()
++        if not speaker or not voice or speaker.casefold() in profiles:
++            raise VideoGenError("speaker profiles need unique IDs and nonempty voice descriptions")
++        profiles[speaker.casefold()] = {"speaker_id": speaker, "voice_description": voice}
++    for segment in plan.get("segments", []):
++        transition = segment.get("audio_transition", "auto")
++        if transition not in {"auto", "cut", "fade"}:
++            raise VideoGenError(f"invalid audio transition: {transition}")
++        segment["audio_transition"] = transition
++        for shot in segment.get("shots", []):
++            for line in shot.get("dialogue", []):
++                speaker = str(line.get("speaker_id") or "").strip()
++                if speaker and speaker.casefold() not in profiles:
++                    profiles[speaker.casefold()] = {
++                        "speaker_id": speaker,
++                        "voice_description": str(line.get("delivery") or "natural voice").strip() or "natural voice",
++                    }
++    return list(profiles.values())
++
++
++def bind_segment_voices(plan: dict[str, Any], segments: list[dict[str, Any]]) -> None:
++    profiles = normalize_audio_continuity(plan)
++    by_id = {profile["speaker_id"].casefold(): (index, profile)
++             for index, profile in enumerate(profiles, 1)}
++    for segment in segments:
++        for shot in segment.get("shots", []):
++            for line in shot.get("dialogue", []):
++                entry = by_id.get(str(line.get("speaker_id", "")).strip().casefold())
++                if entry:
++                    index, profile = entry
++                    line["voice_description"] = profile["voice_description"]
++                    line["speaker_tag"] = f"S{index}"
++
++
+ def normalized_music(value: Any) -> str:
+     music = str(value or "").strip()
+     marker = re.sub(r"[\s.!]+", " ", music).strip().casefold()
+@@ -4679,7 +4742,7 @@
+     lines = []
+     for line in shot.get("dialogue", []):
+         original = str(line["speaker_id"]).strip().lstrip("(").rstrip(")") or "speaker"
+-        speaker = speaker_map.setdefault(original.casefold(), f"S{len(speaker_map) + 1}")
++        speaker = line.get("speaker_tag") or speaker_map.setdefault(original.casefold(), f"S{len(speaker_map) + 1}")
+         delivery = re.sub(
+             r"^\s*(?:(?:begins?|starts?)\s+(?:immediately|at once)|"
+             r"immediate(?:ly)?|at once)\s*[;,:.\-]*\s*",
+@@ -4687,8 +4750,10 @@
+             str(line["delivery"]),
+             flags=re.IGNORECASE,
+         ).strip() or "natural delivery"
++        voice = str(line.get("voice_description", "")).strip()
++        identity = f"stable voice identity: {voice}; this turn's performance: " if voice else ""
+         lines.append(
+-            f"{original} ({speaker}), with {delivery}, says: "
++            f"{original} ({speaker}), with {identity}{delivery}, says: "
+             f"<d>[{normalized_language(line['language'])}] {line['text']}</d>"
+         )
+     return " ".join(lines)
+@@ -4934,7 +4999,9 @@
+         sentence = f"{transition} {shot['visual'].rstrip('.')} while {shot['camera'].rstrip('.')} ."
+         for line in shot.get("dialogue", []):
+             sentence += (
+-                f" The {line['speaker_id']} speaker, in {normalized_language(line['language'])} with "
++                f" The {line['speaker_id']} speaker, "
++                + (f"with stable voice identity {line['voice_description']}, " if line.get("voice_description") else "")
++                + f"in {normalized_language(line['language'])} with "
+                 f"{line['delivery']}, says exactly: \"{line['text']}\"."
+             )
+         sentence += f" {shot['audio'].rstrip('.')} ."
+@@ -6305,6 +6372,7 @@
+     fast_duration_aware: bool = False,
+ ) -> list[dict[str, Any]]:
+     segments = copy.deepcopy(plan["segments"])
++    bind_segment_voices(plan, segments)
+     if model == "h3" and fast_duration_aware:
+         segments = fit_fast_h3_segments_to_delivery(segments)
+     deferred_segment_indexes = deferred_segment_indexes or set()
+@@ -6429,6 +6497,7 @@
+                 "index": index + 1,
+                 "title": segment["title"],
+                 "transition": segment["transition"],
++                "audio_transition": segment.get("audio_transition", "auto"),
+                 "target_seconds": round(target_seconds, 3),
+                 "source_target_seconds": round(source_target_seconds, 3),
+                 "duration_optimized": target_seconds + 1e-6 < source_target_seconds,
+@@ -6482,7 +6551,11 @@
+         raise VideoGenError(f"{context}: {detail or f'FFmpeg exited {result.returncode}'}")
+ 
+ 
+-def h3_dialogue_opening_guard_enabled() -> bool:
++def h3_dialogue_opening_guard_enabled(segment_index: int = 1) -> bool:
++    # The legacy guard silences the entire mix, including music and room tone.
++    # Limit it to the video opening; keep the prompt's speech-only lead-in on every clip.
++    if segment_index > 1 and os.environ.get("VIDEO_H3_DIALOGUE_OPENING_GUARD_SCOPE", "opening").casefold() != "all":
++        return False
+     return os.environ.get(
+         "VIDEO_H3_DIALOGUE_OPENING_GUARD",
+         "1",
+@@ -7034,7 +7107,13 @@
+     validations: list[dict[str, Any]],
+     transitions: list[str],
+     destination: Path,
++    audio_transitions: list[str] | None = None,
+ ) -> dict[str, Any]:
++    if not paths or len(paths) != len(validations) or len(paths) != len(transitions):
++        raise VideoGenError("assembly requires matching nonempty paths, validations and transitions")
++    audio_transitions = audio_transitions if audio_transitions is not None else ["auto"] * len(paths)
++    if len(audio_transitions) != len(paths) or any(value not in {"auto", "cut", "fade"} for value in audio_transitions):
++        raise VideoGenError("assembly requires one valid audio transition per segment")
+     if len(paths) == 1:
+         return validations[0]
+     command = [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", "-y"]
+@@ -7047,7 +7126,9 @@
+         )
+         filters.append(
+             f"[{index}:a]asetpts=PTS-STARTPTS,aresample=48000," 
+-            f"aformat=sample_fmts=fltp:channel_layouts=stereo[a{index}]"
++            f"aformat=sample_fmts=fltp:channel_layouts=stereo,"
++            f"apad=whole_dur={float(validations[index]['duration_seconds']):.6f},"
++            f"atrim=duration={float(validations[index]['duration_seconds']):.6f}[a{index}]"
+         )
+     current_video = "v0"
+     current_audio = "a0"
+@@ -7062,14 +7143,35 @@
+                 f"[{current_video}][v{index}]xfade=transition=fade:duration={fade:.3f}:"
+                 f"offset={offset:.3f}[{next_video}]"
+             )
++        else:
++            fade = 0.0
++            filters.append(f"[{current_video}][v{index}]concat=n=2:v=1:a=0[{next_video}]")
++        audio_mode = audio_transitions[index]
++        if fade and audio_mode == "auto":
+             filters.append(
+                 f"[{current_audio}][a{index}]acrossfade=d={fade:.3f}:c1=tri:c2=tri[{next_audio}]"
+             )
+-            cumulative += float(validations[index]["duration_seconds"]) - fade
+         else:
+-            filters.append(f"[{current_video}][v{index}]concat=n=2:v=1:a=0[{next_video}]")
+-            filters.append(f"[{current_audio}][a{index}]concat=n=2:v=0:a=1[{next_audio}]")
+-            cumulative += float(validations[index]["duration_seconds"])
++            # A separate audio cut during a visual dissolve lands at its midpoint.
++            # Trim equal halves of the existing overlap to preserve both A/V alignment
++            # and total runtime. At ordinary cuts no samples or timestamps are shifted.
++            left = current_audio
++            right = f"a{index}"
++            left_duration = cumulative - fade / 2
++            right_duration = float(validations[index]["duration_seconds"]) - fade / 2
++            if fade:
++                filters.append(f"[{left}]atrim=end={left_duration:.6f},asetpts=PTS-STARTPTS[al{index}]")
++                filters.append(f"[{right}]atrim=start={fade / 2:.6f},asetpts=PTS-STARTPTS[ar{index}]")
++                left, right = f"al{index}", f"ar{index}"
++            if audio_mode != "cut":
++                # Twelve milliseconds suppresses a splice click without a perceptible
++                # pause or the dialogue overlap introduced by whole-mix crossfades.
++                seam = min(0.012, left_duration / 4, right_duration / 4)
++                filters.append(f"[{left}]afade=t=out:st={left_duration - seam:.6f}:d={seam:.6f}[afl{index}]")
++                filters.append(f"[{right}]afade=t=in:d={seam:.6f}[afr{index}]")
++                left, right = f"afl{index}", f"afr{index}"
++            filters.append(f"[{left}][{right}]concat=n=2:v=0:a=1[{next_audio}]")
++        cumulative += float(validations[index]["duration_seconds"]) - fade
+         current_video, current_audio = next_video, next_audio
+     # xfade promotes 4:2:0 inputs to yuv444p. Convert the completed graph back to
+     # the broadly supported 8-bit 4:2:0 format before libx264 selects a profile.
+@@ -7878,7 +7980,7 @@
+                     model == "h3"
+                     and has_segment_speech
+                     and dialogue_guard_seconds > 0
+-                    and h3_dialogue_opening_guard_enabled()
++                    and h3_dialogue_opening_guard_enabled(segment["index"])
+                 )
+                 if record:
+                     candidate = Path(record["path"])
+@@ -8102,6 +8204,7 @@
+                     validations,
+                     transitions,
+                     final_output,
++                    [segment.get("audio_transition", "auto") for segment in prepared],
+                 )
+             else:
+                 final_output = segment_paths[0]
+@@ -8189,8 +8292,14 @@
+                     "shift_audio": args.h3_shift_audio or 3.0,
+                     "dialogue_lead_in_seconds": h3_dialogue_lead_in_seconds(),
+                     "dialogue_opening_guard": h3_dialogue_opening_guard_enabled(),
++                    "dialogue_opening_guard_scope": os.environ.get("VIDEO_H3_DIALOGUE_OPENING_GUARD_SCOPE", "opening"),
+                 } if model == "h3" else None),
+                 "loop_optimization": loop_optimization,
++                "audio_continuity": {
++                    "speaker_profiles": normalize_audio_continuity(plan),
++                    "transitions": [segment.get("audio_transition", "auto") for segment in prepared],
++                    "seam_fade_seconds": 0.012,
++                },
+                 "segments": completed,
+                 "generated_at": datetime.now().astimezone().isoformat(),
+                 "validation": final_validation,
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -3217,5 +3217,101 @@
+         self.assertEqual(command[command.index("-profile:v") + 1], "high")
+ 
+ 
++class AudioContinuityTests(unittest.TestCase):
++    def test_profiles_survive_validation_and_anchor_both_compilers(self):
++        plan = sample_plan("Hello.")
++        plan["speaker_profiles"] = [
++            {"speaker_id": "woman", "voice_description": "bright alto"},
++            {"speaker_id": "man", "voice_description": "low chest resonance, Mexican Spanish accent"},
++        ]
++        second = video_gen.copy.deepcopy(plan["segments"][0])
++        second.update(transition="cut", audio_transition="fade")
++        second["shots"][0]["dialogue"][0]["delivery"] = "shouting"
++        plan["segments"].append(second)
++        normalized = video_gen.validate_plan_shape(plan, "", None, 15.0, 5.0)
++        self.assertEqual(normalized["speaker_profiles"], plan["speaker_profiles"])
++        prepared = video_gen.prepare_model_segments("", normalized, "h3", None, {}, False, 1.0)
++        self.assertEqual(prepared[1]["audio_transition"], "fade")
++        for segment in prepared:
++            self.assertIn("man (S2)", segment["prompt"])
++            self.assertIn("low chest resonance, Mexican Spanish accent", segment["prompt"])
++            self.assertIn("<d>[English] Hello.</d>", segment["prompt"])
++        self.assertIn("this turn's performance: shouting", prepared[1]["prompt"])
++        ltx = video_gen.compile_ltx_draft({"shots": prepared[1]["shots"], "music": "N/A"}, False)
++        self.assertIn("low chest resonance, Mexican Spanish accent", ltx)
++        self.assertIn('says exactly: "Hello."', ltx)
++
++    def test_legacy_profiles_and_invalid_contracts(self):
++        plan = sample_plan("Hello.")
++        second = video_gen.copy.deepcopy(plan["segments"][0])
++        second["shots"][0]["dialogue"] = [
++            {"speaker_id": "woman", "delivery": "bright alto", "text": "Hi."},
++            {"speaker_id": "MAN", "delivery": "angry", "text": "Wait."},
++        ]
++        plan["segments"].append(second)
++        profiles = video_gen.normalize_audio_continuity(plan)
++        self.assertEqual(profiles, [
++            {"speaker_id": "man", "voice_description": "calmly"},
++            {"speaker_id": "woman", "voice_description": "bright alto"},
++        ])
++        self.assertEqual(second["shots"][0]["dialogue"][1]["delivery"], "angry")
++        self.assertEqual(video_gen.normalize_audio_continuity(sample_plan()), [])
++        plan["speaker_profiles"] = profiles + [profiles[0]]
++        with self.assertRaisesRegex(video_gen.VideoGenError, "unique"):
++            video_gen.normalize_audio_continuity(plan)
++        plan.pop("speaker_profiles")
++        plan["segments"][0]["audio_transition"] = "invalid"
++        with self.assertRaisesRegex(video_gen.VideoGenError, "audio transition"):
++            video_gen.normalize_audio_continuity(plan)
++
++    def test_internal_scenes_keep_ambience_with_explicit_legacy_rollback(self):
++        with mock.patch.dict(video_gen.os.environ, {}, clear=True):
++            self.assertTrue(video_gen.h3_dialogue_opening_guard_enabled(1))
++            self.assertFalse(video_gen.h3_dialogue_opening_guard_enabled(2))
++        with mock.patch.dict(video_gen.os.environ, {
++            "VIDEO_H3_DIALOGUE_OPENING_GUARD": "1", "VIDEO_H3_DIALOGUE_OPENING_GUARD_SCOPE": "all",
++        }):
++            self.assertTrue(video_gen.h3_dialogue_opening_guard_enabled(2))
++        with mock.patch.dict(video_gen.os.environ, {"VIDEO_H3_DIALOGUE_OPENING_GUARD": "0"}):
++            self.assertFalse(video_gen.h3_dialogue_opening_guard_enabled(1))
++
++    def test_real_audio_edits_preserve_av_timing(self):
++        import shutil
++        import subprocess
++        ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
++        if not ffmpeg or not ffprobe:
++            self.skipTest("FFmpeg and ffprobe required for CPU assembly integration test")
++
++        def probe(path):
++            result = subprocess.run([ffprobe, "-v", "error", "-show_streams", "-of", "json", str(path)],
++                                    capture_output=True, text=True, check=True)
++            streams = json.loads(result.stdout)["streams"]
++            return {"duration_seconds": float(streams[0]["duration"]), "streams": streams}
++
++        with tempfile.TemporaryDirectory() as directory:
++            source, output = Path(directory) / "source.mp4", Path(directory) / "joined.mp4"
++            subprocess.run([
++                ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=24:d=1",
++                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1.08",
++                "-c:v", "libx264", "-threads", "1", "-c:a", "aac", "-ac", "2", str(source),
++            ], capture_output=True, check=True)
++            for transitions, audio, expected in [
++                (["start", "cut", "continue"], ["auto", "auto", "auto"], 3.0),
++                (["start", "cut", "cut"], ["auto", "cut", "fade"], 3.0),
++                (["start", "dissolve", "cut"], ["auto", "auto", "auto"], 2.75),
++                (["start", "dissolve", "dissolve"], ["auto", "cut", "fade"], 2.5),
++            ]:
++                with self.subTest(transitions=transitions, audio=audio), \
++                     mock.patch.object(video_gen, "ffmpeg_executable", return_value=ffmpeg), \
++                     mock.patch.object(video_gen, "validate_video", side_effect=probe):
++                    result = video_gen.assemble_segments(
++                        [source] * 3, [{"duration_seconds": 1.0}] * 3, transitions, output, audio,
++                    )
++                    for stream in result["streams"]:
++                        self.assertAlmostEqual(float(stream["duration"]), expected, delta=0.045)
++                    subprocess.run([ffmpeg, "-v", "error", "-i", str(output), "-f", "null", "-"],
++                                   capture_output=True, check=True)
++
++
+ if __name__ == "__main__":
+     unittest.main()

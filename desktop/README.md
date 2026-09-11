@@ -1,5 +1,14 @@
 # Desktop video optimization changes
 
+## Audio continuity
+
+`video-audio-continuity.patch` adds shared speaker profiles, independent audio
+edits, duration-correct assembly, and an opening-only default for the H3 blanket
+audio mute. See [audio continuity](../docs/video-audio-continuity.md) for behavior,
+limitations, regression coverage and installation. The patch changes only the
+generator and its tests; new generator invocations load it without restarting
+the worker or interrupting active renders.
+
 ## Continuity-frame fallback and delivery repair
 
 `video-fallback-delivery.patch` fixes local validation of speech accidentally
