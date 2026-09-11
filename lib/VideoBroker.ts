@@ -1947,8 +1947,8 @@ export class VideoBroker {
         const plannerGuidance = sanitizeVideoWorkerText(
             body.planner_guidance,
             '',
-            // OALGO/Meximutt combine visual-story and voice guidance. The old
-            // 2,000-character cap silently removed their trailing voice rules.
+            // OALGO combines visual-story and voice guidance. The old
+            // 2,000-character cap silently removed its trailing voice rules.
             8000,
         ).trim() || null;
         const deliveryLimit = Number(
@@ -2028,10 +2028,13 @@ export class VideoBroker {
         const suppliedRequestedAt = Number(body.requested_at);
         const requestedAt = Number.isFinite(suppliedRequestedAt) && suppliedRequestedAt <= receivedAt
             && suppliedRequestedAt > receivedAt - 86400 ? suppliedRequestedAt : receivedAt;
-        const commandVariant = String(body.command_variant || (
+        const requestedCommandVariant = String(body.command_variant || (
             sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'oalgo' : VIDEO_MODELS[body.model as VideoModelId].command
         ));
-        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo', 'meximutt'] : [])].includes(commandVariant)) {
+        // Older clients may still send an alias; share rollout selection and metrics.
+        const commandVariant = ['meximutt', 'minimutt'].includes(requestedCommandVariant)
+            ? 'oalgo' : requestedCommandVariant;
+        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo'] : [])].includes(commandVariant)) {
             return { status: 400, body: { error: 'Invalid video command variant.' } };
         }
         const sourceMode = compositeDescriptor ? 'preset_composite'

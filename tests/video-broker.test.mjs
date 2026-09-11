@@ -18,7 +18,7 @@ import {
     videoFailureDisposition,
 } from '../dist/VideoBroker.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
-import { OALGO_VIDEO_PLANNER_GUIDANCE, MEXIMUTT_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
+import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtocol.js';
 
 test('authenticated owner submissions bypass the personal limit but retain the global cap', async () => {
@@ -163,7 +163,7 @@ test('derived segment identity references apply only to recurring source cast', 
     assert.equal(videoSegmentUsesFrameZeroIdentity(plan, 2), false);
 });
 
-test('broker resolves the built-in OALGO preset without arbitrary file input', async () => {
+test('broker canonicalizes the legacy meximutt alias and resolves the OALGO preset', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-preset-'));
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
@@ -176,7 +176,7 @@ test('broker resolves the built-in OALGO preset without arbitrary file input', a
             method: 'POST',
             headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
             body: JSON.stringify({
-                model: 'minimax', prompt: 'Animate the preset', requester_id: 'preset-user',
+                model: 'minimax', command_variant: 'meximutt', prompt: 'Animate the preset', requester_id: 'preset-user',
                 origin_bot_id: 'bot-1', channel_id: 'channel-1',
                 command_message_id: 'preset-message', status_message_id: 'preset-status',
                 source_image: { preset: 'oalgo' },
@@ -185,6 +185,7 @@ test('broker resolves the built-in OALGO preset without arbitrary file input', a
         const body = await response.json();
         assert.equal(response.status, 201);
         assert.equal(body.job.has_source_image, true);
+        assert.equal((await broker.get('SELECT command_variant FROM video_submission_metrics')).command_variant, 'oalgo');
         assert.deepEqual(
             readFileSync(join(directory, 'results', body.job.id, 'source.png')),
             readFileSync(new URL('../images/oalgo.png', import.meta.url)),
@@ -835,7 +836,7 @@ test('OALGO jobs use the preset, AI-composite an attachment, and fall back safel
         return { status: response.status, body: await response.json() };
     };
     try {
-        const generated = await submit('generated', MEXIMUTT_VIDEO_PLANNER_GUIDANCE);
+        const generated = await submit('generated', OALGO_VIDEO_PLANNER_GUIDANCE);
         assert.equal(generated.status, 201);
         assert.equal(generated.body.job.has_source_image, true);
         assert.equal(generated.body.source_image_composition, 'generated');
@@ -858,7 +859,7 @@ test('OALGO jobs use the preset, AI-composite an attachment, and fall back safel
                 );
             });
         });
-        assert.equal(guidance, MEXIMUTT_VIDEO_PLANNER_GUIDANCE,
+        assert.equal(guidance, OALGO_VIDEO_PLANNER_GUIDANCE,
             'the complete character guidance must survive broker storage, including voice rules after character 2,000');
 
         failComposition = true;
