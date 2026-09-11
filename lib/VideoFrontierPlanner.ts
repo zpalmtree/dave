@@ -1,3 +1,4 @@
+import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA } from './VideoAudioContinuity.js';
 import { createHash } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 
@@ -104,10 +105,11 @@ export function configuredVideoPlannerVariant(
 export const VIDEO_PLAN_SCHEMA = {
     type: 'object',
     additionalProperties: false,
-    required: ['intent', 'continuity_bible', 'keyframe', 'segments'],
+    required: ['intent', 'continuity_bible', 'speaker_profiles', 'keyframe', 'segments'],
     properties: {
         intent: { type: 'string' },
         continuity_bible: { type: 'string' },
+        speaker_profiles: VIDEO_SPEAKER_PROFILES_SCHEMA,
         keyframe: {
             type: 'object',
             additionalProperties: false,
@@ -165,6 +167,7 @@ export const VIDEO_PLAN_SCHEMA = {
                     'title',
                     'overlay_label',
                     'transition',
+                    'audio_transition',
                     'target_seconds',
                     'output_seconds',
                     'music',
@@ -174,6 +177,7 @@ export const VIDEO_PLAN_SCHEMA = {
                     title: { type: 'string' },
                     overlay_label: { type: 'string' },
                     transition: { type: 'string', enum: ['start', 'continue', 'cut', 'dissolve'] },
+                    audio_transition: { type: 'string', enum: ['auto', 'cut', 'fade'] },
                     target_seconds: { type: 'number', minimum: 1, maximum: 20 },
                     output_seconds: { type: 'number', minimum: 0.5, maximum: 20 },
                     music: { type: 'string' },
@@ -452,6 +456,8 @@ Treat every content-bearing word in the request as material. Preserve every expl
 Choose the shortest natural finished duration that makes the idea legible, capped by the supplied total and per-segment limits. A segment is one independently generated clip, while shots inside a segment are directions that one generative pass must perform itself. Keep ordinary camera-angle, framing, or lens changes within the same continuous location, cast, lighting, and action as shots in one segment. Every hard scene change involving a different location, time, cast, environment, independent action, or deliberately discontinuous visual state must begin a new segment even when the total duration fits one model generation. Use transition=continue only when the next segment should inherit the preceding final frame and can physically continue from it; use cut for a fresh scene and dissolve only for an intentional soft transition. Do not split a continuous action merely to add another camera angle. The sum of shot durations within each segment should equal target_seconds.
 
 ${VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS}
+
+${VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS}
 
 Budget action density for reliable generation before polishing prose. In a shot of seven seconds or less, stage one primary physical action, optionally followed by one simple reaction or consequence; a spoken turn also consumes beat time. In an eight-to-fifteen-second shot, use at most three simple sequential phases with a clear causal link. If the story needs more, distribute the beats across additional shots, segments, or duration within the supplied limits instead of compressing a chain of gestures, transformations, reactions, and dialogue into one clip. For generated speech, prefer one memorable line or a concise two-turn exchange for a short comic beat; do not make every shot talk.
 
@@ -1458,6 +1464,8 @@ export function compileBestEffortFrontierVideoPlan(
         segments.push({
             title: String(original.title || `Segment ${segmentIndex + 1}`).trim(),
             overlay_label: String(original.overlay_label || 'N/A').trim() || 'N/A',
+            audio_transition: ['auto', 'cut', 'fade'].includes(original.audio_transition)
+                ? original.audio_transition : 'auto',
             transition: segmentIndex === 0
                 ? 'start'
                 : (['continue', 'cut', 'dissolve'].includes(String(original.transition))
@@ -1506,6 +1514,7 @@ export function compileBestEffortFrontierVideoPlan(
         : {};
     const compiled = {
         intent: String(source.intent || promptAnalysis?.resolved_intent || rawPrompt).trim() || rawPrompt,
+        ...(Array.isArray(source.speaker_profiles) ? { speaker_profiles: source.speaker_profiles } : {}),
         continuity_bible: [
             String(source.continuity_bible || '').trim(),
             `Original request (preserve literally): ${rawPrompt}`,
@@ -1548,6 +1557,14 @@ export function compileBestEffortFrontierVideoPlan(
             ? { segment_keyframes: JSON.parse(JSON.stringify(source.segment_keyframes)) }
             : {}),
     };
+    try {
+        normalizeVideoAudioContinuity(compiled);
+    } catch {
+        // A rejected planner response may contain conflicting voice profiles.
+        // Recover from its actual spoken turns instead of abandoning the fallback.
+        compiled.speaker_profiles = [];
+        normalizeVideoAudioContinuity(compiled);
+    }
     preserveAudiovisualContractsBestEffort(compiled, analysis);
     stageFrontierDialogueVisually(compiled);
     reconcileFrontierKeyframeMotionGeometry(compiled);
@@ -1570,6 +1587,7 @@ export function validateFrontierVideoPlanForKeyframe(
     if (!String(plan.intent || '').trim() || !String(plan.continuity_bible || '').trim()) {
         throw new Error('GPT-5.6 Sol omitted the intent or continuity bible.');
     }
+    normalizeVideoAudioContinuity(JSON.parse(JSON.stringify(plan)));
     if (plan.prompt_analysis) validateAudiovisualContracts(plan, plan.prompt_analysis);
     validateKnownEveryPresidentContract(plan.prompt_analysis || plan.semantic_analysis, rawPrompt);
     validateCoverageContract(plan, plan.prompt_analysis || plan.semantic_analysis);
