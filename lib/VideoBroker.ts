@@ -235,6 +235,7 @@ interface JobRow {
     delivered_at: number | null;
     notified_at: number | null;
     planner_json: string | null;
+    frontier_analysis_json: string | null;
     planner_model: string | null;
     source_image_path: string | null;
     source_image_mime: string | null;
@@ -372,6 +373,16 @@ const FRONTIER_REJECTION_PREFIX = 'local-fallback:';
 function cachedFrontierRejection(plannerModel: string | null): string | null {
     if (!plannerModel?.startsWith(FRONTIER_REJECTION_PREFIX)) return null;
     return plannerModel.slice(FRONTIER_REJECTION_PREFIX.length).trim() || 'other';
+}
+
+function parseStoredFrontierAnalysis(value: string | null): Record<string, any> | null {
+    if (!value) return null;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
 }
 
 export type VideoFailureDisposition = 'fail' | 'retry' | 'wait-readiness';
@@ -1070,8 +1081,11 @@ async function composeOalgoSourceImages(
     const references: VideoKeyframeReference[] = [
         {
             label: 'OALGO base image',
-            kind: 'style',
-            visualFactsToPreserve: 'Preserve the recognizable face and body, Mexican flag clothing and emblem, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so OALGO can visibly interact with the attached subjects.',
+            // identity, not style: only an identity reference makes the supplied image the
+            // authority for face and body. Declared as style, the composite kept the shirt
+            // and palette and replaced OALGO with a generic man.
+            kind: 'identity',
+            visualFactsToPreserve: 'This image is the authority for who OALGO is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with the Mexican flag clothing and emblem, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so OALGO can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.',
             bytes: readFileSync(base.path),
             mimeType: base.mimeType,
             sourceUrl: 'built-in:oalgo',
@@ -1346,6 +1360,7 @@ export class VideoBroker {
             ['keyframe_strategy', 'TEXT'],
             ['command_variant', 'TEXT'], ['source_mode', 'TEXT'], ['requested_at', 'REAL'],
             ['optimization_json', 'TEXT'],
+            ['frontier_analysis_json', 'TEXT'],
         ] as const) {
             if (!columnNames.has(name)) {
                 await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
@@ -2958,6 +2973,7 @@ export class VideoBroker {
             throw new FrontierPlannerRejectedError(
                 cachedRejection,
                 `Frontier planner previously classified this request for local fallback (${cachedRejection}).`,
+                parseStoredFrontierAnalysis(job.frontier_analysis_json),
             );
         }
         let planning = this.plannerInFlight.get(job.public_id);
@@ -3039,7 +3055,8 @@ export class VideoBroker {
                         const rejectionVariant = this.frontierOptions(job, criticalPath);
                         const rejectionStrategy = rejectionVariant.plannerStrategy || 'single-pass';
                         await this.run(
-                            `UPDATE video_jobs SET planner_model = ?, planner_fingerprint = ?, updated_at = ?
+                            `UPDATE video_jobs SET planner_model = ?, planner_fingerprint = ?,
+                                    frontier_analysis_json = ?, updated_at = ?
                              WHERE public_id = ? AND status IN (${ACTIVE_SQL})`,
                             [
                                 `${FRONTIER_REJECTION_PREFIX}${reasonCode}`,
@@ -3050,6 +3067,9 @@ export class VideoBroker {
                                     rejectionVariant.plannerGuidance || '',
                                     rejectionStrategy,
                                 ),
+                                // Keep the rejected run's dialogue contract; a retry hits the
+                                // cached-rejection path and would otherwise plan locally blind.
+                                error.promptAnalysis ? JSON.stringify(error.promptAnalysis) : null,
                                 nowSeconds(),
                                 job.public_id,
                             ],
@@ -4445,6 +4465,10 @@ export class VideoBroker {
                     ...(error instanceof FrontierPlannerRejectedError ? {
                         disposition: 'reject',
                         reason_code: error.reasonCode,
+                        // The local planner re-derives speech from the raw prompt alone and
+                        // reads a bare assertion as visual direction. Hand it the frontier
+                        // dialogue contract so both ends agree on what is spoken.
+                        ...(error.promptAnalysis ? { prompt_analysis: error.promptAnalysis } : {}),
                     } : {}),
                 });
             }
