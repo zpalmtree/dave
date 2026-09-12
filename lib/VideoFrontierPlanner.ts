@@ -1732,11 +1732,22 @@ export interface VideoPlanSourceImage {
 
 export class FrontierPlannerRejectedError extends Error {
     readonly reasonCode: string;
+    /**
+     * The frontier analysis that preceded the rejection, when one was produced. Its
+     * dialogue contract is the only speech determination made with the whole prompt in
+     * view, so the local planner needs it even though the frontier screenplay is gone.
+     */
+    readonly promptAnalysis: Record<string, any> | null;
 
-    constructor(reasonCode: string, message = 'Frontier planner rejected faithful handling; use local planning.') {
+    constructor(
+        reasonCode: string,
+        message = 'Frontier planner rejected faithful handling; use local planning.',
+        promptAnalysis: Record<string, any> | null = null,
+    ) {
         super(message);
         this.name = 'FrontierPlannerRejectedError';
         this.reasonCode = reasonCode;
+        this.promptAnalysis = promptAnalysis;
     }
 }
 
@@ -2257,6 +2268,7 @@ async function validatedPromptAnalysis(
             throw new FrontierPlannerRejectedError(
                 reasonCode,
                 `Frontier planner classified this request for local fallback (${reasonCode}).`,
+                value,
             );
         }
     }
@@ -2426,6 +2438,7 @@ export async function createFrontierVideoPlan(
         if (plannerStrategy === 'single-pass') {
             const singlePassStarted = Date.now();
             let rejectedCandidateReason: string | null = null;
+            let rejectedCandidateAnalysis: Record<string, any> | null = null;
             try {
                 const content: any[] = [{
                     type: 'input_text',
@@ -2486,6 +2499,7 @@ export async function createFrontierVideoPlan(
                 rejectedCandidateReason = promptAnalysis.frontier_handling?.disposition === 'reject'
                     ? String(promptAnalysis.frontier_handling?.reason_code || 'other')
                     : null;
+                rejectedCandidateAnalysis = promptAnalysis;
                 const plan = combined?.plan;
                 if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
                     throw new Error('GPT-5.6 Sol returned an invalid combined screenplay object.');
@@ -2604,6 +2618,7 @@ export async function createFrontierVideoPlan(
                         rejectedCandidateReason,
                         `Frontier planner classified this request for local fallback (${rejectedCandidateReason}); `
                         + `its screenplay candidate was unusable: ${detail}`,
+                        rejectedCandidateAnalysis,
                     );
                 }
                 if (error instanceof FrontierPlannerRejectedError
@@ -2817,6 +2832,7 @@ export async function createFrontierVideoPlan(
                         throw new FrontierPlannerRejectedError(
                             'cannot_faithfully_fulfill',
                             'Frontier planner twice failed to preserve protected verbatim dialogue; use local planning.',
+                            promptAnalysis,
                         );
                     }
                     const compiled = compileBestEffortFrontierVideoPlan(
