@@ -1472,7 +1472,6 @@ function isUnsupportedTransparentBackgroundError(errorText?: string): boolean {
 
 export async function handleCImage(msg: Message, args: string): Promise<void> {
     const userArgs = args.trim();
-    const MAX_STREAM_PARTIALS = 3;
 
     let referencedMessage: Message | undefined;
     if (msg.reference?.messageId) {
@@ -1514,153 +1513,9 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             content: contentParts,
         };
 
-        const promptPreview =
-            prompt.length > 180 ? `${prompt.slice(0, 177)}…` : prompt;
-
-        const buildProgressEmbed = (options: {
-            status: 'starting' | 'generating' | 'done' | 'error';
-            partialCount?: number;
-            errorText?: string;
-            elapsedSeconds?: string;
-        }): EmbedBuilder => {
-            const embed = new EmbedBuilder()
-                .setTitle('Generating image')
-                .setDescription(`**Prompt:** ${promptPreview}`)
-                .setTimestamp(new Date());
-
-            const { status, partialCount = 0, errorText, elapsedSeconds } = options;
-
-            switch (status) {
-                case 'starting':
-                    embed.setColor(0x5865F2).setFooter({ text: 'Status: Starting…' });
-                    break;
-                case 'generating': {
-                    const footer =
-                        partialCount > 0
-                            ? `Status: Generating • Preview ${partialCount}/${MAX_STREAM_PARTIALS}`
-                            : 'Status: Generating';
-                    embed.setColor(0x5865F2).setFooter({ text: footer });
-                    break;
-                }
-                case 'done': {
-                    const footer = elapsedSeconds
-                        ? `Status: Completed • ${elapsedSeconds}s`
-                        : 'Status: Completed';
-                    embed.setColor(0x57F287).setFooter({ text: footer });
-                    break;
-                }
-                case 'error':
-                    embed.setColor(0xED4245).setFooter({ text: 'Status: Failed' });
-                    break;
-            }
-
-            if (errorText) {
-                embed.addFields({
-                    name: 'Error',
-                    value: errorText.slice(0, 1024),
-                });
-            }
-
-            if (status !== 'done') {
-                embed.addFields({
-                    name: 'Note',
-                    value:
-                        status === 'error'
-                            ? 'No image was generated.'
-                            : 'Final image will be posted once generation completes.',
-                });
-            }
-
-            return embed;
-        };
-
-        let progressMessage: Message | null = null;
-
-        const updateProgress = async (options: {
-            status: 'starting' | 'generating' | 'done' | 'error';
-            partialCount?: number;
-            partialBuffer?: Buffer | null;
-            errorText?: string;
-            elapsedSeconds?: string;
-            showImage?: boolean;
-            createIfMissing?: boolean;
-        }) => {
-            const { partialBuffer, status, showImage, createIfMissing = false } = options;
-            const embed = buildProgressEmbed(options);
-            const editPayload: any = { embeds: [embed] };
-
-            if (partialBuffer && showImage) {
-                editPayload.files = [
-                    new AttachmentBuilder(partialBuffer, {
-                        name: 'partial.png',
-                    }),
-                ];
-                editPayload.attachments = [];
-                embed.setImage('attachment://partial.png');
-            } else if (status === 'done' || status === 'error') {
-                editPayload.attachments = [];
-            }
-
-            try {
-                if (!progressMessage) {
-                    if (!createIfMissing) return;
-                    progressMessage = await msg.reply(editPayload);
-                } else {
-                    await progressMessage.edit(editPayload);
-                }
-            } catch (editErr) {
-                console.warn('Failed to update image generation progress embed', editErr);
-            }
-        };
-
-        const showFinalResult = async (
-            payload: OpenAIResponse,
-            elapsedSeconds: string,
-        ) => {
-            const images = payload.images ?? [];
-            const attachments = buildImageAttachments(images);
-
-            const finalEmbed = buildProgressEmbed({
-                status: 'done',
-                elapsedSeconds,
-            });
-
-            let description = `**Prompt:** ${promptPreview}`;
-            if (payload.result) {
-                description += `\n\n**Response:** ${truncateForEmbed(payload.result)}`;
-            }
-            finalEmbed.setDescription(description);
-
-            if (attachments.length > 0) {
-                const primaryName = attachments[0].name;
-                finalEmbed.setImage(`attachment://${primaryName}`);
-            }
-
-            const messagePayload: any = {
-                embeds: [finalEmbed],
-            };
-            const tease = await promptTease;
-            if (tease) {
-                messagePayload.content = tease;
-            }
-
-            if (attachments.length > 0) {
-                messagePayload.files = attachments;
-                messagePayload.attachments = [];
-            } else {
-                messagePayload.attachments = [];
-            }
-
-            if (progressMessage) {
-                await progressMessage.edit(messagePayload);
-            } else {
-                progressMessage = await msg.reply(messagePayload);
-            }
-        };
-
         const runImageGeneration = async (
             imageGenerationTool: CImageGenerationTool,
-        ): Promise<{ completed: true } | { completed: false; errorText: string }> => {
+        ): Promise<{ completed: true; payload: OpenAIResponse } | { completed: false; errorText: string }> => {
             const requestPayload: ResponsesCreateParams = {
                 model: AI_MODELS.openAIChat,
                 instructions: createSystemPrompt(
@@ -1670,10 +1525,9 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                 input: [toResponsesMessage(userMessageForInput)],
                 tools: [imageGenerationTool as any],
                 user: msg.author.id,
-                stream: true,
+                stream: false,
             };
 
-            const startedAt = Date.now();
             let rawResult: ResponsesCreateReturn;
             try {
                 rawResult = await openai.responses.create(requestPayload);
@@ -1685,110 +1539,11 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                 };
             }
 
-            if (!isStreamResponse(rawResult)) {
-                const result = toNonStreamingResponse(rawResult);
-                const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-                const payload = buildOpenAIResponseFromResult(result, []);
-
-                if (payload.error) {
-                    return { completed: false, errorText: payload.error };
-                }
-
-                const missingImageError = getMissingGeneratedImageError(payload);
-                if (missingImageError) {
-                    return { completed: false, errorText: missingImageError };
-                }
-
-                await showFinalResult(payload, elapsed);
-                return { completed: true };
-            }
-
-            let finalResponse: ResponsesPayload | null = null;
-            let streamError: string | undefined;
-            let latestPartial: Buffer | null = null;
-            let lastPartialIndex = -1;
-            let partialCount = 0;
-
-            try {
-                for await (const event of rawResult) {
-                    switch (event.type) {
-                        case 'response.image_generation_call.partial_image': {
-                            if (event.partial_image_index !== lastPartialIndex) {
-                                lastPartialIndex = event.partial_image_index;
-                                partialCount = Math.max(
-                                    partialCount,
-                                    event.partial_image_index + 1,
-                                );
-                            }
-                            latestPartial = Buffer.from(event.partial_image_b64, 'base64');
-                            await updateProgress({
-                                status: 'generating',
-                                partialCount,
-                                partialBuffer: latestPartial,
-                                showImage: true,
-                                createIfMissing: true,
-                            });
-                            break;
-                        }
-                        case 'response.image_generation_call.in_progress':
-                        case 'response.image_generation_call.generating':
-                            await updateProgress({
-                                status: 'generating',
-                                partialCount,
-                                showImage: false,
-                            });
-                            break;
-                        case 'response.image_generation_call.completed':
-                            await updateProgress({
-                                status: 'generating',
-                                partialCount,
-                                showImage: !!latestPartial,
-                                partialBuffer: latestPartial,
-                            });
-                            break;
-                        case 'response.completed':
-                            finalResponse = event.response;
-                            break;
-                        case 'response.failed':
-                            streamError =
-                                event.response.error?.message ||
-                                'Image generation failed.';
-                            break;
-                        case 'error':
-                            streamError = event.message || 'Image generation failed.';
-                            break;
-                        default:
-                            break;
-                    }
-
-                    if (streamError) {
-                        break;
-                    }
-                }
-            } catch (error: any) {
-                console.error('Failed while streaming image generation from OpenAI Responses API:', error);
-                return {
-                    completed: false,
-                    errorText: formatProviderApiError({ provider: 'OpenAI', error }),
-                };
-            }
-
-            if (streamError) {
-                return { completed: false, errorText: streamError };
-            }
-
-            if (!finalResponse) {
-                return {
-                    completed: false,
-                    errorText: 'Image generation ended unexpectedly without a result.',
-                };
-            }
-
-            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-            const payload = buildOpenAIResponseFromResult(finalResponse, []);
+            const result = toNonStreamingResponse(rawResult);
+            const payload = buildOpenAIResponseFromResult(result, []);
 
             if (payload.error) {
-                logResponseSummary('Empty streamed response payload', finalResponse);
+                logResponseSummary('Empty response payload', result);
                 return { completed: false, errorText: payload.error };
             }
 
@@ -1797,50 +1552,40 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                 return { completed: false, errorText: missingImageError };
             }
 
-            await showFinalResult(payload, elapsed);
-            return { completed: true };
+            return { completed: true, payload };
         };
 
         try {
             const transparentBackground = wantsTransparentOutput(prompt);
             const outputFormat = wantsPngOutput(prompt) || transparentBackground ? 'png' : 'jpeg';
-            const result = await runImageGeneration(
-                buildCImageGenerationTool(outputFormat, transparentBackground, MAX_STREAM_PARTIALS),
+            let result = await runImageGeneration(
+                buildCImageGenerationTool(outputFormat, transparentBackground),
             );
 
-            if (result.completed) {
-                return;
-            }
-
-            if (transparentBackground && isUnsupportedTransparentBackgroundError(result.errorText)) {
-                const fallbackResult = await runImageGeneration(
-                    buildCImageGenerationTool(outputFormat, false, MAX_STREAM_PARTIALS),
+            if (
+                !result.completed
+                && transparentBackground
+                && isUnsupportedTransparentBackgroundError(result.errorText)
+            ) {
+                result = await runImageGeneration(
+                    buildCImageGenerationTool(outputFormat, false),
                 );
+            }
 
-                if (fallbackResult.completed) {
-                    return;
-                }
-
-                await updateProgress({
-                    status: 'error',
-                    errorText: fallbackResult.errorText,
-                    createIfMissing: true,
-                });
+            if (!result.completed) {
+                await msg.reply(result.errorText.slice(0, 1900));
                 return;
             }
 
-            await updateProgress({
-                status: 'error',
-                errorText: result.errorText,
-                createIfMissing: true,
+            const attachments = buildImageAttachments(result.payload.images ?? []);
+            const tease = await promptTease;
+            await msg.reply({
+                files: attachments,
+                ...(tease ? { content: tease } : {}),
             });
         } catch (error: any) {
             console.error('Failed to generate image with OpenAI Responses API:', error);
-            await updateProgress({
-                status: 'error',
-                errorText: formatProviderApiError({ provider: 'OpenAI', error }),
-                createIfMissing: true,
-            });
+            await msg.reply(formatProviderApiError({ provider: 'OpenAI', error }).slice(0, 1900));
         }
     });
 }

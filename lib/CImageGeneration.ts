@@ -9,13 +9,11 @@ export type CImageGenerationTool = {
     output_format: CImageOutputFormat;
     output_compression?: number;
     background?: 'transparent';
-    partial_images: number;
 };
 
 export function buildCImageGenerationTool(
     outputFormat: CImageOutputFormat,
     transparentBackground: boolean,
-    partialImages: number,
 ): CImageGenerationTool {
     const effectiveOutputFormat = transparentBackground ? 'png' : outputFormat;
 
@@ -26,6 +24,5 @@ export function buildCImageGenerationTool(
         output_format: effectiveOutputFormat,
         ...(effectiveOutputFormat === 'jpeg' ? { output_compression: 50 } : {}),
         ...(transparentBackground ? { background: 'transparent' as const } : {}),
-        partial_images: partialImages,
     };
 }
