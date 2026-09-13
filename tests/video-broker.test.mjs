@@ -3129,3 +3129,223 @@ test('external gpuq Gaming Mode pauses and safely requeues video dispatch', asyn
         rmSync(directory, { recursive: true, force: true });
     }
 });
+
+function leaseRecoveryPlan() {
+    return {
+        intent: 'A lease-recovery-safe sprint through a neon city.',
+        continuity_bible: 'Keep the same red hovercar and rainy neon streets.',
+        keyframe: {
+            recommended: false,
+            reason: 'Text-to-video is sufficient for this test.',
+            prompt: 'A red hovercar on a rainy neon street.',
+            motion_contract: {
+                subject_orientation: 'Facing forward.',
+                gaze_direction: 'Forward.',
+                travel_direction: 'Forward.',
+                camera_relation: 'Rear tracking view.',
+                first_second_action: 'Accelerate forward.',
+            },
+        },
+        segments: [{
+            title: 'Neon sprint', transition: 'start', target_seconds: 5, music: 'Fast synth pulse.',
+            shots: [{
+                duration_seconds: 5,
+                visual: 'The same red hovercar accelerates through rain and neon reflections.',
+                camera: 'Low rear tracking shot.',
+                audio: 'Electric motor and rain.',
+                dialogue: [],
+            }],
+        }],
+    };
+}
+
+async function startLeaseRecoveryBroker(prefix) {
+    const directory = mkdtempSync(join(tmpdir(), prefix));
+    const dbPath = join(directory, 'queue.sqlite3');
+    const broker = new VideoBroker({
+        host: '127.0.0.1',
+        port: 0,
+        dbPath,
+        resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret',
+        workerToken: 'worker-secret',
+        heartbeatTimeoutMs: 5000,
+        frontierPlanner: async () => leaseRecoveryPlan(),
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const botFetch = async (path, init = {}) => {
+        const response = await fetch(base + path, {
+            ...init,
+            headers: {
+                authorization: 'Bearer bot-secret',
+                'content-type': 'application/json',
+                ...(init.headers || {}),
+            },
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    const submit = async (requester, message) => {
+        const response = await botFetch('/v1/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: 'minimax',
+                prompt: `lease recovery ${message}`,
+                requester_id: requester,
+                origin_bot_id: 'bot-1',
+                channel_id: 'channel-1',
+                command_message_id: message,
+                status_message_id: `status-${message}`,
+            }),
+        });
+        assert.equal(response.status, 201);
+        return response.body.job;
+    };
+    const requestPlan = async (jobId, leaseId) => {
+        const response = await fetch(`${base}/v1/worker/jobs/${jobId}/plan`, {
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer worker-secret',
+                'content-type': 'application/json',
+                'x-video-lease': leaseId,
+            },
+            body: '{}',
+        });
+        return { status: response.status, body: await response.json() };
+    };
+    const connect = async () => {
+        const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello',
+            protocol: 1,
+            worker_id: 'recovery-worker',
+            capabilities: ['minimax'],
+            current_job: null,
+            current_lease: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        return { socket, take };
+    };
+    const runSql = (sql, params) => new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(dbPath, error => {
+            if (error) reject(error);
+        });
+        db.run(sql, params, function onRun(error) {
+            db.close();
+            if (error) reject(error);
+            else resolve(this.changes);
+        });
+    });
+    const stop = async () => {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    };
+    return { broker, botFetch, submit, requestPlan, connect, runSql, stop };
+}
+
+test('an idle worker reconnect with two prepared jobs leases only the oldest', async () => {
+    // The desktop advertises `ready` right after every hello acknowledgement. The
+    // broker used to treat that as a release of the job the hello had just leased,
+    // lease the next job on top of it, and reject the first job's plan request.
+    const harness = await startLeaseRecoveryBroker('dave-video-startup-ready-');
+    let socket;
+    try {
+        const oldest = await harness.submit('user-a', 'message-a');
+        const newer = await harness.submit('user-b', 'message-b');
+        const connection = await harness.connect();
+        socket = connection.socket;
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const lease = await connection.take(value => value.type === 'job');
+        assert.equal(lease.job.id, oldest.id);
+        await assert.rejects(
+            connection.take(value => value.type === 'job', 500),
+            /Timed out/,
+        );
+        const plan = await harness.requestPlan(oldest.id, lease.job.lease_id);
+        assert.equal(plan.status, 200);
+        const waiting = await harness.botFetch('/v1/users/user-b/jobs');
+        assert.equal(waiting.body.jobs[0].id, newer.id);
+        assert.equal(waiting.body.jobs[0].status, 'queued');
+        assert.equal(waiting.body.jobs[0].queue_position, 2);
+    } finally {
+        if (socket) socket.close();
+        await harness.stop();
+    }
+});
+
+test('a worker that drops its leased job returns it to the queue immediately', async () => {
+    const harness = await startLeaseRecoveryBroker('dave-video-dropped-lease-');
+    let socket;
+    try {
+        const job = await harness.submit('user-a', 'message-a');
+        const connection = await harness.connect();
+        socket = connection.socket;
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const first = await connection.take(value => value.type === 'job');
+        assert.equal(first.job.id, job.id);
+        // A second `ready` without a terminal event is the worker discarding the job.
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const second = await connection.take(value => value.type === 'job');
+        assert.equal(second.job.id, job.id);
+        assert.notEqual(second.job.lease_id, first.job.lease_id);
+        const stale = await harness.requestPlan(job.id, first.job.lease_id);
+        assert.equal(stale.status, 409);
+        const fresh = await harness.requestPlan(job.id, second.job.lease_id);
+        assert.equal(fresh.status, 200);
+    } finally {
+        if (socket) socket.close();
+        await harness.stop();
+    }
+});
+
+test('the heartbeat returns an expired lease nobody is working on to the queue', async () => {
+    const harness = await startLeaseRecoveryBroker('dave-video-expired-lease-');
+    let socket;
+    try {
+        const active = await harness.submit('user-a', 'message-a');
+        const stranded = await harness.submit('user-b', 'message-b');
+        const connection = await harness.connect();
+        socket = connection.socket;
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const lease = await connection.take(value => value.type === 'job');
+        assert.equal(lease.job.id, active.id);
+        // Reproduce a job left behind in a lease that the broker no longer tracks.
+        const changed = await harness.runSql(
+            `UPDATE video_jobs SET status = 'leased', worker_id = 'recovery-worker',
+             lease_token = 'orphaned-lease', lease_expires_at = ?, gpu_queue_state = 'submitting',
+             stage = 'Reserving GPU queue position', started_at = ? WHERE public_id = ?`,
+            [Math.floor(Date.now() / 1000) - 120, Math.floor(Date.now() / 1000) - 180, stranded.id],
+        );
+        assert.equal(changed, 1);
+        const recovered = await eventually(
+            () => harness.botFetch('/v1/users/user-b/jobs'),
+            value => value.body.jobs[0].status === 'queued',
+            8000,
+        );
+        assert.equal(recovered.body.jobs[0].stage, 'Resuming after a lost worker lease');
+        // The active lease is untouched while the worker keeps it.
+        const held = await harness.botFetch('/v1/users/user-a/jobs');
+        assert.equal(held.body.jobs[0].status, 'leased');
+        socket.send(JSON.stringify({
+            type: 'event',
+            event: 'failed',
+            job_id: active.id,
+            error: 'finish expired lease test',
+            retryable: false,
+        }));
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const next = await connection.take(value => value.type === 'job');
+        assert.equal(next.job.id, stranded.id);
+        assert.notEqual(next.job.lease_id, 'orphaned-lease');
+    } finally {
+        if (socket) socket.close();
+        await harness.stop();
+    }
+});

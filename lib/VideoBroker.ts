@@ -80,6 +80,8 @@ import {
 } from './VideoSegmentKeyframePlanner.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
+// Statuses in which a worker lease is expected to be live.
+const LEASED_SQL = ['leased', 'planning', 'running', 'uploading'].map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', import.meta.url));
@@ -149,6 +151,10 @@ interface WorkerConnection {
     warmModel: VideoGeneratorModelId | null;
     leaseId: string | null;
     scheduler: VideoWorkerSchedulerState;
+    // The desktop advertises idle capacity right after every hello acknowledgement.
+    // When the hello itself already leased a job, that advertisement must not be
+    // mistaken for a release of the lease that is still in flight to the worker.
+    startupReadyPending: boolean;
 }
 
 interface VideoControlState {
@@ -1163,6 +1169,7 @@ export class VideoBroker {
     private writeChain: Promise<unknown> = Promise.resolve();
     private readonly preparationQueued = new Set<string>();
     private readonly preparationAttempted = new Set<string>();
+    private dispatchChain: Promise<void> = Promise.resolve();
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly segmentContractInFlight = new Map<string, Promise<void>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
@@ -3787,6 +3794,7 @@ export class VideoBroker {
                         warmModel: generatorModel(hello.warm_model),
                         leaseId: hello.current_lease || null,
                         scheduler: workerScheduler(hello.scheduler),
+                        startupReadyPending: !hello.current_job,
                     };
                     initialized = true;
                     const reconciliation = await this.reconcileWorker(hello);
@@ -3961,6 +3969,19 @@ export class VideoBroker {
         if (message.type === 'ready') {
             if (message.warm_model === null || message.warm_model !== undefined) {
                 this.worker.warmModel = generatorModel(message.warm_model);
+            }
+            const startupReady = this.worker.startupReadyPending;
+            this.worker.startupReadyPending = false;
+            if (startupReady && this.worker.currentJob) {
+                // The hello already dispatched a job; that message is still on its way
+                // to the worker, so this is idle capacity the broker has already used.
+                return;
+            }
+            if (this.worker.currentJob) {
+                // The worker dropped a job the broker still counts as leased (for
+                // example after a lost lease during planning). Put it back at the
+                // front of the queue instead of leaving it stranded in a lease.
+                await this.requeueAbandonedLease(this.worker.currentJob, this.worker.leaseId);
             }
             this.worker.ready = true;
             this.worker.currentJob = null;
@@ -4291,7 +4312,15 @@ export class VideoBroker {
         }
     }
 
-    private async dispatchNext(): Promise<void> {
+    private dispatchNext(): Promise<void> {
+        // Dispatch runs from socket handlers, the heartbeat timer, and preparation
+        // completion. Serialize it so two overlapping calls cannot each lease a job.
+        const run = this.dispatchChain.then(() => this.dispatchNextUnlocked());
+        this.dispatchChain = run.catch(() => undefined);
+        return run;
+    }
+
+    private async dispatchNextUnlocked(): Promise<void> {
         if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
         if (!schedulerAcceptsReservations(this.worker.scheduler)) return;
         const control = await this.control();
@@ -4436,11 +4465,57 @@ export class VideoBroker {
         }
     }
 
+    private async requeueAbandonedLease(publicId: string, leaseToken: string | null): Promise<boolean> {
+        const result = await this.run(
+            `UPDATE video_jobs SET status = 'queued', stage = 'Resuming after a lost worker lease',
+             progress = NULL, progress_scope = NULL, segment_index = NULL,
+             segment_count = NULL, segment_progress = NULL,
+             worker_id = NULL, lease_expires_at = NULL, lease_token = NULL,
+             gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
+             gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+             gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+             gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
+             gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL, updated_at = ?
+             WHERE public_id = ? AND status IN (${LEASED_SQL})
+             AND (lease_token IS ? OR lease_token = ?)`,
+            [nowSeconds(), publicId, leaseToken, leaseToken],
+        );
+        if (result.changes === 1) {
+            console.warn(`Requeued video job ${publicId} after the worker released its lease.`);
+        }
+        return result.changes === 1;
+    }
+
+    private async requeueExpiredLeases(): Promise<void> {
+        // A lease that expired while the connected worker is not working on that job
+        // belongs to nobody: dispatch only ever selects queued rows, so without this
+        // sweep the job would sit at the head of the queue forever.
+        if (!this.worker) return;
+        const now = nowSeconds();
+        const expired = await this.all<Pick<JobRow, 'public_id' | 'status' | 'worker_id' | 'lease_token'>>(
+            `SELECT public_id, status, worker_id, lease_token FROM video_jobs
+             WHERE status IN (${LEASED_SQL}) AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+             ORDER BY id ASC`,
+            [now],
+        );
+        for (const job of expired) {
+            if (job.public_id === this.worker.currentJob) continue;
+            const requeued = await this.requeueAbandonedLease(job.public_id, job.lease_token);
+            if (requeued) {
+                console.warn(
+                    `Video job ${job.public_id} was ${job.status} on ${job.worker_id || 'no worker'} `
+                    + 'with an expired lease and no active worker; returned it to the queue.',
+                );
+            }
+        }
+    }
+
     private async checkHeartbeat(): Promise<void> {
         if (this.worker && Date.now() - this.worker.lastHeartbeat > (this.options.heartbeatTimeoutMs || 45000)) {
             this.worker.socket.terminate();
             await this.markWorkerOffline();
         }
+        await this.requeueExpiredLeases();
         const control = await this.control();
         if (!control.paused_until && !control.dispatch_paused) await this.dispatchNext();
     }
