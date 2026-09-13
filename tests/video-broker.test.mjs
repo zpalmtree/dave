@@ -564,12 +564,19 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
             state: 'queued', submitted_at: submittedAt,
             stage: 'Waiting for GPU queue admission',
+            block_reason: 'external_gpu_busy',
+            block_detail: 'GPU admission requires 27952 MiB free;\n 26426 MiB available.',
         }));
         const waitingForGpu = await eventually(
             () => botFetch('/v1/users/runtime-user-2/jobs'),
             value => value.body.jobs[0].gpu_queue_state === 'queued',
         );
         assert.ok(waitingForGpu.body.jobs[0].expected_finish_at > Math.floor(Date.now() / 1000));
+        assert.equal(waitingForGpu.body.jobs[0].gpu_queue_block_reason, 'external_gpu_busy');
+        assert.equal(
+            waitingForGpu.body.jobs[0].gpu_queue_block_detail,
+            'GPU admission requires 27952 MiB free; 26426 MiB available.',
+        );
         const admittedAt = Math.floor(Date.now() / 1000);
         socket.send(JSON.stringify({
             type: 'event', event: 'gpu_queue', job_id: learned.body.job.id,
@@ -577,10 +584,12 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             queue_wait_seconds: admittedAt - submittedAt,
             stage: 'GPU admitted; planning screenplay',
         }));
-        await eventually(
+        const admitted = await eventually(
             () => botFetch('/v1/users/runtime-user-2/jobs'),
             value => value.body.jobs[0].gpu_queue_state === 'admitted',
         );
+        assert.equal(admitted.body.jobs[0].gpu_queue_block_reason, null);
+        assert.equal(admitted.body.jobs[0].gpu_queue_block_detail, null);
         const prepared = await botFetch(`/v1/jobs/${learned.body.job.id}/prepare`, {
             method: 'POST',
             body: '{}',

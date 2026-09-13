@@ -680,6 +680,62 @@ test('active video status shows only rough progress and one completion ETA', () 
     assert.doesNotMatch(waiting, /Estimated completion <t:/);
 });
 
+test('GPU-blocked jobs tell the requester the desktop is holding the GPU', () => {
+    const base = {
+        id: '12345678-1234-1234-1234-123456789abc',
+        model: 'minimax',
+        prompt: 'test',
+        requester_id: 'u',
+        origin_bot_id: 'b',
+        channel_id: 'c',
+        guild_id: null,
+        command_message_id: 'm',
+        status_message_id: 's',
+        status: 'running',
+        queue_position: null,
+        estimate_low_seconds: 120,
+        estimate_high_seconds: 300,
+        estimate_ready: false,
+        expected_start_at: null,
+        expected_finish_at: null,
+        stage: 'Waiting for GPU queue admission',
+        progress: null,
+        error: null,
+        result_path: null,
+        result_bytes: null,
+        has_source_image: false,
+        created_at: 1,
+        updated_at: 1,
+        started_at: 2,
+        completed_at: null,
+        runtime_seconds: null,
+        delivered_at: null,
+        worker_online: true,
+        worker_busy: true,
+        paused_until: null,
+        dispatch_paused: false,
+        gpu_queue_state: 'queued',
+        gpu_queue_submitted_at: 1_999_990_000,
+        gpu_queue_position: 1,
+        gpu_queue_jobs_ahead: 0,
+    };
+    const plain = formatVideoJob(base);
+    assert.doesNotMatch(plain, /held by other applications|Waiting since/);
+
+    const blocked = formatVideoJob({
+        ...base,
+        gpu_queue_block_reason: 'external_gpu_busy',
+        gpu_queue_block_detail: 'GPU admission requires 27952 MiB free; 26426 MiB available.',
+    });
+    assert.match(blocked, /Waiting in the GPU queue/);
+    assert.match(blocked, /desktop GPU is currently held by other applications/);
+    assert.match(blocked, /Waiting since <t:1999990000:R>/);
+    assert.doesNotMatch(blocked, /27952/);
+
+    const other = formatVideoJob({ ...base, gpu_queue_block_reason: 'driver_reset_cooldown' });
+    assert.match(other, /holding this job \(driver_reset_cooldown\)/);
+});
+
 test('drained queue messages retain a rough ETA and explain its assumption', () => {
     const text = formatVideoJob({
         id: '12345678-1234-1234-1234-123456789abc',

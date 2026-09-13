@@ -22,3 +22,12 @@ resize.sh
 **/.claude/settings.local.json
 .claude
 .yarn
+/artifacts/continuity-40d2c739-fix/
+/artifacts/h3-endpoint-benchmark/
+/artifacts/h3-storyboard-ab/
+/artifacts/prepare-shot-split.mjs
+/artifacts/video-identity-investigation/
+/artifacts/video-keyframe-prompt-benchmarks/
+/artifacts/video-keyframe-step-benchmarks/
+/artifacts/video-optimization/
+/artifacts/video-shot-split/

@@ -223,6 +223,8 @@ interface JobRow {
     gpu_queue_jobs_ahead: number | null;
     gpu_estimated_admission_low_at: number | null;
     gpu_estimated_admission_high_at: number | null;
+    gpu_queue_block_reason: string | null;
+    gpu_queue_block_detail: string | null;
     result_path: string | null;
     result_sha256: string | null;
     result_bytes: number | null;
@@ -1305,6 +1307,8 @@ export class VideoBroker {
             gpu_queue_jobs_ahead INTEGER,
             gpu_estimated_admission_low_at INTEGER,
             gpu_estimated_admission_high_at INTEGER,
+            gpu_queue_block_reason TEXT,
+            gpu_queue_block_detail TEXT,
             result_path TEXT,
             result_sha256 TEXT,
             result_bytes INTEGER,
@@ -1396,6 +1400,8 @@ export class VideoBroker {
             ['gpu_queue_jobs_ahead', 'INTEGER'],
             ['gpu_estimated_admission_low_at', 'INTEGER'],
             ['gpu_estimated_admission_high_at', 'INTEGER'],
+            ['gpu_queue_block_reason', 'TEXT'],
+            ['gpu_queue_block_detail', 'TEXT'],
         ] as const) {
             if (!columnNames.has(name)) {
                 await this.run(`ALTER TABLE video_jobs ADD COLUMN ${name} ${definition}`);
@@ -3736,6 +3742,8 @@ export class VideoBroker {
                 gpu_queue_jobs_ahead: row.gpu_queue_jobs_ahead,
                 gpu_estimated_admission_low_at: row.gpu_estimated_admission_low_at,
                 gpu_estimated_admission_high_at: row.gpu_estimated_admission_high_at,
+                gpu_queue_block_reason: row.gpu_queue_block_reason,
+                gpu_queue_block_detail: row.gpu_queue_block_detail,
             };
         });
     }
@@ -3866,7 +3874,8 @@ export class VideoBroker {
                      gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                      gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
                      gpu_estimated_admission_low_at = NULL,
-                     gpu_estimated_admission_high_at = NULL, updated_at = ?
+                     gpu_estimated_admission_high_at = NULL,
+                     gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL, updated_at = ?
                      WHERE public_id = ? AND worker_id = ? AND lease_token = ?
                      AND status IN (${ACTIVE_SQL})`,
                     [
@@ -3898,6 +3907,7 @@ export class VideoBroker {
                  gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                  gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
                  gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
+                 gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL,
                  updated_at = ? WHERE public_id = ?`,
                 [nowSeconds(), disconnected.public_id],
             );
@@ -4039,6 +4049,12 @@ export class VideoBroker {
                 const admissionHigh = admissionHighCandidate === null
                     ? null
                     : Math.max(admissionLow || now - 60, admissionHighCandidate);
+                const blockReason = state === 'queued'
+                    ? sanitizeVideoWorkerText(message.block_reason, '', 80) || null
+                    : null;
+                const blockDetail = blockReason
+                    ? sanitizeVideoWorkerText(message.block_detail, '', 600) || null
+                    : null;
                 await this.run(
                     `UPDATE video_jobs SET gpu_queue_state = ?,
                      gpu_queue_submitted_at = COALESCE(gpu_queue_submitted_at, ?),
@@ -4046,6 +4062,7 @@ export class VideoBroker {
                      gpu_queue_wait_seconds = COALESCE(gpu_queue_wait_seconds, ?),
                      gpu_queue_position = ?, gpu_queue_jobs_ahead = ?,
                      gpu_estimated_admission_low_at = ?, gpu_estimated_admission_high_at = ?,
+                     gpu_queue_block_reason = ?, gpu_queue_block_detail = ?,
                      stage = ?, lease_expires_at = ?, updated_at = ? WHERE public_id = ?`,
                     [
                         state,
@@ -4056,6 +4073,8 @@ export class VideoBroker {
                         jobsAhead,
                         admissionLow,
                         admissionHigh,
+                        blockReason,
+                        blockDetail,
                         sanitizeVideoWorkerText(
                             message.stage,
                             state === 'admitted' ? 'GPU admitted; starting video render' : 'Waiting for GPU queue admission',
@@ -4149,6 +4168,7 @@ export class VideoBroker {
                            gpu_queue_submitted_at = NULL, gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                            gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
                            gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
+                           gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL,
                            updated_at = ? WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'cancelled', stage = NULL, progress = NULL,
                            completed_at = ?, updated_at = ? WHERE public_id = ?`,
@@ -4199,6 +4219,7 @@ export class VideoBroker {
                            gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
                            gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
                            gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
+                           gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL,
                            error = ?, updated_at = ?
                            WHERE public_id = ?`
                         : `UPDATE video_jobs SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
@@ -4309,6 +4330,7 @@ export class VideoBroker {
              gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
              gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
              gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
+             gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL,
              started_at = COALESCE(started_at, ?), stage = 'Reserving GPU queue position', updated_at = ?
              WHERE public_id = ? AND status = 'queued'`,
             [this.worker.id, nowSeconds() + 60, leaseId, nowSeconds(), nowSeconds(), row.public_id],

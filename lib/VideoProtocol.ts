@@ -236,6 +236,8 @@ export interface VideoJobView {
     gpu_queue_jobs_ahead?: number | null;
     gpu_estimated_admission_low_at?: number | null;
     gpu_estimated_admission_high_at?: number | null;
+    gpu_queue_block_reason?: string | null;
+    gpu_queue_block_detail?: string | null;
 }
 
 export interface VideoWorkerHello {
