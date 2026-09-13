@@ -1581,6 +1581,57 @@ export function compileBestEffortFrontierVideoPlan(
     return compiled;
 }
 
+/**
+ * Accept a locally planned screenplay for broker-side use (continuity frames, runtime
+ * estimates) whenever it is structurally usable. The worker renders its own plan
+ * regardless of what the broker says, so rejecting an upload over a frontier-analysis
+ * contract the local planner never saw only removes the identity continuity frames and
+ * leaves every hard cut re-anchored on the source image. Contract misses come back as
+ * warnings; only structural defects still throw.
+ */
+export function validateLocalVideoPlanForKeyframe(
+    plan: any,
+    model: VideoModelId,
+    rawPrompt = '',
+    requestedDurationSeconds?: number | null,
+): string[] {
+    if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
+        throw new Error('The local planner returned no screenplay segments.');
+    }
+    if (plan.segments.length > 64) {
+        throw new Error('The local planner returned more than 64 screenplay segments.');
+    }
+    if (!String(plan.intent || '').trim() || !String(plan.continuity_bible || '').trim()) {
+        throw new Error('The local planner omitted the intent or continuity bible.');
+    }
+    for (const [segmentIndex, segment] of plan.segments.entries()) {
+        if (!segment || typeof segment !== 'object'
+            || !Array.isArray(segment.shots) || !segment.shots.length) {
+            throw new Error(`The local planner segment ${segmentIndex + 1} has no shots.`);
+        }
+        const target = Number(segment.target_seconds);
+        if (!Number.isFinite(target) || target <= 0) {
+            throw new Error(`The local planner segment ${segmentIndex + 1} has no positive duration.`);
+        }
+        for (const [shotIndex, shot] of segment.shots.entries()) {
+            if (!shot || typeof shot !== 'object'
+                || !String(shot.visual || '').trim()
+                || !String(shot.camera || '').trim()) {
+                throw new Error(
+                    `The local planner shot ${segmentIndex + 1}.${shotIndex + 1} has no visual or camera direction.`,
+                );
+            }
+        }
+    }
+    try {
+        validateFrontierVideoPlanForKeyframe(plan, model, rawPrompt, requestedDurationSeconds);
+        return [];
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return [message.replace(/GPT-5\.6 Sol/g, 'The local planner')];
+    }
+}
+
 export function validateFrontierVideoPlanForKeyframe(
     plan: any,
     model: VideoModelId,

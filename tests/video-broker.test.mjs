@@ -2199,6 +2199,16 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         const localPlan = {
             intent: 'Gigachad walks confidently into a gym.',
             continuity_bible: 'Keep Gigachad recognizable throughout.',
+            // The rejected frontier analysis rides along; its motion spine is a
+            // requirement the local planner never saw and must not block the upload.
+            prompt_analysis: {
+                motion_design_contract: {
+                    mode: 'visual_spine',
+                    spine: 'circular bronze arrow',
+                    style_invariants: [],
+                    transition_rules: [],
+                },
+            },
             keyframe: {
                 recommended: true,
                 reason: 'The named character needs a stable identity anchor.',
@@ -2238,7 +2248,11 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
             body: JSON.stringify({ plan: localPlan }),
         });
         assert.equal(uploaded.status, 200);
-        assert.equal((await uploaded.json()).planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        const uploadedBody = await uploaded.json();
+        assert.equal(uploadedBody.planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        assert.match(uploadedBody.plan_identity, /^[0-9a-f]{64}$/);
+        assert.equal(uploadedBody.warnings.length, 1);
+        assert.match(uploadedBody.warnings[0], /^The local planner omitted the required visual motion spine/);
 
         const stored = await requestPlan();
         assert.equal(stored.status, 200);

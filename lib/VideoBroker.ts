@@ -43,7 +43,7 @@ import {
     configuredVideoPlannerStrategy,
     configuredVideoPlannerVariant,
     createFrontierVideoPlan,
-    validateFrontierVideoPlanForKeyframe,
+    validateLocalVideoPlanForKeyframe,
     videoPlannerFingerprint,
 } from './VideoFrontierPlanner.js';
 import {
@@ -4511,12 +4511,18 @@ export class VideoBroker {
             try {
                 const body = await readJson(req, 512 * 1024);
                 const plan = body?.plan;
-                validateFrontierVideoPlanForKeyframe(
+                const warnings = validateLocalVideoPlanForKeyframe(
                     plan,
                     job.model,
                     job.prompt,
                     job.requested_duration_seconds,
                 );
+                for (const warning of warnings) {
+                    console.warn(
+                        `Local screenplay for ${job.public_id} misses a frontier contract (${warning}); `
+                        + 'storing it anyway so identity continuity frames stay available.',
+                    );
+                }
                 const estimate = await this.plannedRuntimeEstimate(job, plan);
                 const now = nowSeconds();
                 await this.run(
@@ -4544,6 +4550,7 @@ export class VideoBroker {
                     ok: true,
                     planner_model: LOCAL_VIDEO_PLANNER_MODEL,
                     plan_identity: segmentKeyframePlanIdentity(plan),
+                    warnings,
                     job: (await this.views([job]))[0],
                 });
             } catch (error) {

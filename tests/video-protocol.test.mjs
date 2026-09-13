@@ -61,6 +61,7 @@ import {
     stageFrontierDialogueVisually,
     stageFrontierVisibleText,
     validateFrontierVideoPlanForKeyframe,
+    validateLocalVideoPlanForKeyframe,
     videoPlannerFingerprint,
     videoPlannerPromptCacheFields,
 } from '../dist/VideoFrontierPlanner.js';
@@ -1095,6 +1096,40 @@ test('broker rejects speech in an empty-dialogue audio field and accepts its rep
     assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'), /non-speech audio/);
     shot.audio = 'Subtle environmental ambience with no additional foreground sounds.';
     assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax'));
+});
+
+test('local screenplay upload downgrades frontier contract misses to warnings', () => {
+    const plan = frontierPlan();
+    plan.prompt_analysis = {
+        motion_design_contract: {
+            mode: 'visual_spine',
+            spine: 'circular bronze arrow',
+            style_invariants: ['bronze stays bronze'],
+            transition_rules: ['the arrow sweeps into the next scene'],
+        },
+    };
+    assert.throws(
+        () => validateFrontierVideoPlanForKeyframe(plan, 'minimax'),
+        /omitted the required visual motion spine: circular bronze arrow/,
+    );
+    const warnings = validateLocalVideoPlanForKeyframe(plan, 'minimax');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^The local planner omitted the required visual motion spine: circular bronze arrow/);
+    assert.doesNotMatch(warnings[0], /GPT-5\.6 Sol/);
+
+    plan.continuity_bible = 'The circular bronze arrow carries every transition.';
+    assert.deepEqual(validateLocalVideoPlanForKeyframe(plan, 'minimax'), []);
+
+    const structural = frontierPlan();
+    structural.segments[0].shots = [];
+    assert.throws(
+        () => validateLocalVideoPlanForKeyframe(structural, 'minimax'),
+        /The local planner segment 1 has no shots/,
+    );
+    assert.throws(
+        () => validateLocalVideoPlanForKeyframe({ intent: 'x', continuity_bible: 'y', segments: [] }, 'minimax'),
+        /returned no screenplay segments/,
+    );
 });
 
 test('frontier planner retries incomplete structured output with a larger token budget', async () => {
