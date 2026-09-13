@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planUpdates as planEmbeds, notificationOptions, deliverPending, listBranches } from '../dist/GitHubCommitWatch.js';
+import { planUpdates as planEmbeds, planPullRequests, notificationOptions, deliverPending, listBranches, watchTargets, saveState } from '../dist/GitHubCommitWatch.js';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 // Existing detection checks inspect individual sections inside the grouped embeds.
 async function planUpdates(...args) {
     const result = await planEmbeds(...args);
@@ -11,6 +14,52 @@ const thread = '1544486384629452831';
 const branch = (name, sha) => ({ name, commit: { sha } });
 const commit = sha => ({ sha, commit: { message: 'Fix bug\nDetails', author: { name: 'Dev' } } });
 const state = heads => ({ repository: repo, threadId: thread, heads, pending: [] });
+const watchSettings = { token: 'test-token', botUserId: '123', repository: repo, threadId: thread };
+const roundAndRound = { repository: 'Xazware/round-and-round', threadId: thread };
+test('adding and reordering repositories preserves the original and additional state paths', () => {
+    const configPath = '/config/watch.json';
+    const original = watchTargets(watchSettings, configPath)[0];
+    assert.equal(original.statePath, `${configPath}.state.json`);
+    const otherThread = { ...roundAndRound, threadId: '456' };
+    const targets = watchTargets({ ...watchSettings, additionalRepositories: [roundAndRound, otherThread] }, configPath);
+    assert.deepEqual(targets[0], original);
+    assert.equal(new Set(targets.map(target => target.statePath)).size, 3);
+    const reordered = watchTargets({ ...watchSettings, additionalRepositories: [otherThread, roundAndRound] }, configPath);
+    assert.deepEqual(reordered, [targets[0], targets[2], targets[1]]);
+});
+test('duplicate watches and invalid additional destinations are rejected before startup', () => {
+    for (const additionalRepositories of [
+        [{ repository: repo.toLowerCase(), threadId: thread }],
+        [roundAndRound, roundAndRound],
+        [{ repository: '../private/repo', threadId: thread }],
+        [{ ...roundAndRound, threadId: 'not-a-thread' }],
+        [null],
+        {},
+    ]) {
+        assert.throws(() => watchTargets({ ...watchSettings, additionalRepositories }, '/config/watch.json'), /Invalid|Duplicate/);
+    }
+});
+test('a new repository baseline preserves the existing watcher cursor and queued notifications', async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'github-watch-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const [original, added] = watchTargets({ ...watchSettings, additionalRepositories: [roundAndRound] }, join(directory, 'watch.json'));
+    const existing = { ...state({ main: 'existing-tip' }), lastPullRequestNumber: 12, pending: ['pending Pooners update'] };
+    await saveState(original.statePath, existing);
+    const baseline = await planEmbeds(undefined, added.repository, added.threadId, async () => [branch('main', 'round-tip')]);
+    const withPulls = await planPullRequests(baseline, async () => [{ number: 2 }]);
+    await saveState(added.statePath, withPulls);
+    assert.deepEqual(JSON.parse(await readFile(original.statePath, 'utf8')), existing);
+    assert.deepEqual(JSON.parse(await readFile(added.statePath, 'utf8')), {
+        ...roundAndRound, heads: { main: 'round-tip' }, lastPullRequestNumber: 2, pending: [],
+    });
+});
+test('repository names that differ around the owner separator cannot share state files', () => {
+    const targets = watchTargets({ ...watchSettings, additionalRepositories: [
+        { repository: 'owner--name/project', threadId: thread },
+        { repository: 'owner/name--project', threadId: thread },
+    ] }, '/config/watch.json');
+    assert.notEqual(targets[1].statePath, targets[2].statePath);
+});
 test('baseline includes all branches without historical posts', async () => {
     const result = await planUpdates(undefined, repo, thread, async () => [branch('main', 'a'), branch('feature', 'b')]);
     assert.deepEqual(result.heads, { main: 'a', feature: 'b' });
@@ -270,7 +319,6 @@ test('mixed, missing, or untrusted avatars are omitted', async () => {
     assert.equal(result.pending[0].embeds[0].thumbnail, undefined);
 });
 
-const { planPullRequests } = await import('../dist/GitHubCommitWatch.js');
 const openedPR = number => ({ ...pr, number, title: 'Add settings', state: 'open', merged_at: null, draft: false, user: { login: 'dev', avatar_url: 'https://avatars.githubusercontent.com/u/1' } });
 test('PR monitoring migrates existing state without flooding historical PRs', async () => {
     const result = await planPullRequests(state({ main: 'a' }), async () => [openedPR(5), openedPR(4)]);
