@@ -39,13 +39,25 @@ Configuration is read from `~/.config/dave-github-watch.json`, or the path in
   "token": "GITHUB_TOKEN_WITH_REPOSITORY_READ_ACCESS",
   "botUserId": "DISCORD_BOT_USER_ID",
   "repository": "Xazware/Pooners",
-  "threadId": "1544486384629452831"
+  "threadId": "1544486384629452831",
+  "additionalRepositories": [
+    {
+      "repository": "Xazware/round-and-round",
+      "threadId": "1544486384629452831"
+    }
+  ]
 }
 ```
 
+`additionalRepositories` is optional. Every repository receives the same commit,
+branch, merge, PR-opening, and link-preview behavior. Destinations can share a
+thread or use separate threads. Each watcher polls and retries independently;
+a failed check for one repository does not stop another. Duplicate repository and
+thread pairs are rejected to prevent duplicate notifications.
+
 Keep this file outside Git with mode 0600. Only the matching bot user starts the
 watcher, so both deployment tracks can share this file without duplicate posts.
-A fine-grained GitHub token needs access to this repository with Contents: read
+A fine-grained GitHub token needs access to every configured repository with Contents: read
 and Pull requests: read for merge details. Without PR access, commit tracking
 continues with merge-commit labels and a warning in the logs.
 If the account is an outside collaborator and cannot select this repository for
@@ -53,8 +65,14 @@ a fine-grained token, use an appropriate classic token or a GitHub App installed
 by the repository owner. Restart the bot after changing configuration.
 
 The initial check saves all current branch tips without posting old commits.
-State and a pending-message outbox are stored atomically beside the config in
-`dave-github-watch.json.state.json`; preserve this file across deployments.
+State and a pending-message outbox are stored atomically beside the config. The
+original repository keeps `dave-github-watch.json.state.json`, preserving its
+progress when additional repositories are added. Each additional repository uses
+`dave-github-watch.json.<encoded-lowercase-repository>.<threadId>.state.json`.
+These paths are stable when additional repositories are reordered. Preserve all
+state files across deployments, and keep the original repository/thread fields
+unchanged when adding watches. New repositories establish their own baseline
+without replaying historical commits or PRs.
 Successful sends are checkpointed individually; failed sends retry on the next
 poll. A crash between Discord accepting a message and saving its checkpoint can
 repeat that message. Never run two instances of the selected bot with this file.
@@ -82,9 +100,9 @@ produce another opening notification. This requires Pull requests: read access.
 
 Human-posted GitHub PR links in the configured thread receive a reply with a
 private-repository preview: title/link, current status, author avatar, branches,
-and a short description. Only the configured repository is expanded. Bot messages
+and a short description. Only repositories configured for that thread are expanded. Bot messages
 are ignored, repeated links in one message are deduplicated, and at most three
-PRs are previewed per message. Angle-bracket links (`<https://...>`) suppress
+PRs per repository are previewed per message. Angle-bracket links (`<https://...>`) suppress
 previews. Preview replies never ping the sender. No public OpenGraph service is
 used, and private PR details are not expanded in other channels.
 

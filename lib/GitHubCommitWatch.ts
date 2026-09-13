@@ -20,7 +20,35 @@ interface PullRequest {
     head: { ref: string };
     base: { ref: string };
 }
-interface Settings { token: string; botUserId: string; repository: string; threadId: string }
+interface WatchDestination { repository: string; threadId: string }
+interface Settings extends WatchDestination {
+    token: string;
+    botUserId: string;
+    additionalRepositories?: WatchDestination[];
+}
+interface WatchTarget extends WatchDestination { statePath: string }
+
+export function watchTargets(settings: Settings, configPath: string): WatchTarget[] {
+    if (typeof settings.token !== 'string' || !settings.token
+        || (settings.additionalRepositories !== undefined && !Array.isArray(settings.additionalRepositories))) {
+        throw new Error('Invalid GitHub watch configuration.');
+    }
+    const destinations = [settings, ...(settings.additionalRepositories || [])];
+    const seen = new Set<string>();
+    return destinations.map((destination, index) => {
+        if (!destination || typeof destination.repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(destination.repository)
+            || typeof destination.threadId !== 'string' || !/^\d+$/.test(destination.threadId)) {
+            throw new Error('Invalid GitHub watch configuration.');
+        }
+        const { repository, threadId } = destination;
+        const key = `${encodeURIComponent(repository.toLowerCase())}.${threadId}`;
+        if (seen.has(key)) throw new Error('Duplicate GitHub watch repository and thread.');
+        seen.add(key);
+        // Keep the original cursor/outbox intact; additional watches have stable,
+        // destination-specific files even when their configuration order changes.
+        return { repository, threadId, statePath: index === 0 ? `${configPath}.state.json` : `${configPath}.${key}.state.json` };
+    });
+}
 export interface WatchState {
     repository: string;
     threadId: string;
@@ -321,9 +349,9 @@ export function startGitHubCommitWatch(client: Client): void {
             throw error;
         }
         if (settings.botUserId !== client.user?.id) return;
-        const { token, repository, threadId } = settings;
-        if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repository) || !/^\d+$/.test(threadId)) throw new Error('Invalid GitHub watch configuration.');
-        const statePath = `${configPath}.state.json`;
+        for (const target of watchTargets(settings, configPath)) startWatch(settings.token, target);
+    }
+    function startWatch(token: string, { repository, threadId, statePath }: WatchTarget) {
         const request: Request = async path => {
             const response = await fetch(`https://api.github.com/repos/${repository}${path}`, {
                 headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
@@ -337,7 +365,7 @@ export function startGitHubCommitWatch(client: Client): void {
             void (async () => {
                 const embeds = await previewPullRequests(message.content, repository, request);
                 if (embeds.length) await message.reply({ embeds, allowedMentions: { parse: [], repliedUser: false } });
-            })().catch(error => console.error('[GitHub watch] Link preview failed:', error.message));
+            })().catch(error => console.error(`[GitHub watch] ${repository} link preview failed:`, error.message));
         });
         const poll = async () => {
             try {
@@ -359,12 +387,12 @@ export function startGitHubCommitWatch(client: Client): void {
                 await deliverPending(state, send, () => saveState(statePath, state!));
                 if (!initialized) console.log(`[GitHub watch] Baseline saved for ${repository}: ${Object.keys(state.heads).length} branches; thread ${threadId}.`);
             } catch (error) {
-                console.error('[GitHub watch]', (error as Error).message);
+                console.error(`[GitHub watch] ${repository}:`, (error as Error).message);
             } finally {
                 setTimeout(() => void poll(), 60000).unref();
             }
         };
         console.log(`[GitHub watch] Tracking ${repository} in thread ${threadId} every 60 seconds.`);
-        await poll();
+        void poll();
     }
 }
