@@ -14,7 +14,8 @@ import {
     parsePauseDuration,
     sanitizeVideoWorkerText,
 } from './VideoProtocol.js';
-import { loadVideoSettings } from './VideoSettings.js';
+import { loadVideoSettings, VideoSettings } from './VideoSettings.js';
+import { VideoStallAlert, VideoStallMonitor } from './VideoStallAlerts.js';
 import { config } from './Config.js';
 import { recordExternalTokenSpend } from './TokenSpend.js';
 import { VideoUsageEvent } from './VideoUsage.js';
@@ -412,7 +413,7 @@ export function formatVideoJob(job: VideoJobView): string {
             const basis = job.gpu_estimated_admission_low_at || job.gpu_estimated_admission_high_at
                 ? ' The completion estimate includes the GPU work currently ahead; higher-priority submissions or external GPU pressure can still delay it.'
                 : ' The GPU coordinator has not provided a work-ahead estimate yet, so this currently assumes admission now.';
-            return `${head}\n**Waiting in the GPU queue.**${position}${ahead}${timing}${basis}`;
+            return `${head}\n**Waiting in the GPU queue.**${position}${ahead}${timing}${basis}${gpuBlockText(job)}`;
         }
         const progress = percentage(job.progress);
         const segment = job.segment_index && job.segment_count
@@ -427,6 +428,15 @@ export function formatVideoJob(job: VideoJobView): string {
     if (job.status === 'delivered') return `${head}\nDelivered.`;
     if (job.status === 'cancelled') return `${head}\nCancelled.`;
     return `${head}\nFailed: ${videoFailureDetail(job, 1800)}`;
+}
+
+function gpuBlockText(job: VideoJobView): string {
+    if (!job.gpu_queue_block_reason) return '';
+    const since = job.gpu_queue_submitted_at ? ` Waiting since <t:${job.gpu_queue_submitted_at}:R>.` : '';
+    if (job.gpu_queue_block_reason === 'external_gpu_busy') {
+        return ` The desktop GPU is currently held by other applications; rendering starts once enough memory frees up.${since}`;
+    }
+    return ` The GPU coordinator is holding this job (${job.gpu_queue_block_reason}).${since}`;
 }
 
 export function formatVideoStatusPost(job: VideoJobView): string {
@@ -554,6 +564,7 @@ class VideoGenerationService {
     private polling = false;
     private nextPollMs = 15_000;
     private readonly rendered = new Map<string, string>();
+    private readonly stallMonitor = new VideoStallMonitor();
     private readonly cancellationCollectors = new Map<
         string,
         ReturnType<Message['createReactionCollector']>
@@ -765,6 +776,39 @@ class VideoGenerationService {
         }
     }
 
+    private async reportStalls(jobs: VideoJobView[], settings: VideoSettings): Promise<void> {
+        const alerts = this.stallMonitor.observe(jobs, Math.floor(Date.now() / 1000), {
+            alertAfterSeconds: settings.stallAlertAfterSeconds,
+            realertSeconds: settings.stallRealertSeconds,
+        });
+        for (const alert of alerts) {
+            await this.deliverStallAlert(alert, settings);
+        }
+    }
+
+    private async deliverStallAlert(alert: VideoStallAlert, settings: VideoSettings): Promise<void> {
+        console.warn(`[Video] ${alert.kind === 'stalled' ? 'GPU queue stalled' : 'GPU queue stall ended'} for ${alert.jobId} after ${alert.waitedSeconds}s`);
+        const userId = settings.stallAlertUserId || config.god;
+        if (userId) {
+            try {
+                const user = await this.client.users.fetch(userId);
+                await user.send({ content: alert.text });
+            } catch (error) {
+                console.warn(`[Video] Could not DM the stall alert for ${alert.jobId}: ${String(error)}`);
+            }
+        }
+        if (settings.stallAlertChannelId) {
+            try {
+                const channel = await this.client.channels.fetch(settings.stallAlertChannelId);
+                if (channel && channel.isTextBased() && 'send' in channel) {
+                    await (channel as any).send({ content: alert.text });
+                }
+            } catch (error) {
+                console.warn(`[Video] Could not post the stall alert for ${alert.jobId}: ${String(error)}`);
+            }
+        }
+    }
+
     private async poll(): Promise<void> {
         if (this.polling || !this.client.user) return;
         const settings = loadVideoSettings();
@@ -782,6 +826,7 @@ class VideoGenerationService {
                     console.warn(`[Video] Could not update ${job.id}: ${String(error)}`);
                 }
             }
+            await this.reportStalls(response.jobs, settings);
             void syncVideoUsageForBot(this.client.user.id);
         } catch (error) {
             console.warn(`[Video] Broker poll failed: ${String(error)}`);
