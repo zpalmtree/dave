@@ -1062,6 +1062,9 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
             prompt: [
                 'Create one cohesive square image combining the OALGO character from Reference 1 with the depicted situation in Reference 2.',
                 'Use the actual OALGO base image as visual ground truth for his recognizable face, body, Mexican flag clothing and emblem, rendering style, and palette; do not change a photographic reference into a drawing.',
+                'OALGO is the exact distinctive character pictured in Reference 1: a very heavyset man with an exceptionally broad rounded head, huge full cheeks and jowls, a thick neck, narrow deep-set eyes beneath a furrowed brow, a broad nose, large full lips, and a broad dense black hair top with closely clipped sides. Copy the hair top\'s width, height, and outer contour directly from the reference. Preserve the reference ratios between these features, his massive head, broad shoulders, and heavy torso. Preserve the photographic skin texture and the intentionally exaggerated anatomy together.',
+                'Carry that same character into the new setting and pose. Establish his face, hair silhouette, and body mass first, then fit his Mexican-flag shirt to that body. Exactly one recognizable OALGO is present. Reference 2 supplies the other subjects and setting; keep their faces and physiques distinct from his.',
+                'Compose around the preserved character: place OALGO in the foreground or at a similar depth to the attached primary subjects so his broad face and hair remain large and clearly readable. Reproduce his original facial proportions at the new scale, with the same cheek-to-eye, mouth-to-face, and hair-to-head width ratios visible in Reference 1.',
                 'Integrate the main subject or subjects from Reference 2 naturally into the same scene while preserving their recognizable appearance, relevant pose, and relationships to story-defining props. A prominent person or animal must remain visible and recognizable; a nearby object is not a substitute for that subject. Preserve the visual situation that makes the requested reaction meaningful.',
                 'Widen or rebalance the composition and use the attached scene as the setting when needed to fit OALGO, the attached subjects, and important props together. Keep his face readable and leave clear sightlines and space for the requested interaction; do not preserve a tight base-portrait crop or background at the expense of the attached subject. Do not add unrelated scenery.',
                 'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
@@ -1080,7 +1083,7 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
     };
 }
 
-async function composeOalgoSourceImages(
+export async function composeOalgoSourceImages(
     base: StoredVideoSourceImage,
     attached: StoredVideoSourceImage,
     prompt: string,
@@ -1109,15 +1112,25 @@ async function composeOalgoSourceImages(
             contextUrl: 'discord-attachment',
         },
     ];
-    return generateFrontierVideoKeyframeCandidate(
-        oalgoSourceImageCompositePlan(prompt),
-        references,
-        {
-            ...configuredVideoKeyframeVariant(),
-            aspectRatio: '1:1',
-            ...hooks,
-        },
-    );
+    // Two image downloads can take a minute. Keep composition plus fallback inside
+    // the bot's seven-minute submission request even when providers time out.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    try {
+        return await createFrontierVideoKeyframe(
+            oalgoSourceImageCompositePlan(prompt),
+            references,
+            {
+                ...configuredVideoKeyframeVariant(),
+                ...hooks,
+                aspectRatio: '1:1',
+                requireIdentityPreservation: true,
+                abortSignal: controller.signal,
+            },
+        );
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 function storeCompositedSourceImage(
