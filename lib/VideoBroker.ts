@@ -1115,10 +1115,10 @@ export async function composeOalgoSourceImages(
             oalgoSourceImageCompositePlan(prompt),
             references,
             {
-                ...configuredVideoKeyframeVariant(),
                 ...hooks,
                 aspectRatio: '1:1',
                 requireIdentityPreservation: true,
+                reviewPurpose: 'source-composite',
                 abortSignal: controller.signal,
             },
         );

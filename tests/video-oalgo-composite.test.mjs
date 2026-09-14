@@ -73,22 +73,23 @@ test('production OALGO compositor repairs identity failures against both origina
             'OALGO looks toward the teacher behind the laptop.',
             { onAttempt: event => attempts.push(event) },
         );
-        assert.equal(result.bytes.toString(), 'gemini-2');
+        assert.equal(result.bytes.toString(), 'openai-2');
         assert.equal(result.reviewStatus, 'accepted');
-        assert.equal(requests.gemini.length, 2);
-        for (const request of requests.gemini) {
-            const parts = request.contents[0].parts;
-            assert.deepEqual(parts.filter(part => part.inlineData).map(part => part.inlineData.data),
-                [identityBytes, attachedBytes].map(bytes => bytes.toString('base64')));
-            const prompt = parts.filter(part => part.text).map(part => part.text).join('\n');
-            assert.match(parts[0].text, /Edit the character supplied in the identity reference/);
+        assert.equal(requests.gemini.length, 0);
+        assert.equal(requests.openai.length, 2);
+        for (const request of requests.openai) {
+            assert.deepEqual(await Promise.all(request.getAll('image[]').map(async image =>
+                Buffer.from(await image.arrayBuffer()))), [identityBytes, attachedBytes]);
+            const prompt = request.get('prompt');
             assert.match(prompt, /Declared use: identity/);
             assert.match(prompt, /huge full cheeks and jowls/);
             assert.match(prompt, /heavy torso/);
-            assert.equal(request.generationConfig.imageConfig.aspectRatio, '1:1');
+            assert.equal(request.get('size'), '1024x1024');
         }
-        assert.match(JSON.stringify(requests.gemini[1]), /Restore the huge rounded cheeks/);
+        assert.match(requests.openai[1].get('prompt'), /Restore the huge rounded cheeks/);
         assert.match(requests.reviews[0].input[0].content[0].text, /recognizable inspiration alone is insufficient/);
+        assert.match(requests.reviews[0].input[0].content[0].text, /Correctable gaze or pose differences alone do not fail/);
+        assert.match(requests.reviews[0].input[0].content[0].text, /missing or substituted attached primary subject/);
         assert.deepEqual(attempts.filter(event => event.stage === 'keyframe_review').map(event => event.outcome),
             ['rejected', 'accepted']);
     } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -170,9 +171,9 @@ for (const [label, reviews] of [
             assert.ok(attempts.some(event => event.stage === 'source_image_composite_keyframe_review'));
             assert.ok(attempts.every(event => event.outcome !== 'unreviewed'));
             if (reviews[0] instanceof Error) {
-                assert.equal(requests.gemini.length, 1);
+                assert.equal(requests.gemini.length, 0);
                 assert.equal(requests.reviews.length, 2);
-                assert.equal(requests.openai.length, 0);
+                assert.equal(requests.openai.length, 1);
             }
         } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
     });
