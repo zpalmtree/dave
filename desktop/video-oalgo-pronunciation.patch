@@ -1,0 +1,137 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -5011,7 +5011,14 @@
+     The plan keeps the user's wording; only the text handed to the renderer
+     changes, so verbatim checks and logs still show what was requested.
+     """
+-    text = str(value)
++    # OALGO is the Spanish phrase "o algo", not an initialism. Keep this
++    # pronunciation alias out of visual directions and the saved dialogue.
++    text = re.sub(
++        r"(?<![\w'])oalgo(?![\w'])",
++        lambda match: match.group(0)[0] + " algo",
++        str(value),
++        flags=re.IGNORECASE,
++    )
+ 
+     def replace(match: "re.Match[str]") -> str:
+         phrase = SPOKEN_ACRONYMS[match.group(1).casefold()]
+@@ -5033,6 +5040,8 @@
+ 
+ def _is_acronym_expansion(token: str, words: list[str]) -> bool:
+     """True when words spell token by their initials, allowing a dropped filler such as "of course"."""
++    if token == "oalgo":
++        return words == ["o", "algo"]
+     letters = re.sub(r"[^\w]", "", token)
+     initials = "".join(word[0] for word in words if word)
+     if len(words) < 2 or not letters or initials[0] != letters[0]:
+@@ -5351,11 +5360,15 @@
+                 )
+             else:
+                 body += f" At the very beginning of this shot, {dialogue}."
++        else:
++            body += " No speech occurs in this shot; character names and scene directions are not spoken."
+         body += f" {shot['audio'].rstrip('.')} ."
+         description.append(re.sub(r"\s+([.])", r"\1", body))
+         elapsed += float(shot["duration_seconds"])
+     if has_dialogue:
+         description.append(
++            "Only the dialogue words inside the dialogue tags are voiced; speaker names, speaker tags, "
++            "language labels, and performance instructions are not spoken. "
+             "Before the first quoted line and after the final quoted line, no human speech, mumbling, "
+             "or invented words are audible; speakers keep their mouths closed outside the dialogue."
+         )
+@@ -5401,10 +5414,14 @@
+                 + f"in {normalized_language(line['language'])} with "
+                 f"{line['delivery']}, says exactly: \"{rendered_dialogue_text(line)}\"."
+             )
++        if not shot.get("dialogue"):
++            sentence += " No speech occurs in this shot; character names and scene directions are not spoken."
+         sentence += f" {shot['audio'].rstrip('.')} ."
+         sentences.append(re.sub(r"\s+([.])", r"\1", sentence))
+     if has_dialogue:
+         sentences.append(
++            "Only the quoted dialogue words are voiced; speaker names, language labels, and performance "
++            "instructions are not spoken. "
+             "After the final quoted line, all speakers stop speaking and keep their mouths closed; "
+             "no additional words, mumbling, or background voices are audible."
+         )
+@@ -6817,7 +6834,7 @@
+         ]
+         required_dialogue = [
+             [
+-                str(line["text"])
++                rendered_dialogue_text(line)
+                 for shot in segment["shots"]
+                 for line in shot.get("dialogue", [])
+             ]
+--- /dev/null
++++ b/test_oalgo_pronunciation.py
+@@ -0,0 +1,67 @@
++"""Pronunciation and metadata regressions; no inference or network calls."""
++import copy
++import unittest
++from unittest import mock
++
++from test_video_gen import sample_plan, video_gen
++
++
++class OalgoPronunciationTests(unittest.TestCase):
++    def test_spanish_phrase_and_acronyms_are_spoken_without_changing_other_words(self):
++        cases = {
++            "WTF, oalgo?": "What the fuck, o algo?",
++            "OALGO, mayne.": "O algo, mayne.",
++            "Try Oalgo or o algo.": "Try O algo or o algo.",
++            "The FBI and CEO said GG.": "The FBI and CEO said GG.",
++            "oalgorithm my_oalgo oalgos": "oalgorithm my_oalgo oalgos",
++        }
++        for text, expected in cases.items():
++            with self.subTest(text=text):
++                self.assertEqual(video_gen.spoken_dialogue_text(text), expected)
++
++    def test_planner_cannot_turn_oalgo_into_initials_or_an_unrelated_expansion(self):
++        self.assertTrue(video_gen.spoken_text_matches("WTF, OALGO?", "What the fuck, o algo?"))
++        for spoken in ["O A L G O", "oh ay el gee oh", "only a little green owl"]:
++            with self.subTest(spoken=spoken):
++                self.assertEqual(video_gen.reconciled_spoken_text("OALGO", spoken), "")
++
++    def test_both_compilers_voice_spanish_phrase_and_preserve_plan_and_visible_text(self):
++        for compiler in [video_gen.compile_h3_prompt, video_gen.compile_ltx_draft]:
++            segment = sample_plan("WTF, oalgo?")["segments"][0]
++            shot = segment["shots"][0]
++            shot["dialogue"][0]["speaker_id"] = "OALGO"
++            shot["visual"] = 'OALGO points at a sign reading "OALGO" and speaks.'
++            before = copy.deepcopy(segment)
++            prompt = compiler(segment, False)
++            with self.subTest(compiler=compiler.__name__):
++                self.assertIn("What the fuck, o algo?", prompt)
++                self.assertIn('sign reading "OALGO"', prompt)
++                self.assertEqual(segment, before)
++
++    def test_speaker_name_is_not_added_to_dialogue(self):
++        segment = sample_plan("Hello, mayne.")["segments"][0]
++        segment["shots"][0]["dialogue"][0]["speaker_id"] = "OALGO"
++        prompt = video_gen.compile_h3_prompt(segment, False)
++        self.assertIn("<d>[English] Hello, mayne.</d>", prompt)
++        self.assertIn("speaker names", prompt)
++        self.assertIn("are not spoken", prompt)
++        self.assertNotIn("<d>[English] OALGO", prompt)
++
++    def test_ltx_enhancer_must_preserve_the_spoken_phrase(self):
++        plan = sample_plan("WTF, oalgo?")
++        with mock.patch.object(video_gen, "enhance_ltx_segments", side_effect=lambda _, drafts, *args: drafts) as enhance:
++            prepared = video_gen.prepare_model_segments("unused", plan, "ltx", None, {}, False, 1)
++        self.assertEqual(enhance.call_args.args[2], [["What the fuck, o algo?"]])
++        self.assertIn("What the fuck, o algo?", prepared[0]["prompt"])
++        self.assertEqual(plan["segments"][0]["shots"][0]["dialogue"][0]["text"], "WTF, oalgo?")
++
++    def test_silent_reaction_has_no_spoken_character_label(self):
++        for compiler in [video_gen.compile_h3_prompt, video_gen.compile_ltx_draft]:
++            segment = sample_plan()["segments"][0]
++            segment["shots"][0]["visual"] = "OALGO grins and waves."
++            with self.subTest(compiler=compiler.__name__):
++                self.assertIn("No speech occurs in this shot", compiler(segment, False))
++
++
++if __name__ == "__main__":
++    unittest.main()
