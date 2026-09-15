@@ -538,7 +538,11 @@ async function masterOpenAIHandler(
               effort: 'high',
             },
             tools: [
-              { type: 'image_generation', moderation: 'low' },
+              {
+                type: 'image_generation',
+                model: imageURLs.length > 0 ? AI_MODELS.openAIImage : AI_MODELS.openAICImage,
+                moderation: 'low',
+              } as any, // The installed SDK predates GPT Image 2.5 tool model IDs.
             ],
             stream: false,
           };
@@ -1310,11 +1314,9 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
                 input: [toResponsesMessage(userMessageForInput)],
                 tools: [
                     {
-                        type: 'image_generation',
-                        moderation: 'low',
-                        output_format: 'png',
+                        ...buildCImageGenerationTool('png', true, true),
                         partial_images: MAX_STREAM_PARTIALS,
-                    },
+                    } as any,
                 ],
                 user: msg.author.id,
                 stream: true,
@@ -1581,7 +1583,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             const transparentBackground = wantsTransparentOutput(prompt);
             const outputFormat = wantsPngOutput(prompt) || transparentBackground ? 'png' : 'jpeg';
             let result = await runImageGeneration(
-                buildCImageGenerationTool(outputFormat, transparentBackground),
+                buildCImageGenerationTool(outputFormat, transparentBackground, imageURLs.length > 0),
             );
 
             if (
@@ -1590,7 +1592,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
                 && isUnsupportedTransparentBackgroundError(result.errorText)
             ) {
                 result = await runImageGeneration(
-                    buildCImageGenerationTool(outputFormat, false),
+                    buildCImageGenerationTool(outputFormat, false, imageURLs.length > 0),
                 );
             }
 

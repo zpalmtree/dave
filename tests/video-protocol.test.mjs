@@ -2114,7 +2114,7 @@ test('video reply-chain guidance is compact background that excludes blank messa
 
 test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.equal(VIDEO_KEYFRAME_MODEL, 'gemini-3-pro-image');
-    assert.equal(VIDEO_KEYFRAME_FALLBACK_MODEL, 'gpt-image-2');
+    assert.equal(VIDEO_KEYFRAME_FALLBACK_MODEL, 'gpt-image-2.5-sunburst');
     assert.equal(VIDEO_KEYFRAME_REVIEW_MODEL, 'gpt-5.6-sol');
     assert.equal(VIDEO_KEYFRAME_REVIEW_TIMEOUT_MS, 75_000);
     const prompt = buildVideoKeyframePrompt({
