@@ -4,7 +4,7 @@ export type CImageOutputFormat = 'png' | 'jpeg';
 
 export type CImageGenerationTool = {
     type: 'image_generation';
-    model: typeof AI_MODELS.openAICImage;
+    model: typeof AI_MODELS.openAICImage | typeof AI_MODELS.openAIImage;
     moderation: 'low';
     output_format: CImageOutputFormat;
     output_compression?: number;
@@ -14,12 +14,13 @@ export type CImageGenerationTool = {
 export function buildCImageGenerationTool(
     outputFormat: CImageOutputFormat,
     transparentBackground: boolean,
+    hasInputImages: boolean = false,
 ): CImageGenerationTool {
     const effectiveOutputFormat = transparentBackground ? 'png' : outputFormat;
 
     return {
         type: 'image_generation',
-        model: AI_MODELS.openAICImage,
+        model: hasInputImages ? AI_MODELS.openAIImage : AI_MODELS.openAICImage,
         moderation: 'low',
         output_format: effectiveOutputFormat,
         ...(effectiveOutputFormat === 'jpeg' ? { output_compression: 50 } : {}),
