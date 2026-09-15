@@ -24,6 +24,7 @@ import { recordTokenSpend } from './TokenSpend.js';
 import { AI_MODELS, OPENAI_FINE_TUNED_MODELS } from './AIModels.js';
 import {
     buildCImageGenerationTool,
+    generateCImageWithFallback,
     type CImageGenerationTool,
 } from './CImageGeneration.js';
 import { classifyPromptTease } from './PromptTease.js';
@@ -1554,7 +1555,13 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
 
             let rawResult: ResponsesCreateReturn;
             try {
-                rawResult = await openai.responses.create(requestPayload);
+                rawResult = await generateCImageWithFallback(
+                    imageGenerationTool,
+                    tool => openai.responses.create({
+                        ...requestPayload,
+                        tools: [tool as any],
+                    }),
+                );
             } catch (error: any) {
                 console.error('Failed to generate image with OpenAI Responses API:', error);
                 return {
