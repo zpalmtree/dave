@@ -9,6 +9,10 @@ export const VIDEO_DISCORD_TIER_3_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const VIDEO_RESULT_MAX_BYTES = VIDEO_DISCORD_TIER_3_UPLOAD_BYTES;
 export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+// Allow two three-minute image attempts and their 75-second visual reviews.
+export const VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS = 9 * 60 * 1000;
+// Include both source downloads and time to return the broker's result.
+export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS + 2 * 60 * 1000;
 
 export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast';
 export type VideoGeneratorModelId = 'ltx' | 'h3';

@@ -23,6 +23,7 @@ import {
     VIDEO_RESULT_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
+    VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS,
     VideoJobStatus,
     VideoJobView,
     VideoGeneratorModelId,
@@ -1052,7 +1053,7 @@ async function storeVideoSourceImage(
 
 export function oalgoSourceImageCompositePlan(prompt: string): Record<string, unknown> {
     const requestedAction = prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT
-        ? 'Invent a lively, visually clear action that naturally follows from the combined image.'
+        ? 'Add OALGO to the attached situation. Preserve its existing subjects and action; a later screenplay will plan the motion.'
         : `Stage the combined image so it can naturally begin this requested video: ${prompt}`;
     return {
         intent: requestedAction,
@@ -1060,13 +1061,10 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
             recommended: true,
             reason: 'Combine the built-in OALGO art with the user-supplied visual reference.',
             prompt: [
-                'Create one cohesive square image combining the OALGO character from Reference 1 with the depicted situation in Reference 2.',
-                'Use the actual OALGO base image as visual ground truth for his recognizable face, body, Mexican flag clothing and emblem, rendering style, and palette; do not change a photographic reference into a drawing.',
-                'OALGO is the exact distinctive character pictured in Reference 1: a very heavyset man with an exceptionally broad rounded head, huge full cheeks and jowls, a thick neck, narrow deep-set eyes beneath a furrowed brow, a broad nose, large full lips, and a broad dense black hair top with closely clipped sides. Copy the hair top\'s width, height, and outer contour directly from the reference. Preserve the reference ratios between these features, his massive head, broad shoulders, and heavy torso. Preserve the photographic skin texture and the intentionally exaggerated anatomy together.',
-                'Carry that same character into the new setting and pose. Establish his face, hair silhouette, and body mass first, then fit his Mexican-flag shirt to that body. Exactly one recognizable OALGO is present. Reference 2 supplies the other subjects and setting; keep their faces and physiques distinct from his.',
-                'Compose around the preserved character: place OALGO in the foreground or at a similar depth to the attached primary subjects so his broad face and hair remain large and clearly readable. Reproduce his original facial proportions at the new scale, with the same cheek-to-eye, mouth-to-face, and hair-to-head width ratios visible in Reference 1.',
-                'Integrate the main subject or subjects from Reference 2 naturally into the same scene while preserving their recognizable appearance, relevant pose, and relationships to story-defining props. A prominent person or animal must remain visible and recognizable; a nearby object is not a substitute for that subject. Preserve the visual situation that makes the requested reaction meaningful.',
-                'Widen or rebalance the composition and use the attached scene as the setting when needed to fit OALGO, the attached subjects, and important props together. Keep his face readable and leave clear sightlines and space for the requested interaction; do not preserve a tight base-portrait crop or background at the expense of the attached subject. Do not add unrelated scenery.',
+                'Edit the scene in Reference 2 by adding OALGO from Reference 1 as one additional, separate person.',
+                'Keep every main subject from Reference 2 visible and recognizable, keeping their own clothing, equipment, and story-defining props with their original owners. OALGO joins them; he does not replace, merge with, or dress as any existing subject.',
+                'Use the OALGO base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.',
+                'Keep the attached setting and the relationships between its subjects. Make room beside them for OALGO, widening the view only as needed. Keep his face large enough to recognize and the attached subjects unobscured.',
                 'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
                 requestedAction,
             ].join(' '),
@@ -1112,10 +1110,10 @@ export async function composeOalgoSourceImages(
             contextUrl: 'discord-attachment',
         },
     ];
-    // Two image downloads can take a minute. Keep composition plus fallback inside
-    // the bot's seven-minute submission request even when providers time out.
+    // A corrective image needs a full review too; the old five-minute cap could
+    // expire just after paying for that second image.
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    const timeout = setTimeout(() => controller.abort(), VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS);
     try {
         return await createFrontierVideoKeyframe(
             oalgoSourceImageCompositePlan(prompt),
@@ -1149,17 +1147,6 @@ function storeCompositedSourceImage(
     writeFileSync(temporary, result.bytes, { flag: 'wx' });
     renameSync(temporary, destination);
     return { path: destination, mimeType: result.mimeType, bytes: result.bytes.length };
-}
-
-function copyStoredSourceImage(
-    source: StoredVideoSourceImage,
-    directory: string,
-): StoredVideoSourceImage {
-    mkdirSync(directory, { recursive: true });
-    const destination = join(directory, `source.${imageExtension(source.mimeType)}`);
-    rmSync(destination, { force: true });
-    copyFileSync(source.path, destination);
-    return { path: destination, mimeType: source.mimeType, bytes: source.bytes };
 }
 
 function writeImage(res: ServerResponse, path: string, mimeType: string, headers: Record<string, string>): void {
@@ -2093,7 +2080,7 @@ export class VideoBroker {
         let sourceImage: StoredVideoSourceImage | null = null;
         let sourceImageDownloadSeconds: number | null = null;
         let sourceImageCompositionSeconds: number | null = null;
-        let sourceImageComposition: 'generated' | 'fallback' | null = null;
+        let sourceImageComposition: 'generated' | null = null;
         if (sourceDescriptor) {
             const sourceImageStarted = Date.now();
             try {
@@ -2126,13 +2113,12 @@ export class VideoBroker {
                         sourceImageComposition = 'generated';
                     } catch (error) {
                         if (error instanceof VideoUsagePersistenceError) throw error;
-                        sourceImageComposition = 'fallback';
                         await submissionHooks.onAttempt?.({
-                            stage: 'source_image_composite_fallback',
+                            stage: 'source_image_composite_failed',
                             attempt: 1,
                             outcome: 'error',
                             provider: 'broker',
-                            model: 'oalgo-preset',
+                            model: 'oalgo-composite',
                             serviceTier: 'default',
                             durationSeconds: (Date.now() - compositionStarted) / 1000,
                             detail: sanitizeVideoWorkerText(
@@ -2142,10 +2128,10 @@ export class VideoBroker {
                             ),
                         });
                         console.warn(
-                            '[Video] OALGO source-image composition failed; using the built-in preset.',
+                            '[Video] OALGO source-image composition failed; rejecting the submission.',
                             error,
                         );
-                        sourceImage = copyStoredSourceImage(base, directory);
+                        throw new Error('Could not combine OALGO with your attached image. No video was queued. Please try again.');
                     } finally {
                         sourceImageCompositionSeconds = (Date.now() - compositionStarted) / 1000;
                         rmSync(join(directory, 'composite-base'), { recursive: true, force: true });
