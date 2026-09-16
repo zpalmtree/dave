@@ -8,6 +8,7 @@ import {
     VIDEO_MODELS,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
+    VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS,
     VideoJobView,
     VideoModelId,
     discordVideoUploadLimitBytes,
@@ -1047,7 +1048,7 @@ export async function handleVideoRequest(
                 source_image_composite: compositeSourceImage,
                 planner_guidance: plannerGuidance || undefined,
             }),
-        }, compositeSourceImage ? 7 * 60 * 1000 : 45_000);
+        }, compositeSourceImage ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
         return;

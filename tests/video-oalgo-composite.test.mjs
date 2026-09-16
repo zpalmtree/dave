@@ -84,6 +84,9 @@ test('production OALGO compositor repairs identity failures against both origina
             assert.match(prompt, /Declared use: identity/);
             assert.match(prompt, /huge full cheeks and jowls/);
             assert.match(prompt, /heavy torso/);
+            assert.match(prompt, /one additional, separate person/);
+            assert.match(prompt, /props with their original owners/);
+            assert.doesNotMatch(prompt, /requires no turn|not starting frames|First-second continuation/);
             assert.equal(request.get('size'), '1024x1024');
         }
         assert.match(requests.openai[1].get('prompt'), /Restore the huge rounded cheeks/);
@@ -135,7 +138,7 @@ for (const [label, reviews] of [
     ['all candidates change identity', [rejected]],
     ['the identity reviewer is unavailable', [new Error('review service unavailable')]],
 ]) {
-    test(`broker falls back to the exact preset when ${label}`, async t => {
+    test(`broker queues no video and reports composition failure when ${label}`, async t => {
         const requests = providers(t, reviews);
         const directory = mkdtempSync(join(tmpdir(), 'oalgo-broker-'));
         const broker = new VideoBroker({
@@ -159,15 +162,22 @@ for (const [label, reviews] of [
                     },
                 }),
             });
-            assert.equal(response.status, 201);
+            assert.equal(response.status, 400);
             const body = await response.json();
-            assert.equal(body.source_image_composition, 'fallback');
-            const resultDirectory = join(directory, 'results', body.job.id);
-            assert.deepEqual(readFileSync(join(resultDirectory, 'source.png')), identityBytes);
-            assert.equal(existsSync(join(resultDirectory, 'composite-base')), false);
-            assert.equal(existsSync(join(resultDirectory, 'composite-attached')), false);
+            assert.match(body.error, /Could not combine OALGO with your attached image\. No video was queued/);
+            assert.equal(body.job, undefined);
+            assert.deepEqual(await broker.all('SELECT public_id FROM video_jobs'), []);
+            const submissions = await broker.all('SELECT * FROM video_submission_metrics');
+            assert.equal(submissions.length, 1);
+            assert.equal(submissions[0].outcome, 'rejected');
+            assert.equal(submissions[0].job_public_id, null);
+            assert.equal(typeof submissions[0].source_composition_seconds, 'number');
+            assert.equal(existsSync(join(directory, 'results', submissions[0].public_id)), false);
+            const usage = await broker.all('SELECT * FROM video_usage_events WHERE job_public_id = ?', [submissions[0].public_id]);
+            assert.ok(usage.length > 0, 'paid image attempts remain accounted for even when no video is queued');
             const attempts = await broker.all('SELECT stage, outcome FROM video_provider_attempt_metrics');
-            assert.ok(attempts.some(event => event.stage === 'source_image_composite_fallback'));
+            assert.ok(attempts.some(event => event.stage === 'source_image_composite_failed'));
+            assert.ok(!attempts.some(event => event.stage === 'source_image_composite_fallback'));
             assert.ok(attempts.some(event => event.stage === 'source_image_composite_keyframe_review'));
             assert.ok(attempts.every(event => event.outcome !== 'unreviewed'));
             if (reviews[0] instanceof Error) {
@@ -178,6 +188,29 @@ for (const [label, reviews] of [
         } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
     });
 }
+
+test('a corrective composite still receives its review after five minutes of provider work', async t => {
+    const requests = providers(t, [rejected, approved]);
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const providerFetch = globalThis.fetch;
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        // Reproduce f4f1cd08: two successful ~135s edits plus their reviews.
+        t.mock.timers.tick(String(input).endsWith('/v1/images/edits') ? 137_000 : 27_000);
+        assert.equal(init.signal.aborted, false, 'a paid candidate must have time for its visual review');
+        return providerFetch(input, init);
+    });
+    const directory = mkdtempSync(join(tmpdir(), 'oalgo-composite-timeout-'));
+    try {
+        const result = await composeOalgoSourceImages(
+            storedImage(directory, 'oalgo.png', identityBytes),
+            storedImage(directory, 'attachment.png', attachedBytes),
+            'OALGO joins the pictured scene.', {},
+        );
+        assert.equal(result.reviewStatus, 'accepted');
+        assert.equal(requests.openai.length, 2);
+        assert.equal(requests.reviews.length, 2);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('required identity review cannot run without an identity reference', async t => {
     const requests = providers(t, [approved]);

@@ -138,7 +138,7 @@ test('long video estimates scale by full segment cost and live job progress repl
 test('OALGO composite instructions preserve both inputs as one scene', () => {
     const plan = oalgoSourceImageCompositePlan('OALGO races toward the finish line.');
     assert.match(plan.keyframe.prompt, /OALGO base image/);
-    assert.match(plan.keyframe.prompt, /Integrate the main subject or subjects from Reference 2/);
+    assert.match(plan.keyframe.prompt, /Keep every main subject from Reference 2/);
     assert.match(plan.keyframe.prompt, /never a split screen, side-by-side layout, pasted rectangle, or collage/);
     assert.match(plan.keyframe.prompt, /races toward the finish line/);
     assert.equal(plan.keyframe.motion_contract.camera_relation.includes('OALGO'), true);
@@ -784,7 +784,7 @@ test('concurrent duplicate OALGO submissions retain both paid composition record
     } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('OALGO jobs use the preset, AI-composite an attachment, and fall back safely', async () => {
+test('OALGO jobs composite attachments and reject failed compositions without dropping the attachment', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-'));
     const dbPath = join(directory, 'queue.sqlite3');
     const presetBytes = Buffer.from('oalgo-preset');
@@ -872,17 +872,13 @@ test('OALGO jobs use the preset, AI-composite an attachment, and fall back safel
             'the complete character guidance must survive broker storage, including voice rules after character 2,000');
 
         failComposition = true;
-        const fallback = await submit('fallback', OALGO_VIDEO_PLANNER_GUIDANCE);
-        assert.equal(fallback.status, 201);
-        assert.equal(fallback.body.job.has_source_image, true);
-        assert.equal(fallback.body.source_image_composition, 'fallback');
-        assert.deepEqual(
-            readFileSync(join(directory, 'results', fallback.body.job.id, 'source.png')),
-            presetBytes,
-        );
+        const failed = await submit('failed', OALGO_VIDEO_PLANNER_GUIDANCE);
+        assert.equal(failed.status, 400);
+        assert.match(failed.body.error, /No video was queued/);
+        assert.equal(failed.body.job, undefined);
         assert.deepEqual(compositionPrompts, [
             'OALGO prompt generated',
-            'OALGO prompt fallback',
+            'OALGO prompt failed',
         ]);
 
         const invalid = await fetch(`${base}/v1/jobs`, {
