@@ -57,11 +57,15 @@ test('includes cache reads, cache writes and web searches in claude cost', () =>
 
 test('prices images per unit', () => {
     const cost = estimateTokenSpendCost({
-        model: 'grok-imagine-image-2.0',
+        model: 'grok-imagine-image',
         images: 2,
     });
 
-    assert.ok(Math.abs(cost - 0.12) < 1e-9);
+    assert.ok(Math.abs(cost - 0.04) < 1e-9);
+    assert.ok(Math.abs(estimateTokenSpendCost({
+        model: 'grok-imagine-image-2.0',
+        images: 2,
+    }) - 0.12) < 1e-9);
 });
 
 test('prices transcription audio by duration', () => {
