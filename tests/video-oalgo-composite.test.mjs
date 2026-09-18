@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import fetch from 'node-fetch';
 
-import { composeOalgoSourceImages, oalgoSourceImageCompositePlan, VideoBroker } from '../dist/VideoBroker.js';
-import { createFrontierVideoKeyframe } from '../dist/VideoKeyframeProvider.js';
+import { composeOalgoSourceImages, oalgoSourceImageCompositePlan, oalgoCompositionFailureMessage, VideoBroker } from '../dist/VideoBroker.js';
+import { createFrontierVideoKeyframe, VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
 
 const identityBytes = Buffer.from('original-oalgo-portrait');
@@ -28,7 +28,7 @@ function json(body, status = 200) {
     return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function providers(t, reviews) {
+function providers(t, reviews, imageErrors = []) {
     const requests = { gemini: [], openai: [], reviews: [] };
     t.mock.method(console, 'log', () => {});
     t.mock.method(console, 'warn', () => {});
@@ -42,6 +42,8 @@ function providers(t, reviews) {
         }
         if (url.endsWith('/v1/images/edits')) {
             requests.openai.push(init.body);
+            const error = imageErrors[requests.openai.length - 1];
+            if (error) return json({ error }, 400);
             return json({ data: [{ b64_json: Buffer.from(`openai-${requests.openai.length}`).toString('base64') }] });
         }
         if (url.endsWith('/v1/responses')) {
@@ -65,21 +67,24 @@ function storedImage(directory, name, bytes) {
 test('production OALGO compositor repairs identity failures against both original inputs', async t => {
     const requests = providers(t, [{ ...rejected, acceptable: true, best_effort_worthy: true }, approved]);
     const attempts = [];
+    const budgets = [];
     const directory = mkdtempSync(join(tmpdir(), 'oalgo-composite-'));
     try {
         const result = await composeOalgoSourceImages(
             storedImage(directory, 'oalgo.png', identityBytes),
             storedImage(directory, 'attachment.png', attachedBytes),
             'OALGO looks toward the teacher behind the laptop.',
-            { onAttempt: event => attempts.push(event) },
+            { onAttempt: event => attempts.push(event), beforeRequest: request => budgets.push(request) },
         );
         assert.equal(result.bytes.toString(), 'openai-2');
         assert.equal(result.reviewStatus, 'accepted');
         assert.equal(requests.gemini.length, 0);
         assert.equal(requests.openai.length, 2);
-        for (const request of requests.openai) {
+        for (const [index, request] of requests.openai.entries()) {
             assert.deepEqual(await Promise.all(request.getAll('image[]').map(async image =>
-                Buffer.from(await image.arrayBuffer()))), [identityBytes, attachedBytes]);
+                Buffer.from(await image.arrayBuffer()))), index === 0
+                ? [identityBytes, attachedBytes]
+                : [identityBytes, attachedBytes, Buffer.from('openai-1')]);
             const prompt = request.get('prompt');
             assert.match(prompt, /Declared use: identity/);
             assert.match(prompt, /huge full cheeks and jowls/);
@@ -90,6 +95,16 @@ test('production OALGO compositor repairs identity failures against both origina
             assert.equal(request.get('size'), '1024x1024');
         }
         assert.match(requests.openai[1].get('prompt'), /Restore the huge rounded cheeks/);
+        assert.match(requests.openai[1].get('prompt'), /Image 3 is the EDIT TARGET/);
+        assert.match(requests.openai[1].get('prompt'), /Edit the supplied EDIT TARGET in place/);
+        const imageBudgets = budgets.filter(request => request.stage === 'keyframe_candidate_openai');
+        assert.ok(imageBudgets[1].maxInputTokens > imageBudgets[0].maxInputTokens + 131_072,
+            'the repair budget includes the extra candidate image');
+        const repairedReviewImages = requests.reviews[1].input[0].content
+            .filter(part => part.type === 'input_image').map(part => part.image_url.split(',')[1]);
+        assert.deepEqual(repairedReviewImages.map(value => Buffer.from(value, 'base64').toString()),
+            ['openai-2', identityBytes.toString(), attachedBytes.toString()],
+            'review against the original inputs, never the rejected candidate');
         assert.match(requests.reviews[0].input[0].content[0].text, /recognizable inspiration alone is insufficient/);
         assert.match(requests.reviews[0].input[0].content[0].text, /Correctable gaze or pose differences alone do not fail/);
         assert.match(requests.reviews[0].input[0].content[0].text, /missing or substituted attached primary subject/);
@@ -134,12 +149,16 @@ test('preserving OALGO alone cannot pass a composite that loses the attached sub
     assert.equal(requests.reviews.length, 4);
 });
 
-for (const [label, reviews] of [
-    ['all candidates change identity', [rejected]],
-    ['the identity reviewer is unavailable', [new Error('review service unavailable')]],
+for (const [label, reviews, imageErrors, expectedMessage] of [
+    ['all candidates change identity', [rejected], [], /changed OALGO's likeness/],
+    ['the attached scene is lost', [{ ...rejected, identity_preserved: true }], [], /did not preserve the attached scene/],
+    ['the identity reviewer is unavailable', [new Error('review service unavailable')], [], /review service was unavailable/],
+    ['the provider declines the first image', [approved], [{ code: 'content_policy_violation', message: 'Request declined.' }], /safety rules/],
+    ['the provider declines the repair', [rejected], [null, { code: 'moderation_blocked', message: 'Request declined.' }], /safety rules/],
+    ['the image provider has an error', [approved], [{ code: 'invalid_api_key', message: 'Private provider details' }], /image service could not complete/],
 ]) {
     test(`broker queues no video and reports composition failure when ${label}`, async t => {
-        const requests = providers(t, reviews);
+        const requests = providers(t, reviews, imageErrors);
         const directory = mkdtempSync(join(tmpdir(), 'oalgo-broker-'));
         const broker = new VideoBroker({
             host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
@@ -165,6 +184,8 @@ for (const [label, reviews] of [
             assert.equal(response.status, 400);
             const body = await response.json();
             assert.match(body.error, /Could not combine OALGO with your attached image\. No video was queued/);
+            assert.match(body.error, expectedMessage);
+            assert.doesNotMatch(body.error, /Private provider details/);
             assert.equal(body.job, undefined);
             assert.deepEqual(await broker.all('SELECT public_id FROM video_jobs'), []);
             const submissions = await broker.all('SELECT * FROM video_submission_metrics');
@@ -174,12 +195,18 @@ for (const [label, reviews] of [
             assert.equal(typeof submissions[0].source_composition_seconds, 'number');
             assert.equal(existsSync(join(directory, 'results', submissions[0].public_id)), false);
             const usage = await broker.all('SELECT * FROM video_usage_events WHERE job_public_id = ?', [submissions[0].public_id]);
-            assert.ok(usage.length > 0, 'paid image attempts remain accounted for even when no video is queued');
+            assert.equal(usage.length > 0, !imageErrors[0],
+                'paid image attempts remain accounted for even when no video is queued');
             const attempts = await broker.all('SELECT stage, outcome FROM video_provider_attempt_metrics');
             assert.ok(attempts.some(event => event.stage === 'source_image_composite_failed'));
             assert.ok(!attempts.some(event => event.stage === 'source_image_composite_fallback'));
-            assert.ok(attempts.some(event => event.stage === 'source_image_composite_keyframe_review'));
+            assert.equal(attempts.some(event => event.stage === 'source_image_composite_keyframe_review'), !imageErrors[0]);
             assert.ok(attempts.every(event => event.outcome !== 'unreviewed'));
+            assert.equal(requests.gemini.length, 0, 'no provider switch on a refused composite');
+            if (imageErrors.length) {
+                assert.equal(requests.openai.length, imageErrors.length, 'a refusal must not be retried');
+                if (expectedMessage.source === 'safety rules') assert.doesNotMatch(body.error, /Please try again|You can retry/);
+            }
             if (reviews[0] instanceof Error) {
                 assert.equal(requests.gemini.length, 0);
                 assert.equal(requests.reviews.length, 2);
@@ -188,6 +215,12 @@ for (const [label, reviews] of [
         } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
     });
 }
+
+test('composition messages distinguish deadlines and hide unexpected provider details', () => {
+    assert.match(oalgoCompositionFailureMessage(new VideoKeyframeError('timeout', 'aborted')), /took too long/);
+    assert.match(oalgoCompositionFailureMessage(new Error('secret request payload')), /image service could not complete/);
+    assert.doesNotMatch(oalgoCompositionFailureMessage(new Error('secret request payload')), /secret/);
+});
 
 test('a corrective composite still receives its review after five minutes of provider work', async t => {
     const requests = providers(t, [rejected, approved]);
@@ -209,6 +242,27 @@ test('a corrective composite still receives its review after five minutes of pro
         assert.equal(result.reviewStatus, 'accepted');
         assert.equal(requests.openai.length, 2);
         assert.equal(requests.reviews.length, 2);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('the shared composition deadline reports a timeout and starts no further image calls', async t => {
+    const requests = providers(t, [approved]);
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    t.mock.method(globalThis, 'fetch', async (_input, init) => {
+        t.mock.timers.tick(9 * 60 * 1000);
+        assert.equal(init.signal.aborted, true);
+        throw new Error('This operation was aborted');
+    });
+    const directory = mkdtempSync(join(tmpdir(), 'oalgo-composite-deadline-'));
+    const attempts = [];
+    try {
+        await assert.rejects(composeOalgoSourceImages(
+            storedImage(directory, 'oalgo.png', identityBytes),
+            storedImage(directory, 'attachment.png', attachedBytes),
+            'OALGO joins the classroom.', { onAttempt: event => attempts.push(event) },
+        ), error => error instanceof VideoKeyframeError && error.code === 'timeout');
+        assert.equal(attempts.length, 1);
+        assert.equal(requests.reviews.length, 0);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

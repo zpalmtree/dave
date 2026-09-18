@@ -54,6 +54,7 @@ import {
     VideoKeyframeAspectRatio,
     VideoKeyframeOptions,
     VideoKeyframeResult,
+    VideoKeyframeError,
     configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
@@ -1126,9 +1127,34 @@ export async function composeOalgoSourceImages(
                 abortSignal: controller.signal,
             },
         );
+    } catch (error) {
+        if (error instanceof VideoUsagePersistenceError) throw error;
+        if (controller.signal.aborted) {
+            throw new VideoKeyframeError('timeout', 'OALGO image composition exceeded its time limit.');
+        }
+        throw error;
     } finally {
         clearTimeout(timeout);
     }
+}
+
+export function oalgoCompositionFailureMessage(error: unknown): string {
+    const prefix = 'Could not combine OALGO with your attached image. No video was queued.';
+    if (error instanceof VideoKeyframeError) {
+        switch (error.code) {
+            case 'moderation':
+                return `${prefix} The image provider declined this combination under its safety rules. Repeating the same request is unlikely to help.`;
+            case 'identity_review':
+                return `${prefix} The generated images changed OALGO's likeness, even after a repair. You can retry the composition.`;
+            case 'composition_review':
+                return `${prefix} The generated images did not preserve the attached scene, even after a repair. You can retry the composition.`;
+            case 'review_unavailable':
+                return `${prefix} The image review service was unavailable, so the result could not be verified. Please try again later.`;
+            case 'timeout':
+                return `${prefix} Combining and checking the images took too long. Please try again later.`;
+        }
+    }
+    return `${prefix} The image service could not complete the composition. Please try again later.`;
 }
 
 function storeCompositedSourceImage(
@@ -2131,7 +2157,7 @@ export class VideoBroker {
                             '[Video] OALGO source-image composition failed; rejecting the submission.',
                             error,
                         );
-                        throw new Error('Could not combine OALGO with your attached image. No video was queued. Please try again.');
+                        throw new Error(oalgoCompositionFailureMessage(error));
                     } finally {
                         sourceImageCompositionSeconds = (Date.now() - compositionStarted) / 1000;
                         rmSync(join(directory, 'composite-base'), { recursive: true, force: true });

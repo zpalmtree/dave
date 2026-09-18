@@ -48,6 +48,16 @@ export interface VideoKeyframeReview {
     correction_prompt: string;
 }
 
+export type VideoKeyframeFailureCode = 'moderation' | 'identity_review' | 'composition_review'
+    | 'review_unavailable' | 'timeout' | 'provider_error';
+
+export class VideoKeyframeError extends Error {
+    constructor(readonly code: VideoKeyframeFailureCode, message: string) {
+        super(message);
+        this.name = 'VideoKeyframeError';
+    }
+}
+
 export function videoKeyframeReviewDetail(review: VideoKeyframeReview): string | undefined {
     if (review.acceptable) return undefined;
     const issues = review.issues
@@ -383,6 +393,7 @@ async function generateOpenAIKeyframe(
     references: VideoKeyframeReference[],
     attempt: number,
     options: VideoKeyframeOptions,
+    editTarget?: VideoKeyframeResult,
 ): Promise<VideoKeyframeResult> {
     const started = Date.now();
     let outcome: 'success' | 'error' = 'error';
@@ -405,9 +416,13 @@ async function generateOpenAIKeyframe(
             '21:9': '1536x640',
         };
         const outputSize = outputSizes[aspectRatio];
-        const fullPrompt = `Output aspect ratio: ${aspectRatio}.\n${referenceContract(references, options)}\n\n${prompt}`;
+        const targetContract = editTarget
+            ? `Image ${references.length + 1} is the EDIT TARGET: the previous candidate to repair. It is not an identity reference. The original references above remain the authority for identity and scene content.`
+            : '';
+        const fullPrompt = `Output aspect ratio: ${aspectRatio}.\n${referenceContract(references, options)}${targetContract ? `\n${targetContract}` : ''}\n\n${prompt}`;
+        const inputImages = editTarget ? [...references, editTarget] : references;
         await options.beforeRequest?.({ stage: 'keyframe_candidate_openai', attempt, provider: 'openai',
-            model: VIDEO_KEYFRAME_FALLBACK_MODEL, maxInputTokens: videoRequestInputTokenBound({ fullPrompt, references: references.map(() => ({ type: 'input_image' })) }),
+            model: VIDEO_KEYFRAME_FALLBACK_MODEL, maxInputTokens: videoRequestInputTokenBound({ fullPrompt, references: inputImages.map(() => ({ type: 'input_image' })) }),
             maxOutputTokens: 32768, maxImages: 1 });
         let response;
         if (references.length) {
@@ -419,7 +434,7 @@ async function generateOpenAIKeyframe(
             form.append('output_format', 'png');
             form.append('moderation', 'low');
             form.append('n', '1');
-            references.forEach((reference, index) => {
+            inputImages.forEach((reference, index) => {
                 const extension = reference.mimeType === 'image/jpeg'
                     ? 'jpg'
                     : reference.mimeType.split('/')[1];
@@ -475,7 +490,9 @@ async function generateOpenAIKeyframe(
             });
         }
         if (!response.ok) {
-            throw new Error(body?.error?.message || `OpenAI returned HTTP ${response.status}.`);
+            const message = body?.error?.message || `OpenAI returned HTTP ${response.status}.`;
+            const moderation = isModerationFailure(new Error(`${body?.error?.code || ''} ${message}`));
+            throw new VideoKeyframeError(moderation ? 'moderation' : 'provider_error', message);
         }
         if (!encoded) throw new Error('OpenAI returned no first-frame image.');
         outcome = 'success';
@@ -695,7 +712,7 @@ async function optionalReview(
             durationSeconds: 0,
             detail: 'Required identity review unavailable; refusing the unverified composite.',
         });
-        throw new Error('Required identity review unavailable; refusing the unverified composite.');
+        throw new VideoKeyframeError('review_unavailable', 'Required identity review unavailable; refusing the unverified composite.');
     }
     console.warn('Frontier first-frame visual review was unavailable after one retry; accepting the generated candidate as unreviewed.', lastError);
     await options.onAttempt?.({
@@ -830,6 +847,7 @@ function isTransientFailure(error: unknown): boolean {
 }
 
 export function isRetryableVideoKeyframeGenerationFailure(error: unknown): boolean {
+    if (error instanceof VideoKeyframeError && error.code === 'moderation') return false;
     return !isModerationFailure(error) && isTransientFailure(error);
 }
 
@@ -839,6 +857,7 @@ async function generateWithRetry(
     references: VideoKeyframeReference[],
     firstAttempt: number,
     options: VideoKeyframeOptions,
+    editTarget?: VideoKeyframeResult,
 ): Promise<VideoKeyframeResult> {
     let lastError: unknown;
     for (let retry = 0; retry < 2; retry += 1) {
@@ -846,7 +865,7 @@ async function generateWithRetry(
         try {
             return provider === 'gemini'
                 ? await generateGeminiKeyframe(prompt, references, firstAttempt + retry, options)
-                : await generateOpenAIKeyframe(prompt, references, firstAttempt + retry, options);
+                : await generateOpenAIKeyframe(prompt, references, firstAttempt + retry, options, editTarget);
         } catch (error) {
             lastError = error;
             if (error instanceof VideoUsagePersistenceError) throw error;
@@ -884,7 +903,7 @@ async function createReviewedOpenAIFallback(
     const review = await optionalReview(plan, fallback, references, options, nextReview);
     if (!review || review.acceptable) return accepted(fallback, Boolean(review));
     if (review.best_effort_worthy) return bestEffort(fallback);
-    return repairReviewedOpenAIKeyframe(plan, references, options, nextReview, prompt, review);
+    return repairReviewedOpenAIKeyframe(plan, references, options, nextReview, prompt, review, fallback);
 }
 
 async function repairReviewedOpenAIKeyframe(
@@ -894,24 +913,33 @@ async function repairReviewedOpenAIKeyframe(
     nextReview: () => number,
     prompt: string,
     review: VideoKeyframeReview,
+    rejectedCandidate?: VideoKeyframeResult,
 ): Promise<VideoKeyframeResult> {
+    // Keep successful scene work during a source-composite repair. Always judge
+    // the result against the originals, never against this rejected candidate.
+    const editTarget = options.reviewPurpose === 'source-composite' ? rejectedCandidate : undefined;
     const repairPrompt = [
         prompt,
         '',
-        'Regenerate the image using this positive-only quality-control correction:',
+        editTarget
+            ? 'Edit the supplied EDIT TARGET in place. Change only the features identified in the correction below. Preserve the already-correct subjects, their props, setting, framing, and lighting. Use the original identity reference to restore facial anatomy, body proportions, hair, and clothing wherever the target drifted. Return the complete repaired scene.'
+            : 'Regenerate the image using this positive-only quality-control correction:',
         keyframeString(
             review.correction_prompt,
             'Strictly align every subject with the declared motion contract and keep every requested identity clearly visible.',
         ),
     ].join('\n');
-    const repaired = await generateWithRetry('openai', repairPrompt, references, 3, options);
+    const repaired = await generateWithRetry('openai', repairPrompt, references, 3, options, editTarget);
     const repairedReview = await optionalReview(plan, repaired, references, options, nextReview);
     if (!repairedReview || repairedReview.acceptable) {
         return accepted(repaired, Boolean(repairedReview));
     }
     if (repairedReview.best_effort_worthy
         || (!options.requireIdentityPreservation && preservesSuppliedIdentity(repairedReview, references))) return bestEffort(repaired);
-    throw new Error(`Fallback first frames failed visual review: ${repairedReview.issues.join('; ')}`);
+    throw new VideoKeyframeError(
+        options.requireIdentityPreservation && !repairedReview.identity_preserved ? 'identity_review' : 'composition_review',
+        `Fallback first frames failed visual review: ${repairedReview.issues.join('; ')}`,
+    );
 }
 
 async function createSerialKeyframe(
