@@ -72,3 +72,34 @@ test logs are saved locally under
 The official [image-generation guide](https://developers.openai.com/api/docs/guides/image-generation#earlier-gpt-image-models)
 confirms that GPT Image 2 already reads inputs at high fidelity automatically;
 adding an `input_fidelity` parameter would not fix this incident.
+
+## September 18: candidate repair and actionable errors
+
+Three consecutive submissions failed for two different reasons: `f92bb210` and
+`e2fdb677` received image-provider safety refusals; `ee600fec` generated two images,
+but both changed OALGO's identity. The bot previously hid both causes behind the
+same generic retry message.
+
+Source-composite corrections now send the first candidate as an explicit edit
+target alongside the two original references. The repair changes the identified
+defects while retaining already-correct scene content. Both reviews still compare
+against the originals; the rejected candidate never becomes an identity reference.
+The extra input is included in request budgeting and normal usage accounting.
+This follows the official [image prompting guidance](https://developers.openai.com/api/docs/guides/image-prompting#prompting-fundamentals)
+on using the previous output as the next edit input and specifying what to preserve.
+
+Typed errors distinguish provider safety refusals, failed likeness checks, failed
+scene checks, reviewer outages, and the shared composition deadline. Discord shows
+the corresponding reason. Refusals stop immediately without retrying or switching
+providers; their message no longer recommends repeating the same request.
+No failed or unverified composition queues a video.
+
+Verification: all 337 isolated master tests passed. A live production-compositor
+run using the recovered `f4f1cd08` attachment reproduced an initial identity
+rejection, then passed the unchanged reviewer after the targeted edit (140.065
+seconds total). Both candidates were visually inspected. A separate saved classroom
+candidate was accepted on its first review and therefore did not exercise repair.
+These checks demonstrate a working repair, not a measured improvement in general
+acceptance rate. Images, requests, reviews, and usage are saved under
+`artifacts/video-identity-investigation/f4f1cd08/repair-sep18-*` and
+`saved-candidate-repair-*` (ignored by Git).
