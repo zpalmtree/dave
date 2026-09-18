@@ -414,7 +414,6 @@ async function generateGrokImage(
         const commonBody = {
             model: XAI_IMAGE_MODEL,
             prompt,
-            quality: 'medium',
         };
 
         const requestBody = isImageEdit

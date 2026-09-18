@@ -14,14 +14,15 @@ export const AI_MODELS = {
     grokChat: 'grok-4.6',
     /* A/B testing found 4.5 faster and more natural for Discord recaps. */
     grokSummary: 'grok-4.5-latest',
-    grokImage: 'grok-imagine-image-2.0',
+    /* Verified against both deployed keys; Imagine 2.0 is not available to them. */
+    grokImage: 'grok-imagine-image',
     gabChat: 'arya',
 } as const;
 
 export const AI_REQUEST_TIMEOUTS = {
     // xAI recommends a six-minute client timeout for reasoning models.
     grokText: 6 * 60 * 1000,
-    // Grok Imagine 2.0 can need longer than one minute to render.
+    // Grok Imagine can need longer than one minute to render.
     grokImage: 3 * 60 * 1000,
 } as const;
 
