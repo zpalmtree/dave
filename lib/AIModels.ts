@@ -14,8 +14,7 @@ export const AI_MODELS = {
     grokChat: 'grok-4.6',
     /* A/B testing found 4.5 faster and more natural for Discord recaps. */
     grokSummary: 'grok-4.5-latest',
-    /* Verified against both deployed keys; Imagine 2.0 is not available to them. */
-    grokImage: 'grok-imagine-image',
+    grokImage: 'grok-imagine-image-2.0',
     gabChat: 'arya',
 } as const;
 
