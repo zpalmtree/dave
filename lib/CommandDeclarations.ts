@@ -191,8 +191,8 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleOalgoVideo,
-            description: 'Generate a MiniMax H3 video from the built-in OALGO image; attached images are AI-composited into it',
-            examples: [{ value: 'oalgo celebrates a championship victory' }],
+            description: 'Generate an OALGO video; combine attachments with Sunburst by default or select --image-provider grok',
+            examples: [{ value: 'oalgo celebrates a championship victory' }, { value: 'oalgo --image-provider grok reacts to the attached image' }],
         },
         relatedCommands: ['minimax', 'minimaxfast', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
