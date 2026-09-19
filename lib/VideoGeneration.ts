@@ -11,6 +11,7 @@ import {
     VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS,
     VideoJobView,
     VideoModelId,
+    VideoSourceCompositeProvider,
     discordVideoUploadLimitBytes,
     parsePauseDuration,
     sanitizeVideoWorkerText,
@@ -967,6 +968,7 @@ interface VideoRequestOptions {
     commandVariant?: 'oalgo';
     presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
     compositeAttachedImage?: boolean;
+    compositeProvider?: VideoSourceCompositeProvider;
     plannerGuidance?: string;
 }
 
@@ -1012,6 +1014,10 @@ export async function handleVideoRequest(
     const compositeSourceImage = options.presetSourceImage && options.compositeAttachedImage
         ? attachedSourceImage
         : null;
+    if (options.compositeProvider && !compositeSourceImage) {
+        await msg.reply('An image provider can only be selected when OALGO has an attached or replied-to image to combine.');
+        return;
+    }
     prompt = videoPromptFromMessages(prompt, referencedMessage);
     if (!prompt && sourceImage) {
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
@@ -1046,6 +1052,7 @@ export async function handleVideoRequest(
                 status_message_id: pending.id,
                 source_image: sourceImage,
                 source_image_composite: compositeSourceImage,
+                source_image_provider: options.compositeProvider,
                 planner_guidance: plannerGuidance || undefined,
             }),
         }, compositeSourceImage ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
@@ -1096,11 +1103,28 @@ export async function handleMinimaxVideo(msg: Message, prompt: string): Promise<
     await handleVideoRequest('minimax', msg, prompt);
 }
 
+export function parseOalgoImageProvider(prompt: string): { prompt: string; provider?: VideoSourceCompositeProvider } {
+    const text = prompt.trim();
+    if (!/^--image-provider(?:[=\s]|$)/i.test(text)) return { prompt };
+    const match = /^--image-provider(?:=|\s+)(\S+)(?:\s+([\s\S]*))?$/i.exec(text);
+    const provider = match?.[1].toLowerCase();
+    if (provider !== 'sunburst' && provider !== 'grok') {
+        throw new Error('Use --image-provider grok or --image-provider sunburst before the prompt.');
+    }
+    const remaining = match?.[2] || '';
+    if (/^--image-provider(?:[=\s]|$)/i.test(remaining)) throw new Error('Select one image provider.');
+    return { prompt: remaining, provider };
+}
+
 export async function handleOalgoVideo(msg: Message, prompt: string): Promise<void> {
-    await handleVideoRequest('minimax', msg, prompt, {
+    let parsed: ReturnType<typeof parseOalgoImageProvider>;
+    try { parsed = parseOalgoImageProvider(prompt); }
+    catch (error) { await msg.reply(error instanceof Error ? error.message : String(error)); return; }
+    await handleVideoRequest('minimax', msg, parsed.prompt, {
         commandVariant: 'oalgo',
         presetSourceImage: 'oalgo',
         compositeAttachedImage: true,
+        compositeProvider: parsed.provider,
         plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
     });
 }

@@ -2,6 +2,8 @@ import { GoogleGenAI, type GenerateContentResponse } from '@google/genai';
 
 import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
+import { extractGrokCostUsd, isGrokImageModerationRejection } from './GrokResponse.js';
+import { VideoSourceCompositeProvider } from './VideoProtocol.js';
 import { VideoKeyframeReference } from './VideoKeyframeReferences.js';
 import { requestPlannerResponse } from './VideoFrontierPlanner.js';
 import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
@@ -101,6 +103,7 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     /** Source composites must be reviewed against the original identity before use. */
     requireIdentityPreservation?: boolean;
     reviewPurpose?: 'frame-zero' | 'source-composite';
+    sourceCompositeProvider?: VideoSourceCompositeProvider;
     aspectRatio?: VideoKeyframeAspectRatio;
     geminiModel?: VideoKeyframeGeminiModel;
     imageSize?: VideoKeyframeImageSize;
@@ -388,6 +391,101 @@ async function generateGeminiKeyframe(
     }
 }
 
+function imageEditPrompt(
+    prompt: string,
+    references: VideoKeyframeReference[],
+    options: VideoKeyframeOptions,
+    editTarget?: VideoKeyframeResult,
+): string {
+    const targetContract = editTarget
+        ? `Image ${references.length + 1} is the EDIT TARGET: the previous candidate to repair. It is not an identity reference. The original references above remain the authority for identity and scene content.`
+        : '';
+    return `Output aspect ratio: ${options.aspectRatio || '16:9'}.\n${referenceContract(references, options)}${targetContract ? `\n${targetContract}` : ''}\n\n${prompt}`;
+}
+
+async function generateGrokComposite(
+    prompt: string,
+    references: VideoKeyframeReference[],
+    attempt: number,
+    options: VideoKeyframeOptions,
+    editTarget?: VideoKeyframeResult,
+): Promise<VideoKeyframeResult> {
+    const inputImages = editTarget ? [...references, editTarget] : references;
+    if (!config.grokApiKey) throw new VideoKeyframeError('provider_error', 'Grok image generation is not configured.');
+    if (!inputImages.length || inputImages.length > 5) throw new VideoKeyframeError('provider_error', 'Grok editing requires one to five references.');
+    const started = Date.now();
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    options.abortSignal?.addEventListener('abort', cancel, { once: true });
+    if (options.abortSignal?.aborted) controller.abort();
+    const timeout = setTimeout(cancel, 3 * 60 * 1000);
+    const model = AI_MODELS.grokImage;
+    let outcome: 'success' | 'error' | 'cancelled' = 'error';
+    let detail: string | undefined;
+    let dispatched = false;
+    let usageRecorded = false;
+    try {
+        const fullPrompt = imageEditPrompt(prompt, references, options, editTarget);
+        await options.beforeRequest?.({ stage: 'keyframe_candidate_grok', attempt, provider: 'xai', model,
+            maxInputTokens: videoRequestInputTokenBound({ fullPrompt, references: inputImages.map(() => ({ type: 'input_image' })) }),
+            maxOutputTokens: 0, maxImages: 1 });
+        if (controller.signal.aborted) throw new VideoKeyframeError('timeout', 'Grok image generation was cancelled.');
+        dispatched = true;
+        const response = await fetch('https://api.x.ai/v1/images/edits', {
+            method: 'POST', signal: controller.signal,
+            headers: { authorization: `Bearer ${config.grokApiKey}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ model, prompt: fullPrompt, images: inputImages.map(image => ({
+                type: 'image_url', url: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`,
+            })), aspect_ratio: options.aspectRatio || '1:1', quality: 'medium', resolution: '1k', response_format: 'b64_json', n: 1 }),
+        });
+        const body: any = await response.json();
+        const encoded = body?.data?.[0]?.b64_json;
+        const cost = extractGrokCostUsd(body);
+        usageRecorded = true;
+        // xAI bills moderation refusals too. Preserve exact reported charges;
+        // missing prices stay explicitly unpriced in the broker's usage ledger.
+        await options.onUsage?.({ stage: 'keyframe_candidate_grok', attempt,
+            outcome: response.ok && encoded ? 'success' : 'error', provider: 'xai', model,
+            images: encoded ? 1 : 0, costOverride: cost, rawUsage: body?.usage, usageMissing: cost === undefined });
+        if (!response.ok) {
+            const message = typeof body?.error === 'string' ? body.error
+                : body?.error?.message || `Grok returned HTTP ${response.status}.`;
+            throw new VideoKeyframeError((isGrokImageModerationRejection(response.status, JSON.stringify(body))
+                || isModerationFailure(new Error(`${body?.error?.code || ''} ${message}`)))
+                ? 'moderation' : 'provider_error', message);
+        }
+        if (typeof encoded !== 'string' || !encoded || encoded.length > Math.ceil(VIDEO_KEYFRAME_MAX_BYTES / 3) * 4 + 4) {
+            throw new VideoKeyframeError('provider_error', 'Grok returned missing or oversized image data.');
+        }
+        const bytes = Buffer.from(encoded, 'base64');
+        const mimeType = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'image/png'
+            : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? 'image/jpeg'
+            : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'image/webp'
+            : null;
+        if (!mimeType) throw new VideoKeyframeError('provider_error', 'Grok returned an unsupported image format.');
+        const result = checkedImageResult(bytes, mimeType, 'xai', model);
+        outcome = 'success';
+        return result;
+    } catch (error) {
+        detail = error instanceof Error ? error.message : String(error);
+        if (controller.signal.aborted) {
+            outcome = 'cancelled';
+            if (!(error instanceof VideoUsagePersistenceError)) throw new VideoKeyframeError('timeout', 'Grok image generation timed out or was cancelled.');
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+        options.abortSignal?.removeEventListener('abort', cancel);
+        try {
+            if (dispatched && !usageRecorded) await options.onUsage?.({ stage: 'keyframe_candidate_grok', attempt,
+                outcome: 'error', provider: 'xai', model, images: 0, usageMissing: true });
+        } finally {
+            await options.onAttempt?.({ stage: 'keyframe_candidate_grok', attempt, outcome, provider: 'xai', model,
+                serviceTier: 'default', durationSeconds: (Date.now() - started) / 1000, detail });
+        }
+    }
+}
+
 async function generateOpenAIKeyframe(
     prompt: string,
     references: VideoKeyframeReference[],
@@ -416,10 +514,7 @@ async function generateOpenAIKeyframe(
             '21:9': '1536x640',
         };
         const outputSize = outputSizes[aspectRatio];
-        const targetContract = editTarget
-            ? `Image ${references.length + 1} is the EDIT TARGET: the previous candidate to repair. It is not an identity reference. The original references above remain the authority for identity and scene content.`
-            : '';
-        const fullPrompt = `Output aspect ratio: ${aspectRatio}.\n${referenceContract(references, options)}${targetContract ? `\n${targetContract}` : ''}\n\n${prompt}`;
+        const fullPrompt = imageEditPrompt(prompt, references, options, editTarget);
         const inputImages = editTarget ? [...references, editTarget] : references;
         await options.beforeRequest?.({ stage: 'keyframe_candidate_openai', attempt, provider: 'openai',
             model: VIDEO_KEYFRAME_FALLBACK_MODEL, maxInputTokens: videoRequestInputTokenBound({ fullPrompt, references: inputImages.map(() => ({ type: 'input_image' })) }),
@@ -865,6 +960,8 @@ async function generateWithRetry(
         try {
             return provider === 'gemini'
                 ? await generateGeminiKeyframe(prompt, references, firstAttempt + retry, options)
+                : options.reviewPurpose === 'source-composite' && options.sourceCompositeProvider === 'grok'
+                ? await generateGrokComposite(prompt, references, firstAttempt + retry, options, editTarget)
                 : await generateOpenAIKeyframe(prompt, references, firstAttempt + retry, options, editTarget);
         } catch (error) {
             lastError = error;

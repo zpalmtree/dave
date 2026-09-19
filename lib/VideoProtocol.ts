@@ -16,6 +16,7 @@ export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEO
 
 export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast';
 export type VideoGeneratorModelId = 'ltx' | 'h3';
+export type VideoSourceCompositeProvider = 'sunburst' | 'grok';
 
 export interface VideoMetricSpan {
     source: 'broker' | 'worker' | 'comfy';

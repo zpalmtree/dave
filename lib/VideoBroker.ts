@@ -29,6 +29,7 @@ import {
     VideoGeneratorModelId,
     VideoMetricSpan,
     VideoModelId,
+    VideoSourceCompositeProvider,
     VideoWorkerMetrics,
     VideoWorkerHello,
     VideoWorkerSchedulerState,
@@ -140,6 +141,7 @@ interface BrokerOptions {
         attached: StoredVideoSourceImage,
         prompt: string,
         hooks: VideoProviderHooks,
+        provider?: VideoSourceCompositeProvider,
     ) => Promise<VideoKeyframeResult>;
 }
 
@@ -1087,7 +1089,9 @@ export async function composeOalgoSourceImages(
     attached: StoredVideoSourceImage,
     prompt: string,
     hooks: VideoProviderHooks,
+    provider: VideoSourceCompositeProvider = 'sunburst',
 ): Promise<VideoKeyframeResult> {
+    if (provider !== 'sunburst' && provider !== 'grok') throw new Error('Unknown source image provider.');
     const references: VideoKeyframeReference[] = [
         {
             label: 'OALGO base image',
@@ -1124,6 +1128,7 @@ export async function composeOalgoSourceImages(
                 aspectRatio: '1:1',
                 requireIdentityPreservation: true,
                 reviewPurpose: 'source-composite',
+                sourceCompositeProvider: provider,
                 abortSignal: controller.signal,
             },
         );
@@ -2052,6 +2057,14 @@ export class VideoBroker {
                 body: { error: 'Image compositing requires the OALGO preset and one Discord attachment.' },
             };
         }
+        const compositeProvider: VideoSourceCompositeProvider = body.source_image_provider === undefined
+            ? 'sunburst' : body.source_image_provider;
+        if (compositeProvider !== 'sunburst' && compositeProvider !== 'grok') {
+            return { status: 400, body: { error: 'Image provider must be sunburst or grok.' } };
+        }
+        if (body.source_image_provider !== undefined && (!compositeDescriptor || body.model !== 'minimax')) {
+            return { status: 400, body: { error: 'Image provider selection requires an OALGO image combination.' } };
+        }
         const existingBeforeDownload = await this.get<JobRow>(
             'SELECT * FROM video_jobs WHERE idempotency_key = ?',
             [String(body.command_message_id)],
@@ -2134,7 +2147,7 @@ export class VideoBroker {
                     try {
                         const composed = await (
                             this.options.sourceImageComposer || composeOalgoSourceImages
-                        )(base, attached, prompt, hooks);
+                        )(base, attached, prompt, hooks, compositeProvider);
                         sourceImage = storeCompositedSourceImage(composed, directory);
                         sourceImageComposition = 'generated';
                     } catch (error) {
