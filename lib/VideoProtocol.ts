@@ -223,6 +223,7 @@ export interface VideoJobView {
     result_path: string | null;
     result_bytes: number | null;
     has_source_image: boolean;
+    source_image_composition?: 'generated' | 'local_qwen' | null;
     created_at: number;
     updated_at: number;
     started_at: number | null;

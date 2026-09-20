@@ -246,6 +246,10 @@ interface JobRow {
     source_image_path: string | null;
     source_image_mime: string | null;
     source_image_bytes: number | null;
+    source_image_composite_path: string | null;
+    source_image_composite_mime: string | null;
+    source_image_composite_bytes: number | null;
+    source_image_composition: 'generated' | 'local_qwen' | null;
     keyframe_path: string | null;
     keyframe_mime: string | null;
     keyframe_provider: string | null;
@@ -1356,6 +1360,10 @@ export class VideoBroker {
             source_image_path TEXT,
             source_image_mime TEXT,
             source_image_bytes INTEGER,
+            source_image_composite_path TEXT,
+            source_image_composite_mime TEXT,
+            source_image_composite_bytes INTEGER,
+            source_image_composition TEXT,
             keyframe_path TEXT,
             keyframe_mime TEXT,
             keyframe_provider TEXT,
@@ -1451,6 +1459,10 @@ export class VideoBroker {
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
+            ['source_image_composite_path', 'TEXT'],
+            ['source_image_composite_mime', 'TEXT'],
+            ['source_image_composite_bytes', 'INTEGER'],
+            ['source_image_composition', 'TEXT'],
             ['keyframe_path', 'TEXT'],
             ['keyframe_mime', 'TEXT'],
             ['keyframe_provider', 'TEXT'],
@@ -2110,9 +2122,10 @@ export class VideoBroker {
         });
         const directory = resolve(this.options.resultsDir, publicId);
         let sourceImage: StoredVideoSourceImage | null = null;
+        let compositeSourceImage: StoredVideoSourceImage | null = null;
         let sourceImageDownloadSeconds: number | null = null;
         let sourceImageCompositionSeconds: number | null = null;
-        let sourceImageComposition: 'generated' | null = null;
+        let sourceImageComposition: 'generated' | 'local_qwen' | null = null;
         if (sourceDescriptor) {
             const sourceImageStarted = Date.now();
             try {
@@ -2160,14 +2173,18 @@ export class VideoBroker {
                             ),
                         });
                         console.warn(
-                            '[Video] OALGO source-image composition failed; rejecting the submission.',
+                            '[Video] OALGO source-image composition failed; queueing the local Qwen fallback.',
                             error,
                         );
-                        throw new Error(oalgoCompositionFailureMessage(error));
+                        sourceImage = base;
+                        compositeSourceImage = attached;
+                        sourceImageComposition = 'local_qwen';
                     } finally {
                         sourceImageCompositionSeconds = (Date.now() - compositionStarted) / 1000;
-                        rmSync(join(directory, 'composite-base'), { recursive: true, force: true });
-                        rmSync(join(directory, 'composite-attached'), { recursive: true, force: true });
+                        if (sourceImageComposition !== 'local_qwen') {
+                            rmSync(join(directory, 'composite-base'), { recursive: true, force: true });
+                            rmSync(join(directory, 'composite-attached'), { recursive: true, force: true });
+                        }
                     }
                 } else {
                     sourceImage = await sourceImageDownloader(sourceDescriptor, directory);
@@ -2223,8 +2240,10 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_image_path, source_image_mime, source_image_bytes,
+                        source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
+                        source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2247,6 +2266,10 @@ export class VideoBroker {
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
+                        compositeSourceImage?.path || null,
+                        compositeSourceImage?.mimeType || null,
+                        compositeSourceImage?.bytes || null,
+                        sourceImageComposition,
                         optimization?.experimentId || experimentLabel(process.env.VIDEO_EXPERIMENT_ID, null),
                         optimization?.variantId || experimentLabel(process.env.VIDEO_PIPELINE_VARIANT, 'production-v1'),
                         commandVariant, sourceMode, requestedAt,
@@ -3761,6 +3784,7 @@ export class VideoBroker {
                 result_path: row.result_path,
                 result_bytes: row.result_bytes,
                 has_source_image: Boolean(row.source_image_path),
+                source_image_composition: row.source_image_composition || null,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
                 started_at: row.started_at,
@@ -4392,6 +4416,7 @@ export class VideoBroker {
                 planner_guidance: row.planner_guidance,
                 command_variant: row.command_variant,
                 has_source_image: Boolean(row.source_image_path),
+                source_image_composition: row.source_image_composition || null,
                 lease_id: leaseId,
                 estimate_low_seconds: row.estimate_low_seconds,
                 estimate_high_seconds: row.estimate_high_seconds,
@@ -4592,6 +4617,35 @@ export class VideoBroker {
             }
             return;
         }
+        const sourceImage = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/source-image$/.exec(url.pathname);
+        if (sourceImage && req.method === 'POST') {
+            const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [sourceImage[1]]);
+            if (!job || job.worker_id !== this.worker?.id || sourceImage[1] !== this.worker.currentJob
+                || !this.workerLeaseMatches(req, job)) {
+                writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+                return;
+            }
+            if (job.source_image_composition !== 'local_qwen') {
+                writeJson(res, 409, { error: 'This job does not require local Qwen source-image composition.' });
+                return;
+            }
+            const role = url.searchParams.get('role');
+            const path = role === 'attached' ? job.source_image_composite_path : job.source_image_path;
+            const mimeType = role === 'attached' ? job.source_image_composite_mime : job.source_image_mime;
+            if (role !== 'base' && role !== 'attached') {
+                writeJson(res, 400, { error: 'Source-image role must be base or attached.' });
+                return;
+            }
+            if (!path || !mimeType || !existsSync(path) || !statSync(path).isFile()) {
+                writeJson(res, 404, { error: `The ${role} source image is unavailable.` });
+                return;
+            }
+            writeImage(res, path, mimeType, {
+                'x-video-source-image-role': role,
+                'x-video-source-image-provider': 'local-qwen',
+            });
+            return;
+        }
         const keyframe = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/keyframe$/.exec(url.pathname);
         if (keyframe && req.method === 'POST') {
             let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [keyframe[1]]);
@@ -4692,6 +4746,13 @@ export class VideoBroker {
                         fallback: 't2v',
                     });
                 }
+                return;
+            }
+            if (job.source_image_composition === 'local_qwen') {
+                writeJson(res, 409, {
+                    error: 'This starting image requires local Qwen composition.',
+                    fallback: 'local_qwen',
+                });
                 return;
             }
             if (job.source_image_path && job.source_image_mime && existsSync(job.source_image_path)) {

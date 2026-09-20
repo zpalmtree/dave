@@ -784,7 +784,7 @@ test('concurrent duplicate OALGO submissions retain both paid composition record
     } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('OALGO jobs composite attachments and reject failed compositions without dropping the attachment', async () => {
+test('OALGO jobs composite attachments and queue local Qwen on composition failure', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-'));
     const dbPath = join(directory, 'queue.sqlite3');
     const presetBytes = Buffer.from('oalgo-preset');
@@ -873,9 +873,11 @@ test('OALGO jobs composite attachments and reject failed compositions without dr
 
         failComposition = true;
         const failed = await submit('failed', OALGO_VIDEO_PLANNER_GUIDANCE);
-        assert.equal(failed.status, 400);
-        assert.match(failed.body.error, /No video was queued/);
-        assert.equal(failed.body.job, undefined);
+        assert.equal(failed.status, 201);
+        assert.equal(failed.body.job.source_image_composition, 'local_qwen');
+        assert.equal(failed.body.source_image_composition, 'local_qwen');
+        assert.equal(existsSync(join(directory, 'results', failed.body.job.id, 'composite-base')), true);
+        assert.equal(existsSync(join(directory, 'results', failed.body.job.id, 'composite-attached')), true);
         assert.deepEqual(compositionPrompts, [
             'OALGO prompt generated',
             'OALGO prompt failed',

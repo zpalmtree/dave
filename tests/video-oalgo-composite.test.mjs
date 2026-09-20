@@ -157,7 +157,7 @@ for (const [label, reviews, imageErrors, expectedMessage] of [
     ['the provider declines the repair', [rejected], [null, { code: 'moderation_blocked', message: 'Request declined.' }], /safety rules/],
     ['the image provider has an error', [approved], [{ code: 'invalid_api_key', message: 'Private provider details' }], /image service could not complete/],
 ]) {
-    test(`broker queues no video and reports composition failure when ${label}`, async t => {
+    test(`broker queues the local Qwen fallback when ${label}`, async t => {
         const requests = providers(t, reviews, imageErrors);
         const directory = mkdtempSync(join(tmpdir(), 'oalgo-broker-'));
         const broker = new VideoBroker({
@@ -181,22 +181,21 @@ for (const [label, reviews, imageErrors, expectedMessage] of [
                     },
                 }),
             });
-            assert.equal(response.status, 400);
+            assert.equal(response.status, 201);
             const body = await response.json();
-            assert.match(body.error, /Could not combine OALGO with your attached image\. No video was queued/);
-            assert.match(body.error, expectedMessage);
-            assert.doesNotMatch(body.error, /Private provider details/);
-            assert.equal(body.job, undefined);
-            assert.deepEqual(await broker.all('SELECT public_id FROM video_jobs'), []);
+            assert.equal(body.job.source_image_composition, 'local_qwen');
+            assert.equal(body.source_image_composition, 'local_qwen');
+            assert.equal((await broker.all('SELECT public_id FROM video_jobs')).length, 1);
             const submissions = await broker.all('SELECT * FROM video_submission_metrics');
             assert.equal(submissions.length, 1);
-            assert.equal(submissions[0].outcome, 'rejected');
-            assert.equal(submissions[0].job_public_id, null);
+            assert.equal(submissions[0].outcome, 'queued');
+            assert.equal(submissions[0].job_public_id, body.job.id);
             assert.equal(typeof submissions[0].source_composition_seconds, 'number');
-            assert.equal(existsSync(join(directory, 'results', submissions[0].public_id)), false);
+            assert.equal(existsSync(join(directory, 'results', submissions[0].public_id, 'composite-base')), true);
+            assert.equal(existsSync(join(directory, 'results', submissions[0].public_id, 'composite-attached')), true);
             const usage = await broker.all('SELECT * FROM video_usage_events WHERE job_public_id = ?', [submissions[0].public_id]);
             assert.equal(usage.length > 0, !imageErrors[0],
-                'paid image attempts remain accounted for even when no video is queued');
+                'paid image attempts remain accounted for when the local fallback is queued');
             const attempts = await broker.all('SELECT stage, outcome FROM video_provider_attempt_metrics');
             assert.ok(attempts.some(event => event.stage === 'source_image_composite_failed'));
             assert.ok(!attempts.some(event => event.stage === 'source_image_composite_fallback'));
@@ -205,7 +204,7 @@ for (const [label, reviews, imageErrors, expectedMessage] of [
             assert.equal(requests.gemini.length, 0, 'no provider switch on a refused composite');
             if (imageErrors.length) {
                 assert.equal(requests.openai.length, imageErrors.length, 'a refusal must not be retried');
-                if (expectedMessage.source === 'safety rules') assert.doesNotMatch(body.error, /Please try again|You can retry/);
+                if (expectedMessage.source === 'safety rules') assert.equal(body.error, undefined);
             }
             if (reviews[0] instanceof Error) {
                 assert.equal(requests.gemini.length, 0);
