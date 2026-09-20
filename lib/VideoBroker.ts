@@ -3056,15 +3056,26 @@ export class VideoBroker {
                 const started = Date.now();
                 let status: 'ok' | 'error' = 'error';
                 try {
-                    let sourceImage: VideoPlanSourceImage | undefined;
+                    const sourceImages: VideoPlanSourceImage[] = [];
                     if (job.source_image_path && job.source_image_mime
                         && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_mime as any)
                         && existsSync(job.source_image_path)
                         && statSync(job.source_image_path).isFile()) {
-                        sourceImage = {
+                        sourceImages.push({
                             mimeType: job.source_image_mime as VideoPlanSourceImage['mimeType'],
                             data: readFileSync(job.source_image_path),
-                        };
+                        });
+                    }
+                    if (job.source_image_composition === 'local_qwen'
+                        && job.source_image_composite_path
+                        && job.source_image_composite_mime
+                        && VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(job.source_image_composite_mime as any)
+                        && existsSync(job.source_image_composite_path)
+                        && statSync(job.source_image_composite_path).isFile()) {
+                        sourceImages.push({
+                            mimeType: job.source_image_composite_mime as VideoPlanSourceImage['mimeType'],
+                            data: readFileSync(job.source_image_composite_path),
+                        });
                     }
                     const plannerOptions = this.frontierOptions(job, criticalPath);
                     plannerOptions.onProvisionalKeyframe = value => this.scheduleProvisionalKeyframe(
@@ -3072,11 +3083,14 @@ export class VideoBroker {
                         value.keyframe,
                         criticalPath,
                     );
+                    const plannerSourceImage = sourceImages.length > 1
+                        ? sourceImages
+                        : sourceImages[0];
                     const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
                         job.prompt,
                         job.model,
                         job.requester_id,
-                        sourceImage,
+                        plannerSourceImage,
                         plannerOptions,
                     );
                     const provisional = this.provisionalKeyframePrefetch.get(job.public_id);
