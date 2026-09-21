@@ -4748,8 +4748,8 @@ export class VideoBroker {
                             bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                         })) : [];
                     const frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
-                        { ...scenePlan, keyframe, segments: [segment] }, references,
-                        { ...options, requireIdentityPreservation: references.length > 0 });
+                        { ...scenePlan, keyframe, segments: [segment], recovery_request: prepared.contract.prompt }, references,
+                        { ...options, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
                     writeJson(res, 200, { image: `data:${frame.mimeType};base64,${frame.bytes.toString('base64')}` });
                     return;
                 }

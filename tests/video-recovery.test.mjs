@@ -109,6 +109,11 @@ test('broker persists recovery and requires every scene review for the matching 
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false, recoveryPlanner: async () => prepared,
+        keyframeGenerator: async (scenePlan, _references, options) => {
+            assert.equal(options.reviewPurpose, 'recovery-scene');
+            assert.equal(scenePlan.recovery_request, contract.prompt);
+            return { bytes: Buffer.from('fixture'), mimeType: 'image/png', provider: 'test', model: 'test' };
+        },
         frontierPlanner: async () => { throw new Error('Legacy planning must not run before approval.'); },
         recoveryReviewer: async (_contract, _segment, body) => ({ acceptable: body.frames[0].endsWith('YQ=='), permitted: true, issues: [] }) });
     await broker.start();
@@ -145,6 +150,7 @@ test('broker persists recovery and requires every scene review for the matching 
             return { status: result.status, body: await result.json() };
         };
         assert.equal((await request('plan')).status, 200);
+        assert.equal((await request('image', { segment_index: 0 })).status, 200);
         assert.equal((await request('checkpoint', { checkpoint: { scenes: { '0': { video_attempts: 1 } } } })).status, 200);
         assert.equal((await request('plan')).body.checkpoint.scenes['0'].video_attempts, 1);
         const hash = 'a'.repeat(64), resultHash = 'b'.repeat(64);
