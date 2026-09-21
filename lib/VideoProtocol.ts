@@ -189,6 +189,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
 };
 
 export interface VideoJobView {
+    delivery_message_id?: string | null;
     id: string;
     model: VideoModelId;
     prompt: string;
@@ -247,6 +248,7 @@ export interface VideoJobView {
 }
 
 export interface VideoWorkerHello {
+    recovery_version?: number;
     type: 'hello';
     protocol: number;
     worker_id: string;

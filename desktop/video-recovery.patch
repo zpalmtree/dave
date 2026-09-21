@@ -1,0 +1,86 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -37,14 +37,12 @@
+ TEMPLATE_DIR = SCRIPT_DIR / "templates"
+ DEFAULT_SERVER = "http://127.0.0.1:8188"
+ PID_FILE = SCRIPT_DIR / "comfyui_video_gen.pid.json"
+-LLAMA_CPP_DIR = Path(r"D:\AI\llama.cpp\b10603")
+-LLAMA_CPP_SERVER_EXE = LLAMA_CPP_DIR / "bin" / "llama-server.exe"
+-LLAMA_CPP_MODEL = Path(
+-    r"C:\AI\llama.cpp\models\Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf"
+-)
+-LLAMA_CPP_MMPROJ = Path(
+-    r"C:\AI\llama.cpp\models\mmproj-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf"
+-)
++from gpuq_settings import qwen_settings
++_QWEN_SETTINGS = qwen_settings()
++LLAMA_CPP_DIR = _QWEN_SETTINGS['qwenworkingdirectory']
++LLAMA_CPP_SERVER_EXE = _QWEN_SETTINGS['qwenexecutable']
++LLAMA_CPP_MODEL = _QWEN_SETTINGS['qwenmodel']
++LLAMA_CPP_MMPROJ = _QWEN_SETTINGS['qwenvisionprojector']
+ LLAMA_CPP_SERVER = "http://127.0.0.1:18080"
+ LLAMA_CPP_PID_FILE = SCRIPT_DIR / "llama_cpp_video_gen.pid.json"
+ PROMPT_INTENT_MODEL = "hauhaucs-qwen3.8:27b-q4kp-mtp"
+@@ -1553,6 +1551,7 @@
+         action="store_true",
+         help=argparse.SUPPRESS,
+     )
++    parser.add_argument("--approved-plan-only", action="store_true", help=argparse.SUPPRESS)
+     parser.add_argument(
+         "--frontier-plan",
+         type=Path,
+@@ -8131,7 +8130,7 @@
+                         models,
+                     )
+                 except VideoGenError as exc:
+-                    if experiment_contract is not None:
++                    if experiment_contract is not None or args.approved_plan_only:
+                         raise
+                     print(
+                         f"WARNING: frontier screenplay failed local validation ({exc}); "
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -1456,6 +1456,7 @@
+                     "protocol": PROTOCOL_VERSION,
+                     "worker_id": self.worker_id,
+                     "capabilities": list(MODEL_ARGS),
++                    "recovery_version": 1,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+                     "warm_model": self.warm_model,
+@@ -1531,6 +1532,14 @@
+         terminal = self.journal.get("terminal_event")
+         if isinstance(terminal, dict):
+             self.render_task = asyncio.create_task(self.replay_terminal(terminal))
++            return
++        if self.current_job.get("recovery_version") == 1:
++            async def resume_recovery():
++                # Existing admission is cooperative; cancel only this job's reservation.
++                # Accepted scene artifacts remain in the durable recovery checkpoint.
++                await self.cancel_gpuq_reservation()
++                await self.run_job(self.current_job)
++            self.render_task = asyncio.create_task(resume_recovery())
+             return
+         if self.gpuq_job_id and self.gpuq_control_dir:
+             if self.journal.get("gpuq_render_sequence") is not None:
+@@ -1878,6 +1887,10 @@
+         return str(body.get("planner_model") or LOCAL_PLANNER_MODEL), plan_identity
+ 
+     async def run_job(self, job: dict[str, Any]) -> None:
++        if job.get("recovery_version") == 1:
++            from video_recovery import run_recovery_job
++            await run_recovery_job(self, job)
++            return
+         job_id = str(job["id"])
+         LOG_DIR.mkdir(parents=True, exist_ok=True)
+         log_path = LOG_DIR / f"{job_id}.log"
+@@ -3137,6 +3150,9 @@
+         except OSError:
+             print("Another Dave video worker is already running.", flush=True)
+             return 0
++    from gpuq_settings import qwen_preflight
++    health = qwen_preflight()
++    print("Qwen preflight: " + ("available" if health["available"] else "missing " + ", ".join(health["missing"])), flush=True)
+     worker = DesktopVideoWorker()
+     asyncio.run(run_with_watchdog(worker.run, LOG_DIR))
+     instance_lock.close()
