@@ -22,9 +22,16 @@ renderer. Video review samples five points in time, checks story/identity/action
 and compares an audio transcription with the approved speech. It judges the
 user's requested story; incidental planner-invented props, camera choices, and
 blocking are flexible. Speech receives sufficient time within each shot.
-Dialogue comparisons accept added or omitted Spanish vowel accents (á, é, í,
-ó, ú, ü), while preserving distinct letters such as ñ and checking for missing
-speech. Authored dialogue text remains unchanged.
+Speech review judges meaning: small paraphrases, extra words, filler, and brief
+creative flourishes are allowed when the intended message and key points remain.
+Silence, missing essential points, contradictions, or material changes to names
+and facts still fail. Exact wording is required only when the user explicitly
+requests it; quoted dialogue and planner verbatim flags alone do not require it.
+Word similarity is a review hint, not an automatic rejection. Comparisons accept
+Spanish vowel accents (á, é, í, ó, ú, ü), while preserving distinct letters such as
+ñ. Authored dialogue text remains unchanged. Previously rejected video artifacts
+are reviewed again under the current rules when resubmitted; accepted artifacts
+remain reusable.
 
 Only actual generated video can pass final approval. Storyboards, slideshows,
 and caption cards are never substitutes for requested action. Exhausted render

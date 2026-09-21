@@ -1,5 +1,5 @@
 import { VIDEO_RECOVERY_VERSION, recoveryHash } from './VideoRecovery.js';
-import { prepareRecoveryPlan, reviewRecoveryMedia } from './VideoRecoveryService.js';
+import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
@@ -4757,9 +4757,14 @@ export class VideoBroker {
                     || !/^[a-f0-9]{64}$/.test(String(body.artifact_sha256 || ''))) throw new Error('Invalid artifact.');
                 const key = `${body.kind}:${index}:${body.artifact_sha256}`;
                 state.reviews ||= {};
-                if (!state.reviews[key]) {
-                    state.reviews[key] = await (this.options.recoveryReviewer || reviewRecoveryMedia)(
-                        prepared.contract, segment, body, options, prepared.contract.use_source_images ? sources : []);
+                const cachedReview = state.reviews[key];
+                if (!cachedReview || (body.kind === 'video' && !cachedReview.acceptable
+                    && cachedReview.review_version !== VIDEO_RECOVERY_REVIEW_VERSION)) {
+                    state.reviews[key] = {
+                        ...await (this.options.recoveryReviewer || reviewRecoveryMedia)(
+                            prepared.contract, segment, body, options, prepared.contract.use_source_images ? sources : []),
+                        review_version: VIDEO_RECOVERY_REVIEW_VERSION,
+                    };
                     await persist();
                 }
                 writeJson(res, 200, state.reviews[key]);
