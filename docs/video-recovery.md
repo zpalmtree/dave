@@ -1,7 +1,7 @@
 # Video recovery
 
-The broker's production configuration enables recovery protocol version 1. It
-leases new work only to a worker advertising that version. Existing active
+The broker's production configuration enables recovery protocol version 2. It
+leases new work only to a worker advertising that version or newer. Existing active
 leases can finish normally during a broker restart.
 
 An independently approved screenplay is the content contract for the job.
@@ -11,20 +11,22 @@ first produces a permitted adaptation with an audience-facing notice; that
 adaptation must independently pass planning before any images or video render.
 Source images that cannot safely be retained are excluded from subsequent calls.
 
-Each scene gets an opening image and a review against the original references
-and approved scene. The worker permits two image attempts and two video attempts,
-using the previous review's feedback. Video review samples five points in time,
-checks story/identity/action, and compares an audio transcription with the
-approved speech. Decoding failures also consume a render attempt. Minor visual
-differences and intentionally still scenes do not fail review.
+Each scene gets a reviewed opening image. When the approved plan calls for the
+original portrait at frame zero, the worker uses that image directly. Continuing
+scenes use the previous accepted clip's final frame. New shots get their own
+opening composition, without inheriting a frame-zero crop restriction.
 
-If rendering or imagery remains unusable, the worker assembles an animated
-storyboard on the CPU. Captions carry **both action and dialogue**. It uses
-approved scene images or separate reference panels where available. If those
-cannot pass review, explicitly labeled typographic story cards convey the
-approved scene without pretending that an unrelated portrait depicts it.
-The delivery notice identifies the storyboard format. All storyboard pages
-undergo review too; unsafe or unreadable content is never marked successful.
+The worker permits two image attempts per recovery pass. Each scene gets one
+video attempt and a targeted retry, then two attempts with an alternate video
+renderer. Video review samples five points in time, checks story/identity/action,
+and compares an audio transcription with the approved speech. It judges the
+user's requested story; incidental planner-invented props, camera choices, and
+blocking are flexible. Speech receives sufficient time within each shot.
+
+Only actual generated video can pass final approval. Storyboards, slideshows,
+and caption cards are never substitutes for requested action. Exhausted render
+attempts defer the same job for another recovery pass, retaining accepted scenes
+and actionable review feedback. No terminal error or placeholder is delivered.
 
 The broker persists the approved contract, checksummed scene reviews, worker
 checkpoints, and final approval. The worker persists accepted artifacts and
@@ -39,6 +41,9 @@ Completion requires approval for every scene and the exact uploaded file hash.
 Generated clips are normalized before concatenation and the final MP4 is fully
 decoded before upload. Discord delivery records the posted message ID before
 editing the progress message, so a cosmetic edit failure cannot trigger a render.
+Authorized regeneration increments a delivery revision and replaces attachments
+on the existing Discord message; stale delivery acknowledgments cannot complete
+the new revision.
 
 ## Desktop installation and Qwen
 
@@ -63,9 +68,9 @@ Recovery never sends a policy-rejected request to a less restricted local model.
 
 `yarn test` covers contract preservation, timing repair, policy adaptation,
 matching output approval, deferred recovery, and broker/delivery regressions.
-`desktop/test_video_recovery.py` exercises real FFmpeg storyboard output,
-unavailable imagery, two failed renders, corrupt video, review outages, upload
-retry without rerendering, and coordinator-path preflight.
+`desktop/test_video_recovery.py` uses real decodable video fixtures to exercise
+original-frame reuse, continuation, alternate renderers, unavailable imagery,
+review/upload retries without rerendering, and coordinator-path preflight.
 
 The existing desktop generator suite has three pre-existing failures referring
 to removed legacy keyframe graph/cache symbols. These reproduce against the

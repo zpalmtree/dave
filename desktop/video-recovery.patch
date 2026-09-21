@@ -46,7 +46,7 @@
                      "protocol": PROTOCOL_VERSION,
                      "worker_id": self.worker_id,
                      "capabilities": list(MODEL_ARGS),
-+                    "recovery_version": 1,
++                    "recovery_version": 2,
                      "current_job": self.current_job.get("id") if self.current_job else None,
                      "current_lease": self.current_job.get("lease_id") if self.current_job else None,
                      "warm_model": self.warm_model,
@@ -55,7 +55,7 @@
          if isinstance(terminal, dict):
              self.render_task = asyncio.create_task(self.replay_terminal(terminal))
 +            return
-+        if self.current_job.get("recovery_version") == 1:
++        if self.current_job.get("recovery_version", 0) >= 1:
 +            async def resume_recovery():
 +                # Existing admission is cooperative; cancel only this job's reservation.
 +                # Accepted scene artifacts remain in the durable recovery checkpoint.
@@ -69,13 +69,30 @@
          return str(body.get("planner_model") or LOCAL_PLANNER_MODEL), plan_identity
  
      async def run_job(self, job: dict[str, Any]) -> None:
-+        if job.get("recovery_version") == 1:
++        if job.get("recovery_version", 0) >= 1:
 +            from video_recovery import run_recovery_job
 +            await run_recovery_job(self, job)
 +            return
          job_id = str(job["id"])
          LOG_DIR.mkdir(parents=True, exist_ok=True)
          log_path = LOG_DIR / f"{job_id}.log"
+@@ -2705,14 +2718,14 @@
+         else:
+             await self.fail_current("Recovered generator exited without a final MP4.", True)
+ 
+-    def find_output(self) -> Path | None:
++    def find_output(self, renderer: str | None = None) -> Path | None:
+         if not self.current_job:
+             return None
+         run_dir_value = self.journal.get("run_dir")
+         candidates: list[Path] = []
+         if run_dir_value:
+             run_dir = Path(str(run_dir_value))
+-            model = GENERATOR_MODELS.get(str(self.current_job.get("model")), "ltx")
++            model = GENERATOR_MODELS.get(renderer or str(self.current_job.get("model")), "ltx")
+             master_manifest = run_dir / model / f"{model}_final.generation.json"
+             manifest = read_json(master_manifest, {})
+             validation = manifest.get("validation") if isinstance(manifest, dict) else None
 @@ -3137,6 +3150,9 @@
          except OSError:
              print("Another Dave video worker is already running.", flush=True)

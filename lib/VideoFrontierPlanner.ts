@@ -1182,7 +1182,7 @@ export function expandExhaustiveSequentialPlan(
         (sum: number, segment: any) => sum + segment.output_seconds,
         0,
     );
-    if (!plan.recovery_storyboard && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!plan.recovery_extended && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         const correction = AUTO_TOTAL_LIMIT_SECONDS / outputTotal;
         for (const segment of segments) segment.output_seconds *= correction;
     }
@@ -1288,7 +1288,7 @@ export function compileBestEffortFrontierVideoPlan(
     reconcileFrontierKeyframeMotionGeometry(compiled);
     preserveAudiovisualContractsBestEffort(compiled, compiled.prompt_analysis);
     validatePlanAgainstAnalysis(compiled, compiled.prompt_analysis, rawPrompt);
-    if (compiled.segments.reduce((sum: number, segment: any) => sum + segment.target_seconds, 0) > AUTO_TOTAL_LIMIT_SECONDS) compiled.recovery_storyboard = true;
+    if (compiled.segments.reduce((sum: number, segment: any) => sum + segment.target_seconds, 0) > AUTO_TOTAL_LIMIT_SECONDS) compiled.recovery_extended = true;
     compiled.generation_adjustments = { timing_repaired: true };
     return compiled;
 }
@@ -1390,13 +1390,13 @@ export function validateFrontierVideoPlanForKeyframe(
         outputTotal += segment.output_seconds === undefined ? floor : declaredOutput;
         finishedTotal += segment.output_seconds === undefined ? target : declaredOutput;
     }
-    if (!plan.recovery_storyboard && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!plan.recovery_extended && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `GPT-5.6 Sol screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s generation limit.`,
         );
     }
-    if (!plan.recovery_storyboard && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!plan.recovery_extended && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `GPT-5.6 Sol screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,

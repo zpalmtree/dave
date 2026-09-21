@@ -186,13 +186,13 @@ const sharedCommands: Command[] = [
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
-        aliases: ['oalgo', 'meximutt', 'minimutt'],
+        aliases: ['meximutt', 'oalgo', 'minimutt'],
         discordOnly: true,
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleOalgoVideo,
-            description: 'Generate an OALGO video; combine attachments with Sunburst by default or select --image-provider grok',
-            examples: [{ value: 'oalgo celebrates a championship victory' }, { value: 'oalgo --image-provider grok reacts to the attached image' }],
+            description: 'Generate an Meximutt video; combine attachments with Sunburst by default or select --image-provider grok',
+            examples: [{ value: 'meximutt celebrates a championship victory' }, { value: 'meximutt --image-provider grok reacts to the attached image' }],
         },
         relatedCommands: ['minimax', 'minimaxfast', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],

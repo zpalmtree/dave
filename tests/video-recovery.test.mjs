@@ -45,6 +45,19 @@ test('contract cannot approve omitted dialogue, bypassed quality, or policy reje
     assert.throws(() => approvedRecoveryContract({ ...plan(), quality_gate_bypassed: true }, 'explorers'), /preserves/);
 });
 
+test('timing repair reserves speech time within a shot even when the whole segment has enough time', () => {
+    const value = plan('Everything is fake, even the little war happening down by the feeder.');
+    const speaking = value.segments[0].shots[0];
+    speaking.duration_seconds = 2;
+    value.segments[0].shots.unshift({ ...speaking, duration_seconds: 10, dialogue: [] });
+    value.segments[0].target_seconds = 12;
+    repairVideoTiming(value, 15, 5);
+    const repaired = value.segments.flatMap(s => s.shots).find(s => s.dialogue.length);
+    assert.ok(repaired.duration_seconds > 6);
+    assert.equal(repaired.dialogue[0].text, speaking.dialogue[0].text);
+    assert.equal(value.segments[1].transition, 'continue');
+});
+
 test('speech verification tolerates punctuation but rejects missing lines and silent audio', () => {
     assert.equal(recoverySpeechMatches('We made it home!', 'We made it home.'), true);
     assert.equal(recoverySpeechMatches('We made it home.', ''), false);
@@ -110,12 +123,18 @@ test('broker persists recovery and requires every scene review for the matching 
             method: 'POST', headers: { authorization: 'Bearer bot', 'content-type': 'application/json' }, body: '{}',
         });
         assert.equal(initial.status, 200);
+        let leased = false;
+        broker.worker = { id: 'old-worker', currentJob: null, ready: true, capabilities: ['minimax'],
+            recoveryVersion: 1, lastHeartbeat: Date.now(), scheduler: { available: false },
+            socket: { send() { leased = true; }, close() {}, terminate() {} } };
+        await broker.dispatchNext();
+        assert.equal(leased, false, 'A storyboard-capable legacy worker must not receive new work');
         // Use a leased worker directly so these HTTP integration assertions don't
         // depend on websocket scheduling or real GPU availability.
         broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
-            capabilities: ['minimax'], recoveryVersion: 1, lastHeartbeat: Date.now(),
+            capabilities: ['minimax'], recoveryVersion: 2, lastHeartbeat: Date.now(),
             scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
-        await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=1 WHERE public_id=?", [id]);
+        await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=2 WHERE public_id=?", [id]);
         const request = async (operation, body = {}) => {
             const result = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${id}/recovery/${operation}`, {
                 method: 'POST', headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' },
@@ -132,12 +151,14 @@ test('broker persists recovery and requires every scene review for the matching 
         assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: hash,
             frames: ['data:image/jpeg;base64,YQ=='] })).body.acceptable, true);
         assert.equal((await request('quality', quality)).status, 200);
+        assert.equal((await request('quality', { ...quality, format: 'storyboard' })).status, 503);
+        assert.equal((await request('review', { segment_index: 0, kind: 'storyboard', artifact_sha256: hash })).status, 503);
         assert.equal((await request('quality', { ...quality, contract_hash: 'c'.repeat(64) })).status, 409);
         await broker.run("UPDATE video_jobs SET result_path='result.mp4', result_sha256=? WHERE public_id=?", ['c'.repeat(64), id]);
         await assert.rejects(broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id,
             lease_id: 'lease', runtime_seconds: 5 }), /exact output/);
         await broker.run("UPDATE video_jobs SET result_path='result.mp4', result_sha256=?, error='old error' WHERE public_id=?", [resultHash, id]);
-        const notice = 'Adapted to a friendly reunion. Delivered as an animated storyboard.';
+        const notice = 'Adapted to a friendly reunion. An alternate video renderer recovered the scene.';
         await broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id, lease_id: 'lease', runtime_seconds: 5, generation_notice: notice });
         const row = await broker.get('SELECT status,error FROM video_jobs WHERE public_id=?', [id]);
         assert.deepEqual(row, { status: 'ready', error: null });
@@ -154,5 +175,22 @@ test('broker persists recovery and requires every scene review for the matching 
         assert.equal(deferred.error, null);
         assert.ok(deferred.recovery_next_at > Date.now() / 1000);
         assert.equal(JSON.parse(deferred.recovery_json).checkpoint.scenes['0'].video_attempts, 1);
+        broker.worker = null;
+        await broker.run("UPDATE video_jobs SET status='delivered', delivery_message_id='123456' WHERE public_id=?", [id]);
+        const botRequest = async (endpoint, body) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs/${id}/${endpoint}`, {
+            method: 'POST', headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        assert.equal((await botRequest('regenerate', { planner_guidance: 'Meximutt plays the explorer.' })).status, 200);
+        const regenerated = await broker.get('SELECT status,delivery_message_id,delivery_revision,delivered_revision,recovery_json,planner_json,planner_guidance FROM video_jobs WHERE public_id=?', [id]);
+        assert.deepEqual(regenerated, { status: 'queued', delivery_message_id: '123456', delivery_revision: 1,
+            delivered_revision: 0, recovery_json: null, planner_json: null, planner_guidance: 'Meximutt plays the explorer.' });
+        assert.equal((await botRequest('regenerate', {})).status, 409);
+        await broker.run("UPDATE video_jobs SET status='ready' WHERE public_id=?", [id]);
+        await botRequest('delivered', { revision: 0, message_id: '123456' });
+        assert.equal((await broker.get('SELECT status FROM video_jobs WHERE public_id=?', [id])).status, 'ready');
+        await botRequest('delivered', { revision: 1, message_id: '123456' });
+        assert.deepEqual(await broker.get('SELECT status,delivered_revision,delivery_message_id FROM video_jobs WHERE public_id=?', [id]),
+            { status: 'delivered', delivered_revision: 1, delivery_message_id: '123456' });
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });

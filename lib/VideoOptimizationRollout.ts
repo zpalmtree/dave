@@ -14,8 +14,10 @@ export function selectVideoOptimization(
     release: any, command: string, jobId: string,
 ): VideoOptimizationSelection | null {
     if (release?.schema_version !== 1 || !/^[a-zA-Z0-9_-]{1,80}$/.test(release.experiment_id || '')) return null;
+    // Keep audited legacy rollout assignments when the public command is renamed.
+    if (command === 'meximutt' && !release.commands?.meximutt) command = 'oalgo';
     const arm = release.commands?.[command];
-    if (!['minimax', 'oalgo'].includes(command) || !arm || ![10, 50, 100].includes(arm.percentage)) return null;
+    if (!['minimax', 'oalgo', 'meximutt'].includes(command) || !arm || ![10, 50, 100].includes(arm.percentage)) return null;
     // FastH3 belongs to the explicit fast command. Reject old renderer releases,
     // including mixed cloud/renderer arms, instead of silently changing them.
     if (arm.renderer != null) return null;
@@ -45,7 +47,7 @@ export function selectVideoOptimization(
         Object.assign(options, { reviewModel: arm.reviewer.model, reviewReasoningEffort: arm.reviewer.effort });
     }
     if (arm.composite) {
-        if (command !== 'oalgo' || proof.human_frame_review_complete !== true || proof.composite_passed !== true
+        if (!['oalgo', 'meximutt'].includes(command) || proof.human_frame_review_complete !== true || proof.composite_passed !== true
             || arm.composite.model !== 'gemini-3.1-flash-image' || arm.composite.size !== '1K') return null;
         Object.assign(options, { geminiModel: arm.composite.model, imageSize: arm.composite.size });
     }

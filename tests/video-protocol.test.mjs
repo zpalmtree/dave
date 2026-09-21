@@ -261,7 +261,8 @@ test('local video commands are declared as Discord-only', () => {
         assert.equal(command.discordOnly, true);
     }
     const oalgo = Commands.find(candidate => candidate.aliases.includes('oalgo'));
-    assert.deepEqual(oalgo.aliases, ['oalgo', 'meximutt', 'minimutt']);
+    assert.deepEqual(oalgo.aliases, ['meximutt', 'oalgo', 'minimutt']);
+    assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /^Meximutt is the recurring character/);
     const meximutt = Commands.find(candidate => candidate.aliases.includes('meximutt'));
     assert.equal(meximutt, oalgo, 'both aliases must resolve to the same command and handler');
     assert.equal(Commands.filter(candidate => candidate.aliases.some(alias => ['oalgo', 'meximutt'].includes(alias))).length, 1);
@@ -1573,7 +1574,7 @@ test('best-effort compiler strips fidelity notes from dialogue.language', () => 
     assert.equal(compiled.segments[0].shots[0].dialogue[0].text, 'Hello, Astra.');
 });
 
-test('best-effort compiler preserves all beats and selects storyboard beyond the render budget', () => {
+test('best-effort compiler preserves all beats and extends generation beyond the render budget', () => {
     const plan = frontierPlan();
     plan.segments = Array.from({ length: 8 }, (_, index) => ({
         ...structuredClone(plan.segments[0]),
@@ -1590,7 +1591,7 @@ test('best-effort compiler preserves all beats and selects storyboard beyond the
     );
     assert.equal(compiled.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 160);
     assert.equal(compiled.segments.length, 8);
-    assert.equal(compiled.recovery_storyboard, true);
+    assert.equal(compiled.recovery_extended, true);
     assert.doesNotThrow(
         () => validateFrontierVideoPlanForKeyframe(
             compiled, 'ltxfast', 'A dog runs through three stages.',

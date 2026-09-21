@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 
-export const VIDEO_RECOVERY_VERSION = 1;
-export type VideoOutputFormat = 'generated' | 'storyboard';
+export const VIDEO_RECOVERY_VERSION = 2;
+export type VideoOutputFormat = 'generated';
 export interface VideoRecoveryContract {
     version: 1;
     prompt: string;
@@ -42,7 +42,8 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
         oldIndexes[originalIndex] = repaired.length + 1;
         const lines = original.shots.flatMap((shot: any) => shot.dialogue || []);
         if (original.shots.length <= 4 && Number(original.target_seconds) >= minimum
-            && Number(original.target_seconds) <= maximum && speechSeconds(lines) <= Number(original.target_seconds)) {
+            && Number(original.target_seconds) <= maximum && speechSeconds(lines) <= Number(original.target_seconds)
+            && original.shots.every((shot: any) => speechSeconds(shot.dialogue || []) <= Number(shot.duration_seconds))) {
             repaired.push(original);
             continue;
         }
