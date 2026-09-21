@@ -66,7 +66,10 @@ class RecoveryTests(unittest.TestCase):
     def test_review_outage_resumes_the_rendered_artifact_without_new_gpu_work(self):
         self.exercise_recovery(review_outage=True)
 
-    def exercise_recovery(self, image_available=True, corrupt_video=False, review_outage=False):
+    def test_admission_outage_does_not_consume_a_render_attempt(self):
+        self.exercise_recovery(admission_outage=True)
+
+    def exercise_recovery(self, image_available=True, corrupt_video=False, review_outage=False, admission_outage=False):
         from PIL import Image
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -127,11 +130,23 @@ class RecoveryTests(unittest.TestCase):
                 GENERATOR=root / 'generator.py', console_python_executable=lambda: sys.executable,
                 atomic_json=lambda path, value: path.write_text(json_module.dumps(value)), stable_job_seed=lambda _: 1)
             json_module = json
+            admission_failures = [admission_outage]
+            async def admit(_job):
+                if admission_failures[0]:
+                    admission_failures[0] = False
+                    raise RuntimeError('GPU coordinator temporarily unavailable')
+                self.assertIsNone(getattr(worker, 'gpuq_job_id', None), 'A completed reservation must not be reused')
+                worker.gpuq_job_id = 'fresh-test-reservation'
+                worker.journal['gpuq_job_id'] = worker.gpuq_job_id
+                return True
+            worker.ensure_gpu_reservation.side_effect = admit
             with mock.patch.dict(sys.modules, {'video_worker': fake_module}):
                 asyncio.run(recovery.run_recovery_job(worker, {'id': 'test-job', 'model': 'minimax'}))
                 render_count = 1 if review_outage else 2 if image_available else 0
-                self.assertEqual(worker.run_reserved_command.await_count, render_count)
-                if not review_outage:
+                self.assertEqual(worker.run_reserved_command.await_count, 0 if admission_outage else render_count)
+                if admission_outage:
+                    self.assertEqual(state['scenes']['0'].get('video_attempts', 0), 0)
+                if not review_outage and not admission_outage:
                     self.assertEqual(state['format'], 'storyboard')
                 worker.fail_current.assert_awaited_once()
                 worker.upload.side_effect = None
