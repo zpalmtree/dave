@@ -261,7 +261,7 @@ test('local video commands are declared as Discord-only', () => {
         assert.equal(command.discordOnly, true);
     }
     const oalgo = Commands.find(candidate => candidate.aliases.includes('oalgo'));
-    assert.deepEqual(oalgo.aliases, ['meximutt', 'oalgo', 'minimutt']);
+    assert.deepEqual(oalgo.aliases, ['oalgo', 'meximutt', 'minimutt']);
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /^Meximutt is the recurring character/);
     const meximutt = Commands.find(candidate => candidate.aliases.includes('meximutt'));
     assert.equal(meximutt, oalgo, 'both aliases must resolve to the same command and handler');

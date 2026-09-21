@@ -2137,12 +2137,12 @@ export class VideoBroker {
         const requestedAt = Number.isFinite(suppliedRequestedAt) && suppliedRequestedAt <= receivedAt
             && suppliedRequestedAt > receivedAt - 86400 ? suppliedRequestedAt : receivedAt;
         const requestedCommandVariant = String(body.command_variant || (
-            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'meximutt' : VIDEO_MODELS[body.model as VideoModelId].command
+            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'oalgo' : VIDEO_MODELS[body.model as VideoModelId].command
         ));
         // Older clients may still send an alias; share rollout selection and metrics.
-        const commandVariant = ['oalgo', 'minimutt'].includes(requestedCommandVariant)
-            ? 'meximutt' : requestedCommandVariant;
-        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['meximutt'] : [])].includes(commandVariant)) {
+        const commandVariant = ['meximutt', 'minimutt'].includes(requestedCommandVariant)
+            ? 'oalgo' : requestedCommandVariant;
+        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo'] : [])].includes(commandVariant)) {
             return { status: 400, body: { error: 'Invalid video command variant.' } };
         }
         const sourceMode = compositeDescriptor ? 'preset_composite'
