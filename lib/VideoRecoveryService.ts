@@ -5,7 +5,9 @@ import { createFrontierVideoPlan, FrontierPlannerRejectedError, requestPlannerRe
     VIDEO_PLANNER_MODEL, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
 import { VideoFrontierCallOptions } from './VideoUsage.js';
 import { VideoModelId } from './VideoProtocol.js';
-import { approvedRecoveryContract, recoveryHash, recoverySpeechMatches, repairVideoTiming } from './VideoRecovery.js';
+import { approvedRecoveryContract, normalizedRecoverySpeech, recoveryHash, recoverySpeechMatches, repairVideoTiming } from './VideoRecovery.js';
+
+export const VIDEO_RECOVERY_REVIEW_VERSION = 2;
 
 function outputJSON(response: any): any {
     const text = response.output_text || (response.output || []).flatMap((item: any) => item.content || [])
@@ -115,7 +117,7 @@ export async function reviewRecoveryMedia(contract: any, segment: any, body: any
                 rawUsage: usage as Record<string, unknown> });
             transcript = String(response.text || '').trim();
         }
-        if (!recoverySpeechMatches(expected, transcript)) {
+        if (normalizedRecoverySpeech(expected) && !normalizedRecoverySpeech(transcript)) {
             return { acceptable: false, permitted: true, transcript, issues: ['The required speech is absent, incomplete, or unintelligible.'] };
         }
     }
@@ -125,12 +127,21 @@ export async function reviewRecoveryMedia(contract: any, segment: any, body: any
         + 'Reject unsafe imagery, missing required subjects, identity replacement, a wrong scene, or substantial missing action. '
         + 'For an opening image, judge only the authored initial frame. Characters, settings, or action revealed later do not need to appear at frame zero. A requested original portrait is a valid opening before a camera reveal. '
         + 'Do not reject cosmetic differences, camera preferences, harmless timing differences, or intended stillness. '
-        + 'Speech completeness has already passed a separate transcription check. The transcript is automatic speech recognition, not an exact record of spelling: do not reject minor homophonic spelling differences, punctuation, or capitalization as altered dialogue. You cannot establish a pronunciation error from transcript spelling alone. '
+        + 'For video, speech review is meaning-based by default, NOT script matching. Compare the essential message in expected_speech with the transcript. Accept natural paraphrases, extra words, filler, interjections, and brief creative flourishes when the intended message and key points remain intact. '
+        + 'Reject silence when speech is required, missing essential points or dialogue turns, contradictions, materially changed names or facts, or unrelated speech replacing the requested message. Harmless additions alone are not a failure. Honor an explicit user request for silence. '
+        + 'A request saying that a character says a quoted line is NOT an exact-wording requirement. Quoted dialogue, repetitions, and planner verbatim flags describe the rendering target, not mandatory words. '
+        + 'Only require exact wording when the original user request contains a separate explicit instruction such as "word for word", "do not paraphrase", or "say these exact words"; neither quotation marks nor "says" count. '
+        + 'For example, "Ayúdame a salir, necesito trabajar" and "Por favor, sácame de aquí; tengo que trabajar" express the same request and must pass. Dropping or adding conversational filler such as "mae", "hey", or "please" must not cause rejection. '
+        + 'speech_wording_close is only a spelling-similarity hint, never a pass/fail verdict: different wording may preserve meaning, and similar wording may reverse it. '
+        + 'The transcript is automatic speech recognition, not an exact record of spelling: allow Spanish vowel accents, minor homophonic spelling differences, punctuation, and capitalization. You cannot establish a pronunciation error from transcript spelling alone. '
         + "Judge only the supplied segment's required action, not beats assigned to other segments. Use the complete story solely for identity and continuity context. For video mode check that required action visibly progresses; camera zoom on an unrelated portrait is not story coverage. "
         + 'Judge material fidelity to the user request. Incidental props, mechanisms, exact blocking, and camera choices invented by the planner are flexible when the requested story is clearly enacted. Reject a slideshow, captioned still, or storyboard substituting for requested action. '
+        + 'Before reporting a speech issue, identify the essential meaning that was lost or changed, not merely different words. If you can only cite synonyms, harmless additions, or omitted filler, accept the speech. '
         + 'Return concrete repairable issues only. permitted is false for prohibited visual content.',
         [{ type: 'input_text', text: JSON.stringify({ kind: body.kind, request: contract.prompt, story: contract.analysis,
-            segment, transcript, frozen: body.frozen, reference_count: references.length }) },
+            segment, transcript, expected_speech: expected,
+            speech_wording_close: body.kind === 'video' ? recoverySpeechMatches(expected, transcript) : undefined,
+            frozen: body.frozen, reference_count: references.length }) },
             ...references.map(source => ({ type: 'input_image', image_url: `data:${source.mimeType};base64,${source.data.toString('base64')}`, detail: 'high' })),
             ...body.frames.map((image_url: string) => ({ type: 'input_image', image_url, detail: 'high' }))],
         reviewSchema, 'video_artifact_review', options);
