@@ -1,6 +1,6 @@
 --- a/video_gen.py
 +++ b/video_gen.py
-@@ -37,14 +37,12 @@
+@@ -37,14 +37,14 @@
  TEMPLATE_DIR = SCRIPT_DIR / "templates"
  DEFAULT_SERVER = "http://127.0.0.1:8188"
  PID_FILE = SCRIPT_DIR / "comfyui_video_gen.pid.json"
@@ -12,6 +12,8 @@
 -LLAMA_CPP_MMPROJ = Path(
 -    r"C:\AI\llama.cpp\models\mmproj-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf"
 -)
++# Embedded Windows Python omits the script directory from its isolated path.
++sys.path.insert(0, str(SCRIPT_DIR))
 +from gpuq_settings import qwen_settings
 +_QWEN_SETTINGS = qwen_settings()
 +LLAMA_CPP_DIR = _QWEN_SETTINGS['qwenworkingdirectory']
@@ -21,7 +23,7 @@
  LLAMA_CPP_SERVER = "http://127.0.0.1:18080"
  LLAMA_CPP_PID_FILE = SCRIPT_DIR / "llama_cpp_video_gen.pid.json"
  PROMPT_INTENT_MODEL = "hauhaucs-qwen3.8:27b-q4kp-mtp"
-@@ -1553,6 +1551,7 @@
+@@ -1553,6 +1553,7 @@
          action="store_true",
          help=argparse.SUPPRESS,
      )
@@ -29,7 +31,7 @@
      parser.add_argument(
          "--frontier-plan",
          type=Path,
-@@ -8131,7 +8130,7 @@
+@@ -8131,7 +8132,7 @@
                          models,
                      )
                  except VideoGenError as exc:

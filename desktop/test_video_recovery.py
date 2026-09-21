@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -17,6 +18,16 @@ import video_recovery as recovery
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_generator_imports_with_the_isolated_windows_python_path(self):
+        generator = Path(__file__).resolve().parent / 'video_gen.py'
+        if not generator.is_file():
+            self.skipTest('Run this check on the installed desktop sources.')
+        source = ('import importlib.util,sys; '
+                  f's=importlib.util.spec_from_file_location("isolated_video_gen", {str(generator)!r}); '
+                  'm=importlib.util.module_from_spec(s); sys.modules[s.name]=m; s.loader.exec_module(m); '
+                  'assert m.LLAMA_CPP_MODEL.is_file()')
+        subprocess.run([sys.executable, '-s', '-c', source], check=True, capture_output=True, timeout=30)
+
     def test_preflight_uses_coordinator_paths_and_reports_missing_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
