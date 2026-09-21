@@ -48,7 +48,8 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
             continue;
         }
         const pieces: any[] = [];
-        for (const shot of original.shots) {
+        const authoredCuts = new Set<any>();
+        for (const [shotIndex, shot] of original.shots.entries()) {
             const lines = Array.isArray(shot.dialogue) ? shot.dialogue : [];
             const batches: any[][] = [[]];
             for (const line of lines) {
@@ -76,10 +77,12 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
                     batches[batches.length - 1].push(part);
                 }
             }
-            for (const batch of batches) {
+            for (const [batchIndex, batch] of batches.entries()) {
                 const authored = Number(shot.duration_seconds) || minimum;
                 const seconds = Math.max(0.5, Math.min(maximum, authored / batches.length), speechSeconds(batch));
-                pieces.push({ ...shot, duration_seconds: Math.min(maximum, seconds), dialogue: batch });
+                const piece = { ...shot, duration_seconds: Math.min(maximum, seconds), dialogue: batch };
+                if (shotIndex > 0 && batchIndex === 0) authoredCuts.add(piece);
+                pieces.push(piece);
             }
         }
         let shots: any[] = [];
@@ -89,7 +92,8 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
             const result = { ...original, shots, target_seconds: target };
             delete result.output_seconds;
             result.transition = repaired.length === 0 ? 'start'
-                : repaired.length + 1 === oldIndexes[originalIndex] ? original.transition : 'continue';
+                : repaired.length + 1 === oldIndexes[originalIndex] ? original.transition
+                    : authoredCuts.has(shots[0]) ? 'cut' : 'continue';
             repaired.push(result);
             shots = [];
         };

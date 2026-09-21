@@ -42,7 +42,18 @@
                          f"WARNING: frontier screenplay failed local validation ({exc}); "
 --- a/video_worker.py
 +++ b/video_worker.py
-@@ -1456,6 +1456,7 @@
+@@ -179,7 +179,9 @@
+     lease_id = str(job.get("lease_id") or "").strip()
+     if not job_id or not lease_id:
+         raise RuntimeError("Broker job is missing its GPU reservation lease identity.")
+-    lease_fragment = hashlib.sha256(lease_id.encode("utf-8")).hexdigest()[:12]
++    scope = str(job.get("gpuq_reservation_scope") or "")
++    identity = f"{lease_id}:{scope}" if scope else lease_id
++    lease_fragment = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+     return lease_fragment, f"dave-video:{job_id}:{lease_fragment}"
+ 
+ 
+@@ -1456,6 +1458,7 @@
                      "protocol": PROTOCOL_VERSION,
                      "worker_id": self.worker_id,
                      "capabilities": list(MODEL_ARGS),
@@ -50,7 +61,7 @@
                      "current_job": self.current_job.get("id") if self.current_job else None,
                      "current_lease": self.current_job.get("lease_id") if self.current_job else None,
                      "warm_model": self.warm_model,
-@@ -1531,6 +1532,14 @@
+@@ -1531,6 +1534,14 @@
          terminal = self.journal.get("terminal_event")
          if isinstance(terminal, dict):
              self.render_task = asyncio.create_task(self.replay_terminal(terminal))
@@ -65,7 +76,7 @@
              return
          if self.gpuq_job_id and self.gpuq_control_dir:
              if self.journal.get("gpuq_render_sequence") is not None:
-@@ -1878,6 +1887,10 @@
+@@ -1878,6 +1889,10 @@
          return str(body.get("planner_model") or LOCAL_PLANNER_MODEL), plan_identity
  
      async def run_job(self, job: dict[str, Any]) -> None:
@@ -76,7 +87,7 @@
          job_id = str(job["id"])
          LOG_DIR.mkdir(parents=True, exist_ok=True)
          log_path = LOG_DIR / f"{job_id}.log"
-@@ -2705,14 +2718,14 @@
+@@ -2705,14 +2720,14 @@
          else:
              await self.fail_current("Recovered generator exited without a final MP4.", True)
  
@@ -93,7 +104,7 @@
              master_manifest = run_dir / model / f"{model}_final.generation.json"
              manifest = read_json(master_manifest, {})
              validation = manifest.get("validation") if isinstance(manifest, dict) else None
-@@ -3137,6 +3150,9 @@
+@@ -3137,6 +3152,9 @@
          except OSError:
              print("Another Dave video worker is already running.", flush=True)
              return 0

@@ -170,7 +170,7 @@ async def run_recovery_job(worker, job: dict) -> None:
         checkpoint_path = root / 'checkpoint.json'
         checkpoint = prepared.get('checkpoint') or {}
         if checkpoint_path.exists():
-            local = json.loads(checkpoint_path.read_text())
+            local = json.loads(checkpoint_path.read_text(encoding='utf-8'))
             if local.get('contract_hash') == contract_hash:
                 checkpoint = local
         if (checkpoint.get('contract_hash') != contract_hash or checkpoint.get('pipeline_version') != 2
@@ -209,7 +209,8 @@ async def run_recovery_job(worker, job: dict) -> None:
                     scene['image_attempts'] = 1
                     scene['image_source'] = 'original'
                     await save()
-                elif index > 0 and segment.get('transition') == 'continue' and not scene.get('image_attempts'):
+                elif (index > 0 and segment.get('transition') == 'continue' and not scene.get('image_attempts')
+                        and not re.match(r'\s*(?:hard\s+)?cut\b', segment['shots'][0]['visual'], re.IGNORECASE)):
                     previous = Path(checkpoint['scenes'][str(index - 1)]['video_path'])
                     seconds = await asyncio.to_thread(duration, previous)
                     await asyncio.to_thread(media_command, ['-ss', str(max(0, seconds - .15)),
@@ -274,6 +275,16 @@ async def run_recovery_job(worker, job: dict) -> None:
                     one = copy.deepcopy(plan)
                     one['segments'] = [copy.deepcopy(segment)]
                     one['segments'][0]['transition'] = 'start'
+                    if index > 0:
+                        one['keyframe'] = {'recommended': False,
+                            'reason': 'Use the accepted opening image for this scene.',
+                            'prompt': segment['shots'][0]['visual'], 'reference_requirements': [],
+                            'motion_contract': {
+                                'subject_orientation': 'Start with the orientation in the supplied opening image.',
+                                'gaze_direction': 'Start with the gaze in the supplied opening image.',
+                                'travel_direction': 'Follow the action authored for this scene.',
+                                'camera_relation': segment['shots'][0]['camera'],
+                                'first_second_action': segment['shots'][0]['visual']}}
                     one.pop('segment_keyframes', None)
                     # The full content contract remains at the broker. The generator
                     # receives only the authorized segment, without reinterpreting it.
@@ -290,7 +301,9 @@ async def run_recovery_job(worker, job: dict) -> None:
                     primary = job['model']
                     alternate = 'ltx' if primary.startswith('minimax') else 'minimax'
                     renderer = primary if scene.get('video_attempts', 0) < 2 else alternate
-                    if not await worker.ensure_gpu_reservation({**job, 'model': renderer}):
+                    reservation_scope = f"scene-{index}-cycle-{scene.get('cycles', 0)}-attempt-{scene.get('video_attempts', 0) + 1}"
+                    if not await worker.ensure_gpu_reservation({**job, 'model': renderer,
+                            'gpuq_reservation_scope': reservation_scope}):
                         raise asyncio.CancelledError()
                     # Queue/admission outages must not consume a render attempt.
                     scene['video_attempts'] = scene.get('video_attempts', 0) + 1

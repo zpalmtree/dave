@@ -55,7 +55,7 @@ test('timing repair reserves speech time within a shot even when the whole segme
     const repaired = value.segments.flatMap(s => s.shots).find(s => s.dialogue.length);
     assert.ok(repaired.duration_seconds > 6);
     assert.equal(repaired.dialogue[0].text, speaking.dialogue[0].text);
-    assert.equal(value.segments[1].transition, 'continue');
+    assert.equal(value.segments[1].transition, 'cut');
 });
 
 test('speech verification tolerates punctuation but rejects missing lines and silent audio', () => {
@@ -63,6 +63,8 @@ test('speech verification tolerates punctuation but rejects missing lines and si
     assert.equal(recoverySpeechMatches('We made it home.', ''), false);
     assert.equal(recoverySpeechMatches('We made it home.', 'We made it.'), false);
     assert.equal(recoverySpeechMatches('', 'Invented speech'), false);
+    assert.equal(recoverySpeechMatches('Just stop feeding the khat squirrels and wait for them to surrender.',
+        'Just stop feeding the caught squirrels and wait for them to surrender.'), true);
 });
 
 test('timing repair fits several turns without packing an oversized split into the previous turn', () => {
