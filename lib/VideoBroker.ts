@@ -99,7 +99,7 @@ interface VideoAttachmentSourceImageDescriptor {
 }
 
 interface VideoPresetSourceImageDescriptor {
-    preset: 'oalgo';
+    preset: 'meximutt' | 'oalgo';
 }
 
 type VideoSourceImageDescriptor =
@@ -194,6 +194,8 @@ interface JobRow {
     recovery_next_at?: number | null;
     recovery_version?: number;
     delivery_message_id?: string | null;
+    delivery_revision?: number;
+    delivered_revision?: number;
     id: number;
     public_id: string;
     optimization_json: string | null;
@@ -955,8 +957,8 @@ function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object') throw new Error('Invalid starting-image metadata.');
     if (value.preset !== undefined) {
-        if (value.preset !== 'oalgo') throw new Error('Unknown starting-image preset.');
-        return { preset: 'oalgo' };
+        if (!['meximutt', 'oalgo'].includes(value.preset)) throw new Error('Unknown starting-image preset.');
+        return { preset: 'meximutt' };
     }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
     const bytes = Number(value.bytes || 0);
@@ -1055,11 +1057,11 @@ async function storeVideoSourceImage(
         return downloadDiscordSourceImage(descriptor, directory);
     }
     if (!existsSync(OALGO_VIDEO_PRESET_PATH) || !statSync(OALGO_VIDEO_PRESET_PATH).isFile()) {
-        throw new Error('The OALGO starting-image preset is unavailable.');
+        throw new Error('The Meximutt starting-image preset is unavailable.');
     }
     const bytes = statSync(OALGO_VIDEO_PRESET_PATH).size;
     if (!bytes || bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
-        throw new Error('The OALGO starting-image preset is empty or too large.');
+        throw new Error('The Meximutt starting-image preset is empty or too large.');
     }
     mkdirSync(directory, { recursive: true });
     const destination = join(directory, 'source.png');
@@ -1070,18 +1072,18 @@ async function storeVideoSourceImage(
 
 export function oalgoSourceImageCompositePlan(prompt: string): Record<string, unknown> {
     const requestedAction = prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT
-        ? 'Add OALGO to the attached situation. Preserve its existing subjects and action; a later screenplay will plan the motion.'
+        ? 'Add Meximutt to the attached situation. Preserve its existing subjects and action; a later screenplay will plan the motion.'
         : `Stage the combined image so it can naturally begin this requested video: ${prompt}`;
     return {
         intent: requestedAction,
         keyframe: {
             recommended: true,
-            reason: 'Combine the built-in OALGO art with the user-supplied visual reference.',
+            reason: 'Combine the built-in Meximutt art with the user-supplied visual reference.',
             prompt: [
-                'Edit the scene in Reference 2 by adding OALGO from Reference 1 as one additional, separate person.',
-                'Keep every main subject from Reference 2 visible and recognizable, keeping their own clothing, equipment, and story-defining props with their original owners. OALGO joins them; he does not replace, merge with, or dress as any existing subject.',
-                'Use the OALGO base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.',
-                'Keep the attached setting and the relationships between its subjects. Make room beside them for OALGO, widening the view only as needed. Keep his face large enough to recognize and the attached subjects unobscured.',
+                'Edit the scene in Reference 2 by adding Meximutt from Reference 1 as one additional, separate person.',
+                'Keep every main subject from Reference 2 visible and recognizable, keeping their own clothing, equipment, and story-defining props with their original owners. Meximutt joins them; he does not replace, merge with, or dress as any existing subject.',
+                'Use the Meximutt base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.',
+                'Keep the attached setting and the relationships between its subjects. Make room beside them for Meximutt, widening the view only as needed. Keep his face large enough to recognize and the attached subjects unobscured.',
                 'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
                 requestedAction,
             ].join(' '),
@@ -1090,7 +1092,7 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
                 subject_orientation: 'Keep all subjects oriented for the opening action.',
                 gaze_direction: 'Direct each visible gaze toward the opening action or another subject.',
                 travel_direction: 'Give moving subjects clear space in their intended direction.',
-                camera_relation: 'Use a coherent single camera view wide enough to show recognizable OALGO, the attached subjects, and their story-defining props with clear sightlines for interaction.',
+                camera_relation: 'Use a coherent single camera view wide enough to show recognizable Meximutt, the attached subjects, and their story-defining props with clear sightlines for interaction.',
                 first_second_action: requestedAction,
             },
         },
@@ -1108,21 +1110,21 @@ export async function composeOalgoSourceImages(
     if (provider !== 'sunburst' && provider !== 'grok') throw new Error('Unknown source image provider.');
     const references: VideoKeyframeReference[] = [
         {
-            label: 'OALGO base image',
+            label: 'Meximutt base image',
             // identity, not style: only an identity reference makes the supplied image the
             // authority for face and body. Declared as style, the composite kept the shirt
-            // and palette and replaced OALGO with a generic man.
+            // and palette and replaced Meximutt with a generic man.
             kind: 'identity',
-            visualFactsToPreserve: 'This image is the authority for who OALGO is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with the Mexican flag clothing and emblem, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so OALGO can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.',
+            visualFactsToPreserve: 'This image is the authority for who Meximutt is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with the Mexican flag clothing and emblem, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so Meximutt can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.',
             bytes: readFileSync(base.path),
             mimeType: base.mimeType,
-            sourceUrl: 'built-in:oalgo',
-            contextUrl: 'built-in:oalgo',
+            sourceUrl: 'built-in:meximutt',
+            contextUrl: 'built-in:meximutt',
         },
         {
             label: 'User-attached image',
             kind: 'object',
-            visualFactsToPreserve: 'Preserve the main depicted subjects, their recognizable appearance and relevant pose, and their relationships to story-defining props. Keep prominent people or animals visible rather than substituting a nearby object. Integrate OALGO into this visual situation with room for interaction.',
+            visualFactsToPreserve: 'Preserve the main depicted subjects, their recognizable appearance and relevant pose, and their relationships to story-defining props. Keep prominent people or animals visible rather than substituting a nearby object. Integrate Meximutt into this visual situation with room for interaction.',
             bytes: readFileSync(attached.path),
             mimeType: attached.mimeType,
             sourceUrl: 'discord-attachment',
@@ -1149,7 +1151,7 @@ export async function composeOalgoSourceImages(
     } catch (error) {
         if (error instanceof VideoUsagePersistenceError) throw error;
         if (controller.signal.aborted) {
-            throw new VideoKeyframeError('timeout', 'OALGO image composition exceeded its time limit.');
+            throw new VideoKeyframeError('timeout', 'Meximutt image composition exceeded its time limit.');
         }
         throw error;
     } finally {
@@ -1158,13 +1160,13 @@ export async function composeOalgoSourceImages(
 }
 
 export function oalgoCompositionFailureMessage(error: unknown): string {
-    const prefix = 'Could not combine OALGO with your attached image. No video was queued.';
+    const prefix = 'Could not combine Meximutt with your attached image. No video was queued.';
     if (error instanceof VideoKeyframeError) {
         switch (error.code) {
             case 'moderation':
                 return `${prefix} The image provider declined this combination under its safety rules. Repeating the same request is unlikely to help.`;
             case 'identity_review':
-                return `${prefix} The generated images changed OALGO's likeness, even after a repair. You can retry the composition.`;
+                return `${prefix} The generated images changed Meximutt's likeness, even after a repair. You can retry the composition.`;
             case 'composition_review':
                 return `${prefix} The generated images did not preserve the attached scene, even after a repair. You can retry the composition.`;
             case 'review_unavailable':
@@ -1475,6 +1477,7 @@ export class VideoBroker {
         for (const [name, definition] of [
             ['recovery_json', 'TEXT'], ['recovery_version', 'INTEGER NOT NULL DEFAULT 0'],
             ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
+            ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -1936,13 +1939,34 @@ export class VideoBroker {
             writeJson(res, 200, await this.cancelJob(cancel[1], String(body.requester_id || ''), Boolean(body.is_admin)));
             return;
         }
+        const regenerate = /^\/v1\/jobs\/([0-9a-f-]+)\/regenerate$/.exec(url.pathname);
+        if (regenerate && req.method === 'POST') {
+            const body = await readJson(req);
+            const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [regenerate[1]]);
+            if (!row || !['ready', 'delivered', 'failed'].includes(row.status)) {
+                writeJson(res, 409, { error: 'Only a finished job can be regenerated.' });
+                return;
+            }
+            const guidance = typeof body.planner_guidance === 'string' ? body.planner_guidance.slice(0, 8000) : row.planner_guidance;
+            await this.run(`UPDATE video_jobs SET status='queued', recovery_json=NULL, recovery_next_at=NULL,
+                planner_json=NULL, frontier_analysis_json=NULL, planner_guidance=?, error=NULL,
+                result_path=NULL, result_sha256=NULL, result_bytes=NULL, notified_at=NULL, delivered_at=NULL,
+                completed_at=NULL, started_at=NULL, worker_id=NULL, lease_token=NULL, lease_expires_at=NULL,
+                progress=NULL, progress_scope=NULL, segment_index=NULL, runtime_seconds=NULL,
+                delivery_revision=delivery_revision+1, stage='Regenerating the actual video', updated_at=? WHERE public_id=?`,
+                [guidance, nowSeconds(), row.public_id]);
+            await this.dispatchNext();
+            writeJson(res, 200, { ok: true, id: row.public_id });
+            return;
+        }
         const delivered = /^\/v1\/jobs\/([0-9a-f-]+)\/delivered$/.exec(url.pathname);
         if (delivered && req.method === 'POST') {
             const body = await readJson(req);
             await this.run(
-                `UPDATE video_jobs SET status = 'delivered', delivery_message_id=COALESCE(?, delivery_message_id), delivered_at = ?, notified_at = ?, updated_at = ?
-                 WHERE public_id = ? AND status = 'ready'`,
-                [/^\d+$/.test(String(body.message_id || '')) ? String(body.message_id) : null, nowSeconds(), nowSeconds(), nowSeconds(), delivered[1]],
+                `UPDATE video_jobs SET status = 'delivered', delivery_message_id=COALESCE(?, delivery_message_id),
+                 delivered_revision=delivery_revision, delivered_at = ?, notified_at = ?, updated_at = ?
+                 WHERE public_id = ? AND status = 'ready' AND delivery_revision=?`,
+                [/^\d+$/.test(String(body.message_id || '')) ? String(body.message_id) : null, nowSeconds(), nowSeconds(), nowSeconds(), delivered[1], Number(body.revision) || 0],
             );
             if (body.duration_seconds !== null && body.duration_seconds !== undefined) {
                 await this.recordMetricSpan(delivered[1], {
@@ -2030,7 +2054,7 @@ export class VideoBroker {
         const plannerGuidance = sanitizeVideoWorkerText(
             body.planner_guidance,
             '',
-            // OALGO combines visual-story and voice guidance. The old
+            // Meximutt combines visual-story and voice guidance. The old
             // 2,000-character cap silently removed its trailing voice rules.
             8000,
         ).trim() || null;
@@ -2078,7 +2102,7 @@ export class VideoBroker {
             || isPresetSourceImage(compositeDescriptor))) {
             return {
                 status: 400,
-                body: { error: 'Image compositing requires the OALGO preset and one Discord attachment.' },
+                body: { error: 'Image compositing requires the Meximutt preset and one Discord attachment.' },
             };
         }
         const compositeProvider: VideoSourceCompositeProvider = body.source_image_provider === undefined
@@ -2087,7 +2111,7 @@ export class VideoBroker {
             return { status: 400, body: { error: 'Image provider must be sunburst or grok.' } };
         }
         if (body.source_image_provider !== undefined && (!compositeDescriptor || body.model !== 'minimax')) {
-            return { status: 400, body: { error: 'Image provider selection requires an OALGO image combination.' } };
+            return { status: 400, body: { error: 'Image provider selection requires a Meximutt image combination.' } };
         }
         const existingBeforeDownload = await this.get<JobRow>(
             'SELECT * FROM video_jobs WHERE idempotency_key = ?',
@@ -2120,12 +2144,12 @@ export class VideoBroker {
         const requestedAt = Number.isFinite(suppliedRequestedAt) && suppliedRequestedAt <= receivedAt
             && suppliedRequestedAt > receivedAt - 86400 ? suppliedRequestedAt : receivedAt;
         const requestedCommandVariant = String(body.command_variant || (
-            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'oalgo' : VIDEO_MODELS[body.model as VideoModelId].command
+            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'meximutt' : VIDEO_MODELS[body.model as VideoModelId].command
         ));
         // Older clients may still send an alias; share rollout selection and metrics.
-        const commandVariant = ['meximutt', 'minimutt'].includes(requestedCommandVariant)
-            ? 'oalgo' : requestedCommandVariant;
-        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo'] : [])].includes(commandVariant)) {
+        const commandVariant = ['oalgo', 'minimutt'].includes(requestedCommandVariant)
+            ? 'meximutt' : requestedCommandVariant;
+        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['meximutt'] : [])].includes(commandVariant)) {
             return { status: 400, body: { error: 'Invalid video command variant.' } };
         }
         const sourceMode = compositeDescriptor ? 'preset_composite'
@@ -2200,7 +2224,7 @@ export class VideoBroker {
                             ),
                         });
                         console.warn(
-                            '[Video] OALGO source-image composition failed; queueing the local Qwen fallback.',
+                            '[Video] Meximutt source-image composition failed; queueing the local Qwen fallback.',
                             error,
                         );
                         sourceImage = base;
@@ -3802,6 +3826,8 @@ export class VideoBroker {
                 planned_intent: plannedIntent(row),
                 generation_notice: generationNotice(row),
                 delivery_message_id: row.delivery_message_id || null,
+                delivery_revision: row.delivery_revision || 0,
+                delivered_revision: row.delivered_revision || 0,
                 requester_id: row.requester_id,
                 origin_bot_id: row.origin_bot_id,
                 channel_id: row.channel_id,
@@ -4388,7 +4414,7 @@ export class VideoBroker {
                 if (row.recovery_version) {
                     const recovery = row.recovery_json ? JSON.parse(row.recovery_json) : {};
                     const quality = recovery.quality;
-                    if (!quality?.accepted || quality.result_sha256 !== row.result_sha256
+                    if (!quality?.accepted || quality.format !== 'generated' || quality.result_sha256 !== row.result_sha256
                         || quality.contract_hash !== recovery.prepared?.contract_hash) {
                         throw new Error('Completion requires quality approval for this exact output.');
                     }
@@ -4480,7 +4506,7 @@ export class VideoBroker {
         }
         const leaseId = randomUUID();
         const result = await this.run(
-            `UPDATE video_jobs SET recovery_version = ${this.options.recoveryEnabled ? 1 : 0}, status = 'leased', worker_id = ?, lease_expires_at = ?,
+            `UPDATE video_jobs SET recovery_version = ${this.options.recoveryEnabled ? VIDEO_RECOVERY_VERSION : 0}, status = 'leased', worker_id = ?, lease_expires_at = ?,
              lease_token = ?, gpu_queue_state = 'submitting', gpu_queue_submitted_at = NULL,
              gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
              gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
@@ -4505,7 +4531,8 @@ export class VideoBroker {
                 prompt: row.prompt,
                 requested_duration_seconds: row.requested_duration_seconds,
                 delivery_limit_bytes: row.delivery_limit_bytes,
-                recovery_version: this.options.recoveryEnabled ? 1 : 0,
+                recovery_version: this.options.recoveryEnabled ? VIDEO_RECOVERY_VERSION : 0,
+                recovery_revision: row.delivery_revision || 0,
                 profile: 'maximum',
                 planner_guidance: row.planner_guidance,
                 command_variant: row.command_variant,
@@ -4706,9 +4733,13 @@ export class VideoBroker {
                 if (!Number.isInteger(index) || index < 0 || index >= prepared.plan.segments.length) throw new Error('Invalid segment.');
                 const segment = prepared.plan.segments[index];
                 if (operation === 'image') {
-                    const scene = segment.shots.map((shot: any) => shot.visual).join(' ');
-                    const keyframe = { ...prepared.plan.keyframe, recommended: true,
-                        prompt: `Create the opening illustrated setup for this approved scene. Preserve the supplied references' cast and identities, making all required participants visible together. ${scene} ${Array.isArray(body.correction) ? body.correction.slice(0, 5).map(String).join('; ').slice(0, 1000) : ''}` };
+                    const scenePlan = index === 0 ? prepared.plan : derivedSegmentKeyframePlan({
+                        ...prepared.plan,
+                        segments: prepared.plan.segments.map((value: any, position: number) => position === index
+                            ? { ...value, transition: 'cut' } : value),
+                    }, index + 1);
+                    const keyframe = { ...scenePlan.keyframe, recommended: true,
+                        prompt: `${scenePlan.keyframe?.prompt || segment.shots[0].visual} Create only this scene's opening instant; later actions and camera reveals need not already be visible. ${Array.isArray(body.correction) ? body.correction.slice(0, 5).map(String).join('; ').slice(0, 1000) : ''}` };
                     const references: VideoKeyframeReference[] = prepared.contract.use_source_images
                         ? sources.map((source, sourceIndex) => ({
                             label: sourceIndex ? 'Attached scene and all its subjects' : 'Original identity',
@@ -4717,12 +4748,12 @@ export class VideoBroker {
                             bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                         })) : [];
                     const frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
-                        { ...prepared.plan, keyframe, segments: [segment] }, references,
+                        { ...scenePlan, keyframe, segments: [segment] }, references,
                         { ...options, requireIdentityPreservation: references.length > 0 });
                     writeJson(res, 200, { image: `data:${frame.mimeType};base64,${frame.bytes.toString('base64')}` });
                     return;
                 }
-                if (!['image', 'video', 'storyboard'].includes(body.kind)
+                if (!['image', 'video'].includes(body.kind)
                     || !/^[a-f0-9]{64}$/.test(String(body.artifact_sha256 || ''))) throw new Error('Invalid artifact.');
                 const key = `${body.kind}:${index}:${body.artifact_sha256}`;
                 state.reviews ||= {};
@@ -4735,13 +4766,13 @@ export class VideoBroker {
                 return;
             }
             if (operation === 'quality') {
-                if (!['generated', 'storyboard'].includes(body.format)
+                if (body.format !== 'generated'
                     || !/^[a-f0-9]{64}$/.test(String(body.result_sha256 || ''))
                     || !Array.isArray(body.artifacts) || body.artifacts.length !== prepared.plan.segments.length) {
                     throw new Error('The final output must cover every approved segment.');
                 }
                 const accepted = body.artifacts.every((artifact: any, segmentIndex: number) => {
-                    const kind = body.format === 'storyboard' ? 'storyboard' : 'video';
+                    const kind = 'video';
                     return state.reviews?.[`${kind}:${segmentIndex}:${artifact.sha256}`]?.acceptable === true;
                 });
                 if (!accepted) throw new Error('Some required scene artifacts have not passed review.');

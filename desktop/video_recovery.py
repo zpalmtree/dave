@@ -6,11 +6,11 @@ import base64
 import copy
 import hashlib
 import json
-import math
 import re
 import shutil
 import subprocess
 import time
+import traceback
 from pathlib import Path
 
 import aiohttp
@@ -77,7 +77,7 @@ def review_samples(path: Path, root: Path) -> dict:
     frames = []
     for index, fraction in enumerate((0, .2, .5, .8, .97)):
         frame = root / f'sample-{index}.jpg'
-        media_command(['-ss', str(max(0, seconds * fraction)), '-i', str(path),
+        media_command(['-ss', str(max(0, min(seconds * fraction, seconds - 0.15))), '-i', str(path),
                        '-frames:v', '1', '-vf', 'scale=640:-2', str(frame)])
         frames.append(data_image(frame))
     audio = root / 'review-audio.wav'
@@ -90,63 +90,6 @@ def review_samples(path: Path, root: Path) -> dict:
     with Image.open(root / 'sample-1.jpg') as first, Image.open(root / 'sample-3.jpg') as last:
         difference = ImageStat.Stat(ImageChops.difference(first, last)).mean
     return {'frames': frames, 'audio': encoded_audio, 'frozen': max(difference) < 0.5}
-
-
-def storyboard_caption(segment: dict) -> str:
-    return '\n'.join('\n'.join([str(shot['visual']), *[
-        f"{line.get('speaker_id', 'Speaker')}: {line['text']}" for line in shot.get('dialogue', [])]])
-        for shot in segment['shots'])
-
-
-def storyboard_panels(images: list[Path], segment: dict, root: Path) -> list[tuple[Path, float]]:
-    """Readable captions, explicit separate panels; never pretend a pasted portrait is a scene."""
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
-    fonts = [Path('C:/Windows/Fonts/arial.ttf'), Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')]
-    font = next((ImageFont.truetype(str(path), 26) for path in fonts if path.is_file()), ImageFont.load_default())
-    words = storyboard_caption(segment).split()
-    pages = [words[i:i + 32] for i in range(0, len(words), 32)] or [[str(segment.get('title', 'Scene'))]]
-    result = []
-    for page_index, page in enumerate(pages):
-        canvas = Image.new('RGB', (960, 720), '#111827')
-        width = 960 // max(1, len(images))
-        for index, path in enumerate(images):
-            with Image.open(path) as image:
-                panel = ImageOps.contain(image.convert('RGB'), (width - 16, 490))
-                canvas.paste(panel, (index * width + (width - panel.width) // 2, (490 - panel.height) // 2))
-        draw = ImageDraw.Draw(canvas)
-        if not images:
-            # Deliberately typographic story cards, never a misleading substitute portrait.
-            draw.rounded_rectangle((48, 48, 912, 464), radius=30, fill='#1e3a5f', outline='#60a5fa', width=3)
-            draw.text((80, 110), f'STORYBOARD  /  {page_index + 1}', font=font, fill='#93c5fd')
-            draw.text((80, 220), str(segment.get('title', 'Scene'))[:48], font=font, fill='white')
-        lines, line = [], ''
-        for word in page:
-            candidate = (line + ' ' + word).strip()
-            if draw.textlength(candidate, font=font) > 880 and line:
-                lines.append(line)
-                line = word
-            else:
-                line = candidate
-        lines.append(line)
-        draw.multiline_text((40, 515), '\n'.join(lines), font=font, fill='white', spacing=8)
-        path = root / f'panel-{page_index}.png'
-        canvas.save(path)
-        result.append((path, max(3.0, len(page) / 2.5)))
-    return result
-
-
-def assemble_storyboard(panels: list[tuple[Path, float]], root: Path) -> Path:
-    clips = []
-    for index, (panel, seconds) in enumerate(panels):
-        clip = root / f'panel-{index}.mp4'
-        frames = math.ceil(seconds * 24)
-        # Image plane moves subtly; captions remain legible in the safe margin.
-        media_command(['-loop', '1', '-i', str(panel), '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-                       '-vf', f"zoompan=z='1+0.015*on/{frames}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=960x720:fps=24",
-                       '-t', str(seconds), '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
-                       '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', str(clip)])
-        clips.append(clip)
-    return join_clips(clips, root / 'storyboard.mp4')
 
 
 def join_clips(clips: list[Path], destination: Path) -> Path:
@@ -201,10 +144,11 @@ async def run_recovery_job(worker, job: dict) -> None:
     log.parent.mkdir(exist_ok=True)
     started = time.time()
     worker.begin_metrics(job, started)
-    worker.save_journal(started=started, log=str(log), recovery_version=1)
+    worker.save_journal(started=started, log=str(log), recovery_version=2)
     base = re.sub(r'^ws(s?)://', lambda match: 'http' + match[1] + '://', worker.broker_url)
     base = re.sub(r'/v1/worker$', f"/v1/worker/jobs/{job['id']}/recovery/", base)
     contract_hash = ''
+    revision = int(job.get('recovery_revision', 0))
 
     async def request(operation: str, body: dict | None = None):
         if worker.cancel_reason:
@@ -213,7 +157,10 @@ async def run_recovery_job(worker, job: dict) -> None:
                 headers=worker.worker_headers(), timeout=aiohttp.ClientTimeout(total=600, connect=20)) as response:
             value = await response.json(content_type=None)
             if response.status != 200:
-                raise RuntimeError(value.get('error', f'Recovery service returned {response.status}'))
+                detail = value.get('error') if isinstance(value, dict) else None
+                raise RuntimeError(detail or f'Recovery service returned {response.status}')
+            if not isinstance(value, dict):
+                raise RuntimeError(f'Recovery service returned invalid {operation} data')
             return value
 
     try:
@@ -226,8 +173,9 @@ async def run_recovery_job(worker, job: dict) -> None:
             local = json.loads(checkpoint_path.read_text())
             if local.get('contract_hash') == contract_hash:
                 checkpoint = local
-        if checkpoint.get('contract_hash') != contract_hash:
-            checkpoint = {'contract_hash': contract_hash, 'scenes': {}}
+        if (checkpoint.get('contract_hash') != contract_hash or checkpoint.get('pipeline_version') != 2
+                or checkpoint.get('revision') != revision):
+            checkpoint = {'contract_hash': contract_hash, 'pipeline_version': 2, 'revision': revision, 'scenes': {}}
         async def save():
             atomic_json(checkpoint_path, checkpoint)
             await request('checkpoint', {'checkpoint': checkpoint})
@@ -237,7 +185,6 @@ async def run_recovery_job(worker, job: dict) -> None:
             save_image(source, path)
             source_paths.append(path)
         plan = prepared['plan']
-        storyboard = bool(plan.get('recovery_storyboard')) or checkpoint.get('format') == 'storyboard'
         clips, artifacts = [], []
         for index, segment in enumerate(plan['segments']):
             scene_root = root / f'scene-{index}'
@@ -255,33 +202,58 @@ async def run_recovery_job(worker, job: dict) -> None:
                 scene.pop('image_accepted', None)
                 scene['image_attempts'] = 0
             if not scene.get('image_accepted'):
-                while scene.get('image_attempts', 0) < 2:
-                    scene['image_attempts'] = scene.get('image_attempts', 0) + 1
+                if (index == 0 and len(source_paths) == 1 and (plan.get('keyframe') or {}).get('recommended') is False
+                        and not scene.get('image_attempts')):
+                    shutil.copy2(source_paths[0], image)
+                    scene['pending_image'] = digest(image)
+                    scene['image_attempts'] = 1
+                    scene['image_source'] = 'original'
                     await save()
-                    try:
-                        value = await request('image', {'segment_index': index, 'correction': scene.get('image_issues', [])})
-                        save_image(value['image'], image)
-                    except Exception as error:
-                        scene['image_issues'] = [str(error)]
-                        scene['image_unavailable'] = True
+                elif index > 0 and segment.get('transition') == 'continue' and not scene.get('image_attempts'):
+                    previous = Path(checkpoint['scenes'][str(index - 1)]['video_path'])
+                    seconds = await asyncio.to_thread(duration, previous)
+                    await asyncio.to_thread(media_command, ['-ss', str(max(0, seconds - .15)),
+                        '-i', str(previous), '-frames:v', '1', str(image)])
+                    scene['pending_image'] = digest(image)
+                    scene['image_attempts'] = 1
+                    scene['image_source'] = 'continuation'
+                    await save()
+                while scene.get('pending_image') or scene.get('image_attempts', 0) < 2:
+                    pending = scene.get('pending_image')
+                    if pending and (not image.is_file() or digest(image) != pending):
+                        scene.pop('pending_image', None)
+                        scene['image_attempts'] = max(0, scene.get('image_attempts', 0) - 1)
+                        pending = None
+                    if not pending:
+                        scene['image_attempts'] = scene.get('image_attempts', 0) + 1
                         await save()
-                        if scene['image_attempts'] < 2:
+                        try:
+                            value = await request('image', {'segment_index': index, 'correction': scene.get('image_issues', [])})
+                            save_image(value['image'], image)
+                            scene['pending_image'] = digest(image)
+                            await save()
+                        except Exception as error:
+                            scene['image_issues'] = [str(error)]
+                            traceback.print_exc()
+                            await save()
                             continue
-                        break
-                    scene['image_unavailable'] = False
                     verdict = await review(image, 'image')
+                    scene.pop('pending_image', None)
                     if verdict['acceptable']:
                         scene['image_accepted'] = digest(image)
+                        await save()
                         break
                     scene['image_issues'] = verdict.get('issues', [])
                     await save()
             if not scene.get('image_accepted'):
-                storyboard = True
+                scene['image_attempts'] = 0
+                await save()
+                raise RuntimeError('Waiting to recover the opening image: ' + '; '.join(scene.get('image_issues', [])))
             if scene.get('video_accepted') and (not Path(scene['video_path']).is_file() or digest(Path(scene['video_path'])) != scene['video_accepted']):
                 scene.pop('video_accepted', None)
                 scene['video_attempts'] = 0
-            if not storyboard and not scene.get('video_accepted'):
-                while scene.get('pending_video') or scene.get('render_interrupted') or scene.get('video_attempts', 0) < 2:
+            if not scene.get('video_accepted'):
+                while scene.get('pending_video') or scene.get('render_interrupted') or scene.get('video_attempts', 0) < 4:
                     pending = scene.get('pending_video')
                     if pending and Path(pending).is_file():
                         verdict = await review(Path(pending), 'video')
@@ -289,11 +261,12 @@ async def run_recovery_job(worker, job: dict) -> None:
                         if verdict['acceptable']:
                             scene['video_accepted'] = digest(Path(pending))
                             scene['video_path'] = pending
+                            scene['renderer'] = scene.get('pending_renderer', job['model'])
                             await save()
                             break
                         scene['video_issues'] = verdict.get('issues', [])
                         await save()
-                    if scene.get('video_attempts', 0) >= 2 and not scene.get('render_interrupted'):
+                    if scene.get('video_attempts', 0) >= 4 and not scene.get('render_interrupted'):
                         break
                     if scene.pop('render_interrupted', False):
                         scene['video_attempts'] = max(0, scene.get('video_attempts', 0) - 1)
@@ -314,20 +287,23 @@ async def run_recovery_job(worker, job: dict) -> None:
                         one['segments'][0]['shots'][0]['visual'] += ' Repair these observed failures: ' + '; '.join(scene['video_issues'])
                     plan_path = scene_root / 'plan.json'
                     atomic_json(plan_path, one)
-                    if not await worker.ensure_gpu_reservation(job):
+                    primary = job['model']
+                    alternate = 'ltx' if primary.startswith('minimax') else 'minimax'
+                    renderer = primary if scene.get('video_attempts', 0) < 2 else alternate
+                    if not await worker.ensure_gpu_reservation({**job, 'model': renderer}):
                         raise asyncio.CancelledError()
                     # Queue/admission outages must not consume a render attempt.
                     scene['video_attempts'] = scene.get('video_attempts', 0) + 1
                     worker.save_journal(run_dir=None, pid=None)
-                    command = [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[job['model']],
+                    command = [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[renderer],
                         '--frontier-plan', str(plan_path), '--approved-plan-only', '--image', str(image), '--keyframe', 'never',
-                        '--seed', str((stable_job_seed(job['id']) + index * 101 + scene['video_attempts']) % (2 ** 63)),
+                        '--seed', str((stable_job_seed(job['id']) + index * 101 + scene['video_attempts'] + scene.get('cycles', 0) * 1009) % (2 ** 63)),
                         'Render the supplied approved scene.']
                     scene['render_interrupted'] = True
                     await save()
                     try:
                         code = await worker.run_reserved_command(command)
-                        output = worker.find_output() if code == 0 else None
+                        output = worker.find_output(renderer) if code == 0 else None
                     finally:
                         await release_recovery_reservation(worker)
                     scene.pop('render_interrupted', None)
@@ -341,42 +317,31 @@ async def run_recovery_job(worker, job: dict) -> None:
                     candidate = scene_root / f"attempt-{scene['video_attempts']}.mp4"
                     shutil.copy2(output, candidate)
                     scene['pending_video'] = str(candidate)
+                    scene['pending_renderer'] = renderer
                     await save()
                     verdict = await review(candidate, 'video')
                     scene.pop('pending_video', None)
                     if verdict['acceptable']:
                         scene['video_accepted'] = digest(candidate)
                         scene['video_path'] = str(candidate)
+                        scene['renderer'] = renderer
                         break
                     scene['video_issues'] = verdict.get('issues', [])
                     await save()
                 if not scene.get('video_accepted'):
-                    storyboard = True
+                    scene['cycles'] = scene.get('cycles', 0) + 1
+                    scene['video_attempts'] = 0
+                    await save()
+                    raise RuntimeError('Recovering the actual scene after both renderers missed it: ' + '; '.join(scene.get('video_issues', [])))
             await save()
-        checkpoint['format'] = 'storyboard' if storyboard else 'generated'
+        checkpoint['format'] = 'generated'
         await save()
         for index, segment in enumerate(plan['segments']):
             scene = checkpoint['scenes'][str(index)]
             scene_root = root / f'scene-{index}'
-            if not storyboard:
-                clip = Path(scene['video_path'])
-                artifacts.append({'sha256': digest(clip)})
-                clip = await asyncio.to_thread(normalize_clip, clip, scene_root / 'normalized.mp4')
-            else:
-                await worker.send({'type': 'event', 'event': 'plan', 'job_id': job['id'], 'stage': 'Preparing an animated storyboard'})
-                images = [scene_root / 'opening.png'] if scene.get('image_accepted') else source_paths
-                for caption_only in ([False, True] if images else [True]):
-                    panels = await asyncio.to_thread(storyboard_panels, [] if caption_only else images, segment, scene_root)
-                    clip = await asyncio.to_thread(assemble_storyboard, panels, scene_root)
-                    frames = [data_image(path) for path, _ in panels]
-                    verdict = await request('review', {'segment_index': index, 'kind': 'storyboard',
-                        'artifact_sha256': digest(clip), 'frames': frames, 'caption_only': caption_only})
-                    if verdict['acceptable']:
-                        break
-                if not verdict['acceptable']:
-                    raise RuntimeError('Waiting for storyboard review: ' + '; '.join(verdict.get('issues', [])))
-                artifacts.append({'sha256': digest(clip)})
-            clips.append(clip)
+            original = Path(scene['video_path'])
+            artifacts.append({'sha256': digest(original)})
+            clips.append(await asyncio.to_thread(normalize_clip, original, scene_root / 'normalized.mp4'))
         final = await asyncio.to_thread(join_clips, clips, root / 'final.mp4')
         delivery = await worker.prepare_delivery(final, job['id'], duration(final))
         await asyncio.to_thread(duration, delivery)
@@ -384,8 +349,8 @@ async def run_recovery_job(worker, job: dict) -> None:
         await worker.send({'type': 'event', 'event': 'uploading', 'job_id': job['id']})
         await worker.upload(job['id'], delivery)
         notice = prepared.get('notice', '')
-        if storyboard:
-            notice = (notice + ' Delivered as an animated storyboard; captions carry the dialogue and story.').strip()
+        if any(scene.get('renderer') != job['model'] for scene in checkpoint['scenes'].values()):
+            notice = (notice + ' An alternate video renderer recovered the scene.').strip()
         await worker.wait_and_send_terminal({'type': 'event', 'event': 'complete', 'job_id': job['id'],
             'runtime_seconds': time.time() - started, 'generation_notice': notice})
         worker.clear_journal()
@@ -393,4 +358,5 @@ async def run_recovery_job(worker, job: dict) -> None:
     except asyncio.CancelledError:
         await worker.finish_cancelled_job(job['id'])
     except Exception as error:
+        traceback.print_exc()
         await worker.fail_current(str(error), True)

@@ -240,7 +240,7 @@ export interface SubmittedVideoAttachmentSourceImage {
 }
 
 export interface SubmittedVideoPresetSourceImage {
-    preset: 'oalgo';
+    preset: 'meximutt' | 'oalgo';
 }
 
 export type SubmittedVideoSourceImage =
@@ -561,7 +561,7 @@ export function globalVideoQueueEmbeds(
     }));
 }
 
-class VideoGenerationService {
+export class VideoGenerationService {
     private timer: NodeJS.Timeout | null = null;
     private polling = false;
     private nextPollMs = 15_000;
@@ -672,7 +672,7 @@ class VideoGenerationService {
     ): Promise<void> {
         await brokerRequest(`/v1/jobs/${job.id}/${endpoint}`, {
             method: 'POST',
-            body: JSON.stringify({ duration_seconds: durationSeconds, message_id: messageId }),
+            body: JSON.stringify({ duration_seconds: durationSeconds, message_id: messageId, revision: job.delivery_revision || 0 }),
         });
     }
 
@@ -685,6 +685,7 @@ class VideoGenerationService {
                 && candidate.author?.id === this.client.user?.id
                 && candidate.content?.includes(marker)) || null;
         } catch (error) {
+            if (job.delivery_message_id && Number((error as any)?.code) !== 10008) throw error;
             console.warn(`[Video] Could not check for an existing delivery of ${job.id}: ${String(error)}`);
             return null;
         }
@@ -711,7 +712,12 @@ class VideoGenerationService {
             allowedMentions: { repliedUser: true },
         };
         const existing = await this.existingDelivery(job, channel);
-        if (existing) return existing;
+        if (existing) {
+            if ((job.delivery_revision || 0) > (job.delivered_revision || 0)) {
+                return existing.edit({ ...payload, attachments: [], allowedMentions: { parse: [] } });
+            }
+            return existing;
+        }
         try {
             const commandMessage = await channel.messages.fetch(job.command_message_id);
             return await commandMessage.reply(payload);
@@ -967,7 +973,7 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 }
 
 interface VideoRequestOptions {
-    commandVariant?: 'oalgo';
+    commandVariant?: 'meximutt' | 'oalgo';
     presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
     compositeAttachedImage?: boolean;
     compositeProvider?: VideoSourceCompositeProvider;
@@ -979,20 +985,20 @@ interface VideoRequestOptions {
 export const OALGO_DIALOGUE_DELIVERY = 'boastful and conversational adult male, with a low, chest-resonant voice and a strong Mexican Spanish accent on every English phrase, using full vowels, a lightly tapped r, crisp consonants, and animated rise-and-fall intonation';
 
 export const OALGO_VIDEO_PLANNER_GUIDANCE = [
-    'OALGO is the recurring character in an enacted visual story. Treat the supplied portrait as his identity and opening frame, not as a requirement to hold its crop, background, or pose for the entire video.',
+    'Meximutt is the recurring character in an enacted visual story. Treat the supplied portrait as his identity and opening frame, not as a requirement to hold its crop, background, or pose for the entire video.',
     'Resolve spoken wording and visual subject matter independently. When the prompt is a boast, rant, or other utterance about concrete projects, places, objects, transformations, or game mechanics, preserve the appropriate spoken wording while visibly staging its distinctive ideas as actions with consequences. Put those visible beats in the analysis actions and inferred_staging, then realize them in shot.visual; mentioning them only in dialogue, intent, or eyebrow gestures does not cover them.',
-    'After honoring frame zero, use motivated camera reveals, interactions, transformations, or later cuts to develop the premise around the recognizable OALGO character. Keep his face and mouth readable while he speaks, but allow a wider composition and changing surroundings. Preserve his Mexican-flag clothing while showing any separately requested national symbols in the scene.',
-    'For a reaction to an attached image, identify the main depicted subject and the props or relationships that explain the situation. Keep that subject recognizable and visibly connect OALGO to it. In shot.visual, name the target of each purposeful glance or head turn and when it happens relative to his speech and reaction; choose the subject and any story-defining prop that he would naturally notice, rather than merely listing them as background scenery. Make the look legible through a clear directional head turn and a useful camera view of both observer and target; a tiny eye shift or downward nod in a distant composition is insufficient.',
+    'After honoring frame zero, use motivated camera reveals, interactions, transformations, or later cuts to develop the premise around the recognizable Meximutt character. Keep his face and mouth readable while he speaks, but allow a wider composition and changing surroundings. Preserve his Mexican-flag clothing while showing any separately requested national symbols in the scene.',
+    'For a reaction to an attached image, identify the main depicted subject and the props or relationships that explain the situation. Keep that subject recognizable and visibly connect Meximutt to it. In shot.visual, name the target of each purposeful glance or head turn and when it happens relative to his speech and reaction; choose the subject and any story-defining prop that he would naturally notice, rather than merely listing them as background scenery. Make the look legible through a clear directional head turn and a useful camera view of both observer and target; a tiny eye shift or downward nod in a distant composition is insufficient.',
     'Make expressions develop in response to what he notices, using readable changes in eyes, brows, mouth, or posture appropriate to the requested emotion. Preserve facial identity without freezing his face or body. A request to look into the camera describes that action beat, not a permanent gaze lock; leave room for a motivated look toward the scene while preserving the user\'s action order and exact words. If the user explicitly requires continuous eye contact, stillness, or a specific expression sequence, honor that restriction and use only compatible reactions.',
     'When a spoken beat and a separate physical reaction must happen in order, place them in successive shots with dialogue attached only to the speaking shot. Use a dialogue-free reaction shot to make the action readable, instead of packing a long sequence of timestamps into one shot.visual and placing its dialogue after the whole sequence. Keep the same viewpoint if the user explicitly locks the camera; separate beats need not add locations, segments, or runtime. For actions intended to accompany speech, keep them together in the speaking shot.',
     'Develop the visual beats alongside the corresponding spoken phrases instead of reciting the whole monologue first and adding a long silent reenactment afterward. A short utterance with linked ideas normally needs its natural speaking time plus a brief setup and payoff, not a separate segment for each noun. Split long supplied speech at natural clause boundaries across shots or segments while preserving every word and its order. Add runtime only when a required action needs it to remain legible or the user requests it.',
     'Use a static talking head only when the user requests that presentation or the brief is a simple greeting or performance with no visual story to enact. Do not invent a ban on new props, graphics, scene changes, or camera movement merely because dialogue is supplied verbatim. Respect actual user restrictions on text, motion, camera, or presentation.',
-    `Use this default OALGO voice description in dialogue.delivery: "${OALGO_DIALOGUE_DELIVERY}". Copy it in full for his ordinary boastful or conversational delivery, including English-only lines and dialogue supplied verbatim by the user.`,
+    `Use this default Meximutt voice description in dialogue.delivery: "${OALGO_DIALOGUE_DELIVERY}". Copy it in full for his ordinary boastful or conversational delivery, including English-only lines and dialogue supplied verbatim by the user.`,
     'For a different requested emotion, adapt the performance while retaining the low, chest-resonant adult male voice and strong Mexican Spanish accent through complaints, shouts, and emotional changes. Keep the voice description outside dialogue.text and language; never recite these instructions or phonetically respell the supplied words. Avoid a neutral American narrator or flat text-to-speech delivery.',
-    'When the requested action or source image supports dialogue, give the OALGO character playful Mexican-American slang and code-switching.',
-    'OALGO and oalgo are pronounced as the Spanish phrase "o algo", never as individual letters. Keep speaker IDs and user-supplied dialogue.text unchanged; specify this pronunciation in dialogue.delivery when the name or phrase occurs in spoken wording. A speaker name is a cast label, not extra dialogue: never announce it unless it belongs to the requested line.',
+    'When the requested action or source image supports dialogue, give the Meximutt character playful Mexican-American slang and code-switching.',
+    'Meximutt is the recurring character\'s cast name. The separate slang phrase "o algo" is pronounced as Spanish words, never as individual letters. Keep speaker IDs and user-supplied dialogue.text unchanged; specify this pronunciation in dialogue.delivery when the name or phrase occurs in spoken wording. A speaker name is a cast label, not extra dialogue: never announce it unless it belongs to the requested line.',
     'Naturally enrich suitable dialogue with phrases such as “o algo,” “mayne,” “wey,” “puta pinche,” and “no mames wey” without mechanically forcing every phrase into every line.',
-    'Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable OALGO wording, but always retain the Spanglish accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.',
+    'Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable Meximutt wording, but always retain the Spanglish accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.',
 ].join(' ');
 
 export async function handleVideoRequest(
@@ -1017,7 +1023,7 @@ export async function handleVideoRequest(
         ? attachedSourceImage
         : null;
     if (options.compositeProvider && !compositeSourceImage) {
-        await msg.reply('An image provider can only be selected when OALGO has an attached or replied-to image to combine.');
+        await msg.reply('An image provider can only be selected when Meximutt has an attached or replied-to image to combine.');
         return;
     }
     prompt = videoPromptFromMessages(prompt, referencedMessage);
@@ -1123,8 +1129,8 @@ export async function handleOalgoVideo(msg: Message, prompt: string): Promise<vo
     try { parsed = parseOalgoImageProvider(prompt); }
     catch (error) { await msg.reply(error instanceof Error ? error.message : String(error)); return; }
     await handleVideoRequest('minimax', msg, parsed.prompt, {
-        commandVariant: 'oalgo',
-        presetSourceImage: 'oalgo',
+        commandVariant: 'meximutt',
+        presetSourceImage: 'meximutt',
         compositeAttachedImage: true,
         compositeProvider: parsed.provider,
         plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,

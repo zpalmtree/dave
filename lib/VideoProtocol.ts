@@ -190,6 +190,8 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
 
 export interface VideoJobView {
     delivery_message_id?: string | null;
+    delivery_revision?: number;
+    delivered_revision?: number;
     id: string;
     model: VideoModelId;
     prompt: string;
