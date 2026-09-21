@@ -1129,7 +1129,7 @@ export async function handleOalgoVideo(msg: Message, prompt: string): Promise<vo
     try { parsed = parseOalgoImageProvider(prompt); }
     catch (error) { await msg.reply(error instanceof Error ? error.message : String(error)); return; }
     await handleVideoRequest('minimax', msg, parsed.prompt, {
-        commandVariant: 'meximutt',
+        commandVariant: 'oalgo',
         presetSourceImage: 'meximutt',
         compositeAttachedImage: true,
         compositeProvider: parsed.provider,

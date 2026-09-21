@@ -14,7 +14,7 @@ export function selectVideoOptimization(
     release: any, command: string, jobId: string,
 ): VideoOptimizationSelection | null {
     if (release?.schema_version !== 1 || !/^[a-zA-Z0-9_-]{1,80}$/.test(release.experiment_id || '')) return null;
-    // Keep audited legacy rollout assignments when the public command is renamed.
+    // Historical alias-tagged jobs share the audited oalgo rollout by default.
     if (command === 'meximutt' && !release.commands?.meximutt) command = 'oalgo';
     const arm = release.commands?.[command];
     if (!['minimax', 'oalgo', 'meximutt'].includes(command) || !arm || ![10, 50, 100].includes(arm.percentage)) return null;

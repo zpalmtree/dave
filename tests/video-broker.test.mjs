@@ -163,7 +163,7 @@ test('derived segment identity references apply only to recurring source cast', 
     assert.equal(videoSegmentUsesFrameZeroIdentity(plan, 2), false);
 });
 
-test('broker canonicalizes the legacy oalgo alias and resolves the Meximutt preset', async () => {
+test('broker canonicalizes the meximutt alias as oalgo and resolves the character preset', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-preset-'));
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
@@ -176,7 +176,7 @@ test('broker canonicalizes the legacy oalgo alias and resolves the Meximutt pres
             method: 'POST',
             headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
             body: JSON.stringify({
-                model: 'minimax', command_variant: 'oalgo', prompt: 'Animate the preset', requester_id: 'preset-user',
+                model: 'minimax', command_variant: 'meximutt', prompt: 'Animate the preset', requester_id: 'preset-user',
                 origin_bot_id: 'bot-1', channel_id: 'channel-1',
                 command_message_id: 'preset-message', status_message_id: 'preset-status',
                 source_image: { preset: 'oalgo' },
@@ -185,7 +185,7 @@ test('broker canonicalizes the legacy oalgo alias and resolves the Meximutt pres
         const body = await response.json();
         assert.equal(response.status, 201);
         assert.equal(body.job.has_source_image, true);
-        assert.equal((await broker.get('SELECT command_variant FROM video_submission_metrics')).command_variant, 'meximutt');
+        assert.equal((await broker.get('SELECT command_variant FROM video_submission_metrics')).command_variant, 'oalgo');
         assert.deepEqual(
             readFileSync(join(directory, 'results', body.job.id, 'source.png')),
             readFileSync(new URL('../images/oalgo.png', import.meta.url)),
@@ -774,12 +774,12 @@ test('concurrent duplicate OALGO submissions retain both paid composition record
         assert.deepEqual(responses.map(response => response.status).sort(), [200, 201]);
         const submissions = await broker.all('SELECT * FROM video_submission_metrics');
         assert.deepEqual(submissions.map(row => row.outcome).sort(), ['duplicate', 'queued']);
-        assert.ok(submissions.every(row => row.command_variant === 'meximutt' && row.source_mode === 'preset_composite'
+        assert.ok(submissions.every(row => row.command_variant === 'oalgo' && row.source_mode === 'preset_composite'
             && row.requested_at < row.received_at && row.source_composition_seconds !== null));
         const usage = await broker.all('SELECT * FROM video_usage_events');
         assert.equal(usage.length, 2);
         assert.equal(usage.reduce((sum, row) => sum + row.cost, 0), 0.02);
-        assert.ok(usage.every(row => row.command === 'meximutt' && row.raw_usage_json && row.pricing_status === 'estimated'));
+        assert.ok(usage.every(row => row.command === 'oalgo' && row.raw_usage_json && row.pricing_status === 'estimated'));
         assert.equal((await broker.get('SELECT COUNT(*) AS count FROM video_jobs')).count, 1);
     } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
