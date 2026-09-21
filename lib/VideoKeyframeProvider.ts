@@ -102,7 +102,7 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     strategy?: VideoKeyframeStrategy;
     /** Source composites must be reviewed against the original identity before use. */
     requireIdentityPreservation?: boolean;
-    reviewPurpose?: 'frame-zero' | 'source-composite';
+    reviewPurpose?: 'frame-zero' | 'source-composite' | 'recovery-scene';
     sourceCompositeProvider?: VideoSourceCompositeProvider;
     aspectRatio?: VideoKeyframeAspectRatio;
     geminiModel?: VideoKeyframeGeminiModel;
@@ -162,6 +162,13 @@ export function buildVideoKeyframePrompt(
     options: Pick<VideoKeyframeOptions, 'aspectRatio' | 'reviewPurpose'> = {},
 ): string {
     const keyframe = plan?.keyframe || {};
+    if (options.reviewPurpose === 'recovery-scene') {
+        return [
+            keyframeString(keyframe.prompt, 'A coherent opening image for the approved scene.'),
+            keyframeCanvasContract(options),
+            'Create one opening instant. Preserve referenced identities and the requested premise. Later action and reveals need not already be visible. Incidental poses, props, and camera choices may vary while the same scene remains easy to enact.',
+        ].join('\n');
+    }
     if (options.reviewPurpose === 'source-composite') {
         return [
             keyframeString(keyframe.prompt, 'Combine the supplied subjects into one coherent scene.'),
@@ -212,6 +219,17 @@ export function buildVideoKeyframeReviewPrompt(
     const firstSegment = Array.isArray(plan?.segments) ? plan.segments[0] : null;
     const firstShot = Array.isArray(firstSegment?.shots) ? firstSegment.shots[0] : null;
     const identityInstructions = 'This is an edit of a supplied character, so recognizable inspiration alone is insufficient. Compare the candidate directly to the identity image: head width relative to height, cheek and jowl volume, eye and lip proportions, neck and torso mass, and hair width, height, and outer contour. Preserve the original exaggeration as well as photographic texture. A generic man in matching clothing fails identity. Judge corresponding features after accounting for angle, expression, perspective, and framing; read the haircut from the pixels rather than a hairstyle label.';
+    if (options.reviewPurpose === 'recovery-scene') {
+        return [
+            `User request: ${keyframeString(plan?.recovery_request, plan?.intent || 'match the approved scene')}`,
+            `Approved scene: ${JSON.stringify(firstSegment)}`,
+            keyframeCanvasContract(options), referenceContract(references, options), identityInstructions,
+            'Judge the candidate as a usable opening for this scene. Preserve the requested identity, core subjects, and premise. References supply identity, not an immutable crop or pose for every later scene.',
+            'Distinguish explicit user requirements from staging invented by the planner. Exact gaze direction, speaking expression, camera choices, incidental prop shapes, background dressing, and the timing of an invented reveal may vary when the requested story remains clear. These variations alone must not fail review. Future action or subjects revealed later need not appear in the opening frame.',
+            'Reject unsafe content, missing or substituted required identity, an incoherent scene, or a setup that cannot enact the requested action. Honor explicit user restrictions on framing, cast, pose, and action order. Do not invent restrictions from incidental screenplay choreography.',
+            'Set identity_preserved independently by comparing the supplied identity references with the candidate, accounting for perspective, expression, and framing. Set acceptable and best_effort_worthy true for a coherent, recognizable setup with only incidental differences; false for material identity or story failures. If rejected, give concrete repairable issues and a positive correction_prompt.',
+        ].join('\n');
+    }
     if (options.reviewPurpose === 'source-composite') {
         return [
             `Requested future video: ${keyframeString(plan?.intent, 'match the supplied references')}`,
