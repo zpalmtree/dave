@@ -1,5 +1,12 @@
 # Desktop video optimization changes
 
+## Durable video recovery
+
+See [video recovery](../docs/video-recovery.md) for the approved-story pipeline,
+quality checks, storyboard fallback, resumable delivery, and shared Qwen paths.
+Install with `python3 scripts/apply-video-recovery-desktop.py`; the hash-checked
+patch targets the audited desktop baseline and preserves unrelated local edits.
+
 ## Audio continuity
 
 `video-audio-continuity.patch` adds shared speaker profiles, independent audio

@@ -898,7 +898,7 @@ test('broker-side frontier validation rejects plans the desktop would reject bef
     );
 });
 
-test('frontier validation enforces an extracted finished-duration contract', () => {
+test('frontier validation treats authored finished duration as a recoverable preference', () => {
     const plan = {
         intent: 'A fifteen-second drawing timelapse.',
         continuity_bible: 'The cursor continuously builds one character.',
@@ -921,10 +921,7 @@ test('frontier validation enforces an extracted finished-duration contract', () 
         () => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15),
     );
     plan.segments[0].output_seconds = 14;
-    assert.throws(
-        () => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15),
-        /explicit duration contract requires 15s exactly/,
-    );
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15));
 });
 
 test('frontier dialogue staging makes every speaking shot visually explicit without a model call', () => {
@@ -1217,7 +1214,7 @@ test('single-pass frontier planner returns validated analysis and screenplay fro
     }
 });
 
-test('single-pass frontier planner salvages a validated screenplay from a routing rejection', async () => {
+test('single-pass frontier planner requires adaptation even when a policy-rejected screenplay is structurally valid', async () => {
     const analysis = frontierAnalysis();
     analysis.frontier_handling = {
         disposition: 'reject',
@@ -1232,20 +1229,13 @@ test('single-pass frontier planner salvages a validated screenplay from a routin
         model: VIDEO_PLANNER_MODEL,
     });
     try {
-        const result = await createFrontierVideoPlan(
-            'A dog runs through a park.',
-            'minimaxfast',
-            'requester-single-pass-salvage',
-            undefined,
+        await assert.rejects(() => createFrontierVideoPlan(
+            'A dog runs through a park.', 'minimaxfast', 'requester-single-pass-salvage', undefined,
             { plannerStrategy: 'single-pass', onAttempt: attempt => attempts.push(attempt) },
-        );
-        assert.equal(result.planner_route, 'frontier-salvaged');
-        assert.equal(result.planner_metrics.frontier_rejection_reason, 'provider_policy');
-        assert.match(result.generation_notice, /independently validated screenplay/);
+        ), error => error instanceof FrontierPlannerRejectedError && error.reasonCode === 'provider_policy');
         assert.ok(attempts.some(attempt =>
             attempt.stage === 'single_pass_decision' && attempt.outcome === 'rejected'));
-        assert.ok(attempts.some(attempt =>
-            attempt.stage === 'single_pass_salvage' && attempt.outcome === 'accepted'));
+        assert.ok(!attempts.some(attempt => attempt.stage === 'single_pass_salvage'));
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -1275,7 +1265,7 @@ test('single-pass frontier planner routes locally when a rejected screenplay is 
             ),
             error => error instanceof FrontierPlannerRejectedError
                 && error.reasonCode === 'provider_policy'
-                && /candidate was unusable/.test(error.message),
+                && /provider_policy/.test(error.message),
         );
     } finally {
         globalThis.fetch = originalFetch;
@@ -1308,7 +1298,7 @@ test('single-pass frontier planner does not salvage an unrelated schema-valid pl
                 { plannerStrategy: 'single-pass' },
             ),
             error => error instanceof FrontierPlannerRejectedError
-                && /salient analysis terms/.test(error.message),
+                && error.reasonCode === 'provider_policy',
         );
     } finally {
         globalThis.fetch = originalFetch;
@@ -1508,7 +1498,7 @@ test('frontier planner replaces creative-brief recitation with original scene di
     assert.match(requests[2].input[1].content[0].text, /recited the visual creative brief as dialogue/);
 });
 
-test('frontier planner compiles the second invalid completed screenplay instead of failing', async () => {
+test('frontier planner reports a missing-dialogue plan to recovery without inventing substitute speech', async () => {
     const replies = [
         { status: 'completed', output_text: JSON.stringify(frontierAnalysis('generated')), model: VIDEO_PLANNER_MODEL },
         { status: 'completed', output_text: JSON.stringify(frontierPlan()), model: VIDEO_PLANNER_MODEL },
@@ -1517,18 +1507,9 @@ test('frontier planner compiles the second invalid completed screenplay instead 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => jsonResponse(replies.shift());
     try {
-        const result = await createFrontierVideoPlan(
+        await assert.rejects(() => createFrontierVideoPlan(
             'A cat and dog discuss cheese.', 'minimaxfast', 'requester-best-effort', undefined,
-        );
-        assert.equal(result.planner_metrics.screenplay_attempts, 2);
-        assert.equal(result.planner_metrics.best_effort_compiled, true);
-        assert.match(result.generation_notice, /rendered best-effort/);
-        assert.ok(result.segments[0].shots[0].dialogue[0].text);
-        assert.doesNotThrow(
-            () => validateFrontierVideoPlanForKeyframe(
-                result, 'minimaxfast', 'A cat and dog discuss cheese.',
-            ),
-        );
+        ), /omitted dialogue required/);
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -1627,7 +1608,7 @@ test('best-effort compiler strips fidelity notes from dialogue.language', () => 
     assert.equal(compiled.segments[0].shots[0].dialogue[0].text, 'Hello, Astra.');
 });
 
-test('best-effort compiler truncates automatic screenplays to two minutes', () => {
+test('best-effort compiler preserves all beats and selects storyboard beyond the render budget', () => {
     const plan = frontierPlan();
     plan.segments = Array.from({ length: 8 }, (_, index) => ({
         ...structuredClone(plan.segments[0]),
@@ -1642,9 +1623,9 @@ test('best-effort compiler truncates automatic screenplays to two minutes', () =
         'A dog runs through three stages.',
         'ltxfast',
     );
-    assert.equal(compiled.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 120);
-    assert.equal(compiled.segments.length, 6);
-    assert.match(compiled.generation_notice, /120-second generation budget.*truncated/);
+    assert.equal(compiled.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 160);
+    assert.equal(compiled.segments.length, 8);
+    assert.equal(compiled.recovery_storyboard, true);
     assert.doesNotThrow(
         () => validateFrontierVideoPlanForKeyframe(
             compiled, 'ltxfast', 'A dog runs through three stages.',
@@ -1893,15 +1874,16 @@ test('best-effort compiler preserves required visible text and the visual motion
     ));
 });
 
-test('broker validation catches long H3 dialogue and literal omissions before desktop dispatch', () => {
+test('broker validation splits long H3 dialogue and still catches literal omissions', () => {
     const plan = frontierPlan([{
         speaker_id: 'dog', language: 'English', delivery: 'fast',
         text: Array.from({ length: 50 }, (_, index) => `word${index}`).join(' '),
     }]);
-    assert.throws(
-        () => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'),
-        /needs .* dialogue, above the 15s model limit/,
-    );
+    const originalText = plan.segments[0].shots[0].dialogue[0].text;
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'));
+    assert.ok(plan.segments.length > 1);
+    assert.ok(plan.segments.every(segment => segment.target_seconds <= 15));
+    assert.equal(plan.segments.flatMap(segment => segment.shots.flatMap(shot => shot.dialogue.map(line => line.text))).join(' '), originalText);
     const literalPlan = frontierPlan();
     assert.throws(
         () => validateFrontierVideoPlanForKeyframe(literalPlan, 'minimaxfast', 'Show 623996725509750785 saying "hello".'),

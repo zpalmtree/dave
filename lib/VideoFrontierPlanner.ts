@@ -1,3 +1,4 @@
+import { repairVideoTiming } from './VideoRecovery.js';
 import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA } from './VideoAudioContinuity.js';
 import { createHash } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
@@ -1191,7 +1192,7 @@ export function expandExhaustiveSequentialPlan(
         (sum: number, segment: any) => sum + segment.output_seconds,
         0,
     );
-    if (outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!plan.recovery_storyboard && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         const correction = AUTO_TOTAL_LIMIT_SECONDS / outputTotal;
         for (const segment of segments) segment.output_seconds *= correction;
     }
@@ -1262,322 +1263,43 @@ function planAutomaticFloor(plan: any, model: VideoModelId): number {
     }, 0);
 }
 
-function truncateDialogueToSeconds(shots: any[], maximumSeconds: number): boolean {
-    let changed = false;
-    while (dialogueFloorSeconds({ shots }) > maximumSeconds + 1e-6) {
-        let lastShot: any;
-        let lastLine: any;
-        for (let shotIndex = shots.length - 1; shotIndex >= 0 && !lastLine; shotIndex -= 1) {
-            const dialogue = shots[shotIndex]?.dialogue;
-            if (Array.isArray(dialogue) && dialogue.length) {
-                lastShot = shots[shotIndex];
-                lastLine = dialogue[dialogue.length - 1];
-            }
-        }
-        if (!lastLine || !lastShot) break;
-        const words = String(lastLine.text || '').trim().split(/\s+/).filter(Boolean);
-        if (words.length <= 1) {
-            lastShot.dialogue.pop();
-        } else {
-            lastLine.text = words.slice(0, -1).join(' ');
-        }
-        changed = true;
-    }
-    return changed;
-}
-
-/**
- * Turn a rejected but content-bearing screenplay into a generator-safe plan.
- * This is deliberately deterministic: it preserves the candidate's earliest
- * usable direction, supplies only missing structural defaults, and truncates
- * instead of making a third expensive model call or failing the job.
- */
+/** Repair structure and timing without weakening the independent content contract. */
 export function compileBestEffortFrontierVideoPlan(
-    candidate: any,
-    promptAnalysis: any,
-    rawPrompt: string,
-    model: VideoModelId,
+    candidate: any, promptAnalysis: any, rawPrompt: string, model: VideoModelId,
     validationFailure = '',
 ): Record<string, any> {
-    const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
-    const minimum = VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3;
-    const dialogueContract = promptAnalysis?.dialogue_contract;
-    const dialogueAllowed = String(dialogueContract?.mode || 'none') !== 'none';
-    const protectedDialogue = (Array.isArray(dialogueContract?.lines) ? dialogueContract.lines : [])
-        .filter((line: any) => line?.verbatim && String(line.text || '').trim())
-        .map((line: any) => String(line.text).trim());
-    const briefRecitationAllowed = protectedDialogue.some((line: string) =>
-        spokenWords(line).includes(spokenWords(rawPrompt)),
-    );
-    const source = candidate && typeof candidate === 'object' ? candidate : {};
-    const rawSegments = Array.isArray(source.segments) && source.segments.length
-        ? source.segments
-        : [{
-            title: 'Best-effort request',
-            transition: 'start',
-            target_seconds: Math.min(7, maximum),
-            music: 'N/A',
-            shots: [{
-                duration_seconds: Math.min(7, maximum),
-                visual: rawPrompt,
-                camera: 'Use camera language appropriate to the requested presentation.',
-                audio: SAFE_NONSPEECH_AUDIO,
-                dialogue: [],
-            }],
-        }];
-    let structurallyAdjusted = rawSegments !== source.segments || rawSegments.length > 64;
-    let durationTruncated = false;
-    let durationCompressed = false;
-    const segments: any[] = [];
-    let remaining = AUTO_TOTAL_LIMIT_SECONDS;
-    const exhaustiveSequential = String(promptAnalysis?.coverage_contract?.mode || '') === 'exhaustive'
-        && String(promptAnalysis?.coverage_contract?.presentation || '') === 'sequential';
-    if (exhaustiveSequential) {
-        const members = Array.isArray(promptAnalysis?.coverage_contract?.members)
-            ? promptAnalysis.coverage_contract.members.filter((member: any) => String(member || '').trim())
-            : [];
-        requireExhaustiveGenerationBudget(members.length, minimum);
-    }
-    const exhaustiveRequestedOutputs = exhaustiveSequential
-        ? rawSegments.slice(0, 64).map((segment: any) => {
-            const output = Number(segment?.output_seconds);
-            const target = Number(segment?.target_seconds);
-            return Number.isFinite(output) && output > 0
-                ? output
-                : Number.isFinite(target) && target > 0 ? target : minimum;
-        })
-        : [];
-    const exhaustiveRequestedTotal = exhaustiveRequestedOutputs.reduce(
-        (sum: number, seconds: number) => sum + seconds,
-        0,
-    );
-    const exhaustiveOutputScale = exhaustiveRequestedTotal > AUTO_TOTAL_LIMIT_SECONDS
-        ? AUTO_TOTAL_LIMIT_SECONDS / exhaustiveRequestedTotal
-        : 1;
-
-    for (const [segmentIndex, originalValue] of rawSegments.slice(0, 64).entries()) {
-        if (!exhaustiveSequential && remaining < minimum - 1e-6) {
-            durationTruncated = true;
-            break;
-        }
-        const original = originalValue && typeof originalValue === 'object' ? originalValue : {};
-        if (original !== originalValue) structurallyAdjusted = true;
-        const rawShots = Array.isArray(original.shots) && original.shots.length
-            ? original.shots.slice(0, 4)
-            : [{}];
-        if (!Array.isArray(original.shots) || !original.shots.length || original.shots.length > 4) {
-            structurallyAdjusted = true;
-        }
-        const shots = rawShots.map((shotValue: any, shotIndex: number) => {
-            const shot = shotValue && typeof shotValue === 'object' ? shotValue : {};
-            if (shot !== shotValue) structurallyAdjusted = true;
-            const parsedDialogue = (Array.isArray(shot.dialogue) ? shot.dialogue : [])
-                .filter((line: any) => line && typeof line === 'object' && String(line.text || '').trim())
-                .map((line: any, lineIndex: number) => ({
-                    speaker_id: String(line.speaker_id || `speaker-${shotIndex + 1}-${lineIndex + 1}`).trim(),
-                    language: normalizedDialogueLanguage(line.language),
-                    delivery: String(line.delivery || 'clear natural delivery').trim(),
-                    text: String(line.text).trim(),
-                }));
-            const candidateDialogue = briefRecitationAllowed
-                ? parsedDialogue
-                : parsedDialogue.filter((line: any) =>
-                    !spokenWords(line.text).includes(spokenWords(rawPrompt)),
-                );
-            const dialogue = dialogueAllowed ? candidateDialogue : [];
-            if (!Array.isArray(shot.dialogue) || dialogue.length !== shot.dialogue.length
-                || candidateDialogue.length !== parsedDialogue.length) {
-                structurallyAdjusted = true;
-            }
-            let audio = String(shot.audio || '').trim() || SAFE_NONSPEECH_AUDIO;
-            if (dialogue.some((line: any) => audio.includes(line.text)) || SPEECH_IN_AUDIO.test(audio)) {
-                audio = SAFE_NONSPEECH_AUDIO;
-                structurallyAdjusted = true;
-            }
-            return {
-                duration_seconds: Math.max(0.5, Number(shot.duration_seconds) || 1.5),
-                visual: String(shot.visual || '').trim() || rawPrompt,
-                camera: String(shot.camera || '').trim()
-                    || 'Use camera language appropriate to the requested presentation.',
-                audio,
-                dialogue,
-            };
-        });
-
-        if (segmentIndex === 0) {
-            const contract = dialogueContract;
-            const requiredLines = Array.isArray(contract?.lines) ? contract.lines : [];
-            for (const line of requiredLines) {
-                const text = String(line?.text || '').trim();
-                if (text && !planPreservesDialogueLine({ segments: [{ shots }] }, text)) {
-                    shots[0].dialogue.push({
-                        speaker_id: String(line?.speaker_hint || 'speaker-1').trim() || 'speaker-1',
-                        language: 'English',
-                        delivery: 'clear natural delivery',
-                        text,
-                    });
-                    structurallyAdjusted = true;
-                }
-            }
-            if (String(contract?.mode || 'none') !== 'none'
-                && !shots.some((shot: any) => shot.dialogue.length)) {
-                const subject = (promptAnalysis?.subjects || []).map(String).filter(Boolean).join(' and ');
-                shots[0].dialogue.push({
-                    speaker_id: subject || 'speaker-1',
-                    language: 'English',
-                    delivery: 'clear natural delivery',
-                    text: 'This is our moment.',
-                });
-                structurallyAdjusted = true;
-            }
-        }
-
-        const shotCountFloor = Math.min(shots.length * 1.5, maximum);
-        const structuralFloor = Math.max(minimum, shotCountFloor);
-        if (!exhaustiveSequential && remaining < structuralFloor - 1e-6) {
-            durationTruncated = true;
-            break;
-        }
-        const requestedTarget = Math.max(
-            structuralFloor,
-            Number(original.target_seconds) || shots.reduce(
-                (total: number, shot: any) => total + Number(shot.duration_seconds || 0),
-                0,
-            ),
-        );
-        let target = Math.min(maximum, requestedTarget, exhaustiveSequential ? maximum : remaining);
-        if (target + 1e-6 < requestedTarget) durationTruncated = true;
-        if (truncateDialogueToSeconds(shots, target)) durationTruncated = true;
-        const dialogueFloor = dialogueFloorSeconds({ shots });
-        target = Math.max(structuralFloor, target, dialogueFloor);
-        if (!exhaustiveSequential && target > remaining + 1e-6) {
-            durationTruncated = true;
-            break;
-        }
-        const shotDurationTotal = shots.reduce(
-            (total: number, shot: any) => total + Number(shot.duration_seconds || 0),
-            0,
-        ) || shots.length;
-        for (const shot of shots) {
-            shot.duration_seconds = target * Number(shot.duration_seconds || 1) / shotDurationTotal;
-        }
-        const outputSeconds = exhaustiveSequential
-            ? Math.min(
-                target,
-                Math.max(
-                    0.5,
-                    exhaustiveRequestedOutputs[segmentIndex] * exhaustiveOutputScale,
-                ),
-            )
-            : target;
-        if (exhaustiveSequential && outputSeconds + 1e-6 < target) durationCompressed = true;
-        segments.push({
-            title: String(original.title || `Segment ${segmentIndex + 1}`).trim(),
-            overlay_label: String(original.overlay_label || 'N/A').trim() || 'N/A',
-            audio_transition: ['auto', 'cut', 'fade'].includes(original.audio_transition)
-                ? original.audio_transition : 'auto',
-            transition: segmentIndex === 0
-                ? 'start'
-                : (['continue', 'cut', 'dissolve'].includes(String(original.transition))
-                    ? String(original.transition)
-                    : 'cut'),
-            target_seconds: target,
-            ...(exhaustiveSequential ? { output_seconds: outputSeconds } : {}),
-            music: String(original.music || 'N/A').trim() || 'N/A',
-            shots,
-        });
-        remaining -= outputSeconds;
-    }
-
-    if (!segments.length) {
-        throw new Error('The rejected screenplay contained no content that could be rendered safely.');
-    }
-    if (rawSegments.length > segments.length) durationTruncated = true;
-    const actualDialogue = segments.flatMap(segment => segment.shots.flatMap((shot: any) => shot.dialogue));
-    const analysis = promptAnalysis && typeof promptAnalysis === 'object'
-        ? JSON.parse(JSON.stringify(promptAnalysis))
-        : {};
-    analysis.dialogue_contract = {
-        mode: actualDialogue.length ? 'generated' : 'none',
-        lines: actualDialogue.map((line: any) => ({
-            speaker_hint: String(line.speaker_id || 'speaker'),
-            text: String(line.text || ''),
-            verbatim: false,
-        })),
-    };
-    const notices: string[] = [];
-    if (durationTruncated && String(promptAnalysis?.coverage_contract?.mode || '') !== 'exhaustive') {
-        notices.push(
-            `The screenplay exceeded the ${AUTO_TOTAL_LIMIT_SECONDS}-second generation budget and was truncated; `
-            + 'later beats or dialogue may be omitted.',
+    if (promptAnalysis?.frontier_handling?.disposition === 'reject') {
+        throw new FrontierPlannerRejectedError(
+            String(promptAnalysis.frontier_handling.reason_code || 'other'),
+            'The request requires an approved adaptation.', promptAnalysis,
         );
     }
-    if (validationFailure || structurallyAdjusted) {
-        notices.push(
-            'The screenplay failed validation and was rendered best-effort; '
-            + 'some requested details may be missing.',
-        );
+    const compiled = JSON.parse(JSON.stringify(candidate || {}));
+    if (!compiled.segments?.length) throw new Error('A content-bearing screenplay is required.');
+    compiled.prompt_analysis = JSON.parse(JSON.stringify(promptAnalysis || {}));
+    for (const segment of compiled.segments) {
+        for (const shot of segment.shots || []) {
+            shot.audio = String(shot.audio || SAFE_NONSPEECH_AUDIO);
+            if (/\b(?:says?|speaks?|dialogue|speech|voice|lip.sync|mouth movement)\b/i.test(shot.audio)) shot.audio = SAFE_NONSPEECH_AUDIO;
+            shot.dialogue = (shot.dialogue || []).map((line: any) => ({
+                ...line, language: normalizedDialogueLanguage(line.language),
+                ...((!line.spoken_text || String(line.spoken_text).trim() === String(line.text).trim())
+                    ? { spoken_text: undefined } : {}),
+            }));
+        }
     }
-    const keyframe = source.keyframe && typeof source.keyframe === 'object' ? source.keyframe : {};
-    const motion = keyframe.motion_contract && typeof keyframe.motion_contract === 'object'
-        ? keyframe.motion_contract
-        : {};
-    const compiled = {
-        intent: String(source.intent || promptAnalysis?.resolved_intent || rawPrompt).trim() || rawPrompt,
-        ...(Array.isArray(source.speaker_profiles) ? { speaker_profiles: source.speaker_profiles } : {}),
-        continuity_bible: [
-            String(source.continuity_bible || '').trim(),
-            `Original request (preserve literally): ${rawPrompt}`,
-        ].filter(Boolean).join(' '),
-        keyframe: {
-            recommended: Boolean(keyframe.recommended),
-            reason: String(keyframe.reason || 'Use a stable opening composition.').trim(),
-            prompt: String(keyframe.prompt || rawPrompt).trim(),
-            reference_requirements: Array.isArray(keyframe.reference_requirements)
-                ? keyframe.reference_requirements.slice(0, 4)
-                : [],
-            motion_contract: {
-                subject_orientation: String(motion.subject_orientation || 'Face into the opening action.').trim(),
-                gaze_direction: String(motion.gaze_direction || 'Look toward the opening action.').trim(),
-                travel_direction: String(motion.travel_direction || 'Continue in the established screen direction.').trim(),
-                camera_relation: String(motion.camera_relation || 'Keep the opening camera side and framing.').trim(),
-                first_second_action: String(motion.first_second_action || 'Continue directly from frame zero.').trim(),
-            },
-        },
-        segments,
-        prompt_analysis: analysis,
-        generation_notice: notices.join(' '),
-        generation_adjustments: {
-            ...(source.generation_adjustments && typeof source.generation_adjustments === 'object'
-                ? source.generation_adjustments
-                : {}),
-            best_effort: true,
-            duration_truncated: durationTruncated
-                || Boolean(source?.generation_adjustments?.duration_truncated),
-            duration_compressed: durationCompressed
-                || Boolean(source?.generation_adjustments?.duration_compressed),
-            ...(exhaustiveSequential ? {
-                coverage_total: Array.isArray(promptAnalysis?.coverage_contract?.members)
-                    ? promptAnalysis.coverage_contract.members.length
-                    : rawSegments.length,
-                coverage_rendered: segments.length,
-            } : {}),
-        },
-        ...(Array.isArray(source.segment_keyframes)
-            ? { segment_keyframes: JSON.parse(JSON.stringify(source.segment_keyframes)) }
-            : {}),
-    };
-    try {
-        normalizeVideoAudioContinuity(compiled);
-    } catch {
-        // A rejected planner response may contain conflicting voice profiles.
-        // Recover from its actual spoken turns instead of abandoning the fallback.
-        compiled.speaker_profiles = [];
-        normalizeVideoAudioContinuity(compiled);
+    for (const segment of compiled.segments) for (const shot of segment.shots) for (const line of shot.dialogue) {
+        if (line.spoken_text === undefined) delete line.spoken_text;
     }
-    preserveAudiovisualContractsBestEffort(compiled, analysis);
+    repairVideoTiming(compiled, VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20,
+        VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3);
+    normalizeVideoAudioContinuity(compiled);
     stageFrontierDialogueVisually(compiled);
     reconcileFrontierKeyframeMotionGeometry(compiled);
+    preserveAudiovisualContractsBestEffort(compiled, compiled.prompt_analysis);
+    validatePlanAgainstAnalysis(compiled, compiled.prompt_analysis, rawPrompt);
+    if (compiled.segments.reduce((sum: number, segment: any) => sum + segment.target_seconds, 0) > AUTO_TOTAL_LIMIT_SECONDS) compiled.recovery_storyboard = true;
+    compiled.generation_adjustments = { timing_repaired: true };
     return compiled;
 }
 
@@ -1648,6 +1370,8 @@ export function validateFrontierVideoPlanForKeyframe(
     if (!String(plan.intent || '').trim() || !String(plan.continuity_bible || '').trim()) {
         throw new Error('GPT-5.6 Sol omitted the intent or continuity bible.');
     }
+    repairVideoTiming(plan, VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20,
+        VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3);
     normalizeVideoAudioContinuity(JSON.parse(JSON.stringify(plan)));
     if (plan.prompt_analysis) validateAudiovisualContracts(plan, plan.prompt_analysis);
     validateKnownEveryPresidentContract(plan.prompt_analysis || plan.semantic_analysis, rawPrompt);
@@ -1727,23 +1451,16 @@ export function validateFrontierVideoPlanForKeyframe(
         outputTotal += segment.output_seconds === undefined ? floor : declaredOutput;
         finishedTotal += segment.output_seconds === undefined ? target : declaredOutput;
     }
-    if (generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!plan.recovery_storyboard && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `GPT-5.6 Sol screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s generation limit.`,
         );
     }
-    if (outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!plan.recovery_storyboard && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `GPT-5.6 Sol screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,
-        );
-    }
-    if (requestedDurationSeconds !== null && requestedDurationSeconds !== undefined
-        && Math.abs(finishedTotal - requestedDurationSeconds) > 0.05) {
-        throw new Error(
-            `GPT-5.6 Sol screenplay finishes at ${finishedTotal.toFixed(2)}s; `
-            + `the explicit duration contract requires ${requestedDurationSeconds}s exactly.`,
         );
     }
     if (rawPrompt) {
@@ -2348,7 +2065,7 @@ async function validatedPromptAnalysis(
             durationSeconds: 0,
             detail: reasonCode,
         });
-        if (!preserveRejectedCandidate) {
+        if (!preserveRejectedCandidate || reasonCode === 'provider_policy') {
             throw new FrontierPlannerRejectedError(
                 reasonCode,
                 `Frontier planner classified this request for local fallback (${reasonCode}).`,

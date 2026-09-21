@@ -668,15 +668,17 @@ class VideoGenerationService {
         job: VideoJobView,
         endpoint: 'delivered' | 'notified',
         durationSeconds?: number,
+        messageId?: string,
     ): Promise<void> {
         await brokerRequest(`/v1/jobs/${job.id}/${endpoint}`, {
             method: 'POST',
-            body: JSON.stringify(durationSeconds === undefined ? {} : { duration_seconds: durationSeconds }),
+            body: JSON.stringify({ duration_seconds: durationSeconds, message_id: messageId }),
         });
     }
 
     private async existingDelivery(job: VideoJobView, channel: any): Promise<any | null> {
         try {
+            if (job.delivery_message_id) return await channel.messages.fetch(job.delivery_message_id);
             const recent = await channel.messages.fetch({ limit: 100 });
             const marker = `video **${shortJobId(job.id)}** is ready`;
             return recent.find((candidate: any) => candidate.id !== job.status_message_id
@@ -749,11 +751,11 @@ class VideoGenerationService {
             const deliveryStarted = Date.now();
             const delivery = await this.postDelivery(job, message);
             const deliverySeconds = (Date.now() - deliveryStarted) / 1000;
+            await this.acknowledge(job, 'delivered', deliverySeconds, delivery.id);
             await message.edit({
                 content: `**${videoModelDisplayName(job.model)} · ${shortJobId(job.id)}**\nDelivered in ${delivery.url}.`,
                 attachments: [],
             });
-            await this.acknowledge(job, 'delivered', deliverySeconds);
             await this.removeCancellationReaction(job.id, message);
             this.rendered.delete(job.id);
             return;

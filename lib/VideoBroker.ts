@@ -1,3 +1,5 @@
+import { VIDEO_RECOVERY_VERSION, recoveryHash } from './VideoRecovery.js';
+import { prepareRecoveryPlan, reviewRecoveryMedia } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
@@ -111,6 +113,9 @@ interface StoredVideoSourceImage {
 }
 
 interface BrokerOptions {
+    recoveryEnabled?: boolean;
+    recoveryPlanner?: typeof prepareRecoveryPlan;
+    recoveryReviewer?: typeof reviewRecoveryMedia;
     host: string;
     port: number;
     dbPath: string;
@@ -146,6 +151,7 @@ interface BrokerOptions {
 }
 
 interface WorkerConnection {
+    recoveryVersion: number;
     socket: WebSocket;
     id: string;
     capabilities: VideoModelId[];
@@ -184,6 +190,10 @@ interface ProvisionalKeyframePrefetch {
 }
 
 interface JobRow {
+    recovery_json?: string | null;
+    recovery_next_at?: number | null;
+    recovery_version?: number;
+    delivery_message_id?: string | null;
     id: number;
     public_id: string;
     optimization_json: string | null;
@@ -1463,6 +1473,8 @@ export class VideoBroker {
             }
         }
         for (const [name, definition] of [
+            ['recovery_json', 'TEXT'], ['recovery_version', 'INTEGER NOT NULL DEFAULT 0'],
+            ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -1928,9 +1940,9 @@ export class VideoBroker {
         if (delivered && req.method === 'POST') {
             const body = await readJson(req);
             await this.run(
-                `UPDATE video_jobs SET status = 'delivered', delivered_at = ?, notified_at = ?, updated_at = ?
+                `UPDATE video_jobs SET status = 'delivered', delivery_message_id=COALESCE(?, delivery_message_id), delivered_at = ?, notified_at = ?, updated_at = ?
                  WHERE public_id = ? AND status = 'ready'`,
-                [nowSeconds(), nowSeconds(), nowSeconds(), delivered[1]],
+                [/^\d+$/.test(String(body.message_id || '')) ? String(body.message_id) : null, nowSeconds(), nowSeconds(), nowSeconds(), delivered[1]],
             );
             if (body.duration_seconds !== null && body.duration_seconds !== undefined) {
                 await this.recordMetricSpan(delivered[1], {
@@ -2158,11 +2170,19 @@ export class VideoBroker {
                         }),
                     };
                     try {
-                        const composed = await (
-                            this.options.sourceImageComposer || composeOalgoSourceImages
-                        )(base, attached, prompt, hooks, compositeProvider);
-                        sourceImage = storeCompositedSourceImage(composed, directory);
-                        sourceImageComposition = 'generated';
+                        if (this.options.recoveryEnabled) {
+                            // Keep both originals until the story is approved. The
+                            // legacy storage tag denotes an uncomposed source pair.
+                            sourceImage = base;
+                            compositeSourceImage = attached;
+                            sourceImageComposition = 'local_qwen';
+                        } else {
+                            const composed = await (
+                                this.options.sourceImageComposer || composeOalgoSourceImages
+                            )(base, attached, prompt, hooks, compositeProvider);
+                            sourceImage = storeCompositedSourceImage(composed, directory);
+                            sourceImageComposition = 'generated';
+                        }
                     } catch (error) {
                         if (error instanceof VideoUsagePersistenceError) throw error;
                         await submissionHooks.onAttempt?.({
@@ -2425,7 +2445,7 @@ export class VideoBroker {
     private async prepareInitialEstimate(publicId: string): Promise<VideoJobView | null> {
         let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
         if (!job) return null;
-        if (ACTIVE_VIDEO_STATUSES.includes(job.status)) {
+        if (!this.options.recoveryEnabled && ACTIVE_VIDEO_STATUSES.includes(job.status)) {
             try {
                 const { plan } = await this.ensurePlan(job, true);
                 await this.storePlanEstimate(job, plan);
@@ -3586,6 +3606,7 @@ export class VideoBroker {
     }
 
     private schedulePreparation(publicId: string, criticalPath: boolean): void {
+        if (this.options.recoveryEnabled) return;
         if (!this.options.preplanQueuedJobs
             || this.preparationQueued.has(publicId) || this.preparationAttempted.has(publicId)
             || this.preparationQueued.size >= 1) return;
@@ -3644,6 +3665,7 @@ export class VideoBroker {
         if (!placeholders) return;
         const candidates = await this.all<JobRow>(
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
+             AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -3779,6 +3801,7 @@ export class VideoBroker {
                 prompt_tease: row.prompt_tease,
                 planned_intent: plannedIntent(row),
                 generation_notice: generationNotice(row),
+                delivery_message_id: row.delivery_message_id || null,
                 requester_id: row.requester_id,
                 origin_bot_id: row.origin_bot_id,
                 channel_id: row.channel_id,
@@ -3864,6 +3887,7 @@ export class VideoBroker {
                         socket,
                         id: hello.worker_id,
                         capabilities: hello.capabilities,
+                        recoveryVersion: Number(hello.recovery_version) || 0,
                         lastHeartbeat: Date.now(),
                         currentJob: hello.current_job,
                         ready: !hello.current_job,
@@ -4281,6 +4305,21 @@ export class VideoBroker {
                     return;
                 }
                 const publicError = sanitizeVideoWorkerText(message.error, 'Worker failure', 2000);
+                if (row.recovery_version) {
+                    const prior = row.recovery_json ? JSON.parse(row.recovery_json) : {};
+                    prior.waits = (prior.waits || 0) + 1;
+                    prior.last_error = publicError;
+                    const delay = Math.min(900, 30 * 2 ** Math.min(5, prior.waits - 1));
+                    await this.run(`UPDATE video_jobs SET status='queued', stage='Waiting to resume video recovery',
+                        recovery_json=?, recovery_next_at=?, worker_id=NULL, lease_token=NULL,
+                        lease_expires_at=NULL, gpu_queue_state=NULL, error=NULL, updated_at=? WHERE public_id=?`,
+                        [JSON.stringify(prior), nowSeconds() + delay, nowSeconds(), jobId]);
+                    this.worker.currentJob = null;
+                    this.worker.ready = false;
+                    if (message.event_id) this.sendWorker({type:'event_ack', job_id:jobId, event_id:message.event_id});
+                    return;
+                }
+
                 const disposition = videoFailureDisposition(
                     publicError,
                     Boolean(message.retryable),
@@ -4346,6 +4385,15 @@ export class VideoBroker {
                     return;
                 }
                 if (!row?.result_path) throw new Error('Worker completed before uploading a result.');
+                if (row.recovery_version) {
+                    const recovery = row.recovery_json ? JSON.parse(row.recovery_json) : {};
+                    const quality = recovery.quality;
+                    if (!quality?.accepted || quality.result_sha256 !== row.result_sha256
+                        || quality.contract_hash !== recovery.prepared?.contract_hash) {
+                        throw new Error('Completion requires quality approval for this exact output.');
+                    }
+                }
+
                 const runtimeSeconds = Number(message.runtime_seconds) > 0
                     ? Number(message.runtime_seconds)
                     : null;
@@ -4359,7 +4407,7 @@ export class VideoBroker {
                     plannerJson = JSON.stringify(plan);
                 }
                 await this.run(
-                    `UPDATE video_jobs SET status = 'ready', stage = 'Ready for Discord delivery', progress = 1,
+                    `UPDATE video_jobs SET status = 'ready', error = NULL, stage = 'Ready for Discord delivery', progress = 1,
                      runtime_seconds = ?, planner_json = ?, completed_at = ?, updated_at = ? WHERE public_id = ?`,
                     [runtimeSeconds, plannerJson, nowSeconds(), nowSeconds(), jobId],
                 );
@@ -4398,6 +4446,7 @@ export class VideoBroker {
 
     private async dispatchNextUnlocked(): Promise<void> {
         if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
+        if (this.options.recoveryEnabled && this.worker.recoveryVersion < VIDEO_RECOVERY_VERSION) return;
         if (!schedulerAcceptsReservations(this.worker.scheduler)) return;
         const control = await this.control();
         if (control.paused_until || control.dispatch_paused
@@ -4406,6 +4455,7 @@ export class VideoBroker {
         if (!placeholders) return;
         const candidates = await this.all<JobRow>(
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
+             AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -4423,14 +4473,14 @@ export class VideoBroker {
                 [nowSeconds(), oldest.public_id],
             );
         }
-        if (this.options.preplanQueuedJobs
+        if (!this.options.recoveryEnabled && this.options.preplanQueuedJobs
             && !this.preparationComplete(row) && !this.preparationAttempted.has(row.public_id)) {
             this.schedulePreparation(row.public_id, true);
             return;
         }
         const leaseId = randomUUID();
         const result = await this.run(
-            `UPDATE video_jobs SET status = 'leased', worker_id = ?, lease_expires_at = ?,
+            `UPDATE video_jobs SET recovery_version = ${this.options.recoveryEnabled ? 1 : 0}, status = 'leased', worker_id = ?, lease_expires_at = ?,
              lease_token = ?, gpu_queue_state = 'submitting', gpu_queue_submitted_at = NULL,
              gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
              gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
@@ -4455,6 +4505,7 @@ export class VideoBroker {
                 prompt: row.prompt,
                 requested_duration_seconds: row.requested_duration_seconds,
                 delivery_limit_bytes: row.delivery_limit_bytes,
+                recovery_version: this.options.recoveryEnabled ? 1 : 0,
                 profile: 'maximum',
                 planner_guidance: row.planner_guidance,
                 command_variant: row.command_variant,
@@ -4597,7 +4648,121 @@ export class VideoBroker {
         if (!control.paused_until && !control.dispatch_paused) await this.dispatchNext();
     }
 
+    private recoverySources(job: JobRow): VideoPlanSourceImage[] {
+        return [[job.source_image_path, job.source_image_mime],
+            [job.source_image_composite_path, job.source_image_composite_mime]]
+            .filter(([path, mime]) => path && mime && existsSync(path))
+            .map(([path, mime]) => ({ data: readFileSync(path!), mimeType: mime as VideoPlanSourceImage['mimeType'] }));
+    }
+
+    private async handleRecovery(req: IncomingMessage, res: ServerResponse, id: string, operation: string): Promise<void> {
+        const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [id]);
+        if (!job || !job.recovery_version || job.worker_id !== this.worker?.id
+            || id !== this.worker.currentJob || !this.workerLeaseMatches(req, job)) {
+            writeJson(res, 409, { error: 'Recovery job is not leased to this worker.' });
+            return;
+        }
+        const body = await readJson(req, 18 * 1024 * 1024);
+        const state = job.recovery_json ? JSON.parse(job.recovery_json) : {};
+        const persist = async () => {
+            await this.run('UPDATE video_jobs SET recovery_json=?, updated_at=? WHERE public_id=?',
+                [JSON.stringify(state), nowSeconds(), id]);
+        };
+        const sources = this.recoverySources(job);
+        const options = this.frontierOptions(job, true);
+        try {
+            if (operation === 'plan') {
+                if (!state.prepared) {
+                    state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
+                        prompt: job.prompt, model: job.model, requester: job.requester_id,
+                        sources, options, planner: this.options.frontierPlanner,
+                    });
+                    state.prepared.plan.generation_notice = state.prepared.notice;
+                    await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
+                        [JSON.stringify(state.prepared.plan), VIDEO_PLANNER_MODEL,
+                            JSON.stringify(state.prepared.contract.analysis), id]);
+                    await persist();
+                }
+                writeJson(res, 200, { ...state.prepared, checkpoint: state.checkpoint || {},
+                    sources: state.prepared.contract.use_source_images ? sources.map(source =>
+                        `data:${source.mimeType};base64,${source.data.toString('base64')}`) : [] });
+                return;
+            }
+            const prepared = state.prepared;
+            if (!prepared || body.contract_hash !== prepared.contract_hash) {
+                writeJson(res, 409, { error: 'Approved contract revision does not match.' });
+                return;
+            }
+            if (operation === 'checkpoint') {
+                // Checkpoints are restart hints only; they never count as quality approval.
+                if (!body.checkpoint || JSON.stringify(body.checkpoint).length > 128 * 1024) throw new Error('Invalid checkpoint.');
+                state.checkpoint = body.checkpoint;
+                await persist();
+                writeJson(res, 200, { ok: true });
+                return;
+            }
+            const index = Number(body.segment_index);
+            if (operation === 'image' || operation === 'review') {
+                if (!Number.isInteger(index) || index < 0 || index >= prepared.plan.segments.length) throw new Error('Invalid segment.');
+                const segment = prepared.plan.segments[index];
+                if (operation === 'image') {
+                    const scene = segment.shots.map((shot: any) => shot.visual).join(' ');
+                    const keyframe = { ...prepared.plan.keyframe, recommended: true,
+                        prompt: `Create the opening illustrated setup for this approved scene. Preserve the supplied references' cast and identities, making all required participants visible together. ${scene} ${Array.isArray(body.correction) ? body.correction.slice(0, 5).map(String).join('; ').slice(0, 1000) : ''}` };
+                    const references: VideoKeyframeReference[] = prepared.contract.use_source_images
+                        ? sources.map((source, sourceIndex) => ({
+                            label: sourceIndex ? 'Attached scene and all its subjects' : 'Original identity',
+                            kind: sourceIndex ? 'object' : 'identity',
+                            visualFactsToPreserve: sourceIndex ? 'Keep every main subject and story-defining prop recognizable.' : 'Preserve the original person and clothing.',
+                            bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
+                        })) : [];
+                    const frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
+                        { ...prepared.plan, keyframe, segments: [segment] }, references,
+                        { ...options, requireIdentityPreservation: references.length > 0 });
+                    writeJson(res, 200, { image: `data:${frame.mimeType};base64,${frame.bytes.toString('base64')}` });
+                    return;
+                }
+                if (!['image', 'video', 'storyboard'].includes(body.kind)
+                    || !/^[a-f0-9]{64}$/.test(String(body.artifact_sha256 || ''))) throw new Error('Invalid artifact.');
+                const key = `${body.kind}:${index}:${body.artifact_sha256}`;
+                state.reviews ||= {};
+                if (!state.reviews[key]) {
+                    state.reviews[key] = await (this.options.recoveryReviewer || reviewRecoveryMedia)(
+                        prepared.contract, segment, body, options, prepared.contract.use_source_images ? sources : []);
+                    await persist();
+                }
+                writeJson(res, 200, state.reviews[key]);
+                return;
+            }
+            if (operation === 'quality') {
+                if (!['generated', 'storyboard'].includes(body.format)
+                    || !/^[a-f0-9]{64}$/.test(String(body.result_sha256 || ''))
+                    || !Array.isArray(body.artifacts) || body.artifacts.length !== prepared.plan.segments.length) {
+                    throw new Error('The final output must cover every approved segment.');
+                }
+                const accepted = body.artifacts.every((artifact: any, segmentIndex: number) => {
+                    const kind = body.format === 'storyboard' ? 'storyboard' : 'video';
+                    return state.reviews?.[`${kind}:${segmentIndex}:${artifact.sha256}`]?.acceptable === true;
+                });
+                if (!accepted) throw new Error('Some required scene artifacts have not passed review.');
+                state.quality = { accepted: true, format: body.format, result_sha256: body.result_sha256,
+                    contract_hash: prepared.contract_hash, artifacts: body.artifacts };
+                await persist();
+                writeJson(res, 200, { ok: true });
+                return;
+            }
+            writeJson(res, 404, { error: 'Unknown recovery operation.' });
+        } catch (error) {
+            writeJson(res, 503, { pending: true, error: sanitizeVideoWorkerText(String(error), 'Waiting for recovery services.', 1000) });
+        }
+    }
+
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|image|review|checkpoint|quality)$/.exec(url.pathname);
+        if (recovery && req.method === 'POST') {
+            await this.handleRecovery(req, res, recovery[1], recovery[2]);
+            return;
+        }
         const planning = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/plan$/.exec(url.pathname);
         if (planning && req.method === 'POST') {
             const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [planning[1]]);
@@ -5014,6 +5179,7 @@ export function videoBrokerOptionsFromEnvironment(): BrokerOptions {
         botToken,
         workerToken,
         preplanQueuedJobs: process.env.VIDEO_PREPLAN_QUEUED !== '0',
+        recoveryEnabled: true,
     };
 }
 
