@@ -4380,9 +4380,9 @@ export class VideoBroker {
                 let plannerJson = row.planner_json;
                 if (deliveryNotice) {
                     const plan = plannerJson ? JSON.parse(plannerJson) : {};
-                    plan.generation_notice = [
-                        String(plan.generation_notice || '').trim(), deliveryNotice,
-                    ].filter(Boolean).join(' ');
+                    const priorNotice = String(plan.generation_notice || '').trim();
+                    plan.generation_notice = priorNotice && !deliveryNotice.includes(priorNotice)
+                        ? `${priorNotice} ${deliveryNotice}` : deliveryNotice;
                     plannerJson = JSON.stringify(plan);
                 }
                 await this.run(
