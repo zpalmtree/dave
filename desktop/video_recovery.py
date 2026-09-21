@@ -174,6 +174,25 @@ def normalize_clip(source: Path, destination: Path) -> Path:
     return destination
 
 
+async def release_recovery_reservation(worker) -> None:
+    await worker.finish_gpuq_reservation()
+    await worker.stop_gpu_monitor()
+    # The legacy worker keeps one reservation for its entire job. Recovery
+    # releases it between scenes/reviews, so the next render needs a new lease.
+    control = getattr(worker, 'gpuq_control_dir', None)
+    worker.gpuq_job_id = None
+    worker.gpuq_control_dir = None
+    worker.gpuq_request_sequence = 0
+    worker.gpuq_log_offset = 0
+    worker.gpuq_log_pending = ''
+    for key in list(worker.journal):
+        if key.startswith('gpuq_'):
+            worker.journal.pop(key)
+    worker.save_journal()
+    if control and control.is_dir():
+        shutil.rmtree(control, ignore_errors=True)
+
+
 async def run_recovery_job(worker, job: dict) -> None:
     from video_worker import SCRIPT_DIR, MODEL_ARGS, GENERATOR, console_python_executable, atomic_json, stable_job_seed
     root = SCRIPT_DIR / 'worker_recovery' / str(job['id'])
@@ -278,7 +297,6 @@ async def run_recovery_job(worker, job: dict) -> None:
                         break
                     if scene.pop('render_interrupted', False):
                         scene['video_attempts'] = max(0, scene.get('video_attempts', 0) - 1)
-                    scene['video_attempts'] = scene.get('video_attempts', 0) + 1
                     await save()
                     one = copy.deepcopy(plan)
                     one['segments'] = [copy.deepcopy(segment)]
@@ -298,6 +316,8 @@ async def run_recovery_job(worker, job: dict) -> None:
                     atomic_json(plan_path, one)
                     if not await worker.ensure_gpu_reservation(job):
                         raise asyncio.CancelledError()
+                    # Queue/admission outages must not consume a render attempt.
+                    scene['video_attempts'] = scene.get('video_attempts', 0) + 1
                     worker.save_journal(run_dir=None, pid=None)
                     command = [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[job['model']],
                         '--frontier-plan', str(plan_path), '--approved-plan-only', '--image', str(image), '--keyframe', 'never',
@@ -309,8 +329,7 @@ async def run_recovery_job(worker, job: dict) -> None:
                         code = await worker.run_reserved_command(command)
                         output = worker.find_output() if code == 0 else None
                     finally:
-                        await worker.finish_gpuq_reservation()
-                        await worker.stop_gpu_monitor()
+                        await release_recovery_reservation(worker)
                     scene.pop('render_interrupted', None)
                     await save()
                     if worker.cancel_reason:
