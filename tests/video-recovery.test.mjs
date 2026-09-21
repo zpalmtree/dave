@@ -90,7 +90,7 @@ test('broker persists recovery and requires every scene review for the matching 
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-'));
     const value = plan();
     const contract = approvedRecoveryContract(value, 'explorers return');
-    const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
+    const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: 'Adapted to a friendly reunion.' };
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false, recoveryPlanner: async () => prepared,
@@ -137,9 +137,12 @@ test('broker persists recovery and requires every scene review for the matching 
         await assert.rejects(broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id,
             lease_id: 'lease', runtime_seconds: 5 }), /exact output/);
         await broker.run("UPDATE video_jobs SET result_path='result.mp4', result_sha256=?, error='old error' WHERE public_id=?", [resultHash, id]);
-        await broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id, lease_id: 'lease', runtime_seconds: 5 });
+        const notice = 'Adapted to a friendly reunion. Delivered as an animated storyboard.';
+        await broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id, lease_id: 'lease', runtime_seconds: 5, generation_notice: notice });
         const row = await broker.get('SELECT status,error FROM video_jobs WHERE public_id=?', [id]);
         assert.deepEqual(row, { status: 'ready', error: null });
+        const stored = await broker.get('SELECT planner_json FROM video_jobs WHERE public_id=?', [id]);
+        assert.equal(JSON.parse(stored.planner_json).generation_notice, notice);
         // A temporary service failure retains the same approved plan/checkpoint
         // and releases the worker, instead of delivering a terminal error.
         broker.worker.currentJob = id;
