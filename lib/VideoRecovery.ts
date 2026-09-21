@@ -17,6 +17,9 @@ export function recoveryHash(value: unknown): string {
 
 export function normalizedRecoverySpeech(value: unknown): string {
     return String(value || '').normalize('NFKC').toLowerCase()
+        // Spanish spelling marks may be supplied by the planner or transcriber.
+        // Fold vowel accents only: distinct letters such as ñ must still match.
+        .replace(/[áéíóúü]/g, vowel => vowel.normalize('NFD')[0])
         .replace(/[’‘]/g, "'").replace(/[^\p{L}\p{N}']+/gu, ' ').trim();
 }
 

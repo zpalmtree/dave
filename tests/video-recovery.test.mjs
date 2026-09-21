@@ -67,6 +67,30 @@ test('speech verification tolerates punctuation but rejects missing lines and si
         'Just stop feeding the caught squirrels and wait for them to surrender.'), true);
 });
 
+test('speech verification accepts Spanish vowel accents without accepting missing or changed words', () => {
+    const expected = 'mae Luis libereme, necesito cotizar mae, saqueme de aqui';
+    const transcript = 'Mae, Luis, libéreme, necesito cotizar, mae, sáqueme de aquí.';
+    assert.equal(recoverySpeechMatches(expected, transcript), true);
+    assert.equal(recoverySpeechMatches(transcript, expected), true);
+    assert.equal(recoverySpeechMatches(expected, transcript.normalize('NFD')), true);
+    assert.equal(recoverySpeechMatches('Sí, está aquí.', 'Si, esta aqui.'), true);
+    assert.equal(recoverySpeechMatches('El pingüino llegó.', 'El pinguino llego.'), true);
+    assert.equal(recoverySpeechMatches(expected, 'Mae Luis libéreme'), false);
+    assert.equal(recoverySpeechMatches(expected, 'Mae Luis'), false);
+    assert.equal(recoverySpeechMatches(expected, ''), false);
+    assert.equal(recoverySpeechMatches('Sáqueme de aquí.', 'Déjeme aquí.'), false);
+    assert.equal(recoverySpeechMatches('Un año.', 'Un ano.'), false);
+});
+
+test('approved dialogue may add Spanish accents while preserving the authored text', () => {
+    const value = plan('mae Luis libereme, necesito cotizar mae, saqueme de aqui');
+    const text = 'Mae, Luis, libéreme, necesito cotizar, mae, sáqueme de aquí.';
+    value.segments[0].shots[0].dialogue[0].text = text;
+    const contract = approvedRecoveryContract(value, 'John pleads at the bars');
+    assert.equal(contract.segments[0].shots[0].dialogue[0].text, text);
+    assert.equal(value.segments[0].shots[0].dialogue[0].text, text);
+});
+
 test('timing repair fits several turns without packing an oversized split into the previous turn', () => {
     const value = plan('Please listen carefully while I explain what happened last night.');
     const long = Array.from({length: 70}, (_, index) => `word${index}`).join(' ');
