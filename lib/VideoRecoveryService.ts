@@ -102,7 +102,8 @@ export async function reviewRecoveryMedia(contract: any, segment: any, body: any
             const client = new GoogleGenAI({ apiKey: config.geminiApiKey });
             const response = await client.models.generateContent({
                 model,
-                contents: [{ role: 'user', parts: [{ text: 'Transcribe every intelligible spoken word exactly, without sound descriptions. Reply with an empty string if no speech is audible.' },
+                contents: [{ role: 'user', parts: [{ text: 'Transcribe every intelligible spoken word exactly, without sound descriptions. Reply with an empty string if no speech is audible. '
+                    + 'Use the expected line only as a spelling hint for names and uncommon words; never insert words that are missing or unintelligible in the audio. Expected line: ' + JSON.stringify(expected) },
                     { inlineData: { mimeType: 'audio/wav', data: body.audio } }] }],
                 config: { httpOptions: { timeout: 75_000 }, temperature: 0, maxOutputTokens: 1024 },
             });
@@ -124,6 +125,7 @@ export async function reviewRecoveryMedia(contract: any, segment: any, body: any
         + 'Reject unsafe imagery, missing required subjects, identity replacement, a wrong scene, or substantial missing action. '
         + 'For an opening image, judge only the authored initial frame. Characters, settings, or action revealed later do not need to appear at frame zero. A requested original portrait is a valid opening before a camera reveal. '
         + 'Do not reject cosmetic differences, camera preferences, harmless timing differences, or intended stillness. '
+        + 'Speech completeness has already passed a separate transcription check. The transcript is automatic speech recognition, not an exact record of spelling: do not reject minor homophonic spelling differences, punctuation, or capitalization as altered dialogue. You cannot establish a pronunciation error from transcript spelling alone. '
         + "Judge only the supplied segment's required action, not beats assigned to other segments. Use the complete story solely for identity and continuity context. For video mode check that required action visibly progresses; camera zoom on an unrelated portrait is not story coverage. "
         + 'Judge material fidelity to the user request. Incidental props, mechanisms, exact blocking, and camera choices invented by the planner are flexible when the requested story is clearly enacted. Reject a slideshow, captioned still, or storyboard substituting for requested action. '
         + 'Return concrete repairable issues only. permitted is false for prohibited visual content.',

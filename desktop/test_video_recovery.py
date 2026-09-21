@@ -42,6 +42,18 @@ class RecoveryTests(unittest.TestCase):
     def test_continuation_uses_previous_video_frame(self):
         self.exercise(original=True, continuation=True)
 
+    def test_authored_cut_gets_a_new_opening_instead_of_inheriting_a_closeup_of_other_subjects(self):
+        self.exercise(original=True, continuation=True, authored_cut=True)
+
+    def test_gpu_reservation_is_idempotent_per_attempt_but_distinct_across_attempts(self):
+        if not (Path(__file__).resolve().parent / 'video_worker.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        from video_worker import gpuq_reservation_identity
+        job = {'id': 'job', 'lease_id': 'lease', 'gpuq_reservation_scope': 'scene-0-attempt-1'}
+        self.assertEqual(gpuq_reservation_identity(job), gpuq_reservation_identity(dict(job)))
+        self.assertNotEqual(gpuq_reservation_identity(job), gpuq_reservation_identity({**job,
+            'gpuq_reservation_scope': 'scene-0-attempt-2'}))
+
     def test_one_targeted_retry_then_alternate_renderer(self):
         self.exercise(render_failures=2)
 
@@ -64,7 +76,7 @@ class RecoveryTests(unittest.TestCase):
         self.exercise(image_outage=True, invalid_response=True)
 
     def exercise(self, original=False, render_failures=0, image_outage=False,
-                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False):
+                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False):
         from PIL import Image
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -83,7 +95,8 @@ class RecoveryTests(unittest.TestCase):
                 'sources': [encoded] if original else []}
             if continuation:
                 prepared['plan']['segments'].append({**copy.deepcopy(segment), 'transition': 'continue'})
-            state, calls, renderers = {}, [], []
+                if authored_cut: prepared['plan']['segments'][1]['shots'][0]['visual'] = 'Cut to a closeup of the duck waving.'
+            state, calls, renderers, reservation_scopes = {}, [], [], set()
             outages = {'review': review_outage, 'admission': admission_outage}
 
             class Response:
@@ -125,6 +138,9 @@ class RecoveryTests(unittest.TestCase):
                     outages['admission'] = False
                     raise RuntimeError('admission temporarily unavailable')
                 self.assertIsNone(getattr(worker, 'gpuq_job_id', None), 'Completed reservation reused')
+                scope = job['gpuq_reservation_scope']
+                self.assertNotIn(scope, reservation_scopes, 'Completed idempotency key reused')
+                reservation_scopes.add(scope)
                 worker.gpuq_job_id = 'fresh-reservation'
                 worker.journal['gpuq_job_id'] = worker.gpuq_job_id
                 renderers.append(job['model'])
@@ -132,7 +148,7 @@ class RecoveryTests(unittest.TestCase):
             worker.ensure_gpu_reservation.side_effect = admit
             fake = types.SimpleNamespace(SCRIPT_DIR=root, MODEL_ARGS={'minimax': ['--model', 'h3'], 'ltx': ['--model', 'ltx']},
                 GENERATOR=root / 'generator.py', console_python_executable=lambda: sys.executable,
-                atomic_json=lambda path, value: path.write_text(json.dumps(value)), stable_job_seed=lambda _: 1)
+                atomic_json=lambda path, value: path.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8'), stable_job_seed=lambda _: 1)
             with mock.patch.dict(sys.modules, {'video_worker': fake}):
                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
                 asyncio.run(recovery.run_recovery_job(worker, job))
@@ -150,13 +166,18 @@ class RecoveryTests(unittest.TestCase):
                     if admission_outage:
                         self.assertEqual(state['scenes']['0'].get('video_attempts', 0), 0)
                     worker.upload.side_effect = None
+                    if review_outage:
+                        checkpoint = root / 'worker_recovery/test-job/checkpoint.json'
+                        stored = json.loads(checkpoint.read_text(encoding='utf-8'))
+                        stored['feedback_note'] = '\u201cUnicode feedback\u201d'
+                        checkpoint.write_text(json.dumps(stored, ensure_ascii=False), encoding='utf-8')
                     asyncio.run(recovery.run_recovery_job(worker, job))
                     self.assertEqual(worker.run_reserved_command.await_count, before + int(admission_outage))
                 worker.wait_and_send_terminal.assert_awaited_once()
                 self.assertEqual(state['format'], 'generated')
-                if original: self.assertFalse(any(operation == 'image' for operation, _ in calls))
+                if original: self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
                 if continuation:
-                    self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
+                    if not authored_cut: self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
                     self.assertEqual(worker.run_reserved_command.await_count, 2)
                 if render_failures == 2: self.assertEqual(renderers, ['minimax', 'minimax', 'ltx'])
                 self.assertGreater(recovery.duration(root / 'worker_recovery/test-job/final.mp4'), 0)
