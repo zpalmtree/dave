@@ -204,16 +204,43 @@ class RecoveryTests(unittest.TestCase):
             from PIL import Image
             portrait = Path(temporary) / 'portrait.png'
             Image.new('RGB', (100, 150), 'red').save(portrait)
-            with mock.patch.object(video_gen, 'generate_keyframe', return_value=portrait) as generate:
+            with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
                 video_gen.generate_recovery_keyframe('http://server', {'prompt': 'A duck.', 'references': [str(portrait)],
                     'motion_contract': {'gaze_direction': 'left'}, 'aspect_image': str(portrait)}, 7, 60, 25)
-            args = generate.call_args
-            self.assertEqual(args.args[2], {}, 'An incomplete motion contract is dropped instead of crashing.')
-            self.assertEqual(args.args[3], '2:3')
-            self.assertEqual(args.kwargs['references'], [portrait])
+            server, prompt, aspect, seed, _root, _timeout, references = generate.call_args.args
+            self.assertIn('Keep every person or character shown in the reference images recognizable', prompt)
+            self.assertIn('A duck.', prompt)
+            self.assertNotIn('left', prompt, 'An incomplete motion contract is dropped instead of crashing.')
+            self.assertEqual((aspect, seed, references), ('2:3', 7, [portrait]))
+            with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
+                video_gen.generate_recovery_keyframe('http://server', {'prompt': 'A market.', 'references': []}, 7, 60, 25)
+            _server, prompt, aspect, *_rest, references = generate.call_args.args
+            self.assertNotIn('reference images', prompt)
+            self.assertEqual((aspect, references), ('16:9', []))
         with mock.patch.object(sys, 'argv', ['video_gen.py', '--recovery-keyframe-input', 'in.json', 'x']):
             with self.assertRaises(SystemExit):
                 video_gen.parse_args()
+
+    def test_recovery_openings_use_edit_2511_lightning(self):
+        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        import video_gen
+        graph = video_gen.edit_keyframe_graph('A duck.', '2:3', 7, 'prefix', ['a.png', 'b.png', 'c.png', 'd.png'])
+        self.assertEqual(graph['model']['inputs']['unet_name'], 'qwen_image_edit_2511_fp8mixed.safetensors')
+        self.assertEqual(graph['lora']['inputs']['lora_name'], 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors')
+        self.assertEqual(graph['shift']['inputs']['shift'], 3.1)
+        sampler = graph['sampler']['inputs']
+        self.assertEqual((sampler['steps'], sampler['cfg'], sampler['model']), (4, 1.0, ['norm', 0]))
+        self.assertEqual((graph['latent']['class_type'], graph['latent']['inputs']['width'], graph['latent']['inputs']['height']),
+                         ('EmptySD3LatentImage', 832, 1248))
+        for text in ('positive_text', 'negative_text'):
+            self.assertEqual([graph[text]['inputs'].get(f'image{index}') for index in range(1, 5)],
+                             [['reference_1', 0], ['reference_2', 0], ['reference_3', 0], None],
+                             'The edit encoder takes at most three references.')
+        self.assertNotIn('reference_4', graph)
+        text_only = video_gen.edit_keyframe_graph('A market.', '16:9', 7, 'prefix', [])
+        self.assertFalse(any(key.startswith('image') for key in text_only['positive_text']['inputs']))
+        self.assertEqual(text_only['latent']['inputs']['width'], 1344)
 
     def exercise(self, original=False, render_failures=0, image_outage=False,
                  review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
