@@ -54,14 +54,17 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotEqual(gpuq_reservation_identity(job), gpuq_reservation_identity({**job,
             'gpuq_reservation_scope': 'scene-0-attempt-2'}))
 
-    def test_one_targeted_retry_then_alternate_renderer(self):
+    def test_one_targeted_retry_can_succeed(self):
+        self.exercise(render_failures=1)
+
+    def test_second_failed_render_stops_without_uploading_a_storyboard(self):
         self.exercise(render_failures=2)
 
-    def test_all_renderers_failing_defers_without_uploading_a_storyboard(self):
-        self.exercise(render_failures=4)
-
     def test_render_budget_survives_restart_and_stops_before_more_gpu_work(self):
-        self.exercise(render_failures=8)
+        self.exercise(render_failures=2, restart_exhausted=True)
+
+    def test_final_attempt_review_outage_does_not_rerender(self):
+        self.exercise(render_failures=1, review_outage=True)
 
     def test_mouthless_h3_prompt_preserves_robot_anatomy_with_full_speech(self):
         if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
@@ -104,7 +107,7 @@ class RecoveryTests(unittest.TestCase):
         self.exercise(image_outage=True, invalid_response=True)
 
     def exercise(self, original=False, render_failures=0, image_outage=False,
-                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False):
+                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
         from PIL import Image
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -180,24 +183,23 @@ class RecoveryTests(unittest.TestCase):
             with mock.patch.dict(sys.modules, {'video_worker': fake}):
                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
                 asyncio.run(recovery.run_recovery_job(worker, job))
-                if render_failures == 8:
-                    self.assertEqual(worker.run_reserved_command.await_count, 4)
-                    self.assertTrue(worker.fail_current.await_args.args[1])
-                    asyncio.run(recovery.run_recovery_job(worker, job))
-                    self.assertEqual(worker.run_reserved_command.await_count, 8)
+                if restart_exhausted:
+                    self.assertEqual(worker.run_reserved_command.await_count, 2)
                     self.assertFalse(worker.fail_current.await_args.args[1])
                     asyncio.run(recovery.run_recovery_job(worker, job))
-                    self.assertEqual(worker.run_reserved_command.await_count, 8)
+                    self.assertEqual(worker.run_reserved_command.await_count, 2)
                     self.assertFalse(worker.fail_current.await_args.args[1])
                     worker.upload.assert_not_awaited()
                     return
-                if image_outage or render_failures == 4:
+                if image_outage or render_failures == 2:
                     worker.fail_current.assert_awaited_once()
                     worker.upload.assert_not_awaited()
                     worker.wait_and_send_terminal.assert_not_awaited()
                     self.assertFalse(any(body.get('format') == 'storyboard' for _, body in calls))
                     if invalid_response: self.assertIn('503', worker.fail_current.await_args.args[0])
-                    if render_failures == 4: self.assertEqual(renderers, ['minimax', 'minimax', 'ltx', 'ltx'])
+                    if render_failures == 2:
+                        self.assertEqual(renderers, ['minimax', 'minimax'])
+                        self.assertFalse(worker.fail_current.await_args.args[1])
                     return
                 if review_outage or upload_outage or admission_outage:
                     worker.fail_current.assert_awaited_once()
@@ -218,7 +220,7 @@ class RecoveryTests(unittest.TestCase):
                 if continuation:
                     if not authored_cut: self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
                     self.assertEqual(worker.run_reserved_command.await_count, 2)
-                if render_failures == 2: self.assertEqual(renderers, ['minimax', 'minimax', 'ltx'])
+                if render_failures == 1: self.assertEqual(renderers, ['minimax', 'minimax'])
                 self.assertGreater(recovery.duration(root / 'worker_recovery/test-job/final.mp4'), 0)
 
 

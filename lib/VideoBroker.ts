@@ -1,4 +1,4 @@
-import { VIDEO_RECOVERY_VERSION, recoveryHash, recoveryLimitReached } from './VideoRecovery.js';
+import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, recoveryHash, recoveryLimitReached } from './VideoRecovery.js';
 import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
@@ -4769,6 +4769,20 @@ export class VideoBroker {
             if (operation === 'checkpoint') {
                 // Checkpoints are restart hints only; they never count as quality approval.
                 if (!body.checkpoint || JSON.stringify(body.checkpoint).length > 128 * 1024) throw new Error('Invalid checkpoint.');
+                // Older connected workers also must stop before starting a third render.
+                // Let an already-running attempt finish and submit its review.
+                for (const [index, value] of Object.entries(body.checkpoint.scenes || {})) {
+                    const scene = value as any;
+                    const prior = state.checkpoint?.scenes?.[index];
+                    if (!scene.video_accepted && scene.render_interrupted
+                        && (Number(scene.cycles || 0) > 0
+                            || Number(scene.video_attempts || 0) > VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS)
+                        && !(prior?.render_interrupted
+                            && prior.video_attempts === scene.video_attempts
+                            && (prior.cycles || 0) === (scene.cycles || 0))) {
+                        throw new RecoveryStoppedError(`Scene ${Number(index) + 1} reached its limit of ${VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS} render attempts.`);
+                    }
+                }
                 state.checkpoint = body.checkpoint;
                 await persist();
                 writeJson(res, 200, { ok: true });

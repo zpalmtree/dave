@@ -23,8 +23,8 @@ scenes use the previous accepted clip's final frame. New shots get their own
 opening composition, without inheriting a frame-zero crop restriction.
 
 The worker permits two image attempts per recovery pass. Each scene gets one
-video attempt and a targeted retry, then two attempts with an alternate video
-renderer. A scene is limited to two recovery passes (eight render attempts).
+video attempt and one targeted retry with the requested renderer: two render
+attempts total per scene, across reconnects and recovery passes.
 The worker persists this count and stops before reserving more GPU work once
 it is exhausted. Video review samples five points in time, checks story/identity/action,
 and compares an audio transcription with the approved speech. It judges the
@@ -43,8 +43,8 @@ remain reusable.
 
 Only actual generated video can pass final approval. Storyboards, slideshows,
 and caption cards are never substitutes for requested action. Exhausted render
-attempts may defer the same job for one more recovery pass, retaining accepted
-scenes and actionable review feedback. Exhausted jobs stop with a diagnostic
+attempts stop the job, retaining accepted scenes and actionable review feedback.
+Exhausted jobs stop with a diagnostic
 failure instead of retrying forever; a placeholder is never delivered.
 
 The broker persists the approved contract, checksummed scene reviews, worker
@@ -100,7 +100,7 @@ Recovery never sends a policy-rejected request to a less restricted local model.
 `yarn test` covers contract preservation, timing repair, refusal handling, source identity,
 matching output approval, deferred recovery, and broker/delivery regressions.
 `desktop/test_video_recovery.py` uses real decodable video fixtures to exercise
-original-frame reuse, continuation, alternate renderers, unavailable imagery,
+original-frame reuse, continuation, the single retry limit, unavailable imagery,
 review/upload retries without rerendering, and coordinator-path preflight.
 
 The existing desktop generator suite has three pre-existing failures referring
