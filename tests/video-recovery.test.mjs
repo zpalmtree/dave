@@ -4,10 +4,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { approvedRecoveryContract, recoveryHash, repairVideoTiming, recoverySpeechMatches, recoveryLimitReached } from '../dist/VideoRecovery.js';
-import { stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
-import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION } from '../dist/VideoRecoveryService.js';
+import { approvedLocalRecoveryContract, approvedRecoveryContract, recoveryHash, repairVideoTiming, recoverySpeechMatches, recoveryLimitReached,
+    VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
+import { requestPlannerResponse, stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
+import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError, reviewRecoveryMedia,
+    VIDEO_RECOVERY_REVIEW_VERSION } from '../dist/VideoRecoveryService.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
+import { VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 
 function plan(text = 'We made it home.') {
     return { intent: 'Two adult explorers return home.', continuity_bible: 'The same explorers.',
@@ -166,16 +169,98 @@ test('technical planning failure retries the original brief once', async () => {
     assert.equal(calls, 2);
 });
 
-test('policy rejection stops without a rewrite request or another planning attempt', async t => {
+test('a frontier rejection routes the original brief to local planning without a rewrite or another frontier attempt', async t => {
     t.mock.method(globalThis, 'fetch', () => { assert.fail('No automatic adaptation request is allowed.'); });
-    let calls = 0;
+    const analysis = { dialogue_contract: { mode: 'verbatim', lines: [] } };
+    for (const reason of ['provider_policy', 'cannot_faithfully_fulfill', 'unsupported_media', 'other']) {
+        let calls = 0;
+        await assert.rejects(prepareRecoveryPlan({ prompt: 'The original brief', model: 'minimax', requester: 'test', sources: [], options: {},
+            planner: async prompt => {
+                assert.equal(prompt, 'The original brief'); calls++;
+                throw new FrontierPlannerRejectedError(reason, 'Provider refusal details', analysis);
+            },
+        }), error => error instanceof RecoveryLocalPlanRequired && error.reasonCode === reason
+            && error.promptAnalysis === analysis);
+        assert.equal(calls, 1, reason);
+    }
+    const rejected = plan();
+    rejected.prompt_analysis.frontier_handling = { disposition: 'reject', reason_code: 'provider_policy' };
     await assert.rejects(prepareRecoveryPlan({ prompt: 'The original brief', model: 'minimax', requester: 'test', sources: [], options: {},
-        planner: async prompt => {
-            assert.equal(prompt, 'The original brief'); calls++;
-            throw new FrontierPlannerRejectedError('provider_policy', 'Provider refusal details');
-        },
-    }), /Video planner declined the request: Provider refusal details/);
-    assert.equal(calls, 1);
+        planner: async () => rejected,
+    }), error => error instanceof RecoveryLocalPlanRequired && error.promptAnalysis === rejected.prompt_analysis);
+});
+
+test('sexual content involving minors stops instead of reaching the local planner', async () => {
+    await assert.rejects(prepareRecoveryPlan({ prompt: 'The original brief', model: 'minimax', requester: 'test', sources: [], options: {},
+        planner: async () => { throw new FrontierPlannerRejectedError('minor_sexualization', 'Declined.'); },
+    }), error => error instanceof RecoveryStoppedError && /never planned locally/.test(error.message));
+});
+
+test('an OpenAI moderation block is a frontier rejection rather than an outage', async t => {
+    let error = { code: 'invalid_prompt', message: 'Invalid prompt: your prompt was flagged as potentially violating our usage policy.' };
+    t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ error }),
+        { status: 400, headers: { 'content-type': 'application/json' } }));
+    await assert.rejects(requestPlannerResponse({ model: 'gpt-5.6-sol', input: 'x' }, AbortSignal.timeout(5000), 'test', {}),
+        error => error instanceof FrontierPlannerRejectedError && error.reasonCode === 'provider_policy');
+    error = { message: 'Bad schema.' };
+    await assert.rejects(requestPlannerResponse({ model: 'gpt-5.6-sol', input: 'x' }, AbortSignal.timeout(5000), 'test', {}),
+        error => !(error instanceof FrontierPlannerRejectedError) && /Bad schema/.test(error.message));
+});
+
+// Mock fetch once per test: a second mock of the same method is not restored cleanly.
+function mockRefusingReview(t, transcript, reply) {
+    const mock = { requests: [], transcript, reply };
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        const url = String(typeof input === 'string' ? input : input.url);
+        if (url.includes('generativelanguage.googleapis.com')) {
+            mock.requests.push({ gemini: JSON.parse(init.body) });
+            return new Response(JSON.stringify(mock.transcript === null
+                ? { candidates: [{ finishReason: 'PROHIBITED_CONTENT' }] }
+                : { candidates: [{ content: { role: 'model', parts: [{ text: mock.transcript }] } }] }),
+            { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        mock.requests.push({ openai: JSON.parse(init.body) });
+        return new Response(JSON.stringify(mock.reply), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    return mock;
+}
+
+test('a refused or unpermitted frontier review hands the artifact to the local reviewer', async t => {
+    const value = plan();
+    const contract = approvedRecoveryContract(value, 'The character delivers the requested message.');
+    const body = { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' };
+    const mock = mockRefusingReview(t, 'We made it home.', null);
+    for (const reply of [
+        { status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'I cannot help with that.' }] }] },
+        { status: 'completed', output_text: JSON.stringify({ acceptable: false, permitted: false, issues: ['Prohibited imagery.'] }) },
+    ]) {
+        mock.reply = reply;
+        const result = await reviewRecoveryMedia(contract, value.segments[0], body, {});
+        assert.equal(result.local_review_required, true);
+        assert.ok(result.frontier_rejection);
+        assert.equal(result.context.transcript, 'We made it home.');
+        assert.equal(result.context.expected_speech, 'We made it home.');
+        assert.equal('acceptable' in result, false, 'A refusal is never cached as a failed review.');
+    }
+});
+
+test('a locally planned story is reviewed locally and a blocked transcription is not missing speech', async t => {
+    const value = plan();
+    const contract = approvedLocalRecoveryContract(value, 'The character delivers the requested message.', 'provider_policy');
+    const mock = mockRefusingReview(t, null, {});
+    const { requests } = mock;
+    const result = await reviewRecoveryMedia(contract, value.segments[0],
+        { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' }, {});
+    assert.equal(result.local_review_required, true);
+    assert.equal(result.context.transcript_unavailable, true);
+    assert.equal(result.context.speech_wording_close, undefined);
+    assert.equal(requests.filter(request => request.openai).length, 0, 'Sol never reviews a story it rejected.');
+    const settings = requests[0].gemini.safetySettings || requests[0].gemini.safety_settings;
+    assert.ok(settings?.length && settings.every(setting => setting.threshold === 'BLOCK_NONE'));
+    mock.transcript = '';
+    const silent = await reviewRecoveryMedia(contract, value.segments[0],
+        { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' }, {});
+    assert.equal(silent.acceptable, false, 'Audible silence still fails before the local reviewer.');
 });
 
 test('mouthless dialogue staging preserves anatomy without forcing lip sync', () => {
@@ -286,7 +371,7 @@ test('broker persists recovery and requires every scene review for the matching 
         // Use a leased worker directly so these HTTP integration assertions don't
         // depend on websocket scheduling or real GPU availability.
         broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
-            capabilities: ['minimax'], recoveryVersion: 2, lastHeartbeat: Date.now(),
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
             scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
         await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=2 WHERE public_id=?", [id]);
         const request = async (operation, body = {}) => {
@@ -399,7 +484,7 @@ test('broker persists recovery and requires every scene review for the matching 
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('broker stops rewritten plans, missing identity, replacement openings, and refusals without requeueing', async () => {
+test('broker stops rewritten plans, missing identity, and replacement openings, and routes refusals locally', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-identity-'));
     const portrait = join(directory, 'portrait.png');
     writeFileSync(portrait, Buffer.from('portrait'));
@@ -416,7 +501,8 @@ test('broker stops rewritten plans, missing identity, replacement openings, and 
             assert.equal(input.requireOriginalFirstFrame, true);
             assert.equal(input.sources.length, 1);
             if (refusal) return prepareRecoveryPlan({ ...input, planner: async () => {
-                throw new FrontierPlannerRejectedError('provider_policy', 'Provider refused the original request');
+                throw new FrontierPlannerRejectedError(refusal === 'minor' ? 'minor_sexualization' : 'provider_policy',
+                    'Provider refused the original request');
             } });
             return structuredClone(prepared);
         },
@@ -433,7 +519,7 @@ test('broker stops rewritten plans, missing identity, replacement openings, and 
         assert.equal(submitted.status, 201);
         const id = (await submitted.json()).job.id;
         broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
-            capabilities: ['minimax'], recoveryVersion: 2, lastHeartbeat: Date.now(),
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
             scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
         const reset = async (state = {}, source = portrait) => {
             broker.worker.currentJob = id;
@@ -484,9 +570,154 @@ test('broker stops rewritten plans, missing identity, replacement openings, and 
             video_attempts: 3, render_interrupted: true,
         } } } })).status, 200, 'A render already active before deployment can finish.');
         await reset(); refusal = true;
-        const declined = await request('plan');
-        assert.equal(declined.status, 422);
-        assert.match(declined.body.error, /Provider refused the original request/);
+        const routed = await request('plan');
+        assert.equal(routed.status, 200);
+        assert.equal(routed.body.local_plan_required, true);
+        assert.equal(routed.body.reason_code, 'provider_policy');
+        assert.equal(routed.body.sources.length, 1, 'The local planner receives the original portrait.');
+        assert.equal((await request('plan')).body.local_plan_required, true);
+        assert.equal(planningCalls, 2, 'A persisted local routing decision never asks the frontier again.');
+        const local = plan(); local.keyframe.recommended = true;
+        const uploaded = await request('local-plan', { plan: local });
+        assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
+        assert.equal(uploaded.body.plan.keyframe.recommended, false, 'The required portrait stays the opening frame.');
+        assert.equal(uploaded.body.contract.planner, 'local');
+        assert.equal(uploaded.body.contract.original_first_frame, true);
+        assert.equal(uploaded.body.sources.length, 1);
+        assert.equal((await request('plan')).body.contract_hash, uploaded.body.contract_hash);
+        const row = await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id]);
+        assert.equal(row.planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        await reset(); refusal = 'minor';
+        const stopped = await request('plan');
+        assert.equal(stopped.status, 422);
+        assert.match(stopped.body.error, /never planned locally/);
         await failed();
+    } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a rejected recovery job is planned, composed, reviewed, and approved through local Qwen', async t => {
+    const originalFetch = globalThis.fetch;
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        const url = String(typeof input === 'string' ? input : input.url);
+        if (url.startsWith('http://127.0.0.1')) return originalFetch(input, init);
+        assert.fail(`A locally planned story must not reach ${url}.`);
+    });
+    const directory = mkdtempSync(join(tmpdir(), 'video-recovery-local-'));
+    let frontierCalls = 0, generatorCalls = 0, reviewerCalls = 0;
+    const analysis = { dialogue_contract: { mode: 'verbatim', lines: [{ text: 'We made it home.', verbatim: true }] } };
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+        recoveryEnabled: true, preplanQueuedJobs: false,
+        frontierPlanner: async () => { frontierCalls++; throw new FrontierPlannerRejectedError('provider_policy', 'Declined.', analysis); },
+        keyframeGenerator: async () => { generatorCalls++; throw new Error('Frontier images are not used for a policy rejection.'); },
+        recoveryReviewer: async (...args) => { reviewerCalls++; return reviewRecoveryMedia(...args); },
+    });
+    await broker.start();
+    try {
+        const base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'explorers return', requester_id: '1', origin_bot_id: '2',
+                channel_id: '3', command_message_id: '4', status_message_id: '5' }),
+        });
+        const id = (await submitted.json()).job.id;
+        broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+            scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+        await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=? WHERE public_id=?",
+            [VIDEO_RECOVERY_VERSION, id]);
+        let contractHash = '';
+        const request = async (operation, body = {}) => {
+            const response = await fetch(`${base}/v1/worker/jobs/${id}/recovery/${operation}`, { method: 'POST',
+                headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' },
+                body: JSON.stringify({ contract_hash: contractHash, ...body }),
+            });
+            return { status: response.status, body: await response.json() };
+        };
+        const routed = await request('plan');
+        assert.equal(routed.status, 200, JSON.stringify(routed.body));
+        assert.deepEqual(routed.body.prompt_analysis, analysis, 'The local planner keeps the frontier dialogue contract.');
+        assert.equal(frontierCalls, 1, 'Recovery does not retry a rejected brief with the frontier planner.');
+        assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
+            'local-fallback:provider_policy');
+        assert.equal((await request('local-plan', { plan: { segments: [] } })).status, 503, 'An empty local screenplay is refused.');
+        const uploaded = await request('local-plan', { plan: { ...plan(), prompt_analysis: analysis,
+            generation_notice: 'Planned by the local model.' } });
+        assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
+        contractHash = uploaded.body.contract_hash;
+        assert.equal(uploaded.body.notice, 'Planned by the local model.');
+        assert.equal(uploaded.body.contract.local_reason, 'provider_policy');
+        const image = await request('image', { segment_index: 0 });
+        assert.equal(image.body.local_image_required, true);
+        assert.match(image.body.keyframe.prompt, /opening instant/);
+        assert.equal(generatorCalls, 0);
+        const hash = 'a'.repeat(64);
+        const artifact = { segment_index: 0, kind: 'image', artifact_sha256: hash, frames: ['data:image/jpeg;base64,YQ=='] };
+        const pending = await request('review', artifact);
+        assert.equal(pending.body.local_review_required, true);
+        assert.equal(pending.body.context.request, 'explorers return');
+        assert.equal((await request('review', artifact)).body.local_review_required, true);
+        assert.equal(reviewerCalls, 1, 'A pending local review is not recomputed.');
+        assert.equal((await request('local-review', { ...artifact, artifact_sha256: 'f'.repeat(64),
+            verdict: { acceptable: true, issues: [] } })).status, 503, 'Only a requested review can be answered locally.');
+        assert.equal((await request('local-review', { ...artifact, verdict: { acceptable: 'yes' } })).status, 503);
+        const stored = await request('local-review', { ...artifact, verdict: { acceptable: true, issues: [] } });
+        assert.equal(stored.body.acceptable, true);
+        assert.equal(stored.body.reviewer, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        assert.equal((await request('review', artifact)).body.acceptable, true);
+        const video = { ...artifact, kind: 'video', artifact_sha256: 'b'.repeat(64) };
+        delete video.frames;
+        video.frames = ['data:image/jpeg;base64,YQ=='];
+        const quality = { format: 'generated', result_sha256: 'c'.repeat(64), artifacts: [{ sha256: video.artifact_sha256 }] };
+        assert.equal((await request('quality', quality)).status, 503);
+        const videoReview = await request('review', video);
+        assert.equal(videoReview.body.acceptable, false, 'Missing audio for required speech still fails deterministically.');
+        const audible = { ...video, artifact_sha256: 'd'.repeat(64) };
+        const state = JSON.parse((await broker.get('SELECT recovery_json FROM video_jobs WHERE public_id=?', [id])).recovery_json);
+        state.local_reviews[`video:0:${audible.artifact_sha256}`] = { context: { transcript: 'We made it home.' } };
+        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?', [JSON.stringify(state), id]);
+        const accepted = await request('local-review', { ...audible, verdict: { acceptable: true, issues: [] } });
+        assert.equal(accepted.body.transcript, 'We made it home.');
+        assert.equal((await request('quality', { ...quality, artifacts: [{ sha256: audible.artifact_sha256 }] })).status, 200);
+    } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('an image-provider refusal of an approved scene falls back to local composition', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-recovery-image-'));
+    const value = plan();
+    const contract = approvedRecoveryContract(value, 'explorers return');
+    const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
+    let failure = new VideoKeyframeError('moderation', 'Blocked by moderation.');
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+        recoveryEnabled: true, preplanQueuedJobs: false, recoveryPlanner: async () => structuredClone(prepared),
+        keyframeGenerator: async () => { throw failure; } });
+    await broker.start();
+    try {
+        const base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'explorers return', requester_id: '1', origin_bot_id: '2',
+                channel_id: '3', command_message_id: '4', status_message_id: '5' }),
+        });
+        const id = (await submitted.json()).job.id;
+        broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+            scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+        await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=? WHERE public_id=?",
+            [VIDEO_RECOVERY_VERSION, id]);
+        const request = async (operation, body = {}) => {
+            const response = await fetch(`${base}/v1/worker/jobs/${id}/recovery/${operation}`, { method: 'POST',
+                headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' },
+                body: JSON.stringify({ contract_hash: prepared.contract_hash, ...body }),
+            });
+            return { status: response.status, body: await response.json() };
+        };
+        assert.equal((await request('plan')).status, 200);
+        const refused = await request('image', { segment_index: 0 });
+        assert.equal(refused.body.local_image_required, true);
+        assert.equal(refused.body.use_references, false);
+        failure = new VideoKeyframeError('provider_error', 'Provider offline.');
+        assert.equal((await request('image', { segment_index: 0 })).status, 503, 'An outage still waits for the provider.');
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });

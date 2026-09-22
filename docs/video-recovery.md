@@ -1,15 +1,45 @@
 # Video recovery
 
-The broker's production configuration enables recovery protocol version 2. It
+The broker's production configuration enables recovery protocol version 3. It
 leases new work only to a worker advertising that version or newer. Existing active
 leases can finish normally during a broker restart.
 
-An independently approved screenplay is the content contract for the job.
-Planning can repair timing and split dialogue at clause boundaries, but cannot
-remove required speech or weaken a rejected content decision. A policy refusal
-stops the job with the provider's diagnostic. Recovery does not rewrite the
-request, substitute another story, or discard its source images. Technical
-planning failures retry the same original brief once within the job budget.
+An approved screenplay is the content contract for the job. Planning can repair
+timing and split dialogue at clause boundaries, but cannot remove required
+speech. Recovery does not rewrite the request, substitute another story, or
+discard its source images. Technical planning failures retry the same original
+brief once within the job budget.
+
+## Local Qwen fallback
+
+When GPT-5.6 Sol rejects the request, whether through its `frontier_handling`
+decision, an API refusal, or an OpenAI moderation block, the broker answers the
+worker's `plan` call with `local_plan_required` instead of stopping or retrying.
+The broker persists that routing decision, so a resumed job never asks Sol
+again. The desktop worker then plans the original request with the local
+abliterated model (`hauhaucs-qwen3.8:27b-q4kp-mtp`), passing Sol's prompt
+analysis so both planners agree on what is spoken. It uploads the screenplay to
+`recovery/local-plan`, and that screenplay becomes the approved contract
+(`contract.planner = 'local'`). The one exception is `minor_sexualization`:
+sexual content involving minors stops the job and is never planned locally.
+
+A locally planned story also stays local for review. The broker still
+transcribes speech with Gemini (safety thresholds at `BLOCK_NONE`), then returns
+`local_review_required` with the review context. The worker judges the frames
+with local Qwen vision and posts its verdict to `recovery/local-review`. For a
+Sol-planned story, a Sol review refusal or a `permitted: false` verdict takes
+the same local route. Such a verdict is a policy veto, not a quality failure,
+so it is never cached as a failed review. When Gemini blocks a transcription, the reviewer is
+told the transcript is unavailable and judges only the visuals. A blocked
+transcript no longer counts as missing speech. Truly silent audio still fails.
+
+Opening images for a policy-rejected local story are composed on the desktop
+with local Qwen Image 2.1, which receives the source references when the
+contract uses them. A Sol-planned scene whose image providers return a
+moderation refusal falls back to the same local composition. Provider outages
+still wait and retry. Every local step (planning, each opening image, each
+review) takes its own `gpuq` reservation on the `video-h3` profile and releases
+it afterward, like a scene render.
 Saved plans that silently rewrote the request are rejected on resume.
 For oalgo, the original Meximutt reference is mandatory. If it is missing or
 excluded, the job stops before rendering. For portrait-only oalgo requests,
@@ -93,7 +123,13 @@ The coordinator config and source defaults have been corrected. Reload an idle
 coordinator after changing its config; it caches configuration in memory.
 
 GPU work, including validation, still uses `gpuq` and respects Gaming Mode.
-Recovery never sends a policy-rejected request to a less restricted local model.
+
+Install the local-fallback update (protocol version 3) with
+`python3 scripts/apply-video-local-fallback-desktop.py --check`, then run it
+without `--check`. It verifies the recorded baseline and result hashes. Reload
+the supervised worker child while idle so it advertises version 3, then deploy
+the broker. A broker running version 3 leases nothing to a version 2 worker,
+so update the worker first to avoid a stalled queue.
 
 ## Verification
 

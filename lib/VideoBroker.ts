@@ -1,5 +1,5 @@
-import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, recoveryHash, recoveryLimitReached } from './VideoRecovery.js';
-import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION, RecoveryStoppedError } from './VideoRecoveryService.js';
+import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
+import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
@@ -4739,26 +4739,73 @@ export class VideoBroker {
                 throw new RecoveryStoppedError('The saved screenplay replaced the required original portrait opening. Regenerate while retaining the source frame.');
             }
         };
+        const encodedSources = () => sources.map(source =>
+            `data:${source.mimeType};base64,${source.data.toString('base64')}`);
+        const writePrepared = () => writeJson(res, 200, { ...state.prepared, checkpoint: state.checkpoint || {},
+            sources: state.prepared.contract.use_source_images ? encodedSources() : [] });
         try {
             validateReferences();
             if (operation === 'plan') {
+                if (!state.prepared && !state.local_plan) {
+                    try {
+                        state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
+                            prompt: job.prompt, model: job.model, requester: job.requester_id,
+                            sources, options, planner: this.options.frontierPlanner,
+                            requireSourceIdentity: sourceRequired,
+                            requireOriginalFirstFrame: originalFrameRequired,
+                        });
+                    } catch (error) {
+                        if (!(error instanceof RecoveryLocalPlanRequired)) throw error;
+                        // Persist the routing decision so a resumed job never asks Sol again.
+                        state.local_plan = { reason_code: error.reasonCode, prompt_analysis: error.promptAnalysis,
+                            detail: sanitizeVideoWorkerText(error.message, '', 1000) };
+                        await this.run('UPDATE video_jobs SET planner_model=?, frontier_analysis_json=? WHERE public_id=?',
+                            [`${FRONTIER_REJECTION_PREFIX}${error.reasonCode}`,
+                                error.promptAnalysis ? JSON.stringify(error.promptAnalysis) : null, id]);
+                        await persist();
+                        console.log(`Frontier planner routed recovery job ${id} to the local planner (${error.reasonCode}).`);
+                    }
+                    if (state.prepared) {
+                        state.prepared.plan.generation_notice = state.prepared.notice;
+                        await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
+                            [JSON.stringify(state.prepared.plan), VIDEO_PLANNER_MODEL,
+                                JSON.stringify(state.prepared.contract.analysis), id]);
+                        await persist();
+                    }
+                }
+                validateReferences();
                 if (!state.prepared) {
-                    state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
-                        prompt: job.prompt, model: job.model, requester: job.requester_id,
-                        sources, options, planner: this.options.frontierPlanner,
-                        requireSourceIdentity: sourceRequired,
-                        requireOriginalFirstFrame: originalFrameRequired,
-                    });
-                    state.prepared.plan.generation_notice = state.prepared.notice;
-                    await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
-                        [JSON.stringify(state.prepared.plan), VIDEO_PLANNER_MODEL,
-                            JSON.stringify(state.prepared.contract.analysis), id]);
+                    writeJson(res, 200, { local_plan_required: true, reason_code: state.local_plan.reason_code,
+                        prompt_analysis: state.local_plan.prompt_analysis || null,
+                        checkpoint: state.checkpoint || {}, sources: encodedSources() });
+                    return;
+                }
+                writePrepared();
+                return;
+            }
+            if (operation === 'local-plan') {
+                if (!state.prepared) {
+                    if (!state.local_plan) throw new Error('Local planning was not requested for this job.');
+                    const plan = body.plan;
+                    for (const warning of validateLocalVideoPlanForKeyframe(
+                        plan, job.model, job.prompt, job.requested_duration_seconds)) {
+                        console.warn(`Local recovery screenplay for ${id} misses a frontier contract (${warning}).`);
+                    }
+                    repairVideoTiming(plan, 15, 5);
+                    if (originalFrameRequired) plan.keyframe = { ...(plan.keyframe || {}), recommended: false };
+                    const notice = sanitizeVideoWorkerText(String(plan.generation_notice || ''), '', 1000).trim();
+                    const contract = approvedLocalRecoveryContract(plan, job.prompt, state.local_plan.reason_code, notice);
+                    if (sourceRequired) contract.source_reference_required = true;
+                    if (originalFrameRequired) contract.original_first_frame = true;
+                    plan.generation_notice = notice;
+                    state.prepared = { plan, contract, contract_hash: recoveryHash(contract), prompt: job.prompt, notice };
+                    await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, planner_fingerprint=?, frontier_analysis_json=? WHERE public_id=?',
+                        [JSON.stringify(plan), LOCAL_VIDEO_PLANNER_MODEL, LOCAL_VIDEO_PLANNER_MODEL,
+                            JSON.stringify(contract.analysis), id]);
                     await persist();
                 }
                 validateReferences();
-                writeJson(res, 200, { ...state.prepared, checkpoint: state.checkpoint || {},
-                    sources: state.prepared.contract.use_source_images ? sources.map(source =>
-                        `data:${source.mimeType};base64,${source.data.toString('base64')}`) : [] });
+                writePrepared();
                 return;
             }
             const prepared = state.prepared;
@@ -4789,7 +4836,7 @@ export class VideoBroker {
                 return;
             }
             const index = Number(body.segment_index);
-            if (operation === 'image' || operation === 'review') {
+            if (operation === 'image' || operation === 'review' || operation === 'local-review') {
                 if (!Number.isInteger(index) || index < 0 || index >= prepared.plan.segments.length) throw new Error('Invalid segment.');
                 const segment = prepared.plan.segments[index];
                 if (operation === 'image') {
@@ -4810,9 +4857,25 @@ export class VideoBroker {
                             visualFactsToPreserve: sourceIndex ? 'Keep every main subject and story-defining prop recognizable.' : 'Preserve the original person and clothing.',
                             bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                         })) : [];
-                    const frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
-                        { ...scenePlan, keyframe, segments: [segment], recovery_request: prepared.contract.prompt }, references,
-                        { ...options, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
+                    // The desktop composes this opening with local Qwen Image instead.
+                    const localImage = () => writeJson(res, 200, { local_image_required: true,
+                        keyframe: { prompt: keyframe.prompt, motion_contract: keyframe.motion_contract || {} },
+                        use_references: references.length > 0 });
+                    if (prepared.contract.planner === 'local' && prepared.contract.local_reason === 'provider_policy') {
+                        localImage();
+                        return;
+                    }
+                    let frame: VideoKeyframeResult;
+                    try {
+                        frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
+                            { ...scenePlan, keyframe, segments: [segment], recovery_request: prepared.contract.prompt }, references,
+                            { ...options, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
+                    } catch (error) {
+                        if (!(error instanceof VideoKeyframeError && error.code === 'moderation')) throw error;
+                        console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);
+                        localImage();
+                        return;
+                    }
                     writeJson(res, 200, { image: `data:${frame.mimeType};base64,${frame.bytes.toString('base64')}` });
                     return;
                 }
@@ -4820,15 +4883,39 @@ export class VideoBroker {
                     || !/^[a-f0-9]{64}$/.test(String(body.artifact_sha256 || ''))) throw new Error('Invalid artifact.');
                 const key = `${body.kind}:${index}:${body.artifact_sha256}`;
                 state.reviews ||= {};
+                state.local_reviews ||= {};
                 const cachedReview = state.reviews[key];
                 if (!cachedReview || (body.kind === 'video' && !cachedReview.acceptable
                     && cachedReview.review_version !== VIDEO_RECOVERY_REVIEW_VERSION)) {
-                    state.reviews[key] = {
-                        ...await (this.options.recoveryReviewer || reviewRecoveryMedia)(
-                            prepared.contract, segment, body, options, prepared.contract.use_source_images ? sources : []),
-                        review_version: VIDEO_RECOVERY_REVIEW_VERSION,
-                    };
-                    await persist();
+                    const pending = state.local_reviews[key];
+                    if (operation === 'local-review') {
+                        const verdict = body.verdict;
+                        if (!pending) throw new Error('No local review is pending for this artifact.');
+                        if (!verdict || typeof verdict.acceptable !== 'boolean' || !Array.isArray(verdict.issues)) {
+                            throw new Error('Invalid local review verdict.');
+                        }
+                        state.reviews[key] = { acceptable: verdict.acceptable, permitted: true,
+                            issues: verdict.issues.slice(0, 8).map((issue: unknown) => sanitizeVideoWorkerText(String(issue), '', 500)),
+                            transcript: pending.context.transcript || '', reviewer: LOCAL_VIDEO_PLANNER_MODEL,
+                            review_version: VIDEO_RECOVERY_REVIEW_VERSION };
+                        delete state.local_reviews[key];
+                        await persist();
+                    } else if (pending) {
+                        writeJson(res, 200, { local_review_required: true, context: pending.context });
+                        return;
+                    } else {
+                        const outcome = await (this.options.recoveryReviewer || reviewRecoveryMedia)(
+                            prepared.contract, segment, body, options, prepared.contract.use_source_images ? sources : []);
+                        if (outcome.local_review_required) {
+                            state.local_reviews[key] = { context: outcome.context,
+                                ...(outcome.frontier_rejection ? { frontier_rejection: outcome.frontier_rejection } : {}) };
+                            await persist();
+                            writeJson(res, 200, { local_review_required: true, context: outcome.context });
+                            return;
+                        }
+                        state.reviews[key] = { ...outcome, review_version: VIDEO_RECOVERY_REVIEW_VERSION };
+                        await persist();
+                    }
                 }
                 writeJson(res, 200, state.reviews[key]);
                 return;
@@ -4863,7 +4950,7 @@ export class VideoBroker {
     }
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|image|review|checkpoint|quality)$/.exec(url.pathname);
+        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|review|local-review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);
             return;
