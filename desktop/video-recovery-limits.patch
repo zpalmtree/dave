@@ -1,0 +1,156 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -5263,7 +5263,16 @@
+     )
+ 
+ 
+-def h3_first_frame_face_identity_instruction(has_dialogue: bool = True) -> str:
++def h3_first_frame_face_identity_instruction(has_dialogue: bool = True, mouthless: bool = False) -> str:
++    if mouthless:
++        return (
++            "Picture 1 is the sole visual authority for every subject. Preserve the exact existing "
++            "head geometry, eye size and spacing, surface panels, clothing, and character design. "
++            "Subjects described as mouthless retain their rigid mouthless face throughout speech; "
++            "their voice comes from the established electronic speaker. Never add lips, teeth, a "
++            "nose, eyelids, or human facial anatomy absent from the reference. Convey emotion through "
++            "body posture, head direction, and hands, preserving the original small lens eyes."
++        )
+     mouth_motion = (
+         "Speech uses natural lip and jaw articulation while preserving that frame-zero lip width, "
+         "lip thickness, mouth-corner placement, teeth scale, jaw, and chin."
+@@ -5283,7 +5292,9 @@
+     )
+ 
+ 
+-def h3_first_frame_face_identity_reanchor(has_dialogue: bool = True) -> str:
++def h3_first_frame_face_identity_reanchor(has_dialogue: bool = True, mouthless: bool = False) -> str:
++    if mouthless:
++        return h3_first_frame_face_identity_instruction(has_dialogue, mouthless=True)
+     mouth_anchor = (
+         "Natural speech articulation retains the frame-zero lip, teeth, jaw, and chin proportions."
+         if has_dialogue else
+@@ -5305,6 +5316,8 @@
+ ) -> str:
+     parts: list[str] = []
+     has_dialogue = any(shot.get("dialogue") for shot in segment["shots"])
++    mouthless = bool(re.search(r"\b(?:mouthless|no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b",
++                              " ".join(str(shot.get("visual", "")) for shot in segment["shots"]), re.I))
+     dialogue_lead_in = h3_dialogue_lead_in_seconds()
+     opening_dialogue_guard = ""
+     if has_dialogue and dialogue_lead_in > 0:
+@@ -5342,12 +5355,12 @@
+                     "composition, and camera axis in <Picture 1>. Picture 1 overrides any conflicting "
+                     "description in the screenplay. "
+                     f"{motion_contract_text(motion_contract, dialogue_lead_in if has_dialogue else 0.0)} "
+-                    f"{h3_first_frame_face_identity_instruction(has_dialogue)}"
++                    f"{h3_first_frame_face_identity_instruction(has_dialogue, mouthless)}"
+                 )
+             else:
+                 image_anchor = (
+                     "After the cut, this remains the same subject from <Picture 1>. "
+-                    f"{h3_first_frame_face_identity_reanchor(has_dialogue)}"
++                    f"{h3_first_frame_face_identity_reanchor(has_dialogue, mouthless)}"
+                 )
+             visual = f"{image_anchor} {visual}"
+         body = f"{opening} {visual.rstrip('.')} . {shot['camera'].rstrip('.')} ."
+@@ -5372,6 +5385,10 @@
+             "Before the first quoted line and after the final quoted line, no human speech, mumbling, "
+             "or invented words are audible; speakers keep their mouths closed outside the dialogue."
+         )
++    if mouthless:
++        description = [value.replace("every speaker keeps their mouth closed", "every speaker remains vocally silent")
++                       .replace("speakers keep their mouths closed outside the dialogue", "the electronic voice is silent outside the dialogue")
++                       for value in description]
+     parts.append("integrated_multimodal_description: " + " ".join(description))
+     soundscape = " ".join(str(shot["audio"]).strip() for shot in segment["shots"])
+     silence_marker = re.sub(r"[\s.!]+", " ", soundscape).strip().casefold()
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -14,6 +14,12 @@
+ from pathlib import Path
+ 
+ import aiohttp
++
++MAX_SCENE_CYCLES = 2
++
++
++class RecoveryLimitError(RuntimeError):
++    pass
+ 
+ 
+ def digest(path: Path) -> str:
+@@ -190,6 +196,9 @@
+             scene_root = root / f'scene-{index}'
+             scene_root.mkdir(exist_ok=True)
+             scene = checkpoint['scenes'].setdefault(str(index), {})
++            if not scene.get('video_accepted') and scene.get('cycles', 0) >= MAX_SCENE_CYCLES:
++                raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
++                                         + '; '.join(scene.get('video_issues', [])))
+             async def review(path: Path, kind: str, frames=None):
+                 try:
+                     details = {'frames': frames or [data_image(path)]} if kind != 'video' else await asyncio.to_thread(review_samples, path, scene_root)
+@@ -345,6 +354,9 @@
+                     scene['cycles'] = scene.get('cycles', 0) + 1
+                     scene['video_attempts'] = 0
+                     await save()
++                    if scene['cycles'] >= MAX_SCENE_CYCLES:
++                        raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
++                                                 + '; '.join(scene.get('video_issues', [])))
+                     raise RuntimeError('Recovering the actual scene after both renderers missed it: ' + '; '.join(scene.get('video_issues', [])))
+             await save()
+         checkpoint['format'] = 'generated'
+@@ -372,4 +384,4 @@
+         await worker.finish_cancelled_job(job['id'])
+     except Exception as error:
+         traceback.print_exc()
+-        await worker.fail_current(str(error), True)
++        await worker.fail_current(str(error), not isinstance(error, RecoveryLimitError))
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -59,6 +59,28 @@
+ 
+     def test_all_renderers_failing_defers_without_uploading_a_storyboard(self):
+         self.exercise(render_failures=4)
++
++    def test_render_budget_survives_restart_and_stops_before_more_gpu_work(self):
++        self.exercise(render_failures=8)
++
++    def test_mouthless_h3_prompt_preserves_robot_anatomy_with_full_speech(self):
++        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
++            self.skipTest('Run on installed desktop sources.')
++        from video_gen import compile_h3_prompt
++        line = {'speaker_id': 'John', 'language': 'Spanish', 'delivery': 'electronic speaker',
++                'text': 'mae Luis libereme, necesito cotizar mae, saqueme de aqui'}
++        segment = {'music': 'N/A', 'shots': [
++            {'visual': 'The mouthless robot walks to the closed bars.', 'camera': 'Wide',
++             'audio': 'Footsteps', 'duration_seconds': 5, 'dialogue': []},
++            {'visual': 'John remains mouthless and speaks through the neck speaker.', 'camera': 'Close-up',
++             'audio': 'Room tone', 'duration_seconds': 8, 'dialogue': [line]}]}
++        prompt = compile_h3_prompt(segment, True)
++        self.assertIn(line['text'], prompt)
++        self.assertIn('rigid mouthless face', prompt)
++        self.assertNotIn('natural lip and jaw articulation', prompt)
++        self.assertNotIn('Natural speech articulation retains', prompt)
++        self.assertNotIn('every speaker keeps their mouth closed', prompt)
++        self.assertIn('At 00:05.000', prompt)
+ 
+     def test_image_service_outage_defers_without_a_placeholder(self):
+         self.exercise(image_outage=True)
+@@ -152,6 +174,17 @@
+             with mock.patch.dict(sys.modules, {'video_worker': fake}):
+                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
+                 asyncio.run(recovery.run_recovery_job(worker, job))
++                if render_failures == 8:
++                    self.assertEqual(worker.run_reserved_command.await_count, 4)
++                    self.assertTrue(worker.fail_current.await_args.args[1])
++                    asyncio.run(recovery.run_recovery_job(worker, job))
++                    self.assertEqual(worker.run_reserved_command.await_count, 8)
++                    self.assertFalse(worker.fail_current.await_args.args[1])
++                    asyncio.run(recovery.run_recovery_job(worker, job))
++                    self.assertEqual(worker.run_reserved_command.await_count, 8)
++                    self.assertFalse(worker.fail_current.await_args.args[1])
++                    worker.upload.assert_not_awaited()
++                    return
+                 if image_outage or render_failures == 4:
+                     worker.fail_current.assert_awaited_once()
+                     worker.upload.assert_not_awaited()

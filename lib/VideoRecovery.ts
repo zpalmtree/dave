@@ -1,6 +1,15 @@
 import { createHash } from 'crypto';
 
 export const VIDEO_RECOVERY_VERSION = 2;
+export const VIDEO_RECOVERY_MAX_FAILURES = 3;
+export const VIDEO_RECOVERY_MAX_SCENE_CYCLES = 2;
+
+/** Persisted budgets survive reconnects and broker/worker restarts. */
+export function recoveryLimitReached(state: any): boolean {
+    return Number(state?.waits || 0) >= VIDEO_RECOVERY_MAX_FAILURES
+        || Object.values(state?.checkpoint?.scenes || {}).some((scene: any) =>
+            !scene.video_accepted && Number(scene.cycles || 0) >= VIDEO_RECOVERY_MAX_SCENE_CYCLES);
+}
 export type VideoOutputFormat = 'generated';
 export interface VideoRecoveryContract {
     version: 1;

@@ -1,4 +1,4 @@
-import { VIDEO_RECOVERY_VERSION, recoveryHash } from './VideoRecovery.js';
+import { VIDEO_RECOVERY_VERSION, recoveryHash, recoveryLimitReached } from './VideoRecovery.js';
 import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
@@ -1943,8 +1943,10 @@ export class VideoBroker {
         if (regenerate && req.method === 'POST') {
             const body = await readJson(req);
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [regenerate[1]]);
-            if (!row || !['ready', 'delivered', 'failed'].includes(row.status)) {
-                writeJson(res, 409, { error: 'Only a finished job can be regenerated.' });
+            const exhaustedQueue = row?.status === 'queued' && row.recovery_version
+                && recoveryLimitReached(JSON.parse(row.recovery_json || '{}'));
+            if (!row || (!['ready', 'delivered', 'failed'].includes(row.status) && !exhaustedQueue)) {
+                writeJson(res, 409, { error: 'Only a finished job or an exhausted recovery can be regenerated.' });
                 return;
             }
             const guidance = typeof body.planner_guidance === 'string' ? body.planner_guidance.slice(0, 8000) : row.planner_guidance;
@@ -4336,10 +4338,17 @@ export class VideoBroker {
                     prior.waits = (prior.waits || 0) + 1;
                     prior.last_error = publicError;
                     const delay = Math.min(900, 30 * 2 ** Math.min(5, prior.waits - 1));
-                    await this.run(`UPDATE video_jobs SET status='queued', stage='Waiting to resume video recovery',
+                    const exhausted = recoveryLimitReached(prior) || message.retryable === false;
+                    await this.run(`UPDATE video_jobs SET status=?, stage=?,
                         recovery_json=?, recovery_next_at=?, worker_id=NULL, lease_token=NULL,
-                        lease_expires_at=NULL, gpu_queue_state=NULL, error=NULL, updated_at=? WHERE public_id=?`,
-                        [JSON.stringify(prior), nowSeconds() + delay, nowSeconds(), jobId]);
+                        lease_expires_at=NULL, gpu_queue_state=NULL, progress=NULL, progress_scope=NULL,
+                        segment_index=NULL, segment_count=NULL, segment_progress=NULL,
+                        error=?, completed_at=?, updated_at=? WHERE public_id=?`,
+                        [exhausted ? 'failed' : 'queued',
+                            exhausted ? 'Video recovery stopped' : 'Waiting to resume video recovery',
+                            JSON.stringify(prior), exhausted ? null : nowSeconds() + delay,
+                            exhausted ? `Video recovery stopped after ${prior.waits} failed passes. ${publicError}` : null,
+                            exhausted ? nowSeconds() : null, nowSeconds(), jobId]);
                     this.worker.currentJob = null;
                     this.worker.ready = false;
                     if (message.event_id) this.sendWorker({type:'event_ack', job_id:jobId, event_id:message.event_id});
@@ -4479,6 +4488,20 @@ export class VideoBroker {
             || control.gpuq_gaming_requested !== null) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
         if (!placeholders) return;
+        // Apply the budget to jobs queued by older code before leasing more GPU work.
+        const recovering = await this.all<JobRow>(
+            "SELECT * FROM video_jobs WHERE status='queued' AND recovery_version>0 AND recovery_json IS NOT NULL",
+        );
+        for (const job of recovering) {
+            const state = JSON.parse(job.recovery_json!);
+            if (!recoveryLimitReached(state)) continue;
+            await this.run(`UPDATE video_jobs SET status='failed', stage='Video recovery limit reached',
+                error=?, completed_at=?, updated_at=?, recovery_next_at=NULL, progress=NULL,
+                worker_id=NULL, lease_token=NULL, lease_expires_at=NULL, gpu_queue_state=NULL
+                WHERE public_id=? AND status='queued'`,
+                [`Video recovery limit reached. ${state.last_error || 'The scene did not pass review.'}`,
+                    nowSeconds(), nowSeconds(), job.public_id]);
+        }
         const candidates = await this.all<JobRow>(
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
              AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)

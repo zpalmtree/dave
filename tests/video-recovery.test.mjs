@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { approvedRecoveryContract, recoveryHash, repairVideoTiming, recoverySpeechMatches } from '../dist/VideoRecovery.js';
+import { approvedRecoveryContract, recoveryHash, repairVideoTiming, recoverySpeechMatches, recoveryLimitReached } from '../dist/VideoRecovery.js';
+import { stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
 import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION } from '../dist/VideoRecoveryService.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 
@@ -178,6 +179,26 @@ test('technical planning failure retries the same brief once; policy rejection f
     } finally { globalThis.fetch = originalFetch; }
 });
 
+test('mouthless dialogue staging preserves anatomy without forcing lip sync', () => {
+    const value = { continuity_bible: 'John is a mouthless robot with small lens eyes.', segments: [{ shots: [{
+        visual: 'John walks to the bars and speaks through his collar.', dialogue: [{ speaker_id: 'John', text: 'Let me out.' }],
+    }] }] };
+    stageFrontierDialogueVisually(value);
+    assert.match(value.segments[0].shots[0].visual, /established voice mechanism/);
+    assert.doesNotMatch(value.segments[0].shots[0].visual, /synchronized mouth movement/);
+    assert.equal(stageFrontierDialogueVisually(value), 0);
+    const human = { segments: [{ shots: [{ visual: 'A man speaks.', dialogue: [{ speaker_id: 'Alex', text: 'Hello.' }] }] }] };
+    stageFrontierDialogueVisually(human);
+    assert.match(human.segments[0].shots[0].visual, /synchronized mouth movement/);
+});
+
+test('recovery budgets distinguish exhausted scenes from accepted scenes', () => {
+    assert.equal(recoveryLimitReached({ waits: 2 }), false);
+    assert.equal(recoveryLimitReached({ waits: 3 }), true);
+    assert.equal(recoveryLimitReached({ checkpoint: { scenes: { 0: { cycles: 2 } } } }), true);
+    assert.equal(recoveryLimitReached({ checkpoint: { scenes: { 0: { cycles: 2, video_accepted: 'hash' } } } }), false);
+});
+
 test('broker persists recovery and requires every scene review for the matching contract/output', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-'));
     const value = plan();
@@ -280,6 +301,35 @@ test('broker persists recovery and requires every scene review for the matching 
         assert.equal(deferred.error, null);
         assert.ok(deferred.recovery_next_at > Date.now() / 1000);
         assert.equal(JSON.parse(deferred.recovery_json).checkpoint.scenes['0'].video_attempts, 1);
+        // Failed passes are bounded even if every provider failure is marked retryable.
+        for (let pass = 2; pass <= 3; pass++) {
+            broker.worker.currentJob = id;
+            await broker.run("UPDATE video_jobs SET status='running', progress=.98 WHERE public_id=?", [id]);
+            await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
+                error: 'review service unavailable', retryable: true });
+            const stopped = await broker.get('SELECT status,progress,error,recovery_next_at,completed_at,recovery_json FROM video_jobs WHERE public_id=?', [id]);
+            assert.equal(stopped.status, pass === 3 ? 'failed' : 'queued');
+            assert.equal(stopped.progress, null);
+            assert.equal(JSON.parse(stopped.recovery_json).waits, pass);
+            if (pass === 3) {
+                assert.match(stopped.error, /3 failed passes/);
+                assert.equal(stopped.recovery_next_at, null);
+                assert.ok(stopped.completed_at);
+            }
+        }
+        // A legacy queued job over budget is stopped before it can receive another lease.
+        await broker.run("UPDATE video_jobs SET status='queued', recovery_next_at=0 WHERE public_id=?", [id]);
+        broker.worker.ready = true;
+        broker.worker.scheduler = { available: true, mode: 'normal', health: 'healthy' };
+        await broker.dispatchNext();
+        assert.equal((await broker.get('SELECT status FROM video_jobs WHERE public_id=?', [id])).status, 'failed');
+        assert.equal(broker.worker.currentJob, null);
+        // Non-retryable errors stop immediately, retaining the last diagnostic and checkpoint.
+        await broker.run("UPDATE video_jobs SET status='running', recovery_json=? WHERE public_id=?", [deferred.recovery_json, id]);
+        broker.worker.currentJob = id;
+        await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
+            error: 'Scene exhausted its render attempts', retryable: false });
+        assert.equal((await broker.get('SELECT status FROM video_jobs WHERE public_id=?', [id])).status, 'failed');
         broker.worker = null;
         await broker.run("UPDATE video_jobs SET status='delivered', delivery_message_id='123456' WHERE public_id=?", [id]);
         const botRequest = async (endpoint, body) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs/${id}/${endpoint}`, {
@@ -297,5 +347,9 @@ test('broker persists recovery and requires every scene review for the matching 
         await botRequest('delivered', { revision: 1, message_id: '123456' });
         assert.deepEqual(await broker.get('SELECT status,delivered_revision,delivery_message_id FROM video_jobs WHERE public_id=?', [id]),
             { status: 'delivered', delivered_revision: 1, delivery_message_id: '123456' });
+        await broker.run("UPDATE video_jobs SET status='queued', recovery_json=? WHERE public_id=?", [JSON.stringify({ waits: 3 }), id]);
+        assert.equal((await botRequest('regenerate', {})).status, 200, 'An explicitly regenerated exhausted queue entry gets a fresh revision.');
+        const retried = await broker.get('SELECT delivery_revision,recovery_json FROM video_jobs WHERE public_id=?', [id]);
+        assert.deepEqual(retried, { delivery_revision: 2, recovery_json: null });
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
