@@ -33,7 +33,7 @@
  ) -> str:
      parts: list[str] = []
      has_dialogue = any(shot.get("dialogue") for shot in segment["shots"])
-+    mouthless = bool(re.search(r"\b(?:mouthless|no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b",
++    mouthless = bool(re.search(r"\b(?:mouthless\b|(?:no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b(?!\s+(?:mov\w*|motion|animation|articulation|opening|sound\w*|noise\w*)))",
 +                              " ".join(str(shot.get("visual", "")) for shot in segment["shots"]), re.I))
      dialogue_lead_in = h3_dialogue_lead_in_seconds()
      opening_dialogue_guard = ""
@@ -107,7 +107,7 @@
 +        await worker.fail_current(str(error), not isinstance(error, RecoveryLimitError))
 --- a/test_video_recovery.py
 +++ b/test_video_recovery.py
-@@ -59,6 +59,28 @@
+@@ -59,6 +59,34 @@
  
      def test_all_renderers_failing_defers_without_uploading_a_storyboard(self):
          self.exercise(render_failures=4)
@@ -133,10 +133,16 @@
 +        self.assertNotIn('Natural speech articulation retains', prompt)
 +        self.assertNotIn('every speaker keeps their mouth closed', prompt)
 +        self.assertIn('At 00:05.000', prompt)
++        speaking_shot = segment['shots'][1]
++        for visual in ['No mouth movement until the line begins.', 'Wait without mouth animation, then speak.']:
++            segment['shots'] = [{**speaking_shot, 'visual': visual}]
++            human = compile_h3_prompt(segment, True)
++            self.assertIn('natural lip and jaw articulation', human)
++            self.assertNotIn('rigid mouthless face', human)
  
      def test_image_service_outage_defers_without_a_placeholder(self):
          self.exercise(image_outage=True)
-@@ -152,6 +174,17 @@
+@@ -152,6 +180,17 @@
              with mock.patch.dict(sys.modules, {'video_worker': fake}):
                  job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
                  asyncio.run(recovery.run_recovery_job(worker, job))

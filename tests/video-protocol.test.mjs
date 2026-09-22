@@ -1855,6 +1855,19 @@ test('broker validation requires one short verbatim H3 line in the first shot', 
         'minimax',
         'After crossing the finish line, a racer says "Not today!"',
     ));
+    for (const prompt of [
+        'A racer walks to the car, close up to the face, racer says "Not today!"',
+        'A racer enters the cockpit; racer says "Not today!"',
+    ]) assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', prompt));
+    for (const prompt of [
+        'A racer walks while he says "Not today!"',
+        'A racer, wearing a red suit, says "Not today!"',
+    ]) assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', prompt), /move it to the beginning/);
+    analysis.dialogue_contract.lines[0].text = 'mae Luis libereme, necesito cotizar mae, saqueme de aqui';
+    plan.segments[0].shots[1].dialogue[0].text = analysis.dialogue_contract.lines[0].text;
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax',
+        'bot is in cell close, walks to the cell bars, close up to the face, bot says mae Luis libereme, necesito cotizar mae, saqueme de aqui'));
+
 });
 
 test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {

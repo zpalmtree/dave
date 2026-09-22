@@ -1,0 +1,26 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -5316,7 +5316,7 @@
+ ) -> str:
+     parts: list[str] = []
+     has_dialogue = any(shot.get("dialogue") for shot in segment["shots"])
+-    mouthless = bool(re.search(r"\b(?:mouthless|no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b",
++    mouthless = bool(re.search(r"\b(?:mouthless\b|(?:no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b(?!\s+(?:mov\w*|motion|animation|articulation|opening|sound\w*|noise\w*)))",
+                               " ".join(str(shot.get("visual", "")) for shot in segment["shots"]), re.I))
+     dialogue_lead_in = h3_dialogue_lead_in_seconds()
+     opening_dialogue_guard = ""
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -81,6 +81,12 @@
+         self.assertNotIn('Natural speech articulation retains', prompt)
+         self.assertNotIn('every speaker keeps their mouth closed', prompt)
+         self.assertIn('At 00:05.000', prompt)
++        speaking_shot = segment['shots'][1]
++        for visual in ['No mouth movement until the line begins.', 'Wait without mouth animation, then speak.']:
++            segment['shots'] = [{**speaking_shot, 'visual': visual}]
++            human = compile_h3_prompt(segment, True)
++            self.assertIn('natural lip and jaw articulation', human)
++            self.assertNotIn('rigid mouthless face', human)
+ 
+     def test_image_service_outage_defers_without_a_placeholder(self):
+         self.exercise(image_outage=True)

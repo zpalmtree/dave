@@ -7,9 +7,15 @@ leases can finish normally during a broker restart.
 An independently approved screenplay is the content contract for the job.
 Planning can repair timing and split dialogue at clause boundaries, but cannot
 remove required speech or weaken a rejected content decision. A policy refusal
-first produces a permitted adaptation with an audience-facing notice; that
-adaptation must independently pass planning before any images or video render.
-Source images that cannot safely be retained are excluded from subsequent calls.
+stops the job with the provider's diagnostic. Recovery does not rewrite the
+request, substitute another story, or discard its source images. Technical
+planning failures retry the same original brief once within the job budget.
+Saved plans that silently rewrote the request are rejected on resume.
+For oalgo, the original Meximutt reference is mandatory. If it is missing or
+excluded, the job stops before rendering. For portrait-only oalgo requests,
+the original portrait is also the required opening frame; a generated
+replacement keyframe is rejected. Identity reviews must receive the original
+reference.
 
 Each scene gets a reviewed opening image. When the approved plan calls for the
 original portrait at frame zero, the worker uses that image directly. Continuing
@@ -91,7 +97,7 @@ Recovery never sends a policy-rejected request to a less restricted local model.
 
 ## Verification
 
-`yarn test` covers contract preservation, timing repair, policy adaptation,
+`yarn test` covers contract preservation, timing repair, refusal handling, source identity,
 matching output approval, deferred recovery, and broker/delivery regressions.
 `desktop/test_video_recovery.py` uses real decodable video fixtures to exercise
 original-frame reuse, continuation, alternate renderers, unavailable imagery,

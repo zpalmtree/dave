@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
@@ -159,24 +159,23 @@ test('timing repair fits several turns without packing an oversized split into t
     }
 });
 
-test('technical planning failure retries the same brief once; policy rejection first changes the brief', async () => {
+test('technical planning failure retries the original brief once', async () => {
     let calls = 0;
     await prepareRecoveryPlan({ prompt: 'explorers', model: 'minimax', requester: 'test', sources: [], options: {},
         planner: async prompt => { assert.equal(prompt, 'explorers'); if (++calls === 1) throw new Error('timeout'); return plan(); } });
     assert.equal(calls, 2);
-    const prompts = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response(JSON.stringify({ status: 'completed', output_text: JSON.stringify({
-        prompt: 'Two adult explorers share a friendly reunion.', notice: 'Adapted to a non-explicit reunion.', use_source_images: false,
-    }) }), { status: 200, headers: { 'content-type': 'application/json' } });
-    try {
-        const result = await prepareRecoveryPlan({ prompt: 'A declined brief', model: 'minimax', requester: 'test', sources: [], options: {},
-            planner: async prompt => { prompts.push(prompt); if (prompts.length === 1) throw new FrontierPlannerRejectedError('provider_policy', 'declined'); return plan(); } });
-        assert.equal(prompts.length, 2);
-        assert.notEqual(prompts[0], prompts[1]);
-        assert.equal(result.contract.use_source_images, false);
-        assert.match(result.notice, /Adapted/);
-    } finally { globalThis.fetch = originalFetch; }
+});
+
+test('policy rejection stops without a rewrite request or another planning attempt', async t => {
+    t.mock.method(globalThis, 'fetch', () => { assert.fail('No automatic adaptation request is allowed.'); });
+    let calls = 0;
+    await assert.rejects(prepareRecoveryPlan({ prompt: 'The original brief', model: 'minimax', requester: 'test', sources: [], options: {},
+        planner: async prompt => {
+            assert.equal(prompt, 'The original brief'); calls++;
+            throw new FrontierPlannerRejectedError('provider_policy', 'Provider refusal details');
+        },
+    }), /Video planner declined the request: Provider refusal details/);
+    assert.equal(calls, 1);
 });
 
 test('mouthless dialogue staging preserves anatomy without forcing lip sync', () => {
@@ -190,6 +189,47 @@ test('mouthless dialogue staging preserves anatomy without forcing lip sync', ()
     const human = { segments: [{ shots: [{ visual: 'A man speaks.', dialogue: [{ speaker_id: 'Alex', text: 'Hello.' }] }] }] };
     stageFrontierDialogueVisually(human);
     assert.match(human.segments[0].shots[0].visual, /synchronized mouth movement/);
+    for (const visual of ['No mouth movement until the line begins.', 'Wait without mouth animation, then speak.']) {
+        const timed = { segments: [{ shots: [{ visual, dialogue: [{ speaker_id: 'Alex', text: 'Hello.' }] }] }] };
+        stageFrontierDialogueVisually(timed);
+        assert.match(timed.segments[0].shots[0].visual, /synchronized mouth movement/);
+    }
+});
+
+test('original request and portrait are retained in planning and required in review', async () => {
+    const sources = [{ data: Buffer.from('portrait'), mimeType: 'image/png' }];
+    let calls = 0;
+    const result = await prepareRecoveryPlan({ prompt: 'The supplied character complains about a crypto scam.', model: 'minimax', requester: 'test', sources,
+        options: {}, requireSourceIdentity: true, requireOriginalFirstFrame: true,
+        planner: async (prompt, _model, _requester, references, options) => {
+            assert.equal(prompt, 'The supplied character complains about a crypto scam.');
+            assert.equal(references, sources);
+            assert.match(options.plannerGuidance, /keyframe.recommended=false/);
+            if (++calls === 1) throw new Error('temporary timeout');
+            const value = plan(); value.keyframe.recommended = false; return value;
+        },
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.prompt, 'The supplied character complains about a crypto scam.');
+    assert.equal(result.notice, '');
+    assert.equal(result.contract.use_source_images, true);
+    assert.equal(result.contract.source_reference_required, true);
+    assert.equal(result.contract.original_first_frame, true);
+    await assert.rejects(reviewRecoveryMedia(result.contract, result.plan.segments[0],
+        { kind: 'image', frames: ['data:image/jpeg;base64,YQ=='] }, {}, []), /reference is missing from review/);
+    await assert.rejects(prepareRecoveryPlan({ prompt: 'A character speaks', model: 'minimax', requester: 'test',
+        sources: [], options: {}, requireSourceIdentity: true,
+        planner: async () => { assert.fail('Missing references must fail before planning.'); },
+    }), /reference is missing/);
+});
+
+test('a generated replacement opening cannot satisfy a required original portrait', async () => {
+    let calls = 0;
+    await assert.rejects(prepareRecoveryPlan({ prompt: 'A character speaks', model: 'minimax', requester: 'test',
+        sources: [{ data: Buffer.from('portrait'), mimeType: 'image/png' }], options: {}, requireOriginalFirstFrame: true,
+        planner: async () => { calls++; return plan(); },
+    }), /required original portrait/);
+    assert.equal(calls, 2);
 });
 
 test('recovery budgets distinguish exhausted scenes from accepted scenes', () => {
@@ -203,7 +243,7 @@ test('broker persists recovery and requires every scene review for the matching 
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-'));
     const value = plan();
     const contract = approvedRecoveryContract(value, 'explorers return');
-    const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: 'Adapted to a friendly reunion.' };
+    const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
     let reviews = 0;
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
@@ -284,7 +324,7 @@ test('broker persists recovery and requires every scene review for the matching 
         await assert.rejects(broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id,
             lease_id: 'lease', runtime_seconds: 5 }), /exact output/);
         await broker.run("UPDATE video_jobs SET result_path='result.mp4', result_sha256=?, error='old error' WHERE public_id=?", [resultHash, id]);
-        const notice = 'Adapted to a friendly reunion. An alternate video renderer recovered the scene.';
+        const notice = 'An alternate video renderer recovered the scene.';
         await broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id, lease_id: 'lease', runtime_seconds: 5, generation_notice: notice });
         const row = await broker.get('SELECT status,error FROM video_jobs WHERE public_id=?', [id]);
         assert.deepEqual(row, { status: 'ready', error: null });
@@ -351,5 +391,88 @@ test('broker persists recovery and requires every scene review for the matching 
         assert.equal((await botRequest('regenerate', {})).status, 200, 'An explicitly regenerated exhausted queue entry gets a fresh revision.');
         const retried = await broker.get('SELECT delivery_revision,recovery_json FROM video_jobs WHERE public_id=?', [id]);
         assert.deepEqual(retried, { delivery_revision: 2, recovery_json: null });
+    } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('broker stops rewritten plans, missing identity, replacement openings, and refusals without requeueing', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-recovery-identity-'));
+    const portrait = join(directory, 'portrait.png');
+    writeFileSync(portrait, Buffer.from('portrait'));
+    const value = plan(); value.keyframe.recommended = false;
+    const contract = approvedRecoveryContract(value, 'The original request');
+    const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
+    let refusal = false, planningCalls = 0;
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+        recoveryEnabled: true, preplanQueuedJobs: false,
+        recoveryPlanner: async input => {
+            planningCalls++;
+            assert.equal(input.requireSourceIdentity, true);
+            assert.equal(input.requireOriginalFirstFrame, true);
+            assert.equal(input.sources.length, 1);
+            if (refusal) return prepareRecoveryPlan({ ...input, planner: async () => {
+                throw new FrontierPlannerRejectedError('provider_policy', 'Provider refused the original request');
+            } });
+            return structuredClone(prepared);
+        },
+        keyframeGenerator: async () => { assert.fail('The original portrait cannot be regenerated.'); },
+    });
+    await broker.start();
+    try {
+        const base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'The original request', requester_id: '1', origin_bot_id: '2',
+                channel_id: '3', command_message_id: '4', status_message_id: '5' }),
+        });
+        assert.equal(submitted.status, 201);
+        const id = (await submitted.json()).job.id;
+        broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+            capabilities: ['minimax'], recoveryVersion: 2, lastHeartbeat: Date.now(),
+            scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+        const reset = async (state = {}, source = portrait) => {
+            broker.worker.currentJob = id;
+            await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=2, command_variant='oalgo', source_image_path=?, source_image_mime='image/png', recovery_json=? WHERE public_id=?",
+                [source, JSON.stringify(state), id]);
+        };
+        const request = async (operation, body = {}) => {
+            const response = await fetch(`${base}/v1/worker/jobs/${id}/recovery/${operation}`, { method: 'POST',
+                headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' },
+                body: JSON.stringify({ contract_hash: prepared.contract_hash, ...body }),
+            });
+            return { status: response.status, body: await response.json() };
+        };
+        await reset();
+        assert.equal((await request('plan')).status, 200);
+        assert.equal((await request('image', { segment_index: 0 })).status, 422);
+        const failed = async () => {
+            await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
+                error: 'Recovery request failed', retryable: true });
+            const row = await broker.get('SELECT status,recovery_json FROM video_jobs WHERE public_id=?', [id]);
+            assert.equal(row.status, 'failed');
+            const state = JSON.parse(row.recovery_json);
+            assert.equal(state.waits, 1);
+            assert.ok(state.terminal_error);
+        };
+        await failed();
+        for (const change of [
+            candidate => { candidate.prompt = 'An automatically rewritten request'; },
+            candidate => { candidate.contract.use_source_images = false; },
+            candidate => { candidate.plan.keyframe.recommended = true; },
+        ]) {
+            const candidate = structuredClone(prepared); change(candidate);
+            await reset({ prepared: candidate });
+            assert.equal((await request('plan')).status, 422);
+            await failed();
+        }
+        await reset({}, null);
+        assert.equal((await request('plan')).status, 422);
+        await failed();
+        assert.equal(planningCalls, 1, 'Invalid saved plans and missing references stop before calling the planner.');
+        await reset(); refusal = true;
+        const declined = await request('plan');
+        assert.equal(declined.status, 422);
+        assert.match(declined.body.error, /Provider refused the original request/);
+        await failed();
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
