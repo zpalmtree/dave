@@ -156,6 +156,22 @@ export function approvedRecoveryContract(plan: any, prompt: string, notice = '',
 }
 
 /**
+ * The local planner sometimes marks a segment that keeps the same shot as a hard cut.
+ * Such a segment should open on the previous clip's last frame rather than on a newly
+ * generated image of the same framing, which loses the source's look.
+ */
+export function continueUnbrokenLocalSegments(plan: any): void {
+    for (const [index, segment] of (Array.isArray(plan?.segments) ? plan.segments : []).entries()) {
+        if (index === 0 || segment?.transition !== 'cut') continue;
+        const opening = String(segment.shots?.[0]?.visual || '').split(/(?<=[.!?])\s/)[0];
+        if (/\b(?:remains?|is still|stays?|continues?)\b/i.test(opening)
+            && !/\b(?:cuts?|new|elsewhere|meanwhile|later|another|different|flashback)\b/i.test(opening)) {
+            segment.transition = 'continue';
+        }
+    }
+}
+
+/**
  * A frontier rejection hands planning to the desktop's local Qwen. Its screenplay
  * becomes the contract; the rejected frontier content decision no longer applies.
  */

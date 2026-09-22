@@ -947,7 +947,7 @@ async function compareVideoKeyframes(
     }
 }
 
-function isModerationFailure(error: unknown): boolean {
+export function isModerationFailure(error: unknown): boolean {
     const detail = error instanceof Error ? error.message : String(error);
     return /moderation|safety|policy|content filter|blocked|blocklist|prompt_block=/.test(detail.toLowerCase())
         || /prohibited[_ ]content|jailbreak|model[_ ]armor|\bspii\b|recitation/i.test(detail);

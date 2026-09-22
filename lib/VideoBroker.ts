@@ -1,4 +1,4 @@
-import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
+import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
@@ -61,6 +61,7 @@ import {
     configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
+    isModerationFailure,
     generateFrontierVideoKeyframeCandidate,
 } from './VideoKeyframeProvider.js';
 import {
@@ -4712,6 +4713,7 @@ export class VideoBroker {
                     if (!state.local_plan) throw new Error('Local planning was not requested for this job.');
                     const plan = body.plan;
                     if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Invalid local screenplay.');
+                    continueUnbrokenLocalSegments(plan);
                     repairVideoTiming(plan, 15, 5);
                     if (originalFrameRequired) plan.keyframe = { ...(plan.keyframe || {}), recommended: false };
                     const notice = sanitizeVideoWorkerText(String(plan.generation_notice || ''), '', 1000).trim();
@@ -4778,23 +4780,24 @@ export class VideoBroker {
                             visualFactsToPreserve: sourceIndex ? 'Keep every main subject and story-defining prop recognizable.' : 'Preserve the original person and clothing.',
                             bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                         })) : [];
-                    // The desktop composes this opening with local Qwen Image instead.
-                    const localImage = () => writeJson(res, 200, { local_image_required: true,
-                        keyframe: { prompt: keyframe.prompt, motion_contract: keyframe.motion_contract || {} },
-                        use_references: references.length > 0 });
-                    if (prepared.contract.planner === 'local' && prepared.contract.local_reason === 'provider_policy') {
-                        localImage();
-                        return;
-                    }
+                    // The frontier providers draw far better frames, and a single scene of a
+                    // rejected story is often unobjectionable, so they always go first. A
+                    // refusal or review veto has the desktop compose the opening with local
+                    // Qwen Image instead; an outage still waits and retries.
                     let frame: VideoKeyframeResult;
                     try {
                         frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
                             { ...scenePlan, keyframe, segments: [segment], recovery_request: prepared.contract.prompt }, references,
                             { ...options, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
                     } catch (error) {
-                        if (!(error instanceof VideoKeyframeError && error.code === 'moderation')) throw error;
+                        const declined = error instanceof VideoKeyframeError
+                            ? ['moderation', 'review_unavailable', 'identity_review', 'composition_review'].includes(error.code)
+                            : isModerationFailure(error);
+                        if (!declined) throw error;
                         console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);
-                        localImage();
+                        writeJson(res, 200, { local_image_required: true,
+                            keyframe: { prompt: keyframe.prompt, motion_contract: keyframe.motion_contract || {} },
+                            use_references: references.length > 0 });
                         return;
                     }
                     writeJson(res, 200, { image: `data:${frame.mimeType};base64,${frame.bytes.toString('base64')}` });
