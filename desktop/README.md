@@ -7,6 +7,14 @@ quality checks, alternate video renderers, resumable delivery, and shared Qwen p
 Install with `python3 scripts/apply-video-recovery-desktop.py`; the hash-checked
 patch targets the audited desktop baseline and preserves unrelated local edits.
 
+## Local Qwen fallback
+
+`video-local-fallback.patch` lets recovery protocol 3 plan, compose opening images,
+and review scenes with local Qwen when GPT-5.6 Sol or the image providers reject a
+request. See [video recovery](../docs/video-recovery.md#local-qwen-fallback).
+Install with `python3 scripts/apply-video-local-fallback-desktop.py --check`, then
+without `--check`, and reload the idle worker child before deploying the broker.
+
 ## Audio continuity
 
 `video-audio-continuity.patch` adds shared speaker profiles, independent audio

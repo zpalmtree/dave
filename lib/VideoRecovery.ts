@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 
-export const VIDEO_RECOVERY_VERSION = 2;
+// Version 3 workers can plan, compose opening images, and review locally.
+export const VIDEO_RECOVERY_VERSION = 3;
 export const VIDEO_RECOVERY_MAX_FAILURES = 3;
 export const VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS = 2;
 
@@ -22,6 +23,9 @@ export interface VideoRecoveryContract {
     use_source_images: boolean;
     source_reference_required?: boolean;
     original_first_frame?: boolean;
+    /** Set when the frontier planner rejected the request and local Qwen planned it. */
+    planner?: 'local';
+    local_reason?: string;
 }
 
 export function recoveryHash(value: unknown): string {
@@ -148,6 +152,22 @@ export function approvedRecoveryContract(plan: any, prompt: string, notice = '',
     if (analysis.dialogue_contract?.mode !== 'none' && !actual) throw new Error('Required dialogue is missing.');
     return JSON.parse(JSON.stringify({
         version: 1, prompt, analysis, segments: plan.segments, notice, use_source_images: useSources,
+    }));
+}
+
+/**
+ * A frontier rejection hands planning to the desktop's local Qwen. Its screenplay
+ * becomes the contract; the rejected frontier content decision no longer applies.
+ */
+export function approvedLocalRecoveryContract(plan: any, prompt: string, reason: string,
+    notice = '', useSources = true): VideoRecoveryContract {
+    if (!Array.isArray(plan?.segments) || !plan.segments.length
+        || plan.segments.some((segment: any) => !Array.isArray(segment?.shots) || !segment.shots.length)) {
+        throw new Error('The local screenplay has no renderable scenes.');
+    }
+    return JSON.parse(JSON.stringify({
+        version: 1, prompt, analysis: plan.prompt_analysis || plan.semantic_analysis || {},
+        segments: plan.segments, notice, use_source_images: useSources, planner: 'local', local_reason: reason,
     }));
 }
 

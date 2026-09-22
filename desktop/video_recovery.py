@@ -147,6 +147,41 @@ async def release_recovery_reservation(worker) -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
+async def run_local_step(worker, job: dict, scope: str, command: list[str], label: str) -> None:
+    """Run one local Qwen step under its own GPU reservation, like a scene render."""
+    if not await worker.ensure_gpu_reservation({**job, 'gpuq_reservation_scope': scope}):
+        raise asyncio.CancelledError()
+    try:
+        code = await worker.run_reserved_command(command)
+    finally:
+        await release_recovery_reservation(worker)
+    if worker.cancel_reason:
+        raise asyncio.CancelledError()
+    if code != 0:
+        raise RuntimeError(f'Local {label} exited with code {code}.')
+
+
+async def plan_locally(worker, job: dict, root: Path, routed: dict, log: Path) -> dict:
+    """The frontier planner rejected the request; plan it with the local Qwen model."""
+    sources = []
+    for index, source in enumerate(routed.get('sources', [])):
+        path = root / f'local-plan-source-{index}.png'
+        save_image(source, path)
+        sources.append(path)
+    scope = f"local-plan-r{int(job.get('recovery_revision', 0))}-{int(time.time())}"
+    if not await worker.ensure_gpu_reservation({**job, 'gpuq_reservation_scope': scope}):
+        raise asyncio.CancelledError()
+    try:
+        # With an attached scene the last source is that scene; otherwise it is the only image.
+        result = await worker.create_local_plan(job, log, sources[-1] if sources else None,
+                                                routed.get('prompt_analysis'))
+    finally:
+        await release_recovery_reservation(worker)
+    if result is None or worker.cancel_reason:
+        raise asyncio.CancelledError()
+    return result[1]
+
+
 async def run_recovery_job(worker, job: dict) -> None:
     from video_worker import SCRIPT_DIR, MODEL_ARGS, GENERATOR, console_python_executable, atomic_json, stable_job_seed
     root = SCRIPT_DIR / 'worker_recovery' / str(job['id'])
@@ -155,7 +190,7 @@ async def run_recovery_job(worker, job: dict) -> None:
     log.parent.mkdir(exist_ok=True)
     started = time.time()
     worker.begin_metrics(job, started)
-    worker.save_journal(started=started, log=str(log), recovery_version=2)
+    worker.save_journal(started=started, log=str(log), recovery_version=3)
     base = re.sub(r'^ws(s?)://', lambda match: 'http' + match[1] + '://', worker.broker_url)
     base = re.sub(r'/v1/worker$', f"/v1/worker/jobs/{job['id']}/recovery/", base)
     contract_hash = ''
@@ -177,6 +212,10 @@ async def run_recovery_job(worker, job: dict) -> None:
     try:
         await worker.send({'type': 'event', 'event': 'plan', 'job_id': job['id'], 'stage': 'Preparing an approved story'})
         prepared = await request('plan')
+        if prepared.get('local_plan_required'):
+            await worker.send({'type': 'event', 'event': 'plan', 'job_id': job['id'],
+                               'stage': 'Frontier planner rejected; planning locally'})
+            prepared = await request('local-plan', {'plan': await plan_locally(worker, job, root, prepared, log)})
         contract_hash = prepared['contract_hash']
         checkpoint_path = root / 'checkpoint.json'
         checkpoint = prepared.get('checkpoint') or {}
@@ -210,8 +249,44 @@ async def run_recovery_job(worker, job: dict) -> None:
                     details = {'frames': frames or [data_image(path)]} if kind != 'video' else await asyncio.to_thread(review_samples, path, scene_root)
                 except Exception:
                     return {'acceptable': False, 'issues': ['The output could not be fully decoded.']}
-                return await request('review', {'segment_index': index, 'kind': kind,
-                    'artifact_sha256': digest(path), **details})
+                artifact = {'segment_index': index, 'kind': kind, 'artifact_sha256': digest(path)}
+                verdict = await request('review', {**artifact, **details})
+                if not verdict.get('local_review_required'):
+                    return verdict
+                # The frontier reviewer declined this artifact; local Qwen judges it instead.
+                context = verdict.get('context') or {}
+                spec = scene_root / f'local-review-{kind}.json'
+                output = scene_root / f'local-review-{kind}.out.json'
+                output.unlink(missing_ok=True)
+                atomic_json(spec, {'context': context, 'frames': details['frames'],
+                    'references': [data_image(source) for source in source_paths] if context.get('reference_count') else []})
+                await run_local_step(worker, job, f"scene-{index}-local-review-{kind}-{artifact['artifact_sha256'][:12]}-{int(time.time())}",
+                    [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[job['model']],
+                     '--recovery-review-input', str(spec), '--recovery-review-output', str(output),
+                     'Review the approved recovery artifact.'], 'review')
+                local = json.loads(output.read_text(encoding='utf-8'))
+                return await request('local-review', {**artifact, 'verdict': {
+                    'acceptable': local.get('acceptable') is True, 'issues': list(local.get('issues') or [])}})
+            async def compose_locally(directive: dict) -> Path:
+                attempt = scene.get('image_attempts', 0)
+                spec = scene_root / f'local-opening-{attempt}.json'
+                output = scene_root / f'local-opening-{attempt}.png'
+                output.unlink(missing_ok=True)
+                keyframe = directive.get('keyframe') or {}
+                previous = checkpoint['scenes'].get('0', {}) if index else {}
+                aspect_image = (root / 'scene-0' / 'opening.png') if previous.get('image_accepted') else (
+                    source_paths[-1] if source_paths else None)
+                atomic_json(spec, {'prompt': keyframe.get('prompt', ''), 'motion_contract': keyframe.get('motion_contract') or {},
+                    'references': [str(source) for source in source_paths] if directive.get('use_references') else [],
+                    'aspect_image': str(aspect_image) if aspect_image else None})
+                await run_local_step(worker, job, f'scene-{index}-local-opening-{attempt}-{int(time.time())}',
+                    [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[job['model']],
+                     '--recovery-keyframe-input', str(spec), '--recovery-keyframe-output', str(output),
+                     '--seed', str((stable_job_seed(job['id']) + index * 101 + attempt) % (2 ** 63)),
+                     'Compose the approved recovery opening.'], 'opening image')
+                if not output.is_file():
+                    raise RuntimeError('The local opening image was not produced.')
+                return output
             image = scene_root / 'opening.png'
             if scene.get('image_accepted') and (not image.is_file() or digest(image) != scene['image_accepted']):
                 scene.pop('image_accepted', None)
@@ -245,7 +320,12 @@ async def run_recovery_job(worker, job: dict) -> None:
                         await save()
                         try:
                             value = await request('image', {'segment_index': index, 'correction': scene.get('image_issues', [])})
-                            save_image(value['image'], image)
+                            if value.get('local_image_required'):
+                                await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'], 'progress': None,
+                                                   'stage': f'Composing scene {index + 1} opening locally'})
+                                shutil.copy2(await compose_locally(value), image)
+                            else:
+                                save_image(value['image'], image)
                             scene['pending_image'] = digest(image)
                             await save()
                         except Exception as error:
