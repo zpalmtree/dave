@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { approvedRecoveryContract, recoveryHash, repairVideoTiming, recoveryLimitReached,
+import { approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, repairVideoTiming, recoveryLimitReached,
     VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
@@ -68,6 +68,22 @@ test('approved dialogue may add Spanish accents while preserving the authored te
     const contract = approvedRecoveryContract(value, 'John pleads at the bars');
     assert.equal(contract.segments[0].shots[0].dialogue[0].text, text);
     assert.equal(value.segments[0].shots[0].dialogue[0].text, text);
+});
+
+test('a local segment that keeps the same shot continues from the previous clip instead of cutting', () => {
+    const segment = visual => ({ transition: 'cut', shots: [{ visual }] });
+    const value = { segments: [
+        { transition: 'start', shots: [{ visual: 'Meximutt remains seated.' }] },
+        segment('Meximutt remains in the medium close-up. A crypto chart appears to his right.'),
+        segment('Meximutt is still in the medium close-up. A floating screen shows Elon.'),
+        segment('Cut to a rooftop where the crowd remains silent.'),
+        segment('A new scene: the office stays dark.'),
+        segment('Later, Meximutt continues walking downtown.'),
+        segment('The robot stands at the bars and speaks.'),
+    ] };
+    continueUnbrokenLocalSegments(value);
+    assert.deepEqual(value.segments.map(item => item.transition),
+        ['start', 'continue', 'continue', 'cut', 'cut', 'cut', 'cut']);
 });
 
 test('timing repair fits several turns without packing an oversized split into the previous turn', () => {
@@ -464,7 +480,7 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false,
         frontierPlanner: async () => { frontierCalls++; throw new FrontierPlannerRejectedError('provider_policy', 'Declined.', analysis); },
-        keyframeGenerator: async () => { generatorCalls++; throw new Error('Frontier images are not used for a policy rejection.'); },
+        keyframeGenerator: async () => { generatorCalls++; throw new VideoKeyframeError('moderation', 'Blocked by moderation.'); },
     });
     await broker.start();
     try {
@@ -495,20 +511,25 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
             'local-fallback:provider_policy');
         assert.equal((await request('local-plan', { plan: { segments: [] } })).status, 503, 'An empty local screenplay is refused.');
-        const uploaded = await request('local-plan', { plan: { ...plan(), prompt_analysis: analysis,
-            generation_notice: 'Planned by the local model.' } });
+        const local = { ...plan(), prompt_analysis: analysis, generation_notice: 'Planned by the local model.' };
+        local.segments.push({ ...structuredClone(local.segments[0]), transition: 'cut' });
+        local.segments[1].shots[0].visual = 'The explorers remain at the door, still waving.';
+        const uploaded = await request('local-plan', { plan: local });
         assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
         contractHash = uploaded.body.contract_hash;
         assert.equal(uploaded.body.notice, 'Planned by the local model.');
         assert.equal(uploaded.body.contract.local_reason, 'provider_policy');
+        assert.equal(uploaded.body.plan.segments[1].transition, 'continue', 'An unbroken shot opens on the previous clip.');
         const image = await request('image', { segment_index: 0 });
         assert.equal(image.body.local_image_required, true);
         assert.match(image.body.keyframe.prompt, /opening instant/);
-        assert.equal(generatorCalls, 0);
-        const quality = { format: 'generated', result_sha256: 'c'.repeat(64), artifacts: [{ sha256: 'b'.repeat(64) }] };
+        assert.equal(generatorCalls, 1, 'The frontier providers are tried before local composition.');
+        const artifacts = [{ sha256: 'b'.repeat(64) }, { sha256: 'd'.repeat(64) }];
+        const quality = { format: 'generated', result_sha256: 'c'.repeat(64), artifacts };
         assert.equal((await request('review', { segment_index: 0, kind: 'image', artifact_sha256: 'a'.repeat(64) })).body.acceptable, true);
+        assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: artifacts[0].sha256 })).body.acceptable, true);
         assert.equal((await request('quality', quality)).status, 503, 'An unrecorded scene cannot be approved.');
-        assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: 'b'.repeat(64) })).body.acceptable, true);
+        assert.equal((await request('review', { segment_index: 1, kind: 'video', artifact_sha256: artifacts[1].sha256 })).body.acceptable, true);
         assert.equal((await request('quality', quality)).status, 200);
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
@@ -545,10 +566,21 @@ test('an image-provider refusal of an approved scene falls back to local composi
             return { status: response.status, body: await response.json() };
         };
         assert.equal((await request('plan')).status, 200);
-        const refused = await request('image', { segment_index: 0 });
-        assert.equal(refused.body.local_image_required, true);
-        assert.equal(refused.body.use_references, false);
-        failure = new VideoKeyframeError('provider_error', 'Provider offline.');
-        assert.equal((await request('image', { segment_index: 0 })).status, 503, 'An outage still waits for the provider.');
+        for (const declined of [
+            new VideoKeyframeError('moderation', 'Blocked by moderation.'),
+            new VideoKeyframeError('review_unavailable', 'Required identity review unavailable.'),
+            new VideoKeyframeError('composition_review', 'Fallback first frames failed visual review.'),
+            new Error('Gemini returned no image (finish=IMAGE_SAFETY).'),
+        ]) {
+            failure = declined;
+            const refused = await request('image', { segment_index: 0 });
+            assert.equal(refused.body.local_image_required, true, declined.message);
+            assert.equal(refused.body.use_references, false);
+        }
+        for (const outage of [new VideoKeyframeError('provider_error', 'Provider offline.'),
+            new VideoKeyframeError('timeout', 'Grok image generation timed out.')]) {
+            failure = outage;
+            assert.equal((await request('image', { segment_index: 0 })).status, 503, 'An outage still waits for the provider.');
+        }
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });

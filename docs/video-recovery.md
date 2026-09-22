@@ -23,11 +23,16 @@ analysis so both planners agree on what is spoken. It uploads the screenplay to
 (`contract.planner = 'local'`). The one exception is `minor_sexualization`:
 sexual content involving minors stops the job and is never planned locally.
 
-Opening images for a policy-rejected local story are composed on the desktop
-with local Qwen Image 2.1, which receives the source references when the
-contract uses them. A Sol-planned scene whose image providers return a
-moderation refusal falls back to the same local composition. Provider outages
-still wait and retry. Every local step (planning and each opening image) takes
+New scene openings always try the frontier image providers first, even for a
+story Sol rejected: they draw far better frames, and a single scene of a
+rejected story is often unobjectionable. When they refuse (a moderation block,
+an unavailable identity review, or a failed identity or composition review), the
+desktop composes the opening with local Qwen Image 2.1, which receives the
+source references when the contract uses them. Provider outages still wait and
+retry. The local planner sometimes marks a segment that keeps the same shot
+("Meximutt remains in the medium close-up") as a hard cut; the broker turns such
+a segment into a continuation, so it opens on the previous clip's last frame
+instead of a newly generated image. Every local step (planning and each opening image) takes
 its own `gpuq` reservation on the `video-h3` profile and releases it afterward,
 like a scene render.
 Saved plans that silently rewrote the request are rejected on resume.
