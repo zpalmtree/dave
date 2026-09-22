@@ -1609,6 +1609,30 @@ test('best-effort compiler strips fidelity notes from dialogue.language', () => 
     assert.equal(compiled.segments[0].shots[0].dialogue[0].text, 'Hello, Astra.');
 });
 
+test('screenplay schema and compiler carry the planner spoken form of a line', () => {
+    const dialogueSchema = VIDEO_PLAN_SCHEMA.properties.segments.items.properties.shots.items.properties.dialogue.items;
+    assert.ok(dialogueSchema.required.includes('spoken_text'));
+    assert.match(dialogueSchema.properties.spoken_text.description, /WTF/);
+    const compile = (spoken_text) => compileBestEffortFrontierVideoPlan(
+        frontierPlan([{
+            speaker_id: 'OALGO',
+            language: 'English',
+            delivery: 'boastful',
+            text: 'WTF, no refunds? SMH',
+            ...(spoken_text === undefined ? {} : { spoken_text }),
+        }]),
+        frontierAnalysis('generated'),
+        'OALGO complains about refunds.',
+        'minimax',
+    ).segments[0].shots[0].dialogue[0];
+    const expanded = compile('What the fuck, no refunds? Shaking my head');
+    assert.equal(expanded.text, 'WTF, no refunds? SMH');
+    assert.equal(expanded.spoken_text, 'What the fuck, no refunds? Shaking my head');
+    for (const copied of ['WTF, no refunds? SMH', '', undefined]) {
+        assert.equal('spoken_text' in compile(copied), false, `spoken_text ${JSON.stringify(copied)}`);
+    }
+});
+
 test('best-effort compiler preserves all beats and extends generation beyond the render budget', () => {
     const plan = frontierPlan();
     plan.segments = Array.from({ length: 8 }, (_, index) => ({
