@@ -15,6 +15,12 @@ from pathlib import Path
 
 import aiohttp
 
+MAX_SCENE_CYCLES = 2
+
+
+class RecoveryLimitError(RuntimeError):
+    pass
+
 
 def digest(path: Path) -> str:
     value = hashlib.sha256()
@@ -190,6 +196,9 @@ async def run_recovery_job(worker, job: dict) -> None:
             scene_root = root / f'scene-{index}'
             scene_root.mkdir(exist_ok=True)
             scene = checkpoint['scenes'].setdefault(str(index), {})
+            if not scene.get('video_accepted') and scene.get('cycles', 0) >= MAX_SCENE_CYCLES:
+                raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
+                                         + '; '.join(scene.get('video_issues', [])))
             async def review(path: Path, kind: str, frames=None):
                 try:
                     details = {'frames': frames or [data_image(path)]} if kind != 'video' else await asyncio.to_thread(review_samples, path, scene_root)
@@ -345,6 +354,9 @@ async def run_recovery_job(worker, job: dict) -> None:
                     scene['cycles'] = scene.get('cycles', 0) + 1
                     scene['video_attempts'] = 0
                     await save()
+                    if scene['cycles'] >= MAX_SCENE_CYCLES:
+                        raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
+                                                 + '; '.join(scene.get('video_issues', [])))
                     raise RuntimeError('Recovering the actual scene after both renderers missed it: ' + '; '.join(scene.get('video_issues', [])))
             await save()
         checkpoint['format'] = 'generated'
@@ -372,4 +384,4 @@ async def run_recovery_job(worker, job: dict) -> None:
         await worker.finish_cancelled_job(job['id'])
     except Exception as error:
         traceback.print_exc()
-        await worker.fail_current(str(error), True)
+        await worker.fail_current(str(error), not isinstance(error, RecoveryLimitError))

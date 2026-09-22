@@ -600,9 +600,14 @@ export function stageFrontierDialogueVisually(plan: any): number {
                 ? speakers[0]
                 : `${speakers.slice(0, -1).join(', ')} and ${speakers.at(-1)}`;
             const action = speakers.length === 1 ? 'delivers the assigned line' : 'deliver their assigned lines';
+            const mouthless = /\b(?:mouthless|no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b/i
+                .test(`${plan.continuity_bible || ''} ${shot.visual || ''}`);
             shot.visual = [
                 String(shot.visual || '').trim(),
-                `${DIALOGUE_STAGING_MARKER} ${subject} remains visible and ${action} with synchronized mouth movement.`,
+                `${DIALOGUE_STAGING_MARKER} ${subject} remains visible and ${action} `
+                    + (mouthless
+                        ? "through the established voice mechanism. Preserve each subject's source anatomy; mouthless faces remain rigid and mouthless."
+                        : 'with synchronized mouth movement.'),
             ].filter(Boolean).join(' ');
             stagedShots += 1;
         }

@@ -18,7 +18,9 @@ opening composition, without inheriting a frame-zero crop restriction.
 
 The worker permits two image attempts per recovery pass. Each scene gets one
 video attempt and a targeted retry, then two attempts with an alternate video
-renderer. Video review samples five points in time, checks story/identity/action,
+renderer. A scene is limited to two recovery passes (eight render attempts).
+The worker persists this count and stops before reserving more GPU work once
+it is exhausted. Video review samples five points in time, checks story/identity/action,
 and compares an audio transcription with the approved speech. It judges the
 user's requested story; incidental planner-invented props, camera choices, and
 blocking are flexible. Speech receives sufficient time within each shot.
@@ -35,17 +37,26 @@ remain reusable.
 
 Only actual generated video can pass final approval. Storyboards, slideshows,
 and caption cards are never substitutes for requested action. Exhausted render
-attempts defer the same job for another recovery pass, retaining accepted scenes
-and actionable review feedback. No terminal error or placeholder is delivered.
+attempts may defer the same job for one more recovery pass, retaining accepted
+scenes and actionable review feedback. Exhausted jobs stop with a diagnostic
+failure instead of retrying forever; a placeholder is never delivered.
 
 The broker persists the approved contract, checksummed scene reviews, worker
 checkpoints, and final approval. The worker persists accepted artifacts and
 pending review locally. Review/upload interruptions reuse rendered media;
 unfinished interrupted renders may resume as a new attempt. Temporary service
-failures return the same job to the queue with 30-second to 15-minute backoff,
-preserving its checkpoint and releasing the worker. They do not send a terminal
-error to Discord. A service outage can therefore delay completion; this is not
+failures return the same job to the queue with exponential backoff, preserving
+its checkpoint and releasing the worker. Three failed recovery passes per job,
+or any non-retryable worker failure, stop the job with its last diagnostic.
+Both broker and worker enforce persisted limits across restarts. Explicit
+regeneration creates a new revision and budget, including for old queued jobs
+already over the limit. A service outage can therefore prevent completion; this is not
 a guarantee of immediate delivery during an outage.
+
+Speaking characters retain their source anatomy. A mouthless robot uses its
+established voice mechanism instead of acquiring human lips, teeth, or a jaw.
+Actions explicitly preceding speech get their own timing so the remaining
+speaking window can hold the complete line.
 
 Completion requires approval for every scene and the exact uploaded file hash.
 Generated clips are normalized before concatenation and the final MP4 is fully
@@ -62,6 +73,10 @@ Run `python3 scripts/apply-video-recovery-desktop.py --check`, then run it witho
 the recovery hooks plus the new helper modules. Reload the supervised worker
 child while idle, preserving its supervisor and any active GPU work. Deploy both
 bot branches with `scripts/deploy-bots.sh --with-broker`.
+
+For an existing recovery installation, apply the bounded-retry and robot-anatomy
+update with `python3 scripts/apply-video-recovery-limits-desktop.py --check`, then
+run it without `--check`. It checks the baseline hashes before changing files.
 
 `gpuq_settings.py` reads the coordinator's `%LOCALAPPDATA%\GpuQ\config.json`
 (`GPUQ_CONFIG` can override it). The generator no longer maintains separate

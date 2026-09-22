@@ -44,7 +44,7 @@ export async function prepareRecoveryPlan(input: {
             const plan = await planner(prompt, input.model, input.requester,
                 useSources ? input.sources : undefined, {
                     ...input.options,
-                    plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. Shot timings are flexible; divide long speech across segments rather than truncating it.`,
+                    plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`,
                 });
             repairVideoTiming(plan, 15, 5);
             const contract = approvedRecoveryContract(plan, prompt, notice, useSources);

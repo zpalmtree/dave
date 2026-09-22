@@ -60,6 +60,28 @@ class RecoveryTests(unittest.TestCase):
     def test_all_renderers_failing_defers_without_uploading_a_storyboard(self):
         self.exercise(render_failures=4)
 
+    def test_render_budget_survives_restart_and_stops_before_more_gpu_work(self):
+        self.exercise(render_failures=8)
+
+    def test_mouthless_h3_prompt_preserves_robot_anatomy_with_full_speech(self):
+        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        from video_gen import compile_h3_prompt
+        line = {'speaker_id': 'John', 'language': 'Spanish', 'delivery': 'electronic speaker',
+                'text': 'mae Luis libereme, necesito cotizar mae, saqueme de aqui'}
+        segment = {'music': 'N/A', 'shots': [
+            {'visual': 'The mouthless robot walks to the closed bars.', 'camera': 'Wide',
+             'audio': 'Footsteps', 'duration_seconds': 5, 'dialogue': []},
+            {'visual': 'John remains mouthless and speaks through the neck speaker.', 'camera': 'Close-up',
+             'audio': 'Room tone', 'duration_seconds': 8, 'dialogue': [line]}]}
+        prompt = compile_h3_prompt(segment, True)
+        self.assertIn(line['text'], prompt)
+        self.assertIn('rigid mouthless face', prompt)
+        self.assertNotIn('natural lip and jaw articulation', prompt)
+        self.assertNotIn('Natural speech articulation retains', prompt)
+        self.assertNotIn('every speaker keeps their mouth closed', prompt)
+        self.assertIn('At 00:05.000', prompt)
+
     def test_image_service_outage_defers_without_a_placeholder(self):
         self.exercise(image_outage=True)
 
@@ -152,6 +174,17 @@ class RecoveryTests(unittest.TestCase):
             with mock.patch.dict(sys.modules, {'video_worker': fake}):
                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
                 asyncio.run(recovery.run_recovery_job(worker, job))
+                if render_failures == 8:
+                    self.assertEqual(worker.run_reserved_command.await_count, 4)
+                    self.assertTrue(worker.fail_current.await_args.args[1])
+                    asyncio.run(recovery.run_recovery_job(worker, job))
+                    self.assertEqual(worker.run_reserved_command.await_count, 8)
+                    self.assertFalse(worker.fail_current.await_args.args[1])
+                    asyncio.run(recovery.run_recovery_job(worker, job))
+                    self.assertEqual(worker.run_reserved_command.await_count, 8)
+                    self.assertFalse(worker.fail_current.await_args.args[1])
+                    worker.upload.assert_not_awaited()
+                    return
                 if image_outage or render_failures == 4:
                     worker.fail_current.assert_awaited_once()
                     worker.upload.assert_not_awaited()
