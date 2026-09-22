@@ -14,24 +14,29 @@ def main():
     args = parser.parse_args()
     archive = Path(__file__).resolve().parents[1] / 'desktop'
     hashes = json.loads((archive / 'video-recovery-limits-hashes.json').read_text())
-    pending = []
+    pending = {'video-recovery-limits.patch': [], 'video-recovery-limits-upgrade.patch': []}
     for name, expected in hashes.items():
         actual = hashlib.sha256((args.directory / name).read_bytes()).hexdigest()
         if actual == expected['after_sha256']:
             continue
-        if actual != expected['before_sha256']:
+        if actual == expected['before_sha256']:
+            pending['video-recovery-limits.patch'].append(name)
+        elif actual == expected.get('intermediate_sha256'):
+            pending['video-recovery-limits-upgrade.patch'].append(name)
+        else:
             raise SystemExit(f'Unexpected local edits in {name}; inspect before installing.')
-        pending.append(name)
-    if not pending:
+    if not any(pending.values()):
         print('Desktop recovery limits and anatomy fixes match the audited revision.')
         return
-    command = ['git', 'apply', *[f'--include={name}' for name in pending],
-               str(archive / 'video-recovery-limits.patch')]
-    subprocess.run([*command, '--check'], cwd=args.directory, check=True)
+    commands = [['git', 'apply', *[f'--include={name}' for name in names], str(archive / patch)]
+                for patch, names in pending.items() if names]
+    for command in commands:
+        subprocess.run([*command, '--check'], cwd=args.directory, check=True)
     if args.check:
         print('Recovery limits update applies to the audited desktop files.')
         return
-    subprocess.run(command, cwd=args.directory, check=True)
+    for command in commands:
+        subprocess.run(command, cwd=args.directory, check=True)
     for name, expected in hashes.items():
         if hashlib.sha256((args.directory / name).read_bytes()).hexdigest() != expected['after_sha256']:
             raise SystemExit(f'Post-apply verification failed: {name}')

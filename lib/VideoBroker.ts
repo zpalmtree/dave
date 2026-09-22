@@ -1,5 +1,5 @@
 import { VIDEO_RECOVERY_VERSION, recoveryHash, recoveryLimitReached } from './VideoRecovery.js';
-import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION } from './VideoRecoveryService.js';
+import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
@@ -4336,9 +4336,9 @@ export class VideoBroker {
                 if (row.recovery_version) {
                     const prior = row.recovery_json ? JSON.parse(row.recovery_json) : {};
                     prior.waits = (prior.waits || 0) + 1;
-                    prior.last_error = publicError;
+                    prior.last_error = prior.terminal_error || publicError;
                     const delay = Math.min(900, 30 * 2 ** Math.min(5, prior.waits - 1));
-                    const exhausted = recoveryLimitReached(prior) || message.retryable === false;
+                    const exhausted = recoveryLimitReached(prior) || message.retryable === false || Boolean(prior.terminal_error);
                     await this.run(`UPDATE video_jobs SET status=?, stage=?,
                         recovery_json=?, recovery_next_at=?, worker_id=NULL, lease_token=NULL,
                         lease_expires_at=NULL, gpu_queue_state=NULL, progress=NULL, progress_scope=NULL,
@@ -4347,7 +4347,7 @@ export class VideoBroker {
                         [exhausted ? 'failed' : 'queued',
                             exhausted ? 'Video recovery stopped' : 'Waiting to resume video recovery',
                             JSON.stringify(prior), exhausted ? null : nowSeconds() + delay,
-                            exhausted ? `Video recovery stopped after ${prior.waits} failed passes. ${publicError}` : null,
+                            exhausted ? `Video recovery stopped after ${prior.waits} failed passes. ${prior.last_error}` : null,
                             exhausted ? nowSeconds() : null, nowSeconds(), jobId]);
                     this.worker.currentJob = null;
                     this.worker.ready = false;
@@ -4720,12 +4720,34 @@ export class VideoBroker {
         };
         const sources = this.recoverySources(job);
         const options = this.frontierOptions(job, true);
+        const sourceRequired = job.command_variant === 'oalgo';
+        const originalFrameRequired = sourceRequired && !job.source_image_composite_path;
+        const validateReferences = () => {
+            if (state.terminal_error) throw new RecoveryStoppedError(state.terminal_error);
+            if (sourceRequired && (!job.source_image_path || !existsSync(job.source_image_path))) {
+                throw new RecoveryStoppedError('The required original Meximutt reference is missing.');
+            }
+            if (!state.prepared) return;
+            if (state.prepared.prompt !== job.prompt || state.prepared.contract.prompt !== job.prompt) {
+                throw new RecoveryStoppedError('The saved plan rewrote the original request. Regenerate to plan the original request without an automatic rewrite.');
+            }
+            if (!sourceRequired) return;
+            if (!state.prepared.contract.use_source_images || !sources.length) {
+                throw new RecoveryStoppedError('The saved plan discarded the required Meximutt reference. Regenerate while retaining the original character.');
+            }
+            if (originalFrameRequired && state.prepared.plan.keyframe?.recommended !== false) {
+                throw new RecoveryStoppedError('The saved screenplay replaced the required original portrait opening. Regenerate while retaining the source frame.');
+            }
+        };
         try {
+            validateReferences();
             if (operation === 'plan') {
                 if (!state.prepared) {
                     state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
                         prompt: job.prompt, model: job.model, requester: job.requester_id,
                         sources, options, planner: this.options.frontierPlanner,
+                        requireSourceIdentity: sourceRequired,
+                        requireOriginalFirstFrame: originalFrameRequired,
                     });
                     state.prepared.plan.generation_notice = state.prepared.notice;
                     await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
@@ -4733,6 +4755,7 @@ export class VideoBroker {
                             JSON.stringify(state.prepared.contract.analysis), id]);
                     await persist();
                 }
+                validateReferences();
                 writeJson(res, 200, { ...state.prepared, checkpoint: state.checkpoint || {},
                     sources: state.prepared.contract.use_source_images ? sources.map(source =>
                         `data:${source.mimeType};base64,${source.data.toString('base64')}`) : [] });
@@ -4756,6 +4779,9 @@ export class VideoBroker {
                 if (!Number.isInteger(index) || index < 0 || index >= prepared.plan.segments.length) throw new Error('Invalid segment.');
                 const segment = prepared.plan.segments[index];
                 if (operation === 'image') {
+                    if (index === 0 && originalFrameRequired) {
+                        throw new RecoveryStoppedError('The original Meximutt portrait is required at frame zero; a generated replacement cannot be used.');
+                    }
                     const scenePlan = index === 0 ? prepared.plan : derivedSegmentKeyframePlan({
                         ...prepared.plan,
                         segments: prepared.plan.segments.map((value: any, position: number) => position === index
@@ -4812,6 +4838,12 @@ export class VideoBroker {
             }
             writeJson(res, 404, { error: 'Unknown recovery operation.' });
         } catch (error) {
+            if (error instanceof RecoveryStoppedError) {
+                state.terminal_error = error.message;
+                await persist();
+                writeJson(res, 422, { pending: false, error: error.message });
+                return;
+            }
             writeJson(res, 503, { pending: true, error: sanitizeVideoWorkerText(String(error), 'Waiting for recovery services.', 1000) });
         }
     }

@@ -81,6 +81,12 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('Natural speech articulation retains', prompt)
         self.assertNotIn('every speaker keeps their mouth closed', prompt)
         self.assertIn('At 00:05.000', prompt)
+        speaking_shot = segment['shots'][1]
+        for visual in ['No mouth movement until the line begins.', 'Wait without mouth animation, then speak.']:
+            segment['shots'] = [{**speaking_shot, 'visual': visual}]
+            human = compile_h3_prompt(segment, True)
+            self.assertIn('natural lip and jaw articulation', human)
+            self.assertNotIn('rigid mouthless face', human)
 
     def test_image_service_outage_defers_without_a_placeholder(self):
         self.exercise(image_outage=True)

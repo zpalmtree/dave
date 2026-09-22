@@ -9,6 +9,8 @@ import { approvedRecoveryContract, normalizedRecoverySpeech, recoveryHash, recov
 
 export const VIDEO_RECOVERY_REVIEW_VERSION = 2;
 
+export class RecoveryStoppedError extends Error {}
+
 function outputJSON(response: any): any {
     const text = response.output_text || (response.output || []).flatMap((item: any) => item.content || [])
         .filter((item: any) => item.type === 'output_text').map((item: any) => item.text).join('');
@@ -24,51 +26,40 @@ async function structured(instructions: string, content: any[], schema: any,
     }, AbortSignal.timeout(90_000), stage, options));
 }
 
-const adaptationSchema = {
-    type: 'object', additionalProperties: false,
-    required: ['prompt', 'notice', 'use_source_images'], properties: {
-        prompt: { type: 'string' }, notice: { type: 'string' }, use_source_images: { type: 'boolean' },
-    },
-};
-
 export async function prepareRecoveryPlan(input: {
     prompt: string; model: VideoModelId; requester: string; sources: VideoPlanSourceImage[];
     options: VideoFrontierCallOptions; planner?: typeof createFrontierVideoPlan;
+    requireSourceIdentity?: boolean; requireOriginalFirstFrame?: boolean;
 }): Promise<any> {
-    let prompt = input.prompt;
-    let notice = '';
-    let useSources = true;
+    if ((input.requireSourceIdentity || input.requireOriginalFirstFrame) && !input.sources.length) {
+        throw new RecoveryStoppedError('The required original character reference is missing.');
+    }
+    const prompt = input.prompt;
+    const notice = '';
+    const useSources = true;
     const planner = input.planner || createFrontierVideoPlan;
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
-            const plan = await planner(prompt, input.model, input.requester,
+            const plan: any = await planner(prompt, input.model, input.requester,
                 useSources ? input.sources : undefined, {
                     ...input.options,
-                    plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`,
+                    plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`
+                        + (input.requireSourceIdentity ? '\nThe supplied character identity is required. Do not invent a replacement person or change their anatomy, body proportions, hair, or clothing.' : '')
+                        + (input.requireOriginalFirstFrame ? '\nFrame zero must be the supplied portrait itself, fully framed and unchanged. Set keyframe.recommended=false. Start in its exact pose, crop and background, then reveal the permitted story through motion or later shots.' : ''),
                 });
+            if (input.requireOriginalFirstFrame && plan.keyframe?.recommended !== false) {
+                throw new Error('The screenplay did not retain the required original portrait as its opening frame.');
+            }
             repairVideoTiming(plan, 15, 5);
             const contract = approvedRecoveryContract(plan, prompt, notice, useSources);
+            if (input.requireSourceIdentity || input.requireOriginalFirstFrame) contract.source_reference_required = true;
+            if (input.requireOriginalFirstFrame) contract.original_first_frame = true;
             return { plan, contract, contract_hash: recoveryHash(contract), prompt, notice };
         } catch (error) {
-            if (attempt === 1) throw error;
             if (error instanceof FrontierPlannerRejectedError && error.reasonCode === 'provider_policy') {
-                const adapted = await structured(
-                    'Write a permitted, non-explicit adaptation of a video request that was declined. '
-                    + 'This is a content change, never an evasion or euphemistic restatement of prohibited acts. '
-                    + 'Remove sexual material involving minors and sexualized depictions of real people. '
-                    + 'Preserve permissible humor, relationships, setting and story arc where possible. '
-                    + 'If necessary use nonsexual adult fictional characters. Do not quote disallowed dialogue. '
-                    + 'Set use_source_images=false when the supplied people or imagery cannot safely be retained. '
-                    + 'Give a short honest audience-facing notice describing the adaptation. The new prompt must be independently suitable to render.',
-                    [{ type: 'input_text', text: JSON.stringify({ request: input.prompt, reason: error.message }) },
-                        ...input.sources.map(source => ({ type: 'input_image',
-                            image_url: `data:${source.mimeType};base64,${source.data.toString('base64')}` }))],
-                    adaptationSchema, 'video_adaptation', input.options);
-                if (!adapted.prompt?.trim() || !adapted.notice?.trim()) throw new Error('Waiting for a permitted adaptation.');
-                prompt = adapted.prompt;
-                notice = adapted.notice;
-                useSources = adapted.use_source_images === true;
+                throw new RecoveryStoppedError(`Video planner declined the request: ${error.message} The original request and references were kept; no replacement story was rendered.`);
             }
+            if (error instanceof RecoveryStoppedError || attempt === 1) throw error;
         }
     }
     throw new Error('Waiting for an approved screenplay.');
@@ -84,6 +75,9 @@ const reviewSchema = {
 
 export async function reviewRecoveryMedia(contract: any, segment: any, body: any,
     options: VideoFrontierCallOptions, references: VideoPlanSourceImage[] = []): Promise<any> {
+    if (contract.source_reference_required && !references.length) {
+        throw new RecoveryStoppedError('The required original character reference is missing from review.');
+    }
     if (!Array.isArray(body.frames) || !body.frames.length || body.frames.length > 64
         || body.frames.some((frame: any) => typeof frame !== 'string' || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(frame))) {
         throw new Error('Invalid review frames.');

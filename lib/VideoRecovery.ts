@@ -18,6 +18,8 @@ export interface VideoRecoveryContract {
     segments: any[];
     notice: string;
     use_source_images: boolean;
+    source_reference_required?: boolean;
+    original_first_frame?: boolean;
 }
 
 export function recoveryHash(value: unknown): string {

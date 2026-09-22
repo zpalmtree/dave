@@ -600,7 +600,7 @@ export function stageFrontierDialogueVisually(plan: any): number {
                 ? speakers[0]
                 : `${speakers.slice(0, -1).join(', ')} and ${speakers.at(-1)}`;
             const action = speakers.length === 1 ? 'delivers the assigned line' : 'deliver their assigned lines';
-            const mouthless = /\b(?:mouthless|no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b/i
+            const mouthless = /\b(?:mouthless\b|(?:no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b(?!\s+(?:mov\w*|motion|animation|articulation|opening|sound\w*|noise\w*)))/i
                 .test(`${plan.continuity_bible || ''} ${shot.visual || ''}`);
             shot.visual = [
                 String(shot.visual || '').trim(),
@@ -806,7 +806,15 @@ function spokenWords(value: string): string {
 const EXPLICIT_DIALOGUE_DELAY = /\b(?:after|before|then|later|finally|eventually|once|until|when|as soon as|at\s+(?:the\s+end|\d+(?:\.\d+)?\s*(?:s|sec|secs|second|seconds)))\b/i;
 
 function promptExplicitlyDelaysDialogue(prompt: string): boolean {
-    return EXPLICIT_DIALOGUE_DELAY.test(prompt);
+    if (EXPLICIT_DIALOGUE_DELAY.test(prompt)) return true;
+    // Comma-separated blocking is an ordered shot list too: "walks to the
+    // bars, close up to the face, bot says ...". Do not force speech over it.
+    const speech = prompt.search(/\b(?:says?|speaks?|asks?|shouts?|whispers?|replies?)\b/i);
+    if (speech < 0) return false;
+    const leadIn = prompt.slice(0, speech);
+    return /[,;.]\s*[^,;.]*$/.test(leadIn)
+        && /\b(?:walks?|approaches?|arrives?|enters?|stands? up|sits? down|turns?|reaches?|close[- ]?up)\b/i.test(leadIn)
+        && !/\b(?:while|as)\b/i.test(leadIn);
 }
 
 function dialogueLineShotIndexes(plan: any, requiredLine: string): number[] {
@@ -1276,7 +1284,7 @@ export function compileBestEffortFrontierVideoPlan(
     if (promptAnalysis?.frontier_handling?.disposition === 'reject') {
         throw new FrontierPlannerRejectedError(
             String(promptAnalysis.frontier_handling.reason_code || 'other'),
-            'The request requires an approved adaptation.', promptAnalysis,
+            'The planner declined the original request.', promptAnalysis,
         );
     }
     const compiled = JSON.parse(JSON.stringify(candidate || {}));
