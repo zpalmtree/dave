@@ -27,8 +27,15 @@ New scene openings always try the frontier image providers first, even for a
 story Sol rejected: they draw far better frames, and a single scene of a
 rejected story is often unobjectionable. When they refuse (a moderation block,
 an unavailable identity review, or a failed identity or composition review), the
-desktop composes the opening with local Qwen Image 2.1, which receives the
-source references when the contract uses them. Provider outages still wait and
+desktop composes the opening locally with Qwen-Image-Edit-2511 and its 4-step
+Lightning LoRA, which receives up to three source references when the contract
+uses them. Qwen Image 2.1 was replaced on 2026-09-21: its reference path gave a
+supplied face crusty, over-sharpened skin with the 4-bit GGUF and the official
+int8 build alike, and at every CFG, step count, and reference resolution tested,
+and it tended to re-render the reference instead of the requested scene.
+Edit-2511 kept the identity, followed the scene, and was faster (about 10 s per
+frame once loaded). The benchmark frames are on the desktop in
+`video_gen/benchmark_outputs/qwen_image_skin_ab_20260921`. Provider outages still wait and
 retry. The local planner sometimes marks a segment that keeps the same shot
 ("Meximutt remains in the medium close-up") as a hard cut; the broker turns such
 a segment into a continuation, so it opens on the previous clip's last frame
@@ -113,7 +120,7 @@ GPU work, including validation, still uses `gpuq` and respects Gaming Mode.
 Install the local-fallback update (protocol version 3) with
 `python3 scripts/apply-video-local-fallback-desktop.py --check`, then run it
 without `--check`. Each desktop file's recorded hash chain shows which of the
-three archived patches it still needs; the installer applies those in order
+four archived patches it still needs; the installer applies those in order
 and verifies the result. The third patch removes the worker's scene-review
 sampling and local review mode. Reload
 the supervised worker child while idle so it advertises version 3, then deploy

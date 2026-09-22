@@ -1,0 +1,204 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -59,6 +59,14 @@
+ QWEN_IMAGE21_DIFFUSION_MODEL = "qwen_image_2.1-Q4_K.gguf"
+ QWEN_IMAGE21_TEXT_ENCODER = "qwen3vl_8b_w4a8.safetensors"
+ QWEN_IMAGE21_VAE = "qwen_image_2.1_vae_bf16.safetensors"
++# Recovery openings use the edit model: Qwen Image 2.1's reference path renders a supplied
++# face with crusty, over-sharpened skin at every precision and setting tested on
++# 2026-09-21, while Edit-2511 keeps the identity, follows the scene, and keeps skin natural.
++QWEN_EDIT_DIFFUSION_MODEL = "qwen_image_edit_2511_fp8mixed.safetensors"
++QWEN_EDIT_TEXT_ENCODER = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
++QWEN_EDIT_VAE = "qwen_image_vae.safetensors"
++QWEN_EDIT_LIGHTNING_LORA = "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
++QWEN_EDIT_MAX_REFERENCES = 3
+ FAST_H3_DIFFUSION_MODEL = (
+     "minimax_h3_fastvideo_vsa_datafree_1300step_4step_int8_convrot.safetensors"
+ )
+@@ -6614,25 +6622,13 @@
+         free_comfy_memory(server)
+ 
+ 
+-def generate_keyframe(
+-    server: str,
+-    prompt: str,
+-    motion_contract: dict[str, Any],
+-    aspect: str,
+-    seed: int,
+-    run_root: Path,
+-    timeout_seconds: float,
+-    steps: int = 25,
+-    timing: dict[str, Any] | None = None,
+-    references: list[Path] | None = None,
+-) -> Path:
+-    width, height = KEYFRAME_DIMENSIONS[aspect]
++def keyframe_prompt(prompt: str, motion_contract: dict[str, Any], has_references: bool) -> str:
+     identity = (
+         "Keep every person or character shown in the reference images recognizable, with the same "
+         "face, anatomy, body proportions, hair, and clothing. "
+-        if references else ""
++        if has_references else ""
+     )
+-    prompt = (
++    return (
+         f"{identity}"
+         "Cast and replacement fidelity has priority over a referenced visual style. "
+         "For a replacement cast, depict only the explicitly requested replacement subjects; "
+@@ -6644,9 +6640,23 @@
+         "and travel direction. Never place the road or intended destination behind a forward-moving "
+         "subject. Prefer a true lateral or rear three-quarter view over a misleading front-facing view."
+     )
++
++
++def generate_keyframe(
++    server: str,
++    prompt: str,
++    motion_contract: dict[str, Any],
++    aspect: str,
++    seed: int,
++    run_root: Path,
++    timeout_seconds: float,
++    steps: int = 25,
++    timing: dict[str, Any] | None = None,
++    references: list[Path] | None = None,
++) -> Path:
+     return generate_qwen_keyframe(
+         server,
+-        prompt,
++        keyframe_prompt(prompt, motion_contract, bool(references)),
+         aspect,
+         seed,
+         run_root,
+@@ -6671,8 +6681,78 @@
+     aspect = nearest_aspect(aspect_image if aspect_image and aspect_image.is_file() else None)
+     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+     run_root = OUTPUT_DIR / "video" / "recovery_openings" / f"{timestamp}_{uuid.uuid4().hex[:6]}"
+-    return generate_keyframe(server, prompt, motion, aspect, seed, run_root, timeout_seconds, steps,
+-                             references=references)
++    return generate_edit_keyframe(server, keyframe_prompt(prompt, motion, bool(references)), aspect, seed,
++                                  run_root, timeout_seconds, references)
++
++
++def edit_keyframe_graph(prompt: str, aspect: str, seed: int, prefix: str, reference_names: list[str]) -> dict[str, Any]:
++    """Qwen-Image-Edit-2511 with its Lightning LoRA, following the official ComfyUI template."""
++    width, height = KEYFRAME_DIMENSIONS[aspect]
++    graph: dict[str, Any] = {
++        "model": {"class_type": "UNETLoader",
++                  "inputs": {"unet_name": QWEN_EDIT_DIFFUSION_MODEL, "weight_dtype": "default"}},
++        "lora": {"class_type": "LoraLoaderModelOnly",
++                 "inputs": {"model": ["model", 0], "lora_name": QWEN_EDIT_LIGHTNING_LORA, "strength_model": 1.0}},
++        "shift": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["lora", 0], "shift": 3.1}},
++        "norm": {"class_type": "CFGNorm", "inputs": {"model": ["shift", 0], "strength": 1.0}},
++        "clip": {"class_type": "CLIPLoader",
++                 "inputs": {"clip_name": QWEN_EDIT_TEXT_ENCODER, "type": "qwen_image", "device": "default"}},
++        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_EDIT_VAE}},
++        "positive_text": {"class_type": "TextEncodeQwenImageEditPlus",
++                          "inputs": {"clip": ["clip", 0], "prompt": prompt, "vae": ["vae", 0]}},
++        "negative_text": {"class_type": "TextEncodeQwenImageEditPlus",
++                          "inputs": {"clip": ["clip", 0], "prompt": "", "vae": ["vae", 0]}},
++        "positive": {"class_type": "FluxKontextMultiReferenceLatentMethod",
++                     "inputs": {"conditioning": ["positive_text", 0], "reference_latents_method": "index_timestep_zero"}},
++        "negative": {"class_type": "FluxKontextMultiReferenceLatentMethod",
++                     "inputs": {"conditioning": ["negative_text", 0], "reference_latents_method": "index_timestep_zero"}},
++        "latent": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
++        "sampler": {"class_type": "KSampler", "inputs": {
++            "model": ["norm", 0], "positive": ["positive", 0], "negative": ["negative", 0],
++            "latent_image": ["latent", 0], "seed": seed % (2**63 - 1), "steps": 4, "cfg": 1.0,
++            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
++        "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sampler", 0], "vae": ["vae", 0]}},
++        "save": {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": prefix}},
++    }
++    for index, name in enumerate(reference_names[:QWEN_EDIT_MAX_REFERENCES], start=1):
++        graph[f"reference_{index}"] = {"class_type": "LoadImage", "inputs": {"image": name}}
++        for text in ("positive_text", "negative_text"):
++            graph[text]["inputs"][f"image{index}"] = [f"reference_{index}", 0]
++    return graph
++
++
++def generate_edit_keyframe(server: str, prompt: str, aspect: str, seed: int, run_root: Path,
++                           timeout_seconds: float, references: list[Path]) -> Path:
++    required = (
++        COMFY_DIR / "models" / "diffusion_models" / QWEN_EDIT_DIFFUSION_MODEL,
++        COMFY_DIR / "models" / "text_encoders" / QWEN_EDIT_TEXT_ENCODER,
++        COMFY_DIR / "models" / "vae" / QWEN_EDIT_VAE,
++        COMFY_DIR / "models" / "loras" / QWEN_EDIT_LIGHTNING_LORA,
++    )
++    missing = [path.name for path in required if not path.is_file() or path.stat().st_size == 0]
++    if missing:
++        raise VideoGenError(f"Qwen-Image-Edit-2511 models are not installed: {', '.join(missing)}")
++    if any(not path.is_file() or path.stat().st_size == 0 for path in references):
++        raise VideoGenError("A Qwen-Image-Edit reference image is missing.")
++    copied = [copy_reference(path) for path in references[:QWEN_EDIT_MAX_REFERENCES]]
++    prefix = f"{run_root.relative_to(OUTPUT_DIR).as_posix()}/keyframe/edit_keyframe"
++    graph = edit_keyframe_graph(prompt, aspect, seed, prefix, [name for name, _ in copied])
++    client_id = f"video-qwen-edit-{uuid.uuid4().hex}"
++    progress = LiveProgress(server, client_id, {node: str(value["class_type"]) for node, value in graph.items()},
++                            (25.0, 300.0))
++    width, height = KEYFRAME_DIMENSIONS[aspect]
++    print(f"Generating a {width}x{height} Qwen-Image-Edit-2511 frame...", flush=True)
++    print(f"  qwen-edit: {prompt}", flush=True)
++    progress.start()
++    try:
++        response = api_json(server, "/prompt", {"prompt": graph, "client_id": client_id}, timeout=30.0)
++        if response.get("error") or not response.get("prompt_id"):
++            raise VideoGenError(f"Qwen-Image-Edit-2511 submission failed: {response}")
++        progress.set_prompt_id(str(response["prompt_id"]))
++        return wait_for_image(server, response["prompt_id"], prefix, timeout_seconds, progress).resolve()
++    finally:
++        progress.stop()
++        free_comfy_memory(server)
+ 
+ 
+ def validate_video(path: Path) -> dict[str, Any]:
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -204,17 +204,44 @@
+             from PIL import Image
+             portrait = Path(temporary) / 'portrait.png'
+             Image.new('RGB', (100, 150), 'red').save(portrait)
+-            with mock.patch.object(video_gen, 'generate_keyframe', return_value=portrait) as generate:
++            with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
+                 video_gen.generate_recovery_keyframe('http://server', {'prompt': 'A duck.', 'references': [str(portrait)],
+                     'motion_contract': {'gaze_direction': 'left'}, 'aspect_image': str(portrait)}, 7, 60, 25)
+-            args = generate.call_args
+-            self.assertEqual(args.args[2], {}, 'An incomplete motion contract is dropped instead of crashing.')
+-            self.assertEqual(args.args[3], '2:3')
+-            self.assertEqual(args.kwargs['references'], [portrait])
++            server, prompt, aspect, seed, _root, _timeout, references = generate.call_args.args
++            self.assertIn('Keep every person or character shown in the reference images recognizable', prompt)
++            self.assertIn('A duck.', prompt)
++            self.assertNotIn('left', prompt, 'An incomplete motion contract is dropped instead of crashing.')
++            self.assertEqual((aspect, seed, references), ('2:3', 7, [portrait]))
++            with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
++                video_gen.generate_recovery_keyframe('http://server', {'prompt': 'A market.', 'references': []}, 7, 60, 25)
++            _server, prompt, aspect, *_rest, references = generate.call_args.args
++            self.assertNotIn('reference images', prompt)
++            self.assertEqual((aspect, references), ('16:9', []))
+         with mock.patch.object(sys, 'argv', ['video_gen.py', '--recovery-keyframe-input', 'in.json', 'x']):
+             with self.assertRaises(SystemExit):
+                 video_gen.parse_args()
+ 
++    def test_recovery_openings_use_edit_2511_lightning(self):
++        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
++            self.skipTest('Run on installed desktop sources.')
++        import video_gen
++        graph = video_gen.edit_keyframe_graph('A duck.', '2:3', 7, 'prefix', ['a.png', 'b.png', 'c.png', 'd.png'])
++        self.assertEqual(graph['model']['inputs']['unet_name'], 'qwen_image_edit_2511_fp8mixed.safetensors')
++        self.assertEqual(graph['lora']['inputs']['lora_name'], 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors')
++        self.assertEqual(graph['shift']['inputs']['shift'], 3.1)
++        sampler = graph['sampler']['inputs']
++        self.assertEqual((sampler['steps'], sampler['cfg'], sampler['model']), (4, 1.0, ['norm', 0]))
++        self.assertEqual((graph['latent']['class_type'], graph['latent']['inputs']['width'], graph['latent']['inputs']['height']),
++                         ('EmptySD3LatentImage', 832, 1248))
++        for text in ('positive_text', 'negative_text'):
++            self.assertEqual([graph[text]['inputs'].get(f'image{index}') for index in range(1, 5)],
++                             [['reference_1', 0], ['reference_2', 0], ['reference_3', 0], None],
++                             'The edit encoder takes at most three references.')
++        self.assertNotIn('reference_4', graph)
++        text_only = video_gen.edit_keyframe_graph('A market.', '16:9', 7, 'prefix', [])
++        self.assertFalse(any(key.startswith('image') for key in text_only['positive_text']['inputs']))
++        self.assertEqual(text_only['latent']['inputs']['width'], 1344)
++
+     def exercise(self, original=False, render_failures=0, image_outage=False,
+                  review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
+         from PIL import Image
