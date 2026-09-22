@@ -1,5 +1,5 @@
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
-import { prepareRecoveryPlan, reviewRecoveryMedia, VIDEO_RECOVERY_REVIEW_VERSION, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
+import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
@@ -115,7 +115,6 @@ interface StoredVideoSourceImage {
 interface BrokerOptions {
     recoveryEnabled?: boolean;
     recoveryPlanner?: typeof prepareRecoveryPlan;
-    recoveryReviewer?: typeof reviewRecoveryMedia;
     host: string;
     port: number;
     dbPath: string;
@@ -4836,7 +4835,7 @@ export class VideoBroker {
                 return;
             }
             const index = Number(body.segment_index);
-            if (operation === 'image' || operation === 'review' || operation === 'local-review') {
+            if (operation === 'image' || operation === 'review') {
                 if (!Number.isInteger(index) || index < 0 || index >= prepared.plan.segments.length) throw new Error('Invalid segment.');
                 const segment = prepared.plan.segments[index];
                 if (operation === 'image') {
@@ -4881,43 +4880,13 @@ export class VideoBroker {
                 }
                 if (!['image', 'video'].includes(body.kind)
                     || !/^[a-f0-9]{64}$/.test(String(body.artifact_sha256 || ''))) throw new Error('Invalid artifact.');
-                const key = `${body.kind}:${index}:${body.artifact_sha256}`;
+                // Scene review was removed: it rejected usable videos over minor issues
+                // and added model calls to every scene. Recording the rendered artifact
+                // still lets final approval match the uploaded scenes exactly.
                 state.reviews ||= {};
-                state.local_reviews ||= {};
-                const cachedReview = state.reviews[key];
-                if (!cachedReview || (body.kind === 'video' && !cachedReview.acceptable
-                    && cachedReview.review_version !== VIDEO_RECOVERY_REVIEW_VERSION)) {
-                    const pending = state.local_reviews[key];
-                    if (operation === 'local-review') {
-                        const verdict = body.verdict;
-                        if (!pending) throw new Error('No local review is pending for this artifact.');
-                        if (!verdict || typeof verdict.acceptable !== 'boolean' || !Array.isArray(verdict.issues)) {
-                            throw new Error('Invalid local review verdict.');
-                        }
-                        state.reviews[key] = { acceptable: verdict.acceptable, permitted: true,
-                            issues: verdict.issues.slice(0, 8).map((issue: unknown) => sanitizeVideoWorkerText(String(issue), '', 500)),
-                            transcript: pending.context.transcript || '', reviewer: LOCAL_VIDEO_PLANNER_MODEL,
-                            review_version: VIDEO_RECOVERY_REVIEW_VERSION };
-                        delete state.local_reviews[key];
-                        await persist();
-                    } else if (pending) {
-                        writeJson(res, 200, { local_review_required: true, context: pending.context });
-                        return;
-                    } else {
-                        const outcome = await (this.options.recoveryReviewer || reviewRecoveryMedia)(
-                            prepared.contract, segment, body, options, prepared.contract.use_source_images ? sources : []);
-                        if (outcome.local_review_required) {
-                            state.local_reviews[key] = { context: outcome.context,
-                                ...(outcome.frontier_rejection ? { frontier_rejection: outcome.frontier_rejection } : {}) };
-                            await persist();
-                            writeJson(res, 200, { local_review_required: true, context: outcome.context });
-                            return;
-                        }
-                        state.reviews[key] = { ...outcome, review_version: VIDEO_RECOVERY_REVIEW_VERSION };
-                        await persist();
-                    }
-                }
-                writeJson(res, 200, state.reviews[key]);
+                state.reviews[`${body.kind}:${index}:${body.artifact_sha256}`] = { acceptable: true, permitted: true, issues: [] };
+                await persist();
+                writeJson(res, 200, { acceptable: true, permitted: true, issues: [] });
                 return;
             }
             if (operation === 'quality') {
@@ -4930,7 +4899,7 @@ export class VideoBroker {
                     const kind = 'video';
                     return state.reviews?.[`${kind}:${segmentIndex}:${artifact.sha256}`]?.acceptable === true;
                 });
-                if (!accepted) throw new Error('Some required scene artifacts have not passed review.');
+                if (!accepted) throw new Error('Some scene artifacts were not recorded for this output.');
                 state.quality = { accepted: true, format: body.format, result_sha256: body.result_sha256,
                     contract_hash: prepared.contract_hash, artifacts: body.artifacts };
                 await persist();
@@ -4950,7 +4919,7 @@ export class VideoBroker {
     }
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|review|local-review|checkpoint|quality)$/.exec(url.pathname);
+        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);
             return;

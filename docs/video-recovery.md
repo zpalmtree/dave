@@ -23,65 +23,44 @@ analysis so both planners agree on what is spoken. It uploads the screenplay to
 (`contract.planner = 'local'`). The one exception is `minor_sexualization`:
 sexual content involving minors stops the job and is never planned locally.
 
-A locally planned story also stays local for review. The broker still
-transcribes speech with Gemini (safety thresholds at `BLOCK_NONE`), then returns
-`local_review_required` with the review context. The worker judges the frames
-with local Qwen vision and posts its verdict to `recovery/local-review`. For a
-Sol-planned story, a Sol review refusal or a `permitted: false` verdict takes
-the same local route. Such a verdict is a policy veto, not a quality failure,
-so it is never cached as a failed review. When Gemini blocks a transcription, the reviewer is
-told the transcript is unavailable and judges only the visuals. A blocked
-transcript no longer counts as missing speech. Truly silent audio still fails.
-
 Opening images for a policy-rejected local story are composed on the desktop
 with local Qwen Image 2.1, which receives the source references when the
 contract uses them. A Sol-planned scene whose image providers return a
 moderation refusal falls back to the same local composition. Provider outages
-still wait and retry. Every local step (planning, each opening image, each
-review) takes its own `gpuq` reservation on the `video-h3` profile and releases
-it afterward, like a scene render.
+still wait and retry. Every local step (planning and each opening image) takes
+its own `gpuq` reservation on the `video-h3` profile and releases it afterward,
+like a scene render.
 Saved plans that silently rewrote the request are rejected on resume.
 For oalgo, the original Meximutt reference is mandatory. If it is missing or
 excluded, the job stops before rendering. For portrait-only oalgo requests,
 the original portrait is also the required opening frame; a generated
-replacement keyframe is rejected. Identity reviews must receive the original
-reference.
+replacement keyframe is rejected.
 
-Each scene gets a reviewed opening image. When the approved plan calls for the
-original portrait at frame zero, the worker uses that image directly and accepts
-it without review. A reviewer cannot improve the user's own frame, and replacing
-it is forbidden, so a rejection could only end the job. Continuing
-scenes use the previous accepted clip's final frame. New shots get their own
-opening composition, without inheriting a frame-zero crop restriction.
+Each scene gets an opening image. When the approved plan calls for the original
+portrait at frame zero, the worker uses that image directly. Continuing scenes
+use the previous accepted clip's final frame. New shots get their own opening
+composition, without inheriting a frame-zero crop restriction. Generated openings
+still pass through the image generator's own identity and composition repair.
 
-The worker permits two image attempts per recovery pass. Each scene gets one
-video attempt and one targeted retry with the requested renderer: two render
-attempts total per scene, across reconnects and recovery passes.
-The worker persists this count and stops before reserving more GPU work once
-it is exhausted. Video review samples five points in time, checks story/identity/action,
-and compares an audio transcription with the approved speech. It judges the
-user's requested story; incidental planner-invented props, camera choices, and
-blocking are flexible. Speech receives sufficient time within each shot.
-Speech review judges meaning: small paraphrases, extra words, filler, and brief
-creative flourishes are allowed when the intended message and key points remain.
-Silence, missing essential points, contradictions, or material changes to names
-and facts still fail. Exact wording is required only when the user explicitly
-requests it; quoted dialogue and planner verbatim flags alone do not require it.
-Word similarity is a review hint, not an automatic rejection. Comparisons accept
-Spanish vowel accents (á, é, í, ó, ú, ü), while preserving distinct letters such as
-ñ. Authored dialogue text remains unchanged. Previously rejected video artifacts
-are reviewed again under the current rules when resubmitted; accepted artifacts
-remain reusable.
+No model reviews the rendered scenes. Model review rejected usable videos over
+minor issues and added Sol, Gemini, or local Qwen calls to every scene, so it
+was removed on 2026-09-21. A scene is accepted once its render produces a
+decodable clip. The worker still records each scene's file hash with the broker
+(the `review` call, which now makes no model request), so final approval can
+require the exact rendered scenes. The worker permits two image attempts per
+recovery pass. A render that produces no valid output is retried once with the
+requested renderer: two render attempts total per scene, across reconnects and
+recovery passes. The worker persists this count and stops before reserving more
+GPU work once it is exhausted.
 
 Only actual generated video can pass final approval. Storyboards, slideshows,
 and caption cards are never substitutes for requested action. Exhausted render
-attempts stop the job, retaining accepted scenes and actionable review feedback.
-Exhausted jobs stop with a diagnostic
-failure instead of retrying forever; a placeholder is never delivered.
+attempts stop the job with a diagnostic failure instead of retrying forever; a
+placeholder is never delivered.
 
-The broker persists the approved contract, checksummed scene reviews, worker
-checkpoints, and final approval. The worker persists accepted artifacts and
-pending review locally. Review/upload interruptions reuse rendered media;
+The broker persists the approved contract, recorded scene hashes, worker
+checkpoints, and final approval. The worker persists accepted artifacts
+locally. Recording/upload interruptions reuse rendered media;
 unfinished interrupted renders may resume as a new attempt. Temporary service
 failures return the same job to the queue with exponential backoff, preserving
 its checkpoint and releasing the worker. Three failed recovery passes per job,
@@ -139,7 +118,7 @@ so update the worker first to avoid a stalled queue.
 matching output approval, deferred recovery, and broker/delivery regressions.
 `desktop/test_video_recovery.py` uses real decodable video fixtures to exercise
 original-frame reuse, continuation, the single retry limit, unavailable imagery,
-review/upload retries without rerendering, and coordinator-path preflight.
+recording/upload retries without rerendering, and coordinator-path preflight.
 
 The existing desktop generator suite has three pre-existing failures referring
 to removed legacy keyframe graph/cache symbols. These reproduce against the

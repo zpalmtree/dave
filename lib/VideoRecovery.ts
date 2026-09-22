@@ -170,19 +170,3 @@ export function approvedLocalRecoveryContract(plan: any, prompt: string, reason:
         segments: plan.segments, notice, use_source_images: useSources, planner: 'local', local_reason: reason,
     }));
 }
-
-export function recoverySpeechMatches(expected: string, transcript: string): boolean {
-    const a = normalizedRecoverySpeech(expected).split(/\s+/).filter(Boolean);
-    const b = normalizedRecoverySpeech(transcript).split(/\s+/).filter(Boolean);
-    if (!a.length) return !b.length;
-    if (!b.length) return false;
-    // Word edit distance tolerates small ASR errors, never a missing line or silence.
-    let row = b.map((_word, i) => i + 1); row.unshift(0);
-    for (let i = 1; i <= a.length; i++) {
-        const next = [i];
-        for (let j = 1; j <= b.length; j++) next[j] = Math.min(
-            next[j - 1] + 1, row[j] + 1, row[j - 1] + Number(a[i - 1] !== b[j - 1]));
-        row = next;
-    }
-    return row[b.length] <= (a.length <= 8 ? 0 : Math.floor(a.length * 0.15));
-}

@@ -4,11 +4,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { approvedLocalRecoveryContract, approvedRecoveryContract, recoveryHash, repairVideoTiming, recoverySpeechMatches, recoveryLimitReached,
+import { approvedRecoveryContract, recoveryHash, repairVideoTiming, recoveryLimitReached,
     VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
-import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError, reviewRecoveryMedia,
-    VIDEO_RECOVERY_REVIEW_VERSION } from '../dist/VideoRecoveryService.js';
+import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 
@@ -62,30 +61,6 @@ test('timing repair reserves speech time within a shot even when the whole segme
     assert.equal(value.segments[1].transition, 'cut');
 });
 
-test('speech verification tolerates punctuation but rejects missing lines and silent audio', () => {
-    assert.equal(recoverySpeechMatches('We made it home!', 'We made it home.'), true);
-    assert.equal(recoverySpeechMatches('We made it home.', ''), false);
-    assert.equal(recoverySpeechMatches('We made it home.', 'We made it.'), false);
-    assert.equal(recoverySpeechMatches('', 'Invented speech'), false);
-    assert.equal(recoverySpeechMatches('Just stop feeding the khat squirrels and wait for them to surrender.',
-        'Just stop feeding the caught squirrels and wait for them to surrender.'), true);
-});
-
-test('speech verification accepts Spanish vowel accents without accepting missing or changed words', () => {
-    const expected = 'mae Luis libereme, necesito cotizar mae, saqueme de aqui';
-    const transcript = 'Mae, Luis, libéreme, necesito cotizar, mae, sáqueme de aquí.';
-    assert.equal(recoverySpeechMatches(expected, transcript), true);
-    assert.equal(recoverySpeechMatches(transcript, expected), true);
-    assert.equal(recoverySpeechMatches(expected, transcript.normalize('NFD')), true);
-    assert.equal(recoverySpeechMatches('Sí, está aquí.', 'Si, esta aqui.'), true);
-    assert.equal(recoverySpeechMatches('El pingüino llegó.', 'El pinguino llego.'), true);
-    assert.equal(recoverySpeechMatches(expected, 'Mae Luis libéreme'), false);
-    assert.equal(recoverySpeechMatches(expected, 'Mae Luis'), false);
-    assert.equal(recoverySpeechMatches(expected, ''), false);
-    assert.equal(recoverySpeechMatches('Sáqueme de aquí.', 'Déjeme aquí.'), false);
-    assert.equal(recoverySpeechMatches('Un año.', 'Un ano.'), false);
-});
-
 test('approved dialogue may add Spanish accents while preserving the authored text', () => {
     const value = plan('mae Luis libereme, necesito cotizar mae, saqueme de aqui');
     const text = 'Mae, Luis, libéreme, necesito cotizar, mae, sáqueme de aquí.';
@@ -93,59 +68,6 @@ test('approved dialogue may add Spanish accents while preserving the authored te
     const contract = approvedRecoveryContract(value, 'John pleads at the bars');
     assert.equal(contract.segments[0].shots[0].dialogue[0].text, text);
     assert.equal(value.segments[0].shots[0].dialogue[0].text, text);
-});
-
-function mockMediaReview(t, transcript, decision) {
-    const requests = [];
-    t.mock.method(globalThis, 'fetch', async (input, init) => {
-        const url = String(typeof input === 'string' ? input : input.url);
-        if (url.includes('generativelanguage.googleapis.com')) {
-            return new Response(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: transcript }] } }] }),
-                { status: 200, headers: { 'content-type': 'application/json' } });
-        }
-        assert.equal(url, 'https://api.openai.com/v1/responses');
-        requests.push(JSON.parse(init.body));
-        return new Response(JSON.stringify({ status: 'completed', output_text: JSON.stringify(decision) }),
-            { status: 200, headers: { 'content-type': 'application/json' } });
-    });
-    return requests;
-}
-
-for (const example of [
-    { name: 'extra words and flair', expected: 'We made it home.', transcript: 'Hey, we finally made it home, my friend!', acceptable: true },
-    { name: 'Spanish paraphrasing', expected: 'mae Luis libereme, necesito cotizar mae, saqueme de aqui',
-        transcript: 'Luis, déjeme salir, necesito hacer una cotización, por favor.', acceptable: true },
-    { name: 'missing essential points', expected: 'mae Luis libereme, necesito cotizar mae, saqueme de aqui',
-        transcript: 'Mae Luis', acceptable: false },
-    { name: 'a meaning reversal despite similar wording', expected: 'We can safely go home now because the storm is over.',
-        transcript: 'We cannot safely go home now because the storm is over.', acceptable: false },
-]) {
-    test(`speech review delegates ${example.name} to the meaning reviewer`, async t => {
-        const requests = mockMediaReview(t, example.transcript, { acceptable: example.acceptable, permitted: true,
-            issues: example.acceptable ? [] : ['The intended message is missing or changed.'] });
-        const value = plan(example.expected);
-        const contract = approvedRecoveryContract(value, 'The character delivers the requested message.');
-        const result = await reviewRecoveryMedia(contract, value.segments[0],
-            { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' }, {});
-        assert.equal(requests.length, 1, 'Nonempty speech must reach the meaning reviewer regardless of word distance.');
-        const review = JSON.parse(requests[0].input[0].content[0].text);
-        assert.equal(review.expected_speech, example.expected);
-        assert.equal(review.transcript, example.transcript);
-        assert.equal(result.acceptable, example.acceptable);
-        assert.equal(result.transcript, example.transcript);
-    });
-}
-
-test('speech review still rejects silent or missing audio before the meaning reviewer', async t => {
-    const requests = mockMediaReview(t, '', { acceptable: true, permitted: true, issues: [] });
-    const value = plan();
-    const contract = approvedRecoveryContract(value, 'The character delivers the requested message.');
-    for (const audio of ['YQ==', undefined]) {
-        const result = await reviewRecoveryMedia(contract, value.segments[0],
-            { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio }, {});
-        assert.equal(result.acceptable, false);
-    }
-    assert.equal(requests.length, 0);
 });
 
 test('timing repair fits several turns without packing an oversized split into the previous turn', () => {
@@ -207,62 +129,6 @@ test('an OpenAI moderation block is a frontier rejection rather than an outage',
         error => !(error instanceof FrontierPlannerRejectedError) && /Bad schema/.test(error.message));
 });
 
-// Mock fetch once per test: a second mock of the same method is not restored cleanly.
-function mockRefusingReview(t, transcript, reply) {
-    const mock = { requests: [], transcript, reply };
-    t.mock.method(globalThis, 'fetch', async (input, init) => {
-        const url = String(typeof input === 'string' ? input : input.url);
-        if (url.includes('generativelanguage.googleapis.com')) {
-            mock.requests.push({ gemini: JSON.parse(init.body) });
-            return new Response(JSON.stringify(mock.transcript === null
-                ? { candidates: [{ finishReason: 'PROHIBITED_CONTENT' }] }
-                : { candidates: [{ content: { role: 'model', parts: [{ text: mock.transcript }] } }] }),
-            { status: 200, headers: { 'content-type': 'application/json' } });
-        }
-        mock.requests.push({ openai: JSON.parse(init.body) });
-        return new Response(JSON.stringify(mock.reply), { status: 200, headers: { 'content-type': 'application/json' } });
-    });
-    return mock;
-}
-
-test('a refused or unpermitted frontier review hands the artifact to the local reviewer', async t => {
-    const value = plan();
-    const contract = approvedRecoveryContract(value, 'The character delivers the requested message.');
-    const body = { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' };
-    const mock = mockRefusingReview(t, 'We made it home.', null);
-    for (const reply of [
-        { status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'I cannot help with that.' }] }] },
-        { status: 'completed', output_text: JSON.stringify({ acceptable: false, permitted: false, issues: ['Prohibited imagery.'] }) },
-    ]) {
-        mock.reply = reply;
-        const result = await reviewRecoveryMedia(contract, value.segments[0], body, {});
-        assert.equal(result.local_review_required, true);
-        assert.ok(result.frontier_rejection);
-        assert.equal(result.context.transcript, 'We made it home.');
-        assert.equal(result.context.expected_speech, 'We made it home.');
-        assert.equal('acceptable' in result, false, 'A refusal is never cached as a failed review.');
-    }
-});
-
-test('a locally planned story is reviewed locally and a blocked transcription is not missing speech', async t => {
-    const value = plan();
-    const contract = approvedLocalRecoveryContract(value, 'The character delivers the requested message.', 'provider_policy');
-    const mock = mockRefusingReview(t, null, {});
-    const { requests } = mock;
-    const result = await reviewRecoveryMedia(contract, value.segments[0],
-        { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' }, {});
-    assert.equal(result.local_review_required, true);
-    assert.equal(result.context.transcript_unavailable, true);
-    assert.equal(result.context.speech_wording_close, undefined);
-    assert.equal(requests.filter(request => request.openai).length, 0, 'Sol never reviews a story it rejected.');
-    const settings = requests[0].gemini.safetySettings || requests[0].gemini.safety_settings;
-    assert.ok(settings?.length && settings.every(setting => setting.threshold === 'BLOCK_NONE'));
-    mock.transcript = '';
-    const silent = await reviewRecoveryMedia(contract, value.segments[0],
-        { kind: 'video', frames: ['data:image/jpeg;base64,YQ=='], audio: 'YQ==' }, {});
-    assert.equal(silent.acceptable, false, 'Audible silence still fails before the local reviewer.');
-});
-
 test('mouthless dialogue staging preserves anatomy without forcing lip sync', () => {
     const value = { continuity_bible: 'John is a mouthless robot with small lens eyes.', segments: [{ shots: [{
         visual: 'John walks to the bars and speaks through his collar.', dialogue: [{ speaker_id: 'John', text: 'Let me out.' }],
@@ -281,7 +147,7 @@ test('mouthless dialogue staging preserves anatomy without forcing lip sync', ()
     }
 });
 
-test('original request and portrait are retained in planning and required in review', async () => {
+test('original request and portrait are retained in planning', async () => {
     const sources = [{ data: Buffer.from('portrait'), mimeType: 'image/png' }];
     let calls = 0;
     const result = await prepareRecoveryPlan({ prompt: 'The supplied character complains about a crypto scam.', model: 'minimax', requester: 'test', sources,
@@ -300,8 +166,6 @@ test('original request and portrait are retained in planning and required in rev
     assert.equal(result.contract.use_source_images, true);
     assert.equal(result.contract.source_reference_required, true);
     assert.equal(result.contract.original_first_frame, true);
-    await assert.rejects(reviewRecoveryMedia(result.contract, result.plan.segments[0],
-        { kind: 'image', frames: ['data:image/jpeg;base64,YQ=='] }, {}, []), /reference is missing from review/);
     await assert.rejects(prepareRecoveryPlan({ prompt: 'A character speaks', model: 'minimax', requester: 'test',
         sources: [], options: {}, requireSourceIdentity: true,
         planner: async () => { assert.fail('Missing references must fail before planning.'); },
@@ -329,12 +193,17 @@ test('recovery budgets allow one retry and preserve pending reviews and accepted
     assert.equal(used({ cycles: 2, video_accepted: 'hash' }), false);
 });
 
-test('broker persists recovery and requires every scene review for the matching contract/output', async () => {
+test('broker persists recovery and requires every recorded scene for the matching contract/output', async t => {
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-'));
     const value = plan();
     const contract = approvedRecoveryContract(value, 'explorers return');
     const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
-    let reviews = 0;
+    const originalFetch = globalThis.fetch;
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+        const url = String(typeof input === 'string' ? input : input.url);
+        if (url.startsWith('http://127.0.0.1')) return originalFetch(input, init);
+        assert.fail(`Recording a scene must not call a reviewer at ${url}.`);
+    });
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false, recoveryPlanner: async () => prepared,
@@ -343,11 +212,7 @@ test('broker persists recovery and requires every scene review for the matching 
             assert.equal(scenePlan.recovery_request, contract.prompt);
             return { bytes: Buffer.from('fixture'), mimeType: 'image/png', provider: 'test', model: 'test' };
         },
-        frontierPlanner: async () => { throw new Error('Legacy planning must not run before approval.'); },
-        recoveryReviewer: async (_contract, _segment, body) => {
-            reviews++;
-            return { acceptable: body.frames[0].endsWith('YQ=='), permitted: true, issues: [] };
-        } });
+        frontierPlanner: async () => { throw new Error('Legacy planning must not run before approval.'); } });
     await broker.start();
     try {
         const submitted = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
@@ -388,24 +253,14 @@ test('broker persists recovery and requires every scene review for the matching 
         const hash = 'a'.repeat(64), resultHash = 'b'.repeat(64);
         const quality = { format: 'generated', result_sha256: resultHash, artifacts: [{ sha256: hash }] };
         assert.equal((await request('quality', quality)).status, 503);
-        assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: hash,
-            frames: ['data:image/jpeg;base64,YQ=='] })).body.acceptable, true);
-        const legacyHash = 'd'.repeat(64);
-        const legacyState = JSON.parse((await broker.get('SELECT recovery_json FROM video_jobs WHERE public_id=?', [id])).recovery_json);
-        delete legacyState.reviews[`video:0:${hash}`].review_version;
-        legacyState.reviews[`video:0:${legacyHash}`] = { acceptable: false, permitted: true, transcript: 'Hey, we made it home!', issues: ['Speech mismatch.'] };
-        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?', [JSON.stringify(legacyState), id]);
-        await request('review', { segment_index: 0, kind: 'video', artifact_sha256: hash, frames: ['data:image/jpeg;base64,YQ=='] });
-        assert.equal(reviews, 1, 'Previously accepted artifacts remain cached across review policy changes.');
-        const rechecked = await request('review', { segment_index: 0, kind: 'video', artifact_sha256: legacyHash,
-            frames: ['data:image/jpeg;base64,YQ=='] });
-        assert.equal(rechecked.body.acceptable, true);
-        assert.equal(rechecked.body.review_version, VIDEO_RECOVERY_REVIEW_VERSION);
-        assert.equal(reviews, 2, 'A legacy rejection must receive a fresh review.');
-        const rejected = { segment_index: 0, kind: 'video', artifact_sha256: 'e'.repeat(64), frames: ['data:image/jpeg;base64,Yg=='] };
-        assert.equal((await request('review', rejected)).body.acceptable, false);
-        assert.equal((await request('review', rejected)).body.acceptable, false);
-        assert.equal(reviews, 3, 'Current-policy rejections remain cached instead of retrying the reviewer forever.');
+        assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: hash })).body.acceptable, true);
+        const state = JSON.parse((await broker.get('SELECT recovery_json FROM video_jobs WHERE public_id=?', [id])).recovery_json);
+        state.reviews[`video:0:${hash}`] = { acceptable: false, issues: ['A rejection cached before reviews were removed.'] };
+        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?', [JSON.stringify(state), id]);
+        assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: hash })).body.acceptable, true,
+            'A resumed job is not blocked by a rejection cached before reviews were removed.');
+        assert.equal((await request('quality', { ...quality, artifacts: [{ sha256: 'e'.repeat(64) }] })).status, 503,
+            'Final approval still requires the exact rendered scenes.');
         assert.equal((await request('quality', quality)).status, 200);
         assert.equal((await request('quality', { ...quality, format: 'storyboard' })).status, 503);
         assert.equal((await request('review', { segment_index: 0, kind: 'storyboard', artifact_sha256: hash })).status, 503);
@@ -595,7 +450,7 @@ test('broker stops rewritten plans, missing identity, and replacement openings, 
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('a rejected recovery job is planned, composed, reviewed, and approved through local Qwen', async t => {
+test('a rejected recovery job is planned and composed through local Qwen and approved without review', async t => {
     const originalFetch = globalThis.fetch;
     t.mock.method(globalThis, 'fetch', async (input, init) => {
         const url = String(typeof input === 'string' ? input : input.url);
@@ -603,14 +458,13 @@ test('a rejected recovery job is planned, composed, reviewed, and approved throu
         assert.fail(`A locally planned story must not reach ${url}.`);
     });
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-local-'));
-    let frontierCalls = 0, generatorCalls = 0, reviewerCalls = 0;
+    let frontierCalls = 0, generatorCalls = 0;
     const analysis = { dialogue_contract: { mode: 'verbatim', lines: [{ text: 'We made it home.', verbatim: true }] } };
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false,
         frontierPlanner: async () => { frontierCalls++; throw new FrontierPlannerRejectedError('provider_policy', 'Declined.', analysis); },
         keyframeGenerator: async () => { generatorCalls++; throw new Error('Frontier images are not used for a policy rejection.'); },
-        recoveryReviewer: async (...args) => { reviewerCalls++; return reviewRecoveryMedia(...args); },
     });
     await broker.start();
     try {
@@ -651,34 +505,11 @@ test('a rejected recovery job is planned, composed, reviewed, and approved throu
         assert.equal(image.body.local_image_required, true);
         assert.match(image.body.keyframe.prompt, /opening instant/);
         assert.equal(generatorCalls, 0);
-        const hash = 'a'.repeat(64);
-        const artifact = { segment_index: 0, kind: 'image', artifact_sha256: hash, frames: ['data:image/jpeg;base64,YQ=='] };
-        const pending = await request('review', artifact);
-        assert.equal(pending.body.local_review_required, true);
-        assert.equal(pending.body.context.request, 'explorers return');
-        assert.equal((await request('review', artifact)).body.local_review_required, true);
-        assert.equal(reviewerCalls, 1, 'A pending local review is not recomputed.');
-        assert.equal((await request('local-review', { ...artifact, artifact_sha256: 'f'.repeat(64),
-            verdict: { acceptable: true, issues: [] } })).status, 503, 'Only a requested review can be answered locally.');
-        assert.equal((await request('local-review', { ...artifact, verdict: { acceptable: 'yes' } })).status, 503);
-        const stored = await request('local-review', { ...artifact, verdict: { acceptable: true, issues: [] } });
-        assert.equal(stored.body.acceptable, true);
-        assert.equal(stored.body.reviewer, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
-        assert.equal((await request('review', artifact)).body.acceptable, true);
-        const video = { ...artifact, kind: 'video', artifact_sha256: 'b'.repeat(64) };
-        delete video.frames;
-        video.frames = ['data:image/jpeg;base64,YQ=='];
-        const quality = { format: 'generated', result_sha256: 'c'.repeat(64), artifacts: [{ sha256: video.artifact_sha256 }] };
-        assert.equal((await request('quality', quality)).status, 503);
-        const videoReview = await request('review', video);
-        assert.equal(videoReview.body.acceptable, false, 'Missing audio for required speech still fails deterministically.');
-        const audible = { ...video, artifact_sha256: 'd'.repeat(64) };
-        const state = JSON.parse((await broker.get('SELECT recovery_json FROM video_jobs WHERE public_id=?', [id])).recovery_json);
-        state.local_reviews[`video:0:${audible.artifact_sha256}`] = { context: { transcript: 'We made it home.' } };
-        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?', [JSON.stringify(state), id]);
-        const accepted = await request('local-review', { ...audible, verdict: { acceptable: true, issues: [] } });
-        assert.equal(accepted.body.transcript, 'We made it home.');
-        assert.equal((await request('quality', { ...quality, artifacts: [{ sha256: audible.artifact_sha256 }] })).status, 200);
+        const quality = { format: 'generated', result_sha256: 'c'.repeat(64), artifacts: [{ sha256: 'b'.repeat(64) }] };
+        assert.equal((await request('review', { segment_index: 0, kind: 'image', artifact_sha256: 'a'.repeat(64) })).body.acceptable, true);
+        assert.equal((await request('quality', quality)).status, 503, 'An unrecorded scene cannot be approved.');
+        assert.equal((await request('review', { segment_index: 0, kind: 'video', artifact_sha256: 'b'.repeat(64) })).body.acceptable, true);
+        assert.equal((await request('quality', quality)).status, 200);
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
