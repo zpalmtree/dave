@@ -1,0 +1,77 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -47,6 +47,8 @@
+ LLAMA_CPP_MMPROJ = _QWEN_SETTINGS['qwenvisionprojector']
+ LLAMA_CPP_SERVER = "http://127.0.0.1:18080"
+ LLAMA_CPP_PID_FILE = SCRIPT_DIR / "llama_cpp_video_gen.pid.json"
++# A cold 18 GB load after renders evict the file cache takes minutes, not seconds.
++LLAMA_CPP_STARTUP_SECONDS = 300
+ PROMPT_INTENT_MODEL = "hauhaucs-qwen3.8:27b-q4kp-mtp"
+ LOCAL_PLAN_ATTEMPTS = 3
+ IMAGE_ONLY_AUTO_PROMPT = (
+@@ -1918,7 +1920,7 @@
+         }),
+         encoding="utf-8",
+     )
+-    deadline = time.monotonic() + 90
++    deadline = time.monotonic() + LLAMA_CPP_STARTUP_SECONDS
+     while time.monotonic() < deadline:
+         if llama_cpp_ready():
+             return
+@@ -6670,7 +6672,10 @@
+     "are artifact frames in time order. Reject missing required subjects, identity replacement, a "
+     "wrong scene, or substantial missing action. For an opening image, judge only the authored "
+     "initial frame: characters, settings, or action revealed later need not appear at frame zero, "
+-    "and a requested original portrait is a valid opening before a camera reveal. Do not reject "
++    "and a requested original portrait is a valid opening before a camera reveal. When kind is image, "
++    "the artifact is one opening still by design: judge only whether it can begin the segment's first "
++    "shot with the right subjects, identity, and setting. Never reject an opening image for being "
++    "static or for not yet showing later actions, reveals, props, characters, or consequences. Do not reject "
+     "cosmetic differences, camera preferences, harmless timing differences, intended stillness, or "
+     "incidental props, mechanisms, blocking, and camera choices invented by the planner when the "
+     "requested story is clearly enacted. Reject a slideshow, captioned still, or storyboard that "
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -326,6 +326,7 @@
+                                 shutil.copy2(await compose_locally(value), image)
+                             else:
+                                 save_image(value['image'], image)
++                            scene['image_source'] = 'generated'
+                             scene['pending_image'] = digest(image)
+                             await save()
+                         except Exception as error:
+@@ -333,7 +334,10 @@
+                             traceback.print_exc()
+                             await save()
+                             continue
+-                    verdict = await review(image, 'image')
++                    # The user's own starting image is frame zero by definition. A reviewer
++                    # cannot improve it; a rejection could only replace or end it.
++                    verdict = ({'acceptable': True} if scene.get('image_source') == 'original'
++                               else await review(image, 'image'))
+                     scene.pop('pending_image', None)
+                     if verdict['acceptable']:
+                         scene['image_accepted'] = digest(image)
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -232,6 +232,8 @@
+         self.assertTrue(verdict['issues'], 'A rejection always carries a repairable issue.')
+         self.assertEqual(seen['data']['messages'][1]['images'], ['Yg==', 'YQ=='])
+         self.assertIn('never reject because of its subject matter', seen['data']['messages'][0]['content'])
++        self.assertIn('Never reject an opening image for being static', seen['data']['messages'][0]['content'])
++        self.assertGreaterEqual(video_gen.LLAMA_CPP_STARTUP_SECONDS, 240)
+         with mock.patch.object(video_gen, 'planner_json', return_value={'message': {'content': 'not json'}}):
+             with self.assertRaises(video_gen.VideoGenError):
+                 video_gen.review_recovery_artifact({'frames': ['YQ==']})
+@@ -362,7 +364,10 @@
+                     self.assertEqual(worker.run_reserved_command.await_count, before + int(admission_outage))
+                 worker.wait_and_send_terminal.assert_awaited_once()
+                 self.assertEqual(state['format'], 'generated')
+-                if original: self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
++                if original:
++                    self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
++                    self.assertFalse(any(operation == 'review' and body['kind'] == 'image' and body['segment_index'] == 0
++                                         for operation, body in calls), 'The original portrait is never reviewed away.')
+                 if continuation:
+                     if not authored_cut: self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
+                     self.assertEqual(worker.run_reserved_command.await_count, 2)

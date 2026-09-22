@@ -232,6 +232,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(verdict['issues'], 'A rejection always carries a repairable issue.')
         self.assertEqual(seen['data']['messages'][1]['images'], ['Yg==', 'YQ=='])
         self.assertIn('never reject because of its subject matter', seen['data']['messages'][0]['content'])
+        self.assertIn('Never reject an opening image for being static', seen['data']['messages'][0]['content'])
+        self.assertGreaterEqual(video_gen.LLAMA_CPP_STARTUP_SECONDS, 240)
         with mock.patch.object(video_gen, 'planner_json', return_value={'message': {'content': 'not json'}}):
             with self.assertRaises(video_gen.VideoGenError):
                 video_gen.review_recovery_artifact({'frames': ['YQ==']})
@@ -362,7 +364,10 @@ class RecoveryTests(unittest.TestCase):
                     self.assertEqual(worker.run_reserved_command.await_count, before + int(admission_outage))
                 worker.wait_and_send_terminal.assert_awaited_once()
                 self.assertEqual(state['format'], 'generated')
-                if original: self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
+                if original:
+                    self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
+                    self.assertFalse(any(operation == 'review' and body['kind'] == 'image' and body['segment_index'] == 0
+                                         for operation, body in calls), 'The original portrait is never reviewed away.')
                 if continuation:
                     if not authored_cut: self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
                     self.assertEqual(worker.run_reserved_command.await_count, 2)
