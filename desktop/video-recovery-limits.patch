@@ -1,6 +1,8 @@
 --- a/video_gen.py
 +++ b/video_gen.py
-@@ -5263,7 +5263,16 @@
+@@ -5261,11 +5261,20 @@
+         "their mouth closed; only the specified non-speech ambience and effects are heard. "
+         f"Dialogue begins no earlier than {boundary}."
      )
  
  
@@ -18,7 +20,11 @@
      mouth_motion = (
          "Speech uses natural lip and jaw articulation while preserving that frame-zero lip width, "
          "lip thickness, mouth-corner placement, teeth scale, jaw, and chin."
-@@ -5283,7 +5292,9 @@
+         if has_dialogue else
+         "The lips remain closed at the frame-zero mouth aperture with the teeth covered; subtle "
+@@ -5281,11 +5290,13 @@
+         f"{mouth_motion} A requested presentation style changes motion, editing, color, and rendering, "
+         "while this facial geometry and character design remain recognizable and unchanged."
      )
  
  
@@ -29,7 +35,11 @@
      mouth_anchor = (
          "Natural speech articulation retains the frame-zero lip, teeth, jaw, and chin proportions."
          if has_dialogue else
-@@ -5305,6 +5316,8 @@
+         "The frame-zero mouth aperture stays closed and the teeth remain covered."
+     )
+@@ -5303,10 +5314,12 @@
+     has_last_frame: bool = False,
+     last_frame_matches_first: bool = False,
  ) -> str:
      parts: list[str] = []
      has_dialogue = any(shot.get("dialogue") for shot in segment["shots"])
@@ -38,7 +48,11 @@
      dialogue_lead_in = h3_dialogue_lead_in_seconds()
      opening_dialogue_guard = ""
      if has_dialogue and dialogue_lead_in > 0:
-@@ -5342,12 +5355,12 @@
+         boundary = f"00:{dialogue_lead_in:06.3f}"
+         opening_dialogue_guard = (
+@@ -5340,16 +5353,16 @@
+                 image_anchor = (
+                     "Begin from the exact visible pose, orientation, gaze, proportions, clothing, "
                      "composition, and camera axis in <Picture 1>. Picture 1 overrides any conflicting "
                      "description in the screenplay. "
                      f"{motion_contract_text(motion_contract, dialogue_lead_in if has_dialogue else 0.0)} "
@@ -53,7 +67,11 @@
                  )
              visual = f"{image_anchor} {visual}"
          body = f"{opening} {visual.rstrip('.')} . {shot['camera'].rstrip('.')} ."
-@@ -5372,6 +5385,10 @@
+         dialogue = shot_dialogue_h3(shot, speaker_map)
+         if dialogue:
+@@ -5370,10 +5383,14 @@
+             "Only the dialogue words inside the dialogue tags are voiced; speaker names, speaker tags, "
+             "language labels, and performance instructions are not spoken. "
              "Before the first quoted line and after the final quoted line, no human speech, mumbling, "
              "or invented words are audible; speakers keep their mouths closed outside the dialogue."
          )
@@ -64,42 +82,116 @@
      parts.append("integrated_multimodal_description: " + " ".join(description))
      soundscape = " ".join(str(shot["audio"]).strip() for shot in segment["shots"])
      silence_marker = re.sub(r"[\s.!]+", " ", soundscape).strip().casefold()
+     if silence_marker in {"silence", "silent", "none", "n/a", "na", "no audible sound"}:
+         parts.append("overall_soundscape: Silence.")
 --- a/video_recovery.py
 +++ b/video_recovery.py
-@@ -14,6 +14,12 @@
+@@ -12,10 +12,21 @@
+ import time
+ import traceback
  from pathlib import Path
  
  import aiohttp
 +
-+MAX_SCENE_CYCLES = 2
++MAX_RENDER_ATTEMPTS = 2
 +
 +
 +class RecoveryLimitError(RuntimeError):
 +    pass
++
++
++def render_budget_used(scene: dict) -> bool:
++    # A legacy cycle already consumed four renders. Never reset that budget.
++    return scene.get('cycles', 0) > 0 or scene.get('video_attempts', 0) >= MAX_RENDER_ATTEMPTS
  
  
  def digest(path: Path) -> str:
-@@ -190,6 +196,9 @@
+     value = hashlib.sha256()
+     with path.open('rb') as stream:
+@@ -188,10 +199,14 @@
+         clips, artifacts = [], []
+         for index, segment in enumerate(plan['segments']):
              scene_root = root / f'scene-{index}'
              scene_root.mkdir(exist_ok=True)
              scene = checkpoint['scenes'].setdefault(str(index), {})
-+            if not scene.get('video_accepted') and scene.get('cycles', 0) >= MAX_SCENE_CYCLES:
-+                raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
++            if (not scene.get('video_accepted') and render_budget_used(scene)
++                    and not scene.get('pending_video') and not scene.get('render_interrupted')):
++                raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
 +                                         + '; '.join(scene.get('video_issues', [])))
              async def review(path: Path, kind: str, frames=None):
                  try:
                      details = {'frames': frames or [data_image(path)]} if kind != 'video' else await asyncio.to_thread(review_samples, path, scene_root)
-@@ -345,6 +354,9 @@
-                     scene['cycles'] = scene.get('cycles', 0) + 1
-                     scene['video_attempts'] = 0
+                 except Exception:
+                     return {'acceptable': False, 'issues': ['The output could not be fully decoded.']}
+@@ -250,13 +265,12 @@
+                 scene['image_attempts'] = 0
+                 await save()
+                 raise RuntimeError('Waiting to recover the opening image: ' + '; '.join(scene.get('image_issues', [])))
+             if scene.get('video_accepted') and (not Path(scene['video_path']).is_file() or digest(Path(scene['video_path'])) != scene['video_accepted']):
+                 scene.pop('video_accepted', None)
+-                scene['video_attempts'] = 0
+             if not scene.get('video_accepted'):
+-                while scene.get('pending_video') or scene.get('render_interrupted') or scene.get('video_attempts', 0) < 4:
++                while scene.get('pending_video') or scene.get('render_interrupted') or not render_budget_used(scene):
+                     pending = scene.get('pending_video')
+                     if pending and Path(pending).is_file():
+                         verdict = await review(Path(pending), 'video')
+                         scene.pop('pending_video', None)
+                         if verdict['acceptable']:
+@@ -265,15 +279,15 @@
+                             scene['renderer'] = scene.get('pending_renderer', job['model'])
+                             await save()
+                             break
+                         scene['video_issues'] = verdict.get('issues', [])
+                         await save()
+-                    if scene.get('video_attempts', 0) >= 4 and not scene.get('render_interrupted'):
+-                        break
+                     if scene.pop('render_interrupted', False):
+                         scene['video_attempts'] = max(0, scene.get('video_attempts', 0) - 1)
                      await save()
-+                    if scene['cycles'] >= MAX_SCENE_CYCLES:
-+                        raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
-+                                                 + '; '.join(scene.get('video_issues', [])))
-                     raise RuntimeError('Recovering the actual scene after both renderers missed it: ' + '; '.join(scene.get('video_issues', [])))
++                    if render_budget_used(scene):
++                        break
+                     one = copy.deepcopy(plan)
+                     one['segments'] = [copy.deepcopy(segment)]
+                     one['segments'][0]['transition'] = 'start'
+                     if index > 0:
+                         one['keyframe'] = {'recommended': False,
+@@ -296,13 +310,11 @@
+                     one['recovery_approved'] = True
+                     if scene.get('video_issues'):
+                         one['segments'][0]['shots'][0]['visual'] += ' Repair these observed failures: ' + '; '.join(scene['video_issues'])
+                     plan_path = scene_root / 'plan.json'
+                     atomic_json(plan_path, one)
+-                    primary = job['model']
+-                    alternate = 'ltx' if primary.startswith('minimax') else 'minimax'
+-                    renderer = primary if scene.get('video_attempts', 0) < 2 else alternate
++                    renderer = job['model']
+                     reservation_scope = f"scene-{index}-cycle-{scene.get('cycles', 0)}-attempt-{scene.get('video_attempts', 0) + 1}"
+                     if not await worker.ensure_gpu_reservation({**job, 'model': renderer,
+                             'gpuq_reservation_scope': reservation_scope}):
+                         raise asyncio.CancelledError()
+                     # Queue/admission outages must not consume a render attempt.
+@@ -340,14 +352,13 @@
+                         scene['renderer'] = renderer
+                         break
+                     scene['video_issues'] = verdict.get('issues', [])
+                     await save()
+                 if not scene.get('video_accepted'):
+-                    scene['cycles'] = scene.get('cycles', 0) + 1
+-                    scene['video_attempts'] = 0
+-                    await save()
+-                    raise RuntimeError('Recovering the actual scene after both renderers missed it: ' + '; '.join(scene.get('video_issues', [])))
++                    await save()
++                    raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
++                                             + '; '.join(scene.get('video_issues', [])))
              await save()
          checkpoint['format'] = 'generated'
-@@ -372,4 +384,4 @@
+         await save()
+         for index, segment in enumerate(plan['segments']):
+             scene = checkpoint['scenes'][str(index)]
+@@ -370,6 +381,6 @@
+         await worker.send_ready()
+     except asyncio.CancelledError:
          await worker.finish_cancelled_job(job['id'])
      except Exception as error:
          traceback.print_exc()
@@ -107,13 +199,26 @@
 +        await worker.fail_current(str(error), not isinstance(error, RecoveryLimitError))
 --- a/test_video_recovery.py
 +++ b/test_video_recovery.py
-@@ -59,6 +59,34 @@
+@@ -52,15 +52,46 @@
+         job = {'id': 'job', 'lease_id': 'lease', 'gpuq_reservation_scope': 'scene-0-attempt-1'}
+         self.assertEqual(gpuq_reservation_identity(job), gpuq_reservation_identity(dict(job)))
+         self.assertNotEqual(gpuq_reservation_identity(job), gpuq_reservation_identity({**job,
+             'gpuq_reservation_scope': 'scene-0-attempt-2'}))
  
-     def test_all_renderers_failing_defers_without_uploading_a_storyboard(self):
-         self.exercise(render_failures=4)
+-    def test_one_targeted_retry_then_alternate_renderer(self):
++    def test_one_targeted_retry_can_succeed(self):
++        self.exercise(render_failures=1)
 +
++    def test_second_failed_render_stops_without_uploading_a_storyboard(self):
+         self.exercise(render_failures=2)
+ 
+-    def test_all_renderers_failing_defers_without_uploading_a_storyboard(self):
+-        self.exercise(render_failures=4)
 +    def test_render_budget_survives_restart_and_stops_before_more_gpu_work(self):
-+        self.exercise(render_failures=8)
++        self.exercise(render_failures=2, restart_exhausted=True)
++
++    def test_final_attempt_review_outage_does_not_rerender(self):
++        self.exercise(render_failures=1, review_outage=True)
 +
 +    def test_mouthless_h3_prompt_preserves_robot_anatomy_with_full_speech(self):
 +        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
@@ -142,21 +247,61 @@
  
      def test_image_service_outage_defers_without_a_placeholder(self):
          self.exercise(image_outage=True)
-@@ -152,6 +180,17 @@
+ 
+     def test_review_outage_preserves_rendered_video(self):
+@@ -74,11 +105,11 @@
+ 
+     def test_bad_response_is_diagnostic_instead_of_none_attribute_error(self):
+         self.exercise(image_outage=True, invalid_response=True)
+ 
+     def exercise(self, original=False, render_failures=0, image_outage=False,
+-                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False):
++                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
+         from PIL import Image
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+             source = root / 'source.png'
+             Image.new('RGB', (256, 144), 'blue').save(source)
+@@ -150,17 +181,27 @@
+                 GENERATOR=root / 'generator.py', console_python_executable=lambda: sys.executable,
+                 atomic_json=lambda path, value: path.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8'), stable_job_seed=lambda _: 1)
              with mock.patch.dict(sys.modules, {'video_worker': fake}):
                  job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
                  asyncio.run(recovery.run_recovery_job(worker, job))
-+                if render_failures == 8:
-+                    self.assertEqual(worker.run_reserved_command.await_count, 4)
-+                    self.assertTrue(worker.fail_current.await_args.args[1])
-+                    asyncio.run(recovery.run_recovery_job(worker, job))
-+                    self.assertEqual(worker.run_reserved_command.await_count, 8)
+-                if image_outage or render_failures == 4:
++                if restart_exhausted:
++                    self.assertEqual(worker.run_reserved_command.await_count, 2)
 +                    self.assertFalse(worker.fail_current.await_args.args[1])
 +                    asyncio.run(recovery.run_recovery_job(worker, job))
-+                    self.assertEqual(worker.run_reserved_command.await_count, 8)
++                    self.assertEqual(worker.run_reserved_command.await_count, 2)
 +                    self.assertFalse(worker.fail_current.await_args.args[1])
 +                    worker.upload.assert_not_awaited()
 +                    return
-                 if image_outage or render_failures == 4:
++                if image_outage or render_failures == 2:
                      worker.fail_current.assert_awaited_once()
                      worker.upload.assert_not_awaited()
+                     worker.wait_and_send_terminal.assert_not_awaited()
+                     self.assertFalse(any(body.get('format') == 'storyboard' for _, body in calls))
+                     if invalid_response: self.assertIn('503', worker.fail_current.await_args.args[0])
+-                    if render_failures == 4: self.assertEqual(renderers, ['minimax', 'minimax', 'ltx', 'ltx'])
++                    if render_failures == 2:
++                        self.assertEqual(renderers, ['minimax', 'minimax'])
++                        self.assertFalse(worker.fail_current.await_args.args[1])
+                     return
+                 if review_outage or upload_outage or admission_outage:
+                     worker.fail_current.assert_awaited_once()
+                     before = worker.run_reserved_command.await_count
+                     if admission_outage:
+@@ -177,11 +218,11 @@
+                 self.assertEqual(state['format'], 'generated')
+                 if original: self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
+                 if continuation:
+                     if not authored_cut: self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
+                     self.assertEqual(worker.run_reserved_command.await_count, 2)
+-                if render_failures == 2: self.assertEqual(renderers, ['minimax', 'minimax', 'ltx'])
++                if render_failures == 1: self.assertEqual(renderers, ['minimax', 'minimax'])
+                 self.assertGreater(recovery.duration(root / 'worker_recovery/test-job/final.mp4'), 0)
+ 
+ 
+ if __name__ == '__main__':
+     unittest.main()

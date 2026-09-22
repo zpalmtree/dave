@@ -2,13 +2,15 @@ import { createHash } from 'crypto';
 
 export const VIDEO_RECOVERY_VERSION = 2;
 export const VIDEO_RECOVERY_MAX_FAILURES = 3;
-export const VIDEO_RECOVERY_MAX_SCENE_CYCLES = 2;
+export const VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS = 2;
 
 /** Persisted budgets survive reconnects and broker/worker restarts. */
 export function recoveryLimitReached(state: any): boolean {
     return Number(state?.waits || 0) >= VIDEO_RECOVERY_MAX_FAILURES
         || Object.values(state?.checkpoint?.scenes || {}).some((scene: any) =>
-            !scene.video_accepted && Number(scene.cycles || 0) >= VIDEO_RECOVERY_MAX_SCENE_CYCLES);
+            !scene.video_accepted && !scene.pending_video && !scene.render_interrupted
+            && (Number(scene.cycles || 0) > 0
+                || Number(scene.video_attempts || 0) >= VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS));
 }
 export type VideoOutputFormat = 'generated';
 export interface VideoRecoveryContract {

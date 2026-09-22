@@ -232,11 +232,16 @@ test('a generated replacement opening cannot satisfy a required original portrai
     assert.equal(calls, 2);
 });
 
-test('recovery budgets distinguish exhausted scenes from accepted scenes', () => {
+test('recovery budgets allow one retry and preserve pending reviews and accepted scenes', () => {
     assert.equal(recoveryLimitReached({ waits: 2 }), false);
     assert.equal(recoveryLimitReached({ waits: 3 }), true);
-    assert.equal(recoveryLimitReached({ checkpoint: { scenes: { 0: { cycles: 2 } } } }), true);
-    assert.equal(recoveryLimitReached({ checkpoint: { scenes: { 0: { cycles: 2, video_accepted: 'hash' } } } }), false);
+    const used = scene => recoveryLimitReached({ checkpoint: { scenes: { 0: scene } } });
+    assert.equal(used({ video_attempts: 1 }), false);
+    assert.equal(used({ video_attempts: 2 }), true);
+    assert.equal(used({ cycles: 1 }), true, 'Legacy four-render cycles are already exhausted.');
+    assert.equal(used({ video_attempts: 2, pending_video: 'clip.mp4' }), false);
+    assert.equal(used({ video_attempts: 2, render_interrupted: true }), false);
+    assert.equal(used({ cycles: 2, video_accepted: 'hash' }), false);
 });
 
 test('broker persists recovery and requires every scene review for the matching contract/output', async () => {
@@ -469,6 +474,15 @@ test('broker stops rewritten plans, missing identity, replacement openings, and 
         assert.equal((await request('plan')).status, 422);
         await failed();
         assert.equal(planningCalls, 1, 'Invalid saved plans and missing references stop before calling the planner.');
+        await reset({ prepared, checkpoint: { scenes: { 0: { video_attempts: 2 } } } });
+        assert.equal((await request('checkpoint', { checkpoint: { scenes: { 0: {
+            video_attempts: 3, render_interrupted: true,
+        } } } })).status, 422, 'An older worker cannot start a third render.');
+        await failed();
+        await reset({ prepared, checkpoint: { scenes: { 0: { video_attempts: 3, render_interrupted: true } } } });
+        assert.equal((await request('checkpoint', { checkpoint: { scenes: { 0: {
+            video_attempts: 3, render_interrupted: true,
+        } } } })).status, 200, 'A render already active before deployment can finish.');
         await reset(); refusal = true;
         const declined = await request('plan');
         assert.equal(declined.status, 422);

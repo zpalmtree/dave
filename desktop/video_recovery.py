@@ -15,11 +15,16 @@ from pathlib import Path
 
 import aiohttp
 
-MAX_SCENE_CYCLES = 2
+MAX_RENDER_ATTEMPTS = 2
 
 
 class RecoveryLimitError(RuntimeError):
     pass
+
+
+def render_budget_used(scene: dict) -> bool:
+    # A legacy cycle already consumed four renders. Never reset that budget.
+    return scene.get('cycles', 0) > 0 or scene.get('video_attempts', 0) >= MAX_RENDER_ATTEMPTS
 
 
 def digest(path: Path) -> str:
@@ -196,8 +201,9 @@ async def run_recovery_job(worker, job: dict) -> None:
             scene_root = root / f'scene-{index}'
             scene_root.mkdir(exist_ok=True)
             scene = checkpoint['scenes'].setdefault(str(index), {})
-            if not scene.get('video_accepted') and scene.get('cycles', 0) >= MAX_SCENE_CYCLES:
-                raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
+            if (not scene.get('video_accepted') and render_budget_used(scene)
+                    and not scene.get('pending_video') and not scene.get('render_interrupted')):
+                raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
                                          + '; '.join(scene.get('video_issues', [])))
             async def review(path: Path, kind: str, frames=None):
                 try:
@@ -261,9 +267,8 @@ async def run_recovery_job(worker, job: dict) -> None:
                 raise RuntimeError('Waiting to recover the opening image: ' + '; '.join(scene.get('image_issues', [])))
             if scene.get('video_accepted') and (not Path(scene['video_path']).is_file() or digest(Path(scene['video_path'])) != scene['video_accepted']):
                 scene.pop('video_accepted', None)
-                scene['video_attempts'] = 0
             if not scene.get('video_accepted'):
-                while scene.get('pending_video') or scene.get('render_interrupted') or scene.get('video_attempts', 0) < 4:
+                while scene.get('pending_video') or scene.get('render_interrupted') or not render_budget_used(scene):
                     pending = scene.get('pending_video')
                     if pending and Path(pending).is_file():
                         verdict = await review(Path(pending), 'video')
@@ -276,11 +281,11 @@ async def run_recovery_job(worker, job: dict) -> None:
                             break
                         scene['video_issues'] = verdict.get('issues', [])
                         await save()
-                    if scene.get('video_attempts', 0) >= 4 and not scene.get('render_interrupted'):
-                        break
                     if scene.pop('render_interrupted', False):
                         scene['video_attempts'] = max(0, scene.get('video_attempts', 0) - 1)
                     await save()
+                    if render_budget_used(scene):
+                        break
                     one = copy.deepcopy(plan)
                     one['segments'] = [copy.deepcopy(segment)]
                     one['segments'][0]['transition'] = 'start'
@@ -307,9 +312,7 @@ async def run_recovery_job(worker, job: dict) -> None:
                         one['segments'][0]['shots'][0]['visual'] += ' Repair these observed failures: ' + '; '.join(scene['video_issues'])
                     plan_path = scene_root / 'plan.json'
                     atomic_json(plan_path, one)
-                    primary = job['model']
-                    alternate = 'ltx' if primary.startswith('minimax') else 'minimax'
-                    renderer = primary if scene.get('video_attempts', 0) < 2 else alternate
+                    renderer = job['model']
                     reservation_scope = f"scene-{index}-cycle-{scene.get('cycles', 0)}-attempt-{scene.get('video_attempts', 0) + 1}"
                     if not await worker.ensure_gpu_reservation({**job, 'model': renderer,
                             'gpuq_reservation_scope': reservation_scope}):
@@ -351,13 +354,9 @@ async def run_recovery_job(worker, job: dict) -> None:
                     scene['video_issues'] = verdict.get('issues', [])
                     await save()
                 if not scene.get('video_accepted'):
-                    scene['cycles'] = scene.get('cycles', 0) + 1
-                    scene['video_attempts'] = 0
                     await save()
-                    if scene['cycles'] >= MAX_SCENE_CYCLES:
-                        raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_SCENE_CYCLES * 4} render attempts. '
-                                                 + '; '.join(scene.get('video_issues', [])))
-                    raise RuntimeError('Recovering the actual scene after both renderers missed it: ' + '; '.join(scene.get('video_issues', [])))
+                    raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
+                                             + '; '.join(scene.get('video_issues', [])))
             await save()
         checkpoint['format'] = 'generated'
         await save()

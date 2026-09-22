@@ -14,7 +14,7 @@ def main():
     args = parser.parse_args()
     archive = Path(__file__).resolve().parents[1] / 'desktop'
     hashes = json.loads((archive / 'video-recovery-limits-hashes.json').read_text())
-    pending = {'video-recovery-limits.patch': [], 'video-recovery-limits-upgrade.patch': []}
+    pending = {'video-recovery-limits.patch': [], 'video-recovery-limits-upgrade.patch': [], 'video-recovery-two-attempts.patch': []}
     for name, expected in hashes.items():
         actual = hashlib.sha256((args.directory / name).read_bytes()).hexdigest()
         if actual == expected['after_sha256']:
@@ -23,6 +23,8 @@ def main():
             pending['video-recovery-limits.patch'].append(name)
         elif actual == expected.get('intermediate_sha256'):
             pending['video-recovery-limits-upgrade.patch'].append(name)
+        elif actual == expected.get('previous_sha256'):
+            pending['video-recovery-two-attempts.patch'].append(name)
         else:
             raise SystemExit(f'Unexpected local edits in {name}; inspect before installing.')
     if not any(pending.values()):
