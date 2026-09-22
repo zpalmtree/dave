@@ -1,7 +1,8 @@
 {
   "video_gen.py": {
     "before_sha256": "a88ae15ca36c7cb96020fd9a9e100b7bb5f0cd260e36e680b1f337538d27bad0",
-    "after_sha256": "4f0ae390478807d4fc68a566265666956fad6cd81ed09e3af2816e0076fade47"
+    "intermediate_sha256": "4f0ae390478807d4fc68a566265666956fad6cd81ed09e3af2816e0076fade47",
+    "after_sha256": "7b4769337f7c235d7429afea9f78ed215af9a5345d83f47f035c1fc962286ab3"
   },
   "video_worker.py": {
     "before_sha256": "2c1dce66fabf9a0989439af7b2d28ff1825771bda529ce0db2fe548d5ce76748",
@@ -9,10 +10,12 @@
   },
   "video_recovery.py": {
     "before_sha256": "484d8b434b547a55396c8bd825d06b1233d55a2f334a7b66dd5368748b2ba1b0",
-    "after_sha256": "77d74fa0ca1325c09b714f6b3b932219dc1abab81b8a9e4ba3a5f6e9e4f8ecb6"
+    "intermediate_sha256": "77d74fa0ca1325c09b714f6b3b932219dc1abab81b8a9e4ba3a5f6e9e4f8ecb6",
+    "after_sha256": "36166dcdf36ae0c4b07d9dc675d7d82e8a2a31c5c23b4262ad6fb52bfc5e938a"
   },
   "test_video_recovery.py": {
     "before_sha256": "84436d116b2b7fdd74cb620811e819112b0d24b064206693eb6e9d147ed4ce5f",
-    "after_sha256": "41c5599b7a2e2f6af921145df2a2ab2fa6cf483ef7f3a9200553d50038c2566f"
+    "intermediate_sha256": "41c5599b7a2e2f6af921145df2a2ab2fa6cf483ef7f3a9200553d50038c2566f",
+    "after_sha256": "72f1b56afd6e4d9b43369ec98d173621e7e1d4972bbe64f0afac545f38781248"
   }
 }

@@ -326,6 +326,7 @@ async def run_recovery_job(worker, job: dict) -> None:
                                 shutil.copy2(await compose_locally(value), image)
                             else:
                                 save_image(value['image'], image)
+                            scene['image_source'] = 'generated'
                             scene['pending_image'] = digest(image)
                             await save()
                         except Exception as error:
@@ -333,7 +334,10 @@ async def run_recovery_job(worker, job: dict) -> None:
                             traceback.print_exc()
                             await save()
                             continue
-                    verdict = await review(image, 'image')
+                    # The user's own starting image is frame zero by definition. A reviewer
+                    # cannot improve it; a rejection could only replace or end it.
+                    verdict = ({'acceptable': True} if scene.get('image_source') == 'original'
+                               else await review(image, 'image'))
                     scene.pop('pending_image', None)
                     if verdict['acceptable']:
                         scene['image_accepted'] = digest(image)

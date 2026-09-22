@@ -48,7 +48,9 @@ replacement keyframe is rejected. Identity reviews must receive the original
 reference.
 
 Each scene gets a reviewed opening image. When the approved plan calls for the
-original portrait at frame zero, the worker uses that image directly. Continuing
+original portrait at frame zero, the worker uses that image directly and accepts
+it without review. A reviewer cannot improve the user's own frame, and replacing
+it is forbidden, so a rejection could only end the job. Continuing
 scenes use the previous accepted clip's final frame. New shots get their own
 opening composition, without inheriting a frame-zero crop restriction.
 
