@@ -107,7 +107,10 @@ GPU work, including validation, still uses `gpuq` and respects Gaming Mode.
 
 Install the local-fallback update (protocol version 3) with
 `python3 scripts/apply-video-local-fallback-desktop.py --check`, then run it
-without `--check`. It verifies the recorded baseline and result hashes. Reload
+without `--check`. Each desktop file's recorded hash chain shows which of the
+three archived patches it still needs; the installer applies those in order
+and verifies the result. The third patch removes the worker's scene-review
+sampling and local review mode. Reload
 the supervised worker child while idle so it advertises version 3, then deploy
 the broker. A broker running version 3 leases nothing to a version 2 worker,
 so update the worker first to avoid a stalled queue.

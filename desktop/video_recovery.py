@@ -83,26 +83,6 @@ def save_image(data: str, path: Path) -> None:
         image.convert('RGB').save(path, format='PNG')
 
 
-def review_samples(path: Path, root: Path) -> dict:
-    seconds = duration(path)
-    frames = []
-    for index, fraction in enumerate((0, .2, .5, .8, .97)):
-        frame = root / f'sample-{index}.jpg'
-        media_command(['-ss', str(max(0, min(seconds * fraction, seconds - 0.15))), '-i', str(path),
-                       '-frames:v', '1', '-vf', 'scale=640:-2', str(frame)])
-        frames.append(data_image(frame))
-    audio = root / 'review-audio.wav'
-    try:
-        media_command(['-i', str(path), '-vn', '-ac', '1', '-ar', '16000', str(audio)])
-        encoded_audio = base64.b64encode(audio.read_bytes()).decode('ascii')
-    except subprocess.CalledProcessError:
-        encoded_audio = None
-    from PIL import Image, ImageChops, ImageStat
-    with Image.open(root / 'sample-1.jpg') as first, Image.open(root / 'sample-3.jpg') as last:
-        difference = ImageStat.Stat(ImageChops.difference(first, last)).mean
-    return {'frames': frames, 'audio': encoded_audio, 'frozen': max(difference) < 0.5}
-
-
 def join_clips(clips: list[Path], destination: Path) -> Path:
     # All paths are generated filenames in task-owned directories, never prompt text.
     manifest = destination.with_suffix('.concat.txt')
@@ -244,29 +224,14 @@ async def run_recovery_job(worker, job: dict) -> None:
                     and not scene.get('pending_video') and not scene.get('render_interrupted')):
                 raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
                                          + '; '.join(scene.get('video_issues', [])))
-            async def review(path: Path, kind: str, frames=None):
+            async def review(path: Path, kind: str):
+                # Scene review was removed. A decodable artifact is recorded so final
+                # approval can match the uploaded scenes.
                 try:
-                    details = {'frames': frames or [data_image(path)]} if kind != 'video' else await asyncio.to_thread(review_samples, path, scene_root)
+                    await asyncio.to_thread(duration, path) if kind == 'video' else data_image(path)
                 except Exception:
                     return {'acceptable': False, 'issues': ['The output could not be fully decoded.']}
-                artifact = {'segment_index': index, 'kind': kind, 'artifact_sha256': digest(path)}
-                verdict = await request('review', {**artifact, **details})
-                if not verdict.get('local_review_required'):
-                    return verdict
-                # The frontier reviewer declined this artifact; local Qwen judges it instead.
-                context = verdict.get('context') or {}
-                spec = scene_root / f'local-review-{kind}.json'
-                output = scene_root / f'local-review-{kind}.out.json'
-                output.unlink(missing_ok=True)
-                atomic_json(spec, {'context': context, 'frames': details['frames'],
-                    'references': [data_image(source) for source in source_paths] if context.get('reference_count') else []})
-                await run_local_step(worker, job, f"scene-{index}-local-review-{kind}-{artifact['artifact_sha256'][:12]}-{int(time.time())}",
-                    [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[job['model']],
-                     '--recovery-review-input', str(spec), '--recovery-review-output', str(output),
-                     'Review the approved recovery artifact.'], 'review')
-                local = json.loads(output.read_text(encoding='utf-8'))
-                return await request('local-review', {**artifact, 'verdict': {
-                    'acceptable': local.get('acceptable') is True, 'issues': list(local.get('issues') or [])}})
+                return await request('review', {'segment_index': index, 'kind': kind, 'artifact_sha256': digest(path)})
             async def compose_locally(directive: dict) -> Path:
                 attempt = scene.get('image_attempts', 0)
                 spec = scene_root / f'local-opening-{attempt}.json'

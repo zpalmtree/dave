@@ -106,25 +106,21 @@ class RecoveryTests(unittest.TestCase):
     def test_bad_response_is_diagnostic_instead_of_none_attribute_error(self):
         self.exercise(image_outage=True, invalid_response=True)
 
-    def test_frontier_rejection_is_planned_composed_and_reviewed_locally(self):
+    def test_frontier_rejection_is_planned_and_composed_locally(self):
         calls, commands, scopes = self.exercise_local()
         operations = [operation for operation, _ in calls]
         self.assertEqual(operations[:2], ['plan', 'local-plan'])
         self.assertEqual(calls[1][1]['plan']['intent'], 'local plan')
         self.assertIn('image', operations)
-        self.assertEqual(sum(operation == 'local-review' for operation in operations), 2)
-        verdicts = [body['verdict'] for operation, body in calls if operation == 'local-review']
-        self.assertTrue(all(verdict == {'acceptable': True, 'issues': []} for verdict in verdicts))
+        recorded = [body for operation, body in calls if operation == 'review']
+        self.assertEqual(sorted(body['kind'] for body in recorded), ['image', 'video'])
+        self.assertTrue(all(set(body) == {'contract_hash', 'segment_index', 'kind', 'artifact_sha256'} for body in recorded),
+                        'Scene recording sends no frames or audio for review.')
         self.assertTrue(any('--recovery-keyframe-input' in command for command in commands))
-        self.assertEqual(sum('--recovery-review-input' in command for command in commands), 2)
         self.assertEqual(len(scopes), len(set(scopes)), 'Every local step needs its own reservation.')
         self.assertTrue(any(scope.startswith('local-plan-') for scope in scopes))
 
-    def test_local_review_failure_keeps_the_render_for_the_next_pass(self):
-        calls, commands, scopes = self.exercise_local(review_failure=True)
-        self.assertEqual(sum('--frontier-plan' in command for command in commands), 1)
-
-    def exercise_local(self, review_failure=False):
+    def exercise_local(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -137,7 +133,7 @@ class RecoveryTests(unittest.TestCase):
                            'audio': 'Wind', 'duration_seconds': 5, 'dialogue': []}]}
             local_plan = {'intent': 'local plan', 'keyframe': {'recommended': True}, 'segments': [segment]}
             analysis = {'dialogue_contract': {'mode': 'none', 'lines': []}}
-            state, calls, commands, scopes, pending = {}, [], [], [], set()
+            state, calls, commands, scopes = {}, [], [], []
 
             class Response:
                 status = 200
@@ -161,28 +157,14 @@ class RecoveryTests(unittest.TestCase):
                     elif operation == 'image':
                         result.value = {'local_image_required': True, 'use_references': False,
                                         'keyframe': {'prompt': 'A duck on a table.', 'motion_contract': {}}}
-                    elif operation == 'review':
-                        key = (json['kind'], json['artifact_sha256'])
-                        pending.add(key)
-                        result.value = {'local_review_required': True, 'context': {'kind': json['kind'], 'reference_count': 0}}
-                    elif operation == 'local-review':
-                        if (json['kind'], json['artifact_sha256']) not in pending:
-                            result.status, result.value = 503, {'error': 'No local review is pending.'}
-                        else: result.value = {**json['verdict'], 'permitted': True}
+                    elif operation == 'review': result.value = {'acceptable': True, 'permitted': True, 'issues': []}
                     else: result.value = {'ok': True}
                     return result
 
-            failures = {'review': review_failure}
             async def run(command):
                 commands.append(command)
                 if '--recovery-keyframe-output' in command:
                     Image.new('RGB', (256, 144), 'green').save(command[command.index('--recovery-keyframe-output') + 1])
-                elif '--recovery-review-output' in command:
-                    output = Path(command[command.index('--recovery-review-output') + 1])
-                    if 'video' in output.name and failures['review']:
-                        failures['review'] = False
-                        return 1
-                    output.write_text(json.dumps({'acceptable': True, 'issues': []}), encoding='utf-8')
                 return 0
             async def create_local_plan(job, log, source, frontier_analysis):
                 self.assertEqual(frontier_analysis, analysis)
@@ -207,38 +189,17 @@ class RecoveryTests(unittest.TestCase):
             with mock.patch.dict(sys.modules, {'video_worker': fake}):
                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
                 asyncio.run(recovery.run_recovery_job(worker, job))
-                if review_failure:
-                    worker.fail_current.assert_awaited_once()
-                    self.assertTrue(worker.fail_current.await_args.args[1], 'A local reviewer failure is retryable.')
-                    worker.upload.assert_not_awaited()
-                    asyncio.run(recovery.run_recovery_job(worker, job))
                 worker.wait_and_send_terminal.assert_awaited_once()
                 self.assertEqual(worker.wait_and_send_terminal.await_args.args[0]['generation_notice'], 'Planned locally.')
                 worker.upload.assert_awaited_once()
             return calls, commands, scopes
 
-    def test_generator_local_review_and_opening_modes(self):
+    def test_generator_local_opening_mode(self):
         if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
             self.skipTest('Run on installed desktop sources.')
         import video_gen
-        seen = {}
-        def chat(path, data, timeout):
-            seen['data'] = data
-            return {'message': {'content': json.dumps({'acceptable': False, 'issues': []})}}
-        with mock.patch.object(video_gen, 'planner_json', side_effect=chat):
-            verdict = video_gen.review_recovery_artifact({'context': {'kind': 'image', 'request': 'A duck'},
-                'frames': ['data:image/jpeg;base64,YQ=='], 'references': ['data:image/png;base64,Yg==']})
-        self.assertFalse(verdict['acceptable'])
-        self.assertTrue(verdict['issues'], 'A rejection always carries a repairable issue.')
-        self.assertEqual(seen['data']['messages'][1]['images'], ['Yg==', 'YQ=='])
-        self.assertIn('never reject because of its subject matter', seen['data']['messages'][0]['content'])
-        self.assertIn('Never reject an opening image for being static', seen['data']['messages'][0]['content'])
+        self.assertFalse(hasattr(video_gen, 'review_recovery_artifact'))
         self.assertGreaterEqual(video_gen.LLAMA_CPP_STARTUP_SECONDS, 240)
-        with mock.patch.object(video_gen, 'planner_json', return_value={'message': {'content': 'not json'}}):
-            with self.assertRaises(video_gen.VideoGenError):
-                video_gen.review_recovery_artifact({'frames': ['YQ==']})
-        with self.assertRaises(video_gen.VideoGenError):
-            video_gen.review_recovery_artifact({'frames': []})
         with tempfile.TemporaryDirectory() as temporary:
             from PIL import Image
             portrait = Path(temporary) / 'portrait.png'
@@ -250,7 +211,7 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(args.args[2], {}, 'An incomplete motion contract is dropped instead of crashing.')
             self.assertEqual(args.args[3], '2:3')
             self.assertEqual(args.kwargs['references'], [portrait])
-        with mock.patch.object(sys, 'argv', ['video_gen.py', '--recovery-review-input', 'in.json', 'x']):
+        with mock.patch.object(sys, 'argv', ['video_gen.py', '--recovery-keyframe-input', 'in.json', 'x']):
             with self.assertRaises(SystemExit):
                 video_gen.parse_args()
 
