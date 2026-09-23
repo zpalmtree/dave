@@ -94,6 +94,8 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         output: 10,
         cacheRead: 0.2,
         cacheWrite: 2.5,
+        /* Same image_generation tool output estimate as GPT-5.6 Sol. */
+        perImage: 0.04,
     },
     'gpt-transcribe': {
         input: 0,
