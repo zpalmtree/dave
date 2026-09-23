@@ -256,7 +256,7 @@ test('Gemini planner schema keeps nested types while removing complexity constra
 });
 
 test('local video commands are declared as Discord-only', () => {
-    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'oalgo', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
+    for (const name of ['minimax', 'minimaxfast', 'oalgo', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command, `${name} command is present`);
         assert.equal(command.discordOnly, true);
@@ -271,11 +271,13 @@ test('local video commands are declared as Discord-only', () => {
         assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, new RegExp(phrase));
     }
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /explicitly requested verbatim/);
-    assert.equal(Commands.some(candidate => candidate.aliases.includes('minimaxdraft')), false);
+    for (const retired of ['minimaxdraft', 'ltx', 'ltxfast']) {
+        assert.equal(Commands.some(candidate => candidate.aliases.includes(retired)), false);
+    }
 });
 
 test('test channel video commands have one silent Dave responder', () => {
-    for (const name of ['ltx', 'ltxfast', 'minimax', 'minimaxfast', 'oalgo', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
+    for (const name of ['minimax', 'minimaxfast', 'oalgo', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command.commandGates.includes(singleVideoResponderGate));
     }
