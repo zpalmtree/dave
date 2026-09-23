@@ -268,6 +268,7 @@ export interface QwenImageJobView {
     model: QwenImageModelId;
     prompt: string;
     prompt_tease: string | null;
+    fast: boolean;
     requester_id: string;
     channel_id: string;
     command_message_id: string;

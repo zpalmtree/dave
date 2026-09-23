@@ -137,7 +137,7 @@ test('image jobs lease ahead of queued videos and deliver the uploaded image', a
     const { bot, connect, worker } = await startBroker(t);
     assert.equal((await bot('/v1/jobs', videoRequest())).status, 201);
     const submitted = await bot('/v1/image-jobs', imageRequest({
-        model: 'qwenedit', prompt: 'Add a hat', aspect: '9:16', prompt_tease: 'Pervert.',
+        model: 'qwenedit', prompt: 'Add a hat', aspect: '9:16', fast: true, prompt_tease: 'Pervert.',
         references: [{ url: 'https://cdn.discordapp.com/attachments/1/2/a.png', mime_type: 'image/png', bytes: 10, name: 'a.png' }],
     }));
     assert.equal(submitted.status, 201);
@@ -147,7 +147,7 @@ test('image jobs lease ahead of queued videos and deliver the uploaded image', a
     const lease = await desktop.take(value => value.type === 'image_job');
     assert.deepEqual(
         { ...lease.job, lease_id: undefined },
-        { id: submitted.body.job.id, model: 'qwenedit', prompt: 'Add a hat', aspect: '9:16', reference_count: 1, lease_id: undefined },
+        { id: submitted.body.job.id, model: 'qwenedit', prompt: 'Add a hat', aspect: '9:16', fast: true, reference_count: 1, lease_id: undefined },
     );
     const stale = await worker(`/v1/worker/image-jobs/${lease.job.id}/reference?index=0`, {
         method: 'POST', headers: { 'x-video-lease': 'wrong' },
@@ -183,6 +183,7 @@ test('image submissions are validated and limited per user', async t => {
     const { bot } = await startBroker(t);
     assert.equal((await bot('/v1/image-jobs', imageRequest({ model: 'qwenedit' }))).status, 400);
     assert.equal((await bot('/v1/image-jobs', imageRequest({ aspect: '5:4' }))).status, 400);
+    assert.equal((await bot('/v1/image-jobs', imageRequest({ fast: true }))).status, 400);
     assert.equal((await bot('/v1/image-jobs', imageRequest({ prompt: '  ' }))).status, 400);
     const request = imageRequest();
     assert.equal((await bot('/v1/image-jobs', request)).status, 201);
@@ -251,6 +252,9 @@ test('qwen image arguments and attachments are parsed like the other image comma
     assert.deepEqual(parseQwenImageArgs('  a duck  '), { prompt: 'a duck' });
     assert.deepEqual(parseQwenImageArgs('--aspect 9:16 a tall duck'), { prompt: 'a tall duck', aspect: '9:16' });
     assert.deepEqual(parseQwenImageArgs('--ar=16:9 a wide duck'), { prompt: 'a wide duck', aspect: '16:9' });
+    assert.deepEqual(parseQwenImageArgs('--fast --aspect 1:1 a duck'), { prompt: 'a duck', aspect: '1:1', fast: true });
+    assert.deepEqual(parseQwenImageArgs('--aspect 1:1 --fast a duck'), { prompt: 'a duck', aspect: '1:1', fast: true });
+    assert.deepEqual(parseQwenImageArgs('--faster duck'), { prompt: '--faster duck' });
     assert.throws(() => parseQwenImageArgs('--aspect 5:4 a duck'), /Aspect must be one of/);
 
     const attachment = (name, contentType, size = 100) => [name, { url: `https://cdn.discordapp.com/${name}`, name, contentType, size }];
@@ -269,4 +273,5 @@ test('qwen image arguments and attachments are parsed like the other image comma
     assert.equal(formatQwenImageStatus(queued), '**Qwen Image 2.1** · Queued behind 1 image; waiting for the current video render to finish.');
     assert.equal(formatQwenImageStatus({ ...queued, worker_online: false }), '**Qwen Image 2.1** · Queued; the desktop worker is offline.');
     assert.equal(formatQwenImageStatus({ model: 'qwenedit', status: 'running', stage: 'Generating' }), '**Qwen-Image-Edit-2511** · Generating…');
+    assert.equal(formatQwenImageStatus({ model: 'qwenedit', fast: true, status: 'running', stage: 'Generating' }), '**Qwen-Image-Edit-2511 (fast)** · Generating…');
 });

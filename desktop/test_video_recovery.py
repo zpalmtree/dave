@@ -257,11 +257,16 @@ class RecoveryTests(unittest.TestCase):
                 video_gen.generate_image_job('http://server', {'model': 'qwenimage', 'prompt': 'A duck.',
                                                                 'aspect': '9:16', 'references': [str(portrait)]}, 7, 60)
                 self.assertEqual((generate.call_args.args[2], generate.call_args.args[7]), ('9:16', [portrait]))
+                self.assertTrue(generate.call_args.kwargs['reference_canvas'])
             with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
                 video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.',
                                                                 'references': [str(portrait)]}, 7, 60)
                 _server, prompt, aspect, *_rest, references = generate.call_args.args
                 self.assertEqual((prompt, aspect, references), ('Add a hat.', '2:3', [portrait]))
+                self.assertTrue(generate.call_args.kwargs['full'])
+                video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.',
+                                                                'references': [str(portrait)], 'fast': True}, 7, 60)
+                self.assertFalse(generate.call_args.kwargs['full'])
                 with self.assertRaises(video_gen.VideoGenError):
                     video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.'}, 7, 60)
             with self.assertRaises(video_gen.VideoGenError):
@@ -269,6 +274,48 @@ class RecoveryTests(unittest.TestCase):
         with mock.patch.object(sys, 'argv', ['video_gen.py', '--image-job-input', 'in.json', 'x']):
             with self.assertRaises(SystemExit):
                 video_gen.parse_args()
+
+    def test_image_job_graphs_follow_the_official_templates(self):
+        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        import video_gen
+        full = video_gen.edit_keyframe_graph('Add a hat.', '2:3', 7, 'prefix', ['a.png'], full=True)
+        self.assertNotIn('lora', full)
+        self.assertEqual(full['shift']['inputs']['model'], ['model', 0])
+        self.assertEqual((full['sampler']['inputs']['steps'], full['sampler']['inputs']['cfg']), (40, 4.0))
+        with tempfile.TemporaryDirectory() as temporary:
+            from PIL import Image
+            portrait = Path(temporary) / 'portrait.png'
+            Image.new('RGB', (100, 150), 'red').save(portrait)
+            submitted = []
+
+            def api_json(_server, _path, data, timeout=0):
+                submitted.append(data['prompt'])
+                return {'prompt_id': 'p'}
+
+            models = Path(temporary) / 'models'
+            for folder, name in (('diffusion_models', video_gen.QWEN_IMAGE21_DIFFUSION_MODEL),
+                                 ('text_encoders', video_gen.QWEN_IMAGE21_TEXT_ENCODER),
+                                 ('vae', video_gen.QWEN_IMAGE21_VAE)):
+                (models / folder).mkdir(parents=True, exist_ok=True)
+                (models / folder / name).write_bytes(b'weights')
+            with mock.patch.object(video_gen, 'COMFY_DIR', Path(temporary)), \
+                    mock.patch.object(video_gen, 'OUTPUT_DIR', Path(temporary) / 'output'), \
+                    mock.patch.object(video_gen, 'copy_reference', return_value=('portrait.png', portrait)), \
+                    mock.patch.object(video_gen, 'api_json', side_effect=api_json), \
+                    mock.patch.object(video_gen, 'wait_for_image', return_value=portrait), \
+                    mock.patch.object(video_gen, 'free_comfy_memory'), \
+                    mock.patch.object(video_gen, 'LiveProgress'):
+                root = Path(temporary) / 'output' / 'run'
+                video_gen.generate_qwen_keyframe('http://server', 'Add a hat.', '2:3', 7, root, 60, 25, [portrait],
+                                                 reference_canvas=True)
+                video_gen.generate_qwen_keyframe('http://server', 'A duck.', '1:1', 7, root, 60, 25, [])
+        edit, text_only = submitted
+        self.assertEqual(edit['model']['class_type'], 'UNETLoader')
+        self.assertEqual(edit['model']['inputs']['unet_name'], 'qwen_image_2.1_int8_convrot.safetensors')
+        self.assertEqual(edit['sampler']['inputs']['latent_image'], ['positive', 2])
+        self.assertNotIn('latent', edit)
+        self.assertEqual(text_only['sampler']['inputs']['latent_image'], ['latent', 0])
 
     def image_worker(self, root: Path, exit_code: int):
         import video_worker

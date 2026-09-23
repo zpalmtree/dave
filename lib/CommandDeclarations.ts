@@ -206,7 +206,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleQwenImage,
-            description: 'Generate an image with local Qwen Image 2.1; optional --aspect 16:9 and up to 3 reference images',
+            description: 'Generate or edit an image with local Qwen Image 2.1; optional --aspect 16:9 and up to 3 attached or replied-to images',
             examples: [
                 { value: 'qwenimage a lighthouse keeper feeding seagulls at dawn' },
                 { value: 'qwenimage --aspect 9:16 a neon ramen stall in the rain' },
@@ -221,8 +221,11 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleQwenEdit,
-            description: 'Edit or combine up to 3 attached or replied-to images with local Qwen-Image-Edit-2511',
-            examples: [{ value: 'qwenedit put him on a pirate ship' }],
+            description: 'Edit or combine up to 3 attached or replied-to images with local Qwen-Image-Edit-2511; --fast for the 4-step mode',
+            examples: [
+                { value: 'qwenedit put him on a pirate ship' },
+                { value: 'qwenedit --fast give him a fez' },
+            ],
         },
         relatedCommands: ['qwenimage', 'grokimage', 'cimage'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],

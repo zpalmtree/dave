@@ -1,0 +1,193 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -56,12 +56,14 @@
+     "motion continuation."
+ )
+ PROMPT_ENHANCER_MODEL = "gemma4_e2b_it_int8_convrot.safetensors"
+-QWEN_IMAGE21_DIFFUSION_MODEL = "qwen_image_2.1-Q4_K.gguf"
+-QWEN_IMAGE21_TEXT_ENCODER = "qwen3vl_8b_w4a8.safetensors"
++# The official int8 builds, which ComfyUI's Qwen Image 2.1 templates use; about twice as fast
++# as the Q4_K GGUF. ComfyUI v0.37.1 carries the official 2.1 support.
++QWEN_IMAGE21_DIFFUSION_MODEL = "qwen_image_2.1_int8_convrot.safetensors"
++QWEN_IMAGE21_TEXT_ENCODER = "qwen3vl_8b_int8_convrot.safetensors"
+ QWEN_IMAGE21_VAE = "qwen_image_2.1_vae_bf16.safetensors"
+-# Recovery openings use the edit model: Qwen Image 2.1's reference path renders a supplied
+-# face with crusty, over-sharpened skin at every precision and setting tested on
+-# 2026-09-21, while Edit-2511 keeps the identity, follows the scene, and keeps skin natural.
++# Recovery openings use the edit model. Qwen Image 2.1's reference path gave a supplied face
++# crusty, over-sharpened skin on 2026-09-21, but that was the hand-ported 2.1 support on
++# ComfyUI v0.33.1: it copied the reference instead of editing it. v0.37.1 edits correctly.
+ QWEN_EDIT_DIFFUSION_MODEL = "qwen_image_edit_2511_fp8mixed.safetensors"
+ QWEN_EDIT_TEXT_ENCODER = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+ QWEN_EDIT_VAE = "qwen_image_vae.safetensors"
+@@ -6507,13 +6509,18 @@
+     steps: int = 25,
+     references: list[Path] | tuple[Path, ...] | None = None,
+     timing: dict[str, Any] | None = None,
++    reference_canvas: bool = False,
+ ) -> Path:
+-    """Generate a first frame or multi-reference composite with Qwen Image 2.1."""
++    """Generate a first frame or multi-reference composite with Qwen Image 2.1.
++
++    With reference_canvas, an edit samples on the encoder's latent, which matches the first
++    reference's shape; ComfyUI notes that any other size shifts the edit.
++    """
+     references = list(references or [])
+     if len(references) > 16:
+         raise VideoGenError("Qwen Image 2.1 supports at most 16 reference images.")
+     required = (
+-        COMFY_DIR / "models" / "unet" / QWEN_IMAGE21_DIFFUSION_MODEL,
++        COMFY_DIR / "models" / "diffusion_models" / QWEN_IMAGE21_DIFFUSION_MODEL,
+         COMFY_DIR / "models" / "text_encoders" / QWEN_IMAGE21_TEXT_ENCODER,
+         COMFY_DIR / "models" / "vae" / QWEN_IMAGE21_VAE,
+     )
+@@ -6528,8 +6535,8 @@
+     prefix = f"{relative}/keyframe/qwen_keyframe"
+     graph: dict[str, Any] = {
+         "model": {
+-            "class_type": "UnetLoaderGGUF",
+-            "inputs": {"unet_name": QWEN_IMAGE21_DIFFUSION_MODEL},
++            "class_type": "UNETLoader",
++            "inputs": {"unet_name": QWEN_IMAGE21_DIFFUSION_MODEL, "weight_dtype": "default"},
+         },
+         "clip": {
+             "class_type": "CLIPLoader",
+@@ -6596,6 +6603,9 @@
+             "inputs": {"image": input_name},
+         }
+         graph["positive"]["inputs"][f"images.image_{index}"] = [node_name, 0]
++    if reference_canvas and copied_references:
++        del graph["latent"]
++        graph["sampler"]["inputs"]["latent_image"] = ["positive", 2]
+     client_id = f"video-qwen-image21-{uuid.uuid4().hex}"
+     classes = {node: str(value["class_type"]) for node, value in graph.items()}
+     progress = LiveProgress(server, client_id, classes, (25.0, 300.0))
+@@ -6703,16 +6713,20 @@
+     model = spec.get("model")
+     if model == "qwenimage":
+         steps = max(25, int(os.environ.get("VIDEO_QWEN_KEYFRAME_STEPS", "25")))
+-        return generate_qwen_keyframe(server, prompt, aspect, seed, run_root, timeout_seconds, steps, references)
++        return generate_qwen_keyframe(server, prompt, aspect, seed, run_root, timeout_seconds, steps, references,
++                                      reference_canvas=True)
+     if model == "qwenedit":
+         if not references:
+             raise VideoGenError("Qwen-Image-Edit needs at least one reference image")
+-        return generate_edit_keyframe(server, prompt, aspect, seed, run_root, timeout_seconds, references)
++        return generate_edit_keyframe(server, prompt, aspect, seed, run_root, timeout_seconds, references,
++                                      full=not spec.get("fast"))
+     raise VideoGenError(f"unknown image model: {model}")
+ 
+ 
+-def edit_keyframe_graph(prompt: str, aspect: str, seed: int, prefix: str, reference_names: list[str]) -> dict[str, Any]:
+-    """Qwen-Image-Edit-2511 with its Lightning LoRA, following the official ComfyUI template."""
++def edit_keyframe_graph(prompt: str, aspect: str, seed: int, prefix: str, reference_names: list[str],
++                        full: bool = False) -> dict[str, Any]:
++    """Qwen-Image-Edit-2511 following the official ComfyUI template: its 4-step Lightning LoRA,
++    or with full, the template's default 40 steps at CFG 4, which follows unusual edits better."""
+     width, height = KEYFRAME_DIMENSIONS[aspect]
+     graph: dict[str, Any] = {
+         "model": {"class_type": "UNETLoader",
+@@ -6744,11 +6758,15 @@
+         graph[f"reference_{index}"] = {"class_type": "LoadImage", "inputs": {"image": name}}
+         for text in ("positive_text", "negative_text"):
+             graph[text]["inputs"][f"image{index}"] = [f"reference_{index}", 0]
++    if full:
++        del graph["lora"]
++        graph["shift"]["inputs"]["model"] = ["model", 0]
++        graph["sampler"]["inputs"].update({"steps": 40, "cfg": 4.0})
+     return graph
+ 
+ 
+ def generate_edit_keyframe(server: str, prompt: str, aspect: str, seed: int, run_root: Path,
+-                           timeout_seconds: float, references: list[Path]) -> Path:
++                           timeout_seconds: float, references: list[Path], full: bool = False) -> Path:
+     required = (
+         COMFY_DIR / "models" / "diffusion_models" / QWEN_EDIT_DIFFUSION_MODEL,
+         COMFY_DIR / "models" / "text_encoders" / QWEN_EDIT_TEXT_ENCODER,
+@@ -6762,7 +6780,7 @@
+         raise VideoGenError("A Qwen-Image-Edit reference image is missing.")
+     copied = [copy_reference(path) for path in references[:QWEN_EDIT_MAX_REFERENCES]]
+     prefix = f"{run_root.relative_to(OUTPUT_DIR).as_posix()}/keyframe/edit_keyframe"
+-    graph = edit_keyframe_graph(prompt, aspect, seed, prefix, [name for name, _ in copied])
++    graph = edit_keyframe_graph(prompt, aspect, seed, prefix, [name for name, _ in copied], full)
+     client_id = f"video-qwen-edit-{uuid.uuid4().hex}"
+     progress = LiveProgress(server, client_id, {node: str(value["class_type"]) for node, value in graph.items()},
+                             (25.0, 300.0))
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -1864,6 +1864,7 @@
+                 "model": job["model"],
+                 "prompt": str(job.get("prompt") or ""),
+                 "aspect": job.get("aspect"),
++                "fast": bool(job.get("fast")),
+                 "references": [str(path) for path in references],
+             })
+             await self.send_image_event(job, "progress", stage="Generating")
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -257,11 +257,16 @@
+                 video_gen.generate_image_job('http://server', {'model': 'qwenimage', 'prompt': 'A duck.',
+                                                                 'aspect': '9:16', 'references': [str(portrait)]}, 7, 60)
+                 self.assertEqual((generate.call_args.args[2], generate.call_args.args[7]), ('9:16', [portrait]))
++                self.assertTrue(generate.call_args.kwargs['reference_canvas'])
+             with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
+                 video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.',
+                                                                 'references': [str(portrait)]}, 7, 60)
+                 _server, prompt, aspect, *_rest, references = generate.call_args.args
+                 self.assertEqual((prompt, aspect, references), ('Add a hat.', '2:3', [portrait]))
++                self.assertTrue(generate.call_args.kwargs['full'])
++                video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.',
++                                                                'references': [str(portrait)], 'fast': True}, 7, 60)
++                self.assertFalse(generate.call_args.kwargs['full'])
+                 with self.assertRaises(video_gen.VideoGenError):
+                     video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.'}, 7, 60)
+             with self.assertRaises(video_gen.VideoGenError):
+@@ -270,6 +275,48 @@
+             with self.assertRaises(SystemExit):
+                 video_gen.parse_args()
+ 
++    def test_image_job_graphs_follow_the_official_templates(self):
++        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
++            self.skipTest('Run on installed desktop sources.')
++        import video_gen
++        full = video_gen.edit_keyframe_graph('Add a hat.', '2:3', 7, 'prefix', ['a.png'], full=True)
++        self.assertNotIn('lora', full)
++        self.assertEqual(full['shift']['inputs']['model'], ['model', 0])
++        self.assertEqual((full['sampler']['inputs']['steps'], full['sampler']['inputs']['cfg']), (40, 4.0))
++        with tempfile.TemporaryDirectory() as temporary:
++            from PIL import Image
++            portrait = Path(temporary) / 'portrait.png'
++            Image.new('RGB', (100, 150), 'red').save(portrait)
++            submitted = []
++
++            def api_json(_server, _path, data, timeout=0):
++                submitted.append(data['prompt'])
++                return {'prompt_id': 'p'}
++
++            models = Path(temporary) / 'models'
++            for folder, name in (('diffusion_models', video_gen.QWEN_IMAGE21_DIFFUSION_MODEL),
++                                 ('text_encoders', video_gen.QWEN_IMAGE21_TEXT_ENCODER),
++                                 ('vae', video_gen.QWEN_IMAGE21_VAE)):
++                (models / folder).mkdir(parents=True, exist_ok=True)
++                (models / folder / name).write_bytes(b'weights')
++            with mock.patch.object(video_gen, 'COMFY_DIR', Path(temporary)), \
++                    mock.patch.object(video_gen, 'OUTPUT_DIR', Path(temporary) / 'output'), \
++                    mock.patch.object(video_gen, 'copy_reference', return_value=('portrait.png', portrait)), \
++                    mock.patch.object(video_gen, 'api_json', side_effect=api_json), \
++                    mock.patch.object(video_gen, 'wait_for_image', return_value=portrait), \
++                    mock.patch.object(video_gen, 'free_comfy_memory'), \
++                    mock.patch.object(video_gen, 'LiveProgress'):
++                root = Path(temporary) / 'output' / 'run'
++                video_gen.generate_qwen_keyframe('http://server', 'Add a hat.', '2:3', 7, root, 60, 25, [portrait],
++                                                 reference_canvas=True)
++                video_gen.generate_qwen_keyframe('http://server', 'A duck.', '1:1', 7, root, 60, 25, [])
++        edit, text_only = submitted
++        self.assertEqual(edit['model']['class_type'], 'UNETLoader')
++        self.assertEqual(edit['model']['inputs']['unet_name'], 'qwen_image_2.1_int8_convrot.safetensors')
++        self.assertEqual(edit['sampler']['inputs']['latent_image'], ['positive', 2])
++        self.assertNotIn('latent', edit)
++        self.assertEqual(text_only['sampler']['inputs']['latent_image'], ['latent', 0])
++
+     def image_worker(self, root: Path, exit_code: int):
+         import video_worker
+         worker = object.__new__(video_worker.DesktopVideoWorker)
