@@ -10,7 +10,7 @@ import {
 test('uses the audited production model for each provider capability', () => {
     assert.deepEqual(AI_MODELS, {
         claudeChat: 'claude-opus-5',
-        openAIChat: 'gpt-5.6-sol',
+        openAIChat: 'gpt-6-sol',
         openAITranscription: 'gpt-transcribe',
         openAIImage: 'gpt-image-2.5-sunburst',
         openAICImage: 'gpt-image-2.5-flare',

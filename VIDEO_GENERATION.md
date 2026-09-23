@@ -92,7 +92,7 @@ loss, sends a heartbeat every 15 seconds, and retries transient render failures
 at most twice. MiniMax H3 requires `comfy-aimdo` 0.4.14 or newer for the expanded
 Windows NVML headroom that prevents WDDM system-memory fallback deadlocks. The
 local startup path pins and verifies that runtime before starting ComfyUI. The
-server asks `gpt-5.6-sol` at medium reasoning effort for one strict combined
+server asks `gpt-6-sol` at low reasoning effort for one strict combined
 prompt analysis and structured screenplay. The analysis separates dialogue,
 requested visible wording, and conditional motion design. Exact on-screen text
 is normalized and validated in render-facing shot directions; motion graphics,
@@ -189,7 +189,7 @@ with the same face.
 ## Optimization experiments
 
 Production remains on Sol and uses the review-gated `fast-gated-v3` first-frame
-path. Jobs first try Gemini Flash Lite at 1K and keep it only when the same GPT-5.6
+path. Jobs first try Gemini Flash Lite at 1K and keep it only when the same GPT-6 Sol
 visual gate accepts it; a rejection, generation error, or unavailable reviewer
 runs the unchanged Pro 2K serial pipeline. Each job records its experiment, pipeline variant, planner
 fingerprint, keyframe strategy, provider timings, queue wait, and end-to-end
@@ -200,7 +200,7 @@ latency so alternatives can be compared without mixing cohorts.
 `scripts/benchmark-video-opus.mjs` runs a paired minimax/oalgo comparison from
 an ignored `artifacts/video-opus-ab/historical-cases.json` file. Each case names
 the original delivered job ID, command, prompt, and optional source image.
-The three arms are the production Sol planner, Opus 5.5 with the existing
+The three arms are a pinned GPT-5.6 Sol control, Opus 5.5 with the existing
 instructions, and Opus 5.5 with a concise provider-specific instruction
 preface. Opus uses two planning passes because its structured-output grammar
 cannot compile the combined single-pass schema. The experiment keeps the same

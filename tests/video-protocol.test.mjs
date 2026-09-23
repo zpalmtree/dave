@@ -780,7 +780,7 @@ test('drained queue messages retain a rough ETA and explain its assumption', () 
 });
 
 test('frontier video planning uses Sol and a strict recursive screenplay schema', () => {
-    assert.equal(VIDEO_PLANNER_MODEL, 'gpt-5.6-sol');
+    assert.equal(VIDEO_PLANNER_MODEL, 'gpt-6-sol');
     assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /exactly one segment containing exactly one shot/);
     assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /5-7 seconds/);
     assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /Do not force an idea into that shape/);
@@ -2177,7 +2177,7 @@ test('video reply-chain guidance is compact background that excludes blank messa
 test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.equal(VIDEO_KEYFRAME_MODEL, 'gemini-3-pro-image');
     assert.equal(VIDEO_KEYFRAME_FALLBACK_MODEL, 'gpt-image-2.5-sunburst');
-    assert.equal(VIDEO_KEYFRAME_REVIEW_MODEL, 'gpt-5.6-sol');
+    assert.equal(VIDEO_KEYFRAME_REVIEW_MODEL, 'gpt-6-sol');
     assert.equal(VIDEO_KEYFRAME_REVIEW_TIMEOUT_MS, 75_000);
     const prompt = buildVideoKeyframePrompt({
         keyframe: {
