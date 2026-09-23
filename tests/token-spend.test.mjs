@@ -68,6 +68,10 @@ test('prices images per unit', () => {
         model: 'grok-imagine-image-2.0',
         images: 2,
     }) - 0.12) < 1e-9);
+    assert.ok(Math.abs(estimateTokenSpendCost({
+        model: 'gpt-6-sol',
+        images: 2,
+    }) - 0.08) < 1e-9);
 });
 
 test('prices transcription audio by duration', () => {
