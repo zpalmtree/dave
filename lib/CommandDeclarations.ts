@@ -159,6 +159,11 @@ import {
     singleVideoResponderGate,
 } from './VideoGeneration.js';
 
+import {
+    handleQwenEdit,
+    handleQwenImage,
+} from './QwenImage.js';
+
 /* Keep shared command order synchronized across deployment tracks. */
 const sharedCommands: Command[] = [
     {
@@ -219,6 +224,33 @@ const sharedCommands: Command[] = [
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimax', 'ltxfast', 'videoqueue'],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
+    },
+    {
+        aliases: ['qwenimage'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleQwenImage,
+            description: 'Generate an image with local Qwen Image 2.1; optional --aspect 16:9 and up to 3 reference images',
+            examples: [
+                { value: 'qwenimage a lighthouse keeper feeding seagulls at dawn' },
+                { value: 'qwenimage --aspect 9:16 a neon ramen stall in the rain' },
+            ],
+        },
+        relatedCommands: ['qwenedit', 'grokimage', 'cimage'],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
+    },
+    {
+        aliases: ['qwenedit'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: handleQwenEdit,
+            description: 'Edit or combine up to 3 attached or replied-to images with local Qwen-Image-Edit-2511',
+            examples: [{ value: 'qwenedit put him on a pirate ship' }],
+        },
+        relatedCommands: ['qwenimage', 'grokimage', 'cimage'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {

@@ -242,6 +242,90 @@ class RecoveryTests(unittest.TestCase):
         self.assertFalse(any(key.startswith('image') for key in text_only['positive_text']['inputs']))
         self.assertEqual(text_only['latent']['inputs']['width'], 1344)
 
+    def test_image_jobs_send_the_raw_prompt_to_the_chosen_qwen_model(self):
+        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        import video_gen
+        with tempfile.TemporaryDirectory() as temporary:
+            from PIL import Image
+            portrait = Path(temporary) / 'portrait.png'
+            Image.new('RGB', (100, 150), 'red').save(portrait)
+            with mock.patch.object(video_gen, 'generate_qwen_keyframe', return_value=portrait) as generate:
+                video_gen.generate_image_job('http://server', {'model': 'qwenimage', 'prompt': 'A duck.'}, 7, 60)
+                _server, prompt, aspect, seed, _root, _timeout, steps, references = generate.call_args.args
+                self.assertEqual((prompt, aspect, seed, steps, references), ('A duck.', '1:1', 7, 25, []))
+                video_gen.generate_image_job('http://server', {'model': 'qwenimage', 'prompt': 'A duck.',
+                                                                'aspect': '9:16', 'references': [str(portrait)]}, 7, 60)
+                self.assertEqual((generate.call_args.args[2], generate.call_args.args[7]), ('9:16', [portrait]))
+            with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
+                video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.',
+                                                                'references': [str(portrait)]}, 7, 60)
+                _server, prompt, aspect, *_rest, references = generate.call_args.args
+                self.assertEqual((prompt, aspect, references), ('Add a hat.', '2:3', [portrait]))
+                with self.assertRaises(video_gen.VideoGenError):
+                    video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.'}, 7, 60)
+            with self.assertRaises(video_gen.VideoGenError):
+                video_gen.generate_image_job('http://server', {'model': 'other', 'prompt': 'A duck.'}, 7, 60)
+        with mock.patch.object(sys, 'argv', ['video_gen.py', '--image-job-input', 'in.json', 'x']):
+            with self.assertRaises(SystemExit):
+                video_gen.parse_args()
+
+    def image_worker(self, root: Path, exit_code: int):
+        import video_worker
+        worker = object.__new__(video_worker.DesktopVideoWorker)
+        worker.current_job = None
+        worker.request_image_reference = mock.AsyncMock(return_value=root / 'reference.png')
+        worker.upload_image_result = mock.AsyncMock()
+        worker.send_image_event = mock.AsyncMock()
+        worker.send_ready = mock.AsyncMock()
+        worker.send = mock.AsyncMock(return_value=True)
+        profiles = []
+
+        def gpuq_command(command, profile, priority):
+            profiles.append((profile, priority))
+            output = command[command.index('--image-job-output') + 1]
+            script = f"open({output!r}, 'wb').write(b'png') if {exit_code} == 0 else print('ERROR: out of memory')"
+            return [sys.executable, '-c', f'{script}; raise SystemExit({exit_code})']
+
+        worker.gpuq_command = gpuq_command
+        return worker, profiles
+
+    def test_worker_runs_an_image_job_under_gpuq_and_reports_back(self):
+        if not (Path(__file__).resolve().parent / 'video_worker.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        import video_worker
+        job = {'id': 'image-job', 'lease_id': 'lease', 'model': 'qwenedit', 'prompt': 'Add a hat.', 'reference_count': 1}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch.object(video_worker, 'IMAGE_JOB_DIR', root / 'images'), \
+                    mock.patch.object(video_worker, 'LOG_DIR', root / 'logs'):
+                worker, profiles = self.image_worker(root, 0)
+                worker.image_job = job
+                asyncio.run(worker.run_image_job(job))
+                self.assertEqual(profiles, [('video-h3', 'normal')])
+                worker.request_image_reference.assert_awaited_once()
+                self.assertEqual(worker.upload_image_result.await_args.args[1].name, 'result.png')
+                events = [call.args[1] for call in worker.send_image_event.await_args_list]
+                self.assertEqual(events, ['progress', 'progress', 'complete'])
+                worker.send_ready.assert_awaited_once()
+                self.assertIsNone(worker.image_job)
+                self.assertFalse((root / 'images' / 'image-job').exists())
+
+                failing, _profiles = self.image_worker(root, 1)
+                asyncio.run(failing.run_image_job(job))
+                failing.upload_image_result.assert_not_awaited()
+                event = failing.send_image_event.await_args_list[-1]
+                self.assertEqual(event.args[1], 'failed')
+                self.assertIn('out of memory', event.kwargs['error'])
+                self.assertTrue(event.kwargs['retryable'])
+                failing.send_ready.assert_awaited_once()
+
+            busy, _profiles = self.image_worker(root, 0)
+            busy.current_job = {'id': 'video'}
+            asyncio.run(busy.handle_message({'type': 'image_job', 'job': job}))
+            self.assertEqual(busy.send.await_args.args[0]['event'], 'failed')
+            self.assertIsNone(busy.image_job)
+
     def exercise(self, original=False, render_failures=0, image_outage=False,
                  review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
         from PIL import Image

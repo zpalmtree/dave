@@ -928,7 +928,7 @@ export function startVideoGenerationService(client: Client): void {
     service.start();
 }
 
-async function brokerRequest<T = any>(path: string, init: RequestInit = {}, timeoutMs = 10_000): Promise<T> {
+export async function brokerRequest<T = any>(path: string, init: RequestInit = {}, timeoutMs = 10_000): Promise<T> {
     const settings = loadVideoSettings();
     if (!settings.botToken) throw new BrokerError('Video generation is not configured on this bot.', 503);
     const controller = new AbortController();

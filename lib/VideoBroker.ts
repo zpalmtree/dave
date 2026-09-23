@@ -14,6 +14,14 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { configuredVideoOptimization, type VideoOptimizationSelection } from './VideoOptimizationRollout.js';
 import {
     ACTIVE_VIDEO_STATUSES,
+    QWEN_IMAGE_ASPECTS,
+    QWEN_IMAGE_MAX_ATTEMPTS,
+    QWEN_IMAGE_MAX_REFERENCES,
+    QWEN_IMAGE_MAX_USER_JOBS,
+    QWEN_IMAGE_MODELS,
+    QWEN_IMAGE_RESULT_MAX_BYTES,
+    QwenImageJobView,
+    QwenImageModelId,
     UNFINISHED_VIDEO_STATUSES,
     VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
     VIDEO_IMAGE_ONLY_AUTO_PROMPT,
@@ -35,6 +43,7 @@ import {
     VideoWorkerMetrics,
     VideoWorkerHello,
     VideoWorkerSchedulerState,
+    isQwenImageModel,
     isVideoModel,
     requestedVideoDurationSeconds,
     sanitizeVideoWorkerText,
@@ -159,7 +168,41 @@ interface WorkerConnection {
     warmModel: VideoGeneratorModelId | null;
     leaseId: string | null;
     scheduler: VideoWorkerSchedulerState;
+    imageModels: QwenImageModelId[];
+    currentImageJob: { id: string; leaseId: string } | null;
 }
+
+interface ImageJobRow {
+    id: number;
+    public_id: string;
+    idempotency_key: string;
+    model: QwenImageModelId;
+    prompt: string;
+    aspect: string | null;
+    prompt_tease: string | null;
+    requester_id: string;
+    origin_bot_id: string;
+    channel_id: string;
+    guild_id: string | null;
+    command_message_id: string;
+    status_message_id: string;
+    status: QwenImageJobView['status'];
+    stage: string | null;
+    error: string | null;
+    attempt: number;
+    reference_json: string;
+    worker_id: string | null;
+    lease_token: string | null;
+    result_path: string | null;
+    result_bytes: number | null;
+    created_at: number;
+    updated_at: number;
+    started_at: number | null;
+    completed_at: number | null;
+    runtime_seconds: number | null;
+    notified_at: number | null;
+}
+
 
 interface VideoControlState {
     paused_until: number | null;
@@ -1719,6 +1762,38 @@ export class VideoBroker {
         }
         await this.run(`CREATE INDEX IF NOT EXISTS video_usage_events_delivery_idx
             ON video_usage_events(origin_bot_id, acked_at, sequence)`);
+        await this.run(`CREATE TABLE IF NOT EXISTS image_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_id TEXT NOT NULL UNIQUE,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            model TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            aspect TEXT,
+            prompt_tease TEXT,
+            requester_id TEXT NOT NULL,
+            origin_bot_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            guild_id TEXT,
+            command_message_id TEXT NOT NULL,
+            status_message_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            stage TEXT,
+            error TEXT,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            reference_json TEXT NOT NULL DEFAULT '[]',
+            worker_id TEXT,
+            lease_token TEXT,
+            result_path TEXT,
+            result_bytes INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            started_at INTEGER,
+            completed_at INTEGER,
+            runtime_seconds REAL,
+            notified_at INTEGER
+        )`);
+        await this.run(`CREATE INDEX IF NOT EXISTS image_jobs_status_idx ON image_jobs(status, id)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS image_jobs_origin_idx ON image_jobs(origin_bot_id, status)`);
     }
 
     async start(): Promise<void> {
@@ -1819,6 +1894,7 @@ export class VideoBroker {
             writeJson(res, 200, await this.videoStats(model, limit));
             return;
         }
+        if (await this.handleImageBotHttp(req, res, url)) return;
         if (url.pathname === '/v1/jobs' && req.method === 'POST') {
             const body = await readJson(req);
             const result = await this.enqueue(body);
@@ -2040,6 +2116,299 @@ export class VideoBroker {
             return;
         }
         writeJson(res, 404, { error: 'Not found.' });
+    }
+
+    private async handleImageBotHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+        if (url.pathname === '/v1/image-jobs' && req.method === 'POST') {
+            const result = await this.enqueueImage(await readJson(req));
+            writeJson(res, result.status, result.body);
+            return true;
+        }
+        const botJobs = /^\/v1\/bots\/([^/]+)\/image-jobs$/.exec(url.pathname);
+        if (botJobs && req.method === 'GET') {
+            const rows = await this.all<ImageJobRow>(
+                `SELECT * FROM image_jobs WHERE origin_bot_id = ?
+                 AND (status IN ('queued','running') OR (status IN ('ready','failed') AND notified_at IS NULL))
+                 ORDER BY id ASC`,
+                [decodeURIComponent(botJobs[1])],
+            );
+            writeJson(res, 200, { jobs: await this.imageViews(rows) });
+            return true;
+        }
+        const notified = /^\/v1\/image-jobs\/([0-9a-f-]+)\/notified$/.exec(url.pathname);
+        if (notified && req.method === 'POST') {
+            await this.run(
+                `UPDATE image_jobs SET status = CASE WHEN status = 'ready' THEN 'delivered' ELSE status END,
+                 notified_at = ?, updated_at = ? WHERE public_id = ? AND status IN ('ready','failed')`,
+                [nowSeconds(), nowSeconds(), notified[1]],
+            );
+            writeJson(res, 200, { ok: true });
+            return true;
+        }
+        return false;
+    }
+
+    private async enqueueImage(body: any): Promise<{ status: number; body: any }> {
+        if (!isQwenImageModel(body.model)) return { status: 400, body: { error: 'Unknown image model.' } };
+        const model = body.model as QwenImageModelId;
+        const prompt = String(body.prompt || '').trim().slice(0, 4000);
+        if (!prompt) return { status: 400, body: { error: 'Prompt must not be empty.' } };
+        const aspect = body.aspect === undefined || body.aspect === null ? null : String(body.aspect);
+        if (aspect !== null && !QWEN_IMAGE_ASPECTS.includes(aspect as any)) {
+            return { status: 400, body: { error: `Aspect must be one of ${QWEN_IMAGE_ASPECTS.join(', ')}.` } };
+        }
+        for (const field of ['requester_id', 'origin_bot_id', 'channel_id', 'command_message_id', 'status_message_id']) {
+            if (!String(body[field] || '').trim()) return { status: 400, body: { error: `Missing ${field}.` } };
+        }
+        const descriptors: VideoAttachmentSourceImageDescriptor[] = Array.isArray(body.references) ? body.references : [];
+        if (descriptors.length > QWEN_IMAGE_MAX_REFERENCES) {
+            return { status: 400, body: { error: `Attach at most ${QWEN_IMAGE_MAX_REFERENCES} images.` } };
+        }
+        if (QWEN_IMAGE_MODELS[model].requiresReference && !descriptors.length) {
+            return { status: 400, body: { error: 'Attach or reply to an image to edit.' } };
+        }
+        for (const descriptor of descriptors) {
+            if (!descriptor || typeof descriptor.url !== 'string'
+                || !VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(descriptor.mime_type)) {
+                return { status: 400, body: { error: 'Reference images must be PNG, JPEG, or WebP attachments.' } };
+            }
+            if (!(Number(descriptor.bytes) > 0) || Number(descriptor.bytes) > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+                return { status: 400, body: { error: `Reference images must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.` } };
+            }
+        }
+        const idempotencyKey = `${String(body.command_message_id)}:${model}`;
+        const existing = await this.get<ImageJobRow>('SELECT * FROM image_jobs WHERE idempotency_key = ?', [idempotencyKey]);
+        if (existing) return { status: 200, body: { job: (await this.imageViews([existing]))[0], duplicate: true } };
+        const userLimitReached = async () => {
+            if (body.is_admin === true) return false;
+            const user = await this.get<{ count: number }>(
+                `SELECT COUNT(*) AS count FROM image_jobs WHERE requester_id = ? AND status IN ('queued','running')`,
+                [String(body.requester_id)],
+            );
+            return (user?.count || 0) >= QWEN_IMAGE_MAX_USER_JOBS;
+        };
+        const limitError = { status: 409, body: { error: `You already have ${QWEN_IMAGE_MAX_USER_JOBS} unfinished Qwen images.` } };
+        if (await userLimitReached()) return limitError;
+
+        const publicId = randomUUID();
+        const directory = resolve(this.options.resultsDir, 'images', publicId);
+        const references: Array<{ path: string; mime_type: string }> = [];
+        try {
+            const download = this.options.sourceImageDownloader || storeVideoSourceImage;
+            for (const [index, descriptor] of descriptors.entries()) {
+                const stored = await download(descriptor, join(directory, `reference-${index}`));
+                references.push({ path: stored.path, mime_type: stored.mimeType });
+            }
+        } catch (error) {
+            rmSync(directory, { recursive: true, force: true });
+            return {
+                status: 400,
+                body: { error: `Could not use the reference image: ${error instanceof Error ? error.message : String(error)}` },
+            };
+        }
+        const result = await this.withWriteLock(async () => {
+            if (await userLimitReached()) {
+                rmSync(directory, { recursive: true, force: true });
+                return limitError;
+            }
+            const now = nowSeconds();
+            await this.run(
+                `INSERT INTO image_jobs(public_id, idempotency_key, model, prompt, aspect, prompt_tease,
+                    requester_id, origin_bot_id, channel_id, guild_id, command_message_id, status_message_id,
+                    status, stage, reference_json, created_at, updated_at)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'queued','Queued',?,?,?)`,
+                [
+                    publicId, idempotencyKey, model, prompt, aspect,
+                    sanitizeVideoWorkerText(body.prompt_tease, '', 120).trim() || null,
+                    String(body.requester_id), String(body.origin_bot_id), String(body.channel_id),
+                    body.guild_id ? String(body.guild_id) : null,
+                    String(body.command_message_id), String(body.status_message_id),
+                    JSON.stringify(references), now, now,
+                ],
+            );
+            const row = await this.get<ImageJobRow>('SELECT * FROM image_jobs WHERE public_id = ?', [publicId]);
+            return { status: 201, body: { job: (await this.imageViews([row!]))[0], duplicate: false } };
+        });
+        if (result.status === 201) await this.dispatchNext();
+        return result;
+    }
+
+    private async imageViews(rows: ImageJobRow[]): Promise<QwenImageJobView[]> {
+        const queued = await this.all<{ public_id: string }>(
+            `SELECT public_id FROM image_jobs WHERE status = 'queued' ORDER BY id ASC`,
+        );
+        const positions = new Map(queued.map((row, index) => [row.public_id, index + 1]));
+        return rows.map(row => ({
+            id: row.public_id,
+            model: row.model,
+            prompt: row.prompt,
+            prompt_tease: row.prompt_tease,
+            requester_id: row.requester_id,
+            channel_id: row.channel_id,
+            command_message_id: row.command_message_id,
+            status_message_id: row.status_message_id,
+            status: row.status,
+            stage: row.stage,
+            error: row.error,
+            result_path: row.result_path,
+            queue_position: positions.get(row.public_id) ?? null,
+            video_rendering: Boolean(this.worker?.currentJob),
+            worker_online: Boolean(this.worker),
+            runtime_seconds: row.runtime_seconds,
+        }));
+    }
+
+    /** Image jobs are short, so they lease ahead of queued videos. */
+    private async dispatchImageJob(): Promise<boolean> {
+        const worker = this.worker;
+        if (!worker?.imageModels?.length) return false;
+        const row = await this.get<ImageJobRow>(
+            `SELECT * FROM image_jobs WHERE status = 'queued'
+             AND model IN (${worker.imageModels.map(() => '?').join(',')}) ORDER BY id ASC LIMIT 1`,
+            worker.imageModels,
+        );
+        if (!row) return false;
+        const leaseId = randomUUID();
+        const result = await this.run(
+            `UPDATE image_jobs SET status = 'running', worker_id = ?, lease_token = ?, attempt = attempt + 1,
+             stage = 'Waiting for the GPU', started_at = COALESCE(started_at, ?), updated_at = ?
+             WHERE public_id = ? AND status = 'queued'`,
+            [worker.id, leaseId, nowSeconds(), nowSeconds(), row.public_id],
+        );
+        if (result.changes !== 1) return false;
+        worker.ready = false;
+        worker.currentImageJob = { id: row.public_id, leaseId };
+        this.sendWorker({
+            type: 'image_job',
+            job: {
+                id: row.public_id,
+                model: row.model,
+                prompt: row.prompt,
+                aspect: row.aspect,
+                reference_count: JSON.parse(row.reference_json || '[]').length,
+                lease_id: leaseId,
+            },
+        });
+        return true;
+    }
+
+    /** Return an interrupted image job to the queue, or fail it once its attempts are spent. */
+    private async releaseImageJob(publicId: string, leaseId: string | null, error: string, retryable: boolean): Promise<void> {
+        const row = await this.get<ImageJobRow>('SELECT * FROM image_jobs WHERE public_id = ?', [publicId]);
+        if (!row || row.status !== 'running' || (leaseId && row.lease_token !== leaseId)) return;
+        const retry = retryable && row.attempt < QWEN_IMAGE_MAX_ATTEMPTS;
+        await this.run(
+            retry
+                ? `UPDATE image_jobs SET status = 'queued', stage = 'Retrying', error = ?, worker_id = NULL,
+                   lease_token = NULL, updated_at = ? WHERE public_id = ?`
+                : `UPDATE image_jobs SET status = 'failed', stage = NULL, error = ?, worker_id = NULL,
+                   lease_token = NULL, completed_at = ?, updated_at = ? WHERE public_id = ?`,
+            retry ? [error, nowSeconds(), publicId] : [error, nowSeconds(), nowSeconds(), publicId],
+        );
+    }
+
+    private async handleImageWorkerMessage(message: any): Promise<void> {
+        const worker = this.worker;
+        const current = worker?.currentImageJob;
+        if (!worker || !current || message.job_id !== current.id || message.lease_id !== current.leaseId) return;
+        const event = String(message.event || '');
+        if (event === 'progress') {
+            await this.run(
+                `UPDATE image_jobs SET stage = ?, updated_at = ? WHERE public_id = ? AND status = 'running'`,
+                [sanitizeVideoWorkerText(message.stage, 'Generating'), nowSeconds(), current.id],
+            );
+            return;
+        }
+        if (event !== 'complete' && event !== 'failed') return;
+        if (event === 'complete') {
+            const row = await this.get<ImageJobRow>('SELECT * FROM image_jobs WHERE public_id = ?', [current.id]);
+            if (!row?.result_path || !existsSync(row.result_path)) {
+                await this.releaseImageJob(current.id, current.leaseId, 'The worker finished without uploading an image.', true);
+            } else {
+                const runtime = Number(message.runtime_seconds) > 0 ? Number(message.runtime_seconds) : null;
+                await this.run(
+                    `UPDATE image_jobs SET status = 'ready', stage = NULL, error = NULL, runtime_seconds = ?,
+                     completed_at = ?, updated_at = ? WHERE public_id = ? AND status = 'running'`,
+                    [runtime, nowSeconds(), nowSeconds(), current.id],
+                );
+            }
+        } else {
+            await this.releaseImageJob(
+                current.id,
+                current.leaseId,
+                sanitizeVideoWorkerText(message.error, 'Image generation failed.', 1000),
+                message.retryable !== false,
+            );
+        }
+        worker.currentImageJob = null;
+    }
+
+    private async handleImageWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+        const match = /^\/v1\/worker\/image-jobs\/([0-9a-f-]+)\/(reference|result)$/.exec(url.pathname);
+        if (!match) return false;
+        const current = this.worker?.currentImageJob;
+        const row = await this.get<ImageJobRow>('SELECT * FROM image_jobs WHERE public_id = ?', [match[1]]);
+        if (!row || row.status !== 'running' || current?.id !== row.public_id
+            || req.headers['x-video-lease'] !== row.lease_token) {
+            writeJson(res, 409, { error: 'Image job is not leased to this worker.' });
+            return true;
+        }
+        if (match[2] === 'reference' && req.method === 'POST') {
+            const references: Array<{ path: string; mime_type: string }> = JSON.parse(row.reference_json || '[]');
+            const reference = references[Number(url.searchParams.get('index'))];
+            if (!reference || !existsSync(reference.path)) {
+                writeJson(res, 404, { error: 'The reference image is unavailable.' });
+                return true;
+            }
+            writeImage(res, reference.path, reference.mime_type, {});
+            return true;
+        }
+        if (match[2] === 'result' && req.method === 'PUT') {
+            const expectedLength = Number(req.headers['content-length'] || 0);
+            const expectedHash = String(req.headers['x-content-sha256'] || '').toLowerCase();
+            if (!expectedLength || expectedLength > QWEN_IMAGE_RESULT_MAX_BYTES || !/^[0-9a-f]{64}$/.test(expectedHash)) {
+                writeJson(res, 400, { error: 'Missing length or SHA-256, or the image is too large.' });
+                return true;
+            }
+            const directory = resolve(this.options.resultsDir, 'images', row.public_id);
+            mkdirSync(directory, { recursive: true });
+            const temporary = join(directory, 'result.png.part');
+            const destination = join(directory, 'result.png');
+            rmSync(temporary, { force: true });
+            const hash = createHash('sha256');
+            let bytes = 0;
+            const meter = new Transform({
+                transform(chunk, _encoding, callback) {
+                    bytes += chunk.length;
+                    if (bytes > QWEN_IMAGE_RESULT_MAX_BYTES) {
+                        callback(new Error('The image is too large.'));
+                        return;
+                    }
+                    hash.update(chunk);
+                    callback(null, chunk);
+                },
+            });
+            try {
+                await pipeline(req, meter, createWriteStream(temporary, { flags: 'wx' }));
+            } catch (error) {
+                rmSync(temporary, { force: true });
+                throw error;
+            }
+            if (bytes !== expectedLength || hash.digest('hex') !== expectedHash) {
+                rmSync(temporary, { force: true });
+                writeJson(res, 400, { error: 'Result length or checksum mismatch.' });
+                return true;
+            }
+            renameSync(temporary, destination);
+            await this.run(
+                'UPDATE image_jobs SET result_path = ?, result_bytes = ?, updated_at = ? WHERE public_id = ?',
+                [destination, bytes, nowSeconds(), row.public_id],
+            );
+            writeJson(res, 200, { ok: true, bytes });
+            return true;
+        }
+        writeJson(res, 405, { error: 'Method not allowed.' });
+        return true;
     }
 
     private async enqueue(body: any): Promise<{ status: number; body: any }> {
@@ -3915,9 +4284,13 @@ export class VideoBroker {
                         warmModel: generatorModel(hello.warm_model),
                         leaseId: hello.current_lease || null,
                         scheduler: workerScheduler(hello.scheduler),
+                        imageModels: Array.isArray(hello.image_models)
+                            ? hello.image_models.filter(isQwenImageModel) : [],
+                        currentImageJob: null,
                     };
                     initialized = true;
                     const reconciliation = await this.reconcileWorker(hello);
+                    const imageCancel = await this.reconcileImageJob(hello);
                     this.sendWorker({
                         type: 'hello_ack',
                         protocol: VIDEO_PROTOCOL_VERSION,
@@ -3925,9 +4298,10 @@ export class VideoBroker {
                         resume_current_job: reconciliation.resumeCurrentJob,
                     });
                     if (reconciliation.cancel) this.sendWorker(reconciliation.cancel);
+                    if (imageCancel) this.sendWorker(imageCancel);
                     await this.synchronizeSchedulerGaming(null);
                     const control = await this.control();
-                    if (!hello.current_job) {
+                    if (!hello.current_job && !this.worker.currentImageJob) {
                         if (control.paused_until) {
                             this.sendWorker({ type: 'unload', reason: 'pause' });
                             this.worker.warmModel = null;
@@ -3951,6 +4325,29 @@ export class VideoBroker {
             }
         });
         socket.on('error', error => console.error('Video worker socket error', error));
+    }
+
+    /** Adopt the worker's in-flight image job if its lease still holds; requeue every other running one. */
+    private async reconcileImageJob(hello: VideoWorkerHello): Promise<{ type: 'image_cancel'; job_id: string } | null> {
+        const claimed = hello.current_image_job;
+        let cancel: { type: 'image_cancel'; job_id: string } | null = null;
+        if (claimed?.id && this.worker) {
+            const row = await this.get<ImageJobRow>('SELECT * FROM image_jobs WHERE public_id = ?', [claimed.id]);
+            if (row?.status === 'running' && row.lease_token === claimed.lease_id) {
+                this.worker.currentImageJob = { id: row.public_id, leaseId: claimed.lease_id };
+                this.worker.ready = false;
+            } else {
+                cancel = { type: 'image_cancel', job_id: claimed.id };
+            }
+        }
+        const orphaned = await this.all<ImageJobRow>(
+            `SELECT * FROM image_jobs WHERE status = 'running' AND public_id != ?`,
+            [this.worker?.currentImageJob?.id || ''],
+        );
+        for (const row of orphaned) {
+            await this.releaseImageJob(row.public_id, row.lease_token, 'The desktop worker restarted during generation.', true);
+        }
+        return cancel;
     }
 
     private async reconcileWorker(hello: VideoWorkerHello): Promise<{
@@ -4081,7 +4478,8 @@ export class VideoBroker {
                     ],
                 );
             }
-            if (!this.worker.currentJob && this.worker.ready && schedulerAcceptsReservations(this.worker.scheduler)) {
+            if (!this.worker.currentJob && !this.worker.currentImageJob && this.worker.ready
+                && schedulerAcceptsReservations(this.worker.scheduler)) {
                 await this.dispatchNext();
             }
             return;
@@ -4089,6 +4487,11 @@ export class VideoBroker {
         if (message.type === 'ready') {
             if (message.warm_model === null || message.warm_model !== undefined) {
                 this.worker.warmModel = generatorModel(message.warm_model);
+            }
+            if (this.worker.currentImageJob) {
+                const dropped = this.worker.currentImageJob;
+                this.worker.currentImageJob = null;
+                await this.releaseImageJob(dropped.id, dropped.leaseId, 'The desktop worker dropped the image job.', true);
             }
             this.worker.ready = true;
             this.worker.currentJob = null;
@@ -4126,6 +4529,10 @@ export class VideoBroker {
                 && !control.paused_until && !control.dispatch_paused) {
                 await this.dispatchNext();
             }
+            return;
+        }
+        if (message.type === 'image_event') {
+            await this.handleImageWorkerMessage(message);
             return;
         }
         const jobId = String(message.job_id || '');
@@ -4451,12 +4858,13 @@ export class VideoBroker {
     }
 
     private async dispatchNext(): Promise<void> {
-        if (!this.worker || !this.worker.ready || this.worker.currentJob) return;
+        if (!this.worker || !this.worker.ready || this.worker.currentJob || this.worker.currentImageJob) return;
         if (this.options.recoveryEnabled && this.worker.recoveryVersion < VIDEO_RECOVERY_VERSION) return;
         if (!schedulerAcceptsReservations(this.worker.scheduler)) return;
         const control = await this.control();
         if (control.paused_until || control.dispatch_paused
             || control.gpuq_gaming_requested !== null) return;
+        if (await this.dispatchImageJob()) return;
         const placeholders = this.worker.capabilities.map(() => '?').join(',');
         if (!placeholders) return;
         // Apply the budget to jobs queued by older code before leasing more GPU work.
@@ -4597,6 +5005,14 @@ export class VideoBroker {
     private async markWorkerOffline(): Promise<void> {
         const worker = this.worker;
         this.worker = null;
+        if (worker?.currentImageJob) {
+            await this.releaseImageJob(
+                worker.currentImageJob.id,
+                worker.currentImageJob.leaseId,
+                'The desktop worker disconnected during generation.',
+                true,
+            );
+        }
         if (worker?.currentJob) {
             await this.run(
                 `UPDATE video_jobs SET
@@ -4844,6 +5260,7 @@ export class VideoBroker {
     }
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+        if (await this.handleImageWorkerHttp(req, res, url)) return;
         const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);
@@ -5218,6 +5635,19 @@ export class VideoBroker {
 
     private async cleanupFiles(): Promise<void> {
         const cutoff = nowSeconds() - 24 * 60 * 60;
+        const images = await this.all<ImageJobRow>(
+            `SELECT * FROM image_jobs WHERE status IN ('delivered','failed')
+             AND COALESCE(notified_at, completed_at, updated_at) < ?
+             AND (result_path IS NOT NULL OR reference_json != '[]')`,
+            [cutoff],
+        );
+        for (const row of images) {
+            rmSync(resolve(this.options.resultsDir, 'images', row.public_id), { recursive: true, force: true });
+            await this.run(
+                `UPDATE image_jobs SET result_path = NULL, reference_json = '[]', updated_at = ? WHERE public_id = ?`,
+                [nowSeconds(), row.public_id],
+            );
+        }
         const rows = await this.all<JobRow>(
             `SELECT * FROM video_jobs
              WHERE status IN ('ready','delivered','failed','cancelled')

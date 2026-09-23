@@ -249,12 +249,51 @@ export interface VideoJobView {
     gpu_queue_block_detail?: string | null;
 }
 
+// Still images from the desktop's local Qwen models, queued on the video worker.
+export type QwenImageModelId = 'qwenimage' | 'qwenedit';
+export const QWEN_IMAGE_MODELS: Record<QwenImageModelId, { displayName: string; requiresReference: boolean }> = {
+    qwenimage: { displayName: 'Qwen Image 2.1', requiresReference: false },
+    qwenedit: { displayName: 'Qwen-Image-Edit-2511', requiresReference: true },
+};
+export const QWEN_IMAGE_MAX_REFERENCES = 3;
+export const QWEN_IMAGE_MAX_USER_JOBS = 3;
+export const QWEN_IMAGE_MAX_ATTEMPTS = 2;
+export const QWEN_IMAGE_RESULT_MAX_BYTES = 25 * 1024 * 1024;
+export const QWEN_IMAGE_ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'] as const;
+export type QwenImageAspect = typeof QWEN_IMAGE_ASPECTS[number];
+export type QwenImageJobStatus = 'queued' | 'running' | 'ready' | 'delivered' | 'failed';
+
+export interface QwenImageJobView {
+    id: string;
+    model: QwenImageModelId;
+    prompt: string;
+    prompt_tease: string | null;
+    requester_id: string;
+    channel_id: string;
+    command_message_id: string;
+    status_message_id: string;
+    status: QwenImageJobStatus;
+    stage: string | null;
+    error: string | null;
+    result_path: string | null;
+    queue_position: number | null;
+    video_rendering: boolean;
+    worker_online: boolean;
+    runtime_seconds: number | null;
+}
+
+export function isQwenImageModel(value: unknown): value is QwenImageModelId {
+    return value === 'qwenimage' || value === 'qwenedit';
+}
+
 export interface VideoWorkerHello {
     recovery_version?: number;
     type: 'hello';
     protocol: number;
     worker_id: string;
     capabilities: VideoModelId[];
+    image_models?: QwenImageModelId[];
+    current_image_job?: { id: string; lease_id: string } | null;
     current_job: string | null;
     warm_model?: VideoGeneratorModelId | null;
     current_lease?: string | null;
