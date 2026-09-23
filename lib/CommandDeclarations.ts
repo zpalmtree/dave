@@ -121,8 +121,6 @@ import { config } from './Config.js';
 
 import {
     discordOnlyGate,
-    handleLtxFastVideo,
-    handleLtxVideo,
     handleMinimaxFastVideo,
     handleMinimaxVideo,
     handleOalgoVideo,
@@ -141,18 +139,6 @@ import {
 /* Keep shared command order synchronized across deployment tracks. */
 const sharedCommands: Command[] = [
     {
-        aliases: ['ltx'],
-        discordOnly: true,
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleLtxVideo,
-            description: 'Generate a maximum-quality local LTX 2.5 video; attach an image or reply to text/image context',
-            examples: [{ value: 'ltx a chihuahua crusade through a medieval castle' }],
-        },
-        relatedCommands: ['ltxfast', 'minimax', 'videoqueue'],
-        commandGates: [discordOnlyGate, singleVideoResponderGate],
-    },
-    {
         aliases: ['minimax'],
         discordOnly: true,
         primaryCommand: {
@@ -161,7 +147,7 @@ const sharedCommands: Command[] = [
             description: 'Generate a maximum-quality local MiniMax H3 video; attach an image or reply to text/image context',
             examples: [{ value: 'minimax an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['minimaxfast', 'ltx', 'videoqueue'],
+        relatedCommands: ['minimaxfast', 'oalgo', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
@@ -177,18 +163,6 @@ const sharedCommands: Command[] = [
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
-        aliases: ['ltxfast'],
-        discordOnly: true,
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleLtxFastVideo,
-            description: 'Generate a faster one-stage LTX 2.5 preview; attach an image or reply to text/image context',
-            examples: [{ value: 'ltxfast a chihuahua crusade through a medieval castle' }],
-        },
-        relatedCommands: ['ltx', 'minimaxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate, singleVideoResponderGate],
-    },
-    {
         aliases: ['minimaxfast'],
         discordOnly: true,
         primaryCommand: {
@@ -197,7 +171,7 @@ const sharedCommands: Command[] = [
             description: 'Generate full-resolution MiniMax FastH3 with 4-step VSA acceleration; supports reply text/images',
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
-        relatedCommands: ['minimax', 'ltxfast', 'videoqueue'],
+        relatedCommands: ['minimax', 'oalgo', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
@@ -242,7 +216,7 @@ const sharedCommands: Command[] = [
                 { value: 'videoqueue cancel 12ab34cd' },
             ],
         },
-        relatedCommands: ['ltx', 'ltxfast', 'minimax', 'minimaxfast'],
+        relatedCommands: ['minimax', 'minimaxfast', 'oalgo'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {

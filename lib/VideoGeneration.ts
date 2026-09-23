@@ -1146,10 +1146,6 @@ export async function handleVideoRequest(
     }
 }
 
-export async function handleLtxVideo(msg: Message, prompt: string): Promise<void> {
-    await handleVideoRequest('ltx', msg, prompt);
-}
-
 export async function handleMinimaxVideo(msg: Message, prompt: string): Promise<void> {
     await handleVideoRequest('minimax', msg, prompt);
 }
@@ -1178,10 +1174,6 @@ export async function handleOalgoVideo(msg: Message, prompt: string): Promise<vo
         compositeProvider: parsed.provider,
         plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
     });
-}
-
-export async function handleLtxFastVideo(msg: Message, prompt: string): Promise<void> {
-    await handleVideoRequest('ltxfast', msg, prompt);
 }
 
 export async function handleMinimaxFastVideo(msg: Message, prompt: string): Promise<void> {
