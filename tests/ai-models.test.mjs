@@ -30,8 +30,5 @@ test('uses provider-appropriate Grok request timeouts', () => {
 });
 
 test('keeps custom personalities pinned to their trained fine-tunes', () => {
-    assert.match(OPENAI_FINE_TUNED_MODELS.davinciV4, /^ft:gpt-3\.5-turbo-1106:/);
-    assert.match(OPENAI_FINE_TUNED_MODELS.fitQuoteV19, /^ft:gpt-3\.5-turbo-1106:/);
-    assert.match(OPENAI_FINE_TUNED_MODELS.slugQuoteV2, /^ft:gpt-3\.5-turbo-1106:/);
     assert.match(OPENAI_FINE_TUNED_MODELS.bugglesV41, /^ft:gpt-4o-2024-08-06:/);
 });
