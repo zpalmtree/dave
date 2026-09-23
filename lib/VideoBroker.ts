@@ -1,6 +1,7 @@
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
+import { execFile } from 'child_process';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
@@ -112,9 +113,15 @@ interface VideoPresetSourceImageDescriptor {
     preset: 'meximutt' | 'oalgo';
 }
 
+interface VideoClipSourceImageDescriptor {
+    clip_url: string;
+    name: string;
+}
+
 type VideoSourceImageDescriptor =
     | VideoAttachmentSourceImageDescriptor
-    | VideoPresetSourceImageDescriptor;
+    | VideoPresetSourceImageDescriptor
+    | VideoClipSourceImageDescriptor;
 
 interface StoredVideoSourceImage {
     path: string;
@@ -1003,6 +1010,11 @@ function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
         if (!['meximutt', 'oalgo'].includes(value.preset)) throw new Error('Unknown starting-image preset.');
         return { preset: 'meximutt' };
     }
+    if (value.clip_url !== undefined) {
+        const clipUrl = String(value.clip_url);
+        if (!isDiscordAttachmentUrl(clipUrl)) throw new Error('The video clip is not a Discord attachment.');
+        return { clip_url: clipUrl, name: String(value.name || 'clip').slice(0, 255) };
+    }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
     const bytes = Number(value.bytes || 0);
     if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) {
@@ -1023,6 +1035,12 @@ function isPresetSourceImage(
     descriptor: VideoSourceImageDescriptor,
 ): descriptor is VideoPresetSourceImageDescriptor {
     return 'preset' in descriptor;
+}
+
+function isClipSourceImage(
+    descriptor: VideoSourceImageDescriptor,
+): descriptor is VideoClipSourceImageDescriptor {
+    return 'clip_url' in descriptor;
 }
 
 function isDiscordAttachmentUrl(value: string): boolean {
@@ -1092,10 +1110,112 @@ async function downloadDiscordSourceImage(
     }
 }
 
+// Discord attachments are untrusted media, so ffmpeg may only read HTTPS and
+// may only demux plain video containers; playlists could otherwise fetch
+// arbitrary URLs through the broker.
+const VIDEO_CLIP_FFMPEG_INPUT_ARGS = [
+    '-protocol_whitelist', 'https,tls,tcp',
+    '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm',
+    '-rw_timeout', '30000000',
+];
+// Middle first; a nearly black frame (a fade or cut) tries the quarter points.
+const VIDEO_CLIP_FRAME_POSITIONS = [0.5, 0.25, 0.75];
+const VIDEO_CLIP_BLACK_FRAME_LUMA = 20;
+
+function runVideoTool(command: string, args: string[]): Promise<string> {
+    return new Promise((resolvePromise, reject) => {
+        execFile(command, args, { timeout: 60_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+            if (error) {
+                reject(new Error(`${command} failed: ${String(stderr || error.message).trim().slice(0, 500)}`));
+                return;
+            }
+            resolvePromise(String(stdout));
+        });
+    });
+}
+
+export function videoClipProxyFrameUrl(clipUrl: string): string {
+    const url = new URL(clipUrl);
+    url.hostname = 'media.discordapp.net';
+    url.searchParams.set('format', 'webp');
+    url.searchParams.set('quality', 'lossless');
+    return url.toString();
+}
+
+async function extractVideoClipFrame(
+    clipUrl: string,
+    seconds: number,
+    destination: string,
+    codecArgs: string[],
+): Promise<number | null> {
+    const stdout = await runVideoTool('ffmpeg', [
+        '-nostdin', '-v', 'error',
+        ...VIDEO_CLIP_FFMPEG_INPUT_ARGS,
+        '-ss', seconds.toFixed(3),
+        '-i', clipUrl,
+        '-frames:v', '1',
+        '-vf', 'signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=-',
+        ...codecArgs,
+        '-y', destination,
+    ]);
+    const luma = /lavfi\.signalstats\.YAVG=([\d.]+)/.exec(stdout);
+    return luma ? Number(luma[1]) : null;
+}
+
+/** Store a representative frame of a Discord video clip as the starting image. */
+export async function extractVideoClipSourceImage(
+    descriptor: VideoClipSourceImageDescriptor,
+    directory: string,
+): Promise<StoredVideoSourceImage> {
+    mkdirSync(directory, { recursive: true });
+    try {
+        const duration = Number((await runVideoTool('ffprobe', [
+            '-v', 'error',
+            ...VIDEO_CLIP_FFMPEG_INPUT_ARGS,
+            '-show_entries', 'format=duration',
+            '-of', 'default=nw=1:nk=1',
+            descriptor.clip_url,
+        ])).trim());
+        const destination = join(directory, 'source.png');
+        for (const position of VIDEO_CLIP_FRAME_POSITIONS) {
+            const seconds = Number.isFinite(duration) && duration > 0 ? duration * position : 0;
+            rmSync(destination, { force: true });
+            const luma = await extractVideoClipFrame(descriptor.clip_url, seconds, destination, []);
+            if (!existsSync(destination)) continue;
+            if (luma !== null && luma < VIDEO_CLIP_BLACK_FRAME_LUMA && position !== VIDEO_CLIP_FRAME_POSITIONS.at(-1)) {
+                continue;
+            }
+            let stored: StoredVideoSourceImage = { path: destination, mimeType: 'image/png', bytes: statSync(destination).size };
+            if (stored.bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+                const jpeg = join(directory, 'source.jpg');
+                await extractVideoClipFrame(descriptor.clip_url, seconds, jpeg, ['-q:v', '2']);
+                rmSync(destination, { force: true });
+                stored = { path: jpeg, mimeType: 'image/jpeg', bytes: statSync(jpeg).size };
+            }
+            if (!stored.bytes || stored.bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+                throw new Error('The extracted clip frame is empty or exceeds the 20 MiB limit.');
+            }
+            return stored;
+        }
+        throw new Error('ffmpeg produced no frame.');
+    } catch (error) {
+        console.warn(`[Video] Could not extract a frame from ${descriptor.name} with ffmpeg; using Discord's first frame.`, error);
+        return downloadDiscordSourceImage({
+            url: videoClipProxyFrameUrl(descriptor.clip_url),
+            mime_type: 'image/webp',
+            bytes: 1,
+            name: descriptor.name,
+        }, directory);
+    }
+}
+
 async function storeVideoSourceImage(
     descriptor: VideoSourceImageDescriptor,
     directory: string,
 ): Promise<StoredVideoSourceImage> {
+    if (isClipSourceImage(descriptor)) {
+        return extractVideoClipSourceImage(descriptor, directory);
+    }
     if (!isPresetSourceImage(descriptor)) {
         return downloadDiscordSourceImage(descriptor, directory);
     }

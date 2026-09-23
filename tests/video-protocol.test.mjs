@@ -21,6 +21,7 @@ import {
     videoReplyChainGuidance,
     videoJobDirection,
     videoSourceImageFromMessage,
+    videoClipSourceImageFromMessage,
     videoSourceImageFromMessages,
     videoPollDelayMs,
     VIDEO_CANCEL_REACTION,
@@ -2112,6 +2113,47 @@ test('video commands combine reply context and current instructions while inheri
             reply,
         ).url,
         commandAttachment.url,
+    );
+});
+
+test('video clip attachments are sent for broker frame extraction', () => {
+    const clip = {
+        url: 'https://cdn.discordapp.com/attachments/1/2/Screen_Recording.mov?ex=1&is=2&hm=3&',
+        contentType: 'video/quicktime',
+        name: 'Screen_Recording.mov',
+        size: 75_128_885,
+    };
+    const expected = { clip_url: clip.url, name: 'Screen_Recording.mov' };
+    assert.equal(videoClipSourceImageFromMessage({ attachments: new Map() }), null);
+    assert.deepEqual(
+        videoClipSourceImageFromMessage({ attachments: new Map([['clip', { ...clip, contentType: null, name: 'x.mp4' }]]) }),
+        { clip_url: clip.url, name: 'x.mp4' },
+    );
+    assert.throws(
+        () => videoClipSourceImageFromMessage({ attachments: new Map([['a', clip], ['b', clip]]) }),
+        /one image or video clip/,
+    );
+    assert.deepEqual(
+        videoSourceImageFromMessages({ attachments: new Map() }, { attachments: new Map([['clip', clip]]) }),
+        expected,
+    );
+
+    const image = {
+        url: 'https://cdn.discordapp.com/attachments/1/2/frame.png',
+        contentType: 'image/png',
+        name: 'frame.png',
+        size: 1234,
+    };
+    assert.equal(
+        videoSourceImageFromMessages({ attachments: new Map([['clip', clip], ['image', image]]) }, null).url,
+        image.url,
+    );
+    assert.deepEqual(
+        videoSourceImageFromMessages(
+            { attachments: new Map([['clip', clip]]) },
+            { attachments: new Map([['image', image]]) },
+        ),
+        expected,
     );
 });
 
