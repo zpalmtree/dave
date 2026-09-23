@@ -139,6 +139,7 @@ interface GeneratedImage {
 const RESPONSES_MODELS = [
   /^o\d/i,       // o3, o4, etc.
   /^gpt-5/i,     // gpt-5 family
+  /^gpt-6/i,     // gpt-6 family
   /^gpt-4\.1/i,  // (optional) route these through Responses too
   /^gpt-4o/i,    // (optional)
 ];

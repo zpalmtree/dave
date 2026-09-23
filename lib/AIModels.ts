@@ -2,7 +2,7 @@
  * replacement fine-tune has been trained and validated. */
 export const AI_MODELS = {
     claudeChat: 'claude-opus-5',
-    openAIChat: 'gpt-5.6-sol',
+    openAIChat: 'gpt-6-sol',
     openAITranscription: 'gpt-transcribe',
     /* Sunburst preserves detail for edits and reference-based video keyframes. */
     openAIImage: 'gpt-image-2.5-sunburst',

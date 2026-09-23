@@ -16,7 +16,7 @@ import {
     resolvedOpenAIServiceTier,
 } from './VideoUsage.js';
 
-export const VIDEO_PLANNER_MODEL = 'gpt-5.6-sol';
+export const VIDEO_PLANNER_MODEL = 'gpt-6-sol';
 export const VIDEO_PLANNER_FAST_MODEL = AI_MODELS.geminiChat;
 export const VIDEO_PLANNER_GEMINI_SCHEMA_MODE = 'compatible-structured-v1';
 export const UNIQUE_US_PRESIDENTS = [
@@ -695,24 +695,24 @@ function validateAudiovisualContracts(plan: any, promptAnalysis: any): void {
         .filter((text: string) => !planPreservesVisibleText(plan, text));
     if (missingText.length) {
         throw new Error(
-            `GPT-5.6 Sol omitted or failed to quote required visible text: ${missingText.join(' | ')}`,
+            `Video planner omitted or failed to quote required visible text: ${missingText.join(' | ')}`,
         );
     }
     if (visibleMode === 'prohibited' && quotedVisibleText(plan).length) {
-        throw new Error('GPT-5.6 Sol added visible text after the user prohibited it.');
+        throw new Error('Video planner added visible text after the user prohibited it.');
     }
     if (visibleMode === 'required_only') {
         const allowed = new Set(requiredItems.map((item: any) => String(item.text).trim()));
         const extraText = quotedVisibleText(plan).filter(text => !allowed.has(text));
         if (extraText.length) {
-            throw new Error(`GPT-5.6 Sol added unrequested visible text: ${extraText.join(' | ')}`);
+            throw new Error(`Video planner added unrequested visible text: ${extraText.join(' | ')}`);
         }
     }
     const motion = promptAnalysis?.motion_design_contract;
     if (String(motion?.mode || 'none') === 'visual_spine') {
         const spine = String(motion?.spine || '').trim();
         if (spine && !semanticPlanText(plan).toLocaleLowerCase().includes(spine.toLocaleLowerCase())) {
-            throw new Error(`GPT-5.6 Sol omitted the required visual motion spine: ${spine}`);
+            throw new Error(`Video planner omitted the required visual motion spine: ${spine}`);
         }
     }
 }
@@ -1389,7 +1389,7 @@ export function validateLocalVideoPlanForKeyframe(
         return [];
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return [message.replace(/GPT-5\.6 Sol/g, 'The local planner')];
+        return [message.replace(/Video planner/g, 'The local planner')];
     }
 }
 
@@ -1401,13 +1401,13 @@ export function validateFrontierVideoPlanForKeyframe(
 ): void {
     requestedDurationSeconds ??= requestedVideoDurationSeconds(rawPrompt);
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
-        throw new Error('GPT-5.6 Sol returned no screenplay segments.');
+        throw new Error('Video planner returned no screenplay segments.');
     }
     if (plan.segments.length > 64) {
-        throw new Error('GPT-5.6 Sol returned more than 64 screenplay segments.');
+        throw new Error('Video planner returned more than 64 screenplay segments.');
     }
     if (!String(plan.intent || '').trim() || !String(plan.continuity_bible || '').trim()) {
-        throw new Error('GPT-5.6 Sol omitted the intent or continuity bible.');
+        throw new Error('Video planner omitted the intent or continuity bible.');
     }
     repairVideoTiming(plan, VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20,
         VIDEO_MODELS[model].generatorModel === 'h3' ? 5 : 3);
@@ -1418,7 +1418,7 @@ export function validateFrontierVideoPlanForKeyframe(
     const keyframe = plan.keyframe;
     if (!keyframe || typeof keyframe !== 'object'
         || !String(keyframe.reason || '').trim() || !String(keyframe.prompt || '').trim()) {
-        throw new Error('GPT-5.6 Sol omitted the keyframe decision, reason, or prompt.');
+        throw new Error('Video planner omitted the keyframe decision, reason, or prompt.');
     }
     const motion = keyframe.motion_contract;
     for (const field of [
@@ -1429,7 +1429,7 @@ export function validateFrontierVideoPlanForKeyframe(
         'first_second_action',
     ]) {
         if (!motion || !String(motion[field] || '').trim()) {
-            throw new Error(`GPT-5.6 Sol omitted keyframe motion field ${field}.`);
+            throw new Error(`Video planner omitted keyframe motion field ${field}.`);
         }
     }
     const maximum = VIDEO_MODELS[model].generatorModel === 'h3' ? 15 : 20;
@@ -1440,18 +1440,18 @@ export function validateFrontierVideoPlanForKeyframe(
     for (const [segmentIndex, segment] of plan.segments.entries()) {
         if (!segment || typeof segment !== 'object'
             || !Array.isArray(segment.shots) || !segment.shots.length || segment.shots.length > 4) {
-            throw new Error(`GPT-5.6 Sol segment ${segmentIndex + 1} must contain one to four shots.`);
+            throw new Error(`Video planner segment ${segmentIndex + 1} must contain one to four shots.`);
         }
         const target = Number(segment.target_seconds);
         if (!Number.isFinite(target) || target <= 0 || target > maximum) {
-            throw new Error(`GPT-5.6 Sol segment ${segmentIndex + 1} exceeds the ${maximum}s model limit.`);
+            throw new Error(`Video planner segment ${segmentIndex + 1} exceeds the ${maximum}s model limit.`);
         }
         const declaredOutput = Number(segment.output_seconds);
         if (segment.output_seconds !== undefined
             && (!Number.isFinite(declaredOutput) || declaredOutput < 0.5
                 || declaredOutput > target + 1e-6)) {
             throw new Error(
-                `GPT-5.6 Sol segment ${segmentIndex + 1} has an invalid final-cut duration.`,
+                `Video planner segment ${segmentIndex + 1} has an invalid final-cut duration.`,
             );
         }
         for (const [shotIndex, shot] of segment.shots.entries()) {
@@ -1460,19 +1460,19 @@ export function validateFrontierVideoPlanForKeyframe(
                 || !String(shot.camera || '').trim()
                 || !String(shot.audio || '').trim()
                 || !Array.isArray(shot.dialogue)) {
-                throw new Error(`GPT-5.6 Sol shot ${segmentIndex + 1}.${shotIndex + 1} is incomplete.`);
+                throw new Error(`Video planner shot ${segmentIndex + 1}.${shotIndex + 1} is incomplete.`);
             }
             const audio = String(shot.audio);
             for (const line of shot.dialogue) {
                 if (!line || typeof line !== 'object' || !String(line.text || '').trim()) {
-                    throw new Error(`GPT-5.6 Sol shot ${segmentIndex + 1}.${shotIndex + 1} has invalid dialogue.`);
+                    throw new Error(`Video planner shot ${segmentIndex + 1}.${shotIndex + 1} has invalid dialogue.`);
                 }
                 if (audio.includes(String(line.text).trim())) {
-                    throw new Error(`GPT-5.6 Sol repeated dialogue in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
+                    throw new Error(`Video planner repeated dialogue in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
                 }
             }
             if (/\b(?:voice|speaker|character|person|man|woman)\s+(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|announces?|narrates?|sings?)\b|\b(?:dialogue|speech|spoken words?|vocals?)\s*:|\b(?:lip[- ]?sync|mouth movement)\b/i.test(audio)) {
-                throw new Error(`GPT-5.6 Sol put speech direction in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
+                throw new Error(`Video planner put speech direction in the non-speech audio field for shot ${segmentIndex + 1}.${shotIndex + 1}.`);
             }
         }
         const dialogueFloor = dialogueFloorSeconds(segment);
@@ -1483,7 +1483,7 @@ export function validateFrontierVideoPlanForKeyframe(
         );
         if (floor > maximum + 1e-6) {
             throw new Error(
-                `GPT-5.6 Sol segment ${segmentIndex + 1} needs ${floor.toFixed(1)}s of dialogue, above the ${maximum}s model limit.`,
+                `Video planner segment ${segmentIndex + 1} needs ${floor.toFixed(1)}s of dialogue, above the ${maximum}s model limit.`,
             );
         }
         generationTotal += target;
@@ -1492,13 +1492,13 @@ export function validateFrontierVideoPlanForKeyframe(
     }
     if (!plan.recovery_extended && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
-            `GPT-5.6 Sol screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
+            `Video planner screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s generation limit.`,
         );
     }
     if (!plan.recovery_extended && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
-            `GPT-5.6 Sol screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
+            `Video planner screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,
         );
     }
@@ -1508,10 +1508,10 @@ export function validateFrontierVideoPlanForKeyframe(
             .filter((line: any) => line?.verbatim && String(line.text || '').trim());
         if (String(contract?.mode || '') === 'none'
             && planHasDialogue(plan)) {
-            throw new Error('GPT-5.6 Sol added dialogue after its independent analysis found no speech.');
+            throw new Error('Video planner added dialogue after its independent analysis found no speech.');
         }
         if (!protectedLines.length && planRecitesCreativeBrief(plan, rawPrompt)) {
-            throw new Error('GPT-5.6 Sol recited the visual creative brief as dialogue.');
+            throw new Error('Video planner recited the visual creative brief as dialogue.');
         }
         if (VIDEO_MODELS[model].generatorModel === 'h3'
             && protectedLines.length === 1
@@ -1520,7 +1520,7 @@ export function validateFrontierVideoPlanForKeyframe(
             const shotIndexes = dialogueLineShotIndexes(plan, String(protectedLines[0].text));
             if (shotIndexes.some(shotIndex => shotIndex > 0)) {
                 throw new Error(
-                    'GPT-5.6 Sol placed one short verbatim H3 line after the first shot; '
+                    'Video planner placed one short verbatim H3 line after the first shot; '
                     + 'move it to the beginning unless the user explicitly delays it.',
                 );
             }
@@ -1528,7 +1528,7 @@ export function validateFrontierVideoPlanForKeyframe(
         const semantic = semanticPlanText(plan);
         const missingQuotes = quotedRequirements(rawPrompt).filter(quote => !semantic.includes(quote));
         if (missingQuotes.length) {
-            throw new Error(`GPT-5.6 Sol omitted quoted wording: ${missingQuotes.join(' | ')}`);
+            throw new Error(`Video planner omitted quoted wording: ${missingQuotes.join(' | ')}`);
         }
         const missingNumbers = videoPromptContentNumbers(rawPrompt).filter(number => {
             if (new RegExp(`(^|\\D)${number.replace('.', '\\.')}($|\\D)`).test(semantic)) return false;
@@ -1537,7 +1537,7 @@ export function validateFrontierVideoPlanForKeyframe(
                 || !new RegExp(`\\b${NUMBER_WORDS[integer]}\\b`, 'i').test(semantic);
         });
         if (missingNumbers.length) {
-            throw new Error(`GPT-5.6 Sol omitted explicit numbers: ${missingNumbers.join(', ')}`);
+            throw new Error(`Video planner omitted explicit numbers: ${missingNumbers.join(', ')}`);
         }
     }
 }
@@ -1611,12 +1611,12 @@ function extractOutputText(response: any): string {
             if (content?.type === 'refusal') {
                 throw new FrontierPlannerRejectedError(
                     'provider_policy',
-                    String(content.refusal || 'GPT-5.6 Sol explicitly declined the request.'),
+                    String(content.refusal || 'Video planner explicitly declined the request.'),
                 );
             }
         }
     }
-    throw new Error(response?.error?.message || 'GPT-5.6 Sol returned no screenplay.');
+    throw new Error(response?.error?.message || 'Video planner returned no screenplay.');
 }
 
 function openAIPolicyRefusal(status: number, body: any): boolean {
@@ -1993,7 +1993,7 @@ async function requestSolResponse(
             if (unexpectedState) {
                 const reason = String(body?.incomplete_details?.reason || body?.error?.code || responseStatus);
                 detail = body?.error?.message
-                    || `GPT-5.6 Sol response was ${responseStatus}: ${reason}.`;
+                    || `Video planner response was ${responseStatus}: ${reason}.`;
                 const error = new Error(detail);
                 lastError = error;
                 retryable = incomplete || /server|timeout|rate/i.test(reason);
@@ -2174,7 +2174,7 @@ async function validatedPromptAnalysis(
         || !Array.isArray(value.motion_design_contract.style_invariants)
         || !Array.isArray(value.motion_design_contract.transition_rules)
         || !value.frontier_handling || typeof value.frontier_handling !== 'object') {
-        throw new Error('GPT-5.6 Sol returned an invalid prompt analysis.');
+        throw new Error('Video planner returned an invalid prompt analysis.');
     }
     const coverageMode = String(value.coverage_contract.mode || '');
     const coveragePresentation = String(value.coverage_contract.presentation || '');
@@ -2192,7 +2192,7 @@ async function validatedPromptAnalysis(
         || ((value.coverage_contract.per_member_dialogue
             || value.coverage_contract.per_member_label)
             && coveragePresentation !== 'sequential')) {
-        throw new Error('GPT-5.6 Sol returned an inconsistent coverage contract.');
+        throw new Error('Video planner returned an inconsistent coverage contract.');
     }
     value.coverage_contract.members = coverageMembers;
     const visibleMode = String(value.visible_text_contract.mode || '');
@@ -2203,7 +2203,7 @@ async function validatedPromptAnalysis(
             || !String(item?.timing || '').trim())
         || (['required', 'required_only'].includes(visibleMode) && !visibleItems.length)
         || (['none', 'prohibited'].includes(visibleMode) && visibleItems.length)) {
-        throw new Error('GPT-5.6 Sol returned an inconsistent visible-text contract.');
+        throw new Error('Video planner returned an inconsistent visible-text contract.');
     }
     const motionMode = String(value.motion_design_contract.mode || '');
     const motionSpine = String(value.motion_design_contract.spine || '').trim();
@@ -2214,15 +2214,15 @@ async function validatedPromptAnalysis(
         || (motionMode === 'visual_spine' && (!motionSpine || motionSpine === 'N/A'
             || !value.motion_design_contract.style_invariants.length
             || !value.motion_design_contract.transition_rules.length))) {
-        throw new Error('GPT-5.6 Sol returned an inconsistent motion-design contract.');
+        throw new Error('Video planner returned an inconsistent motion-design contract.');
     }
     const disposition = String(value.frontier_handling.disposition || '');
     const reasonCode = String(value.frontier_handling.reason_code || 'other');
     if (disposition !== 'fulfill' && disposition !== 'reject') {
-        throw new Error('GPT-5.6 Sol omitted its frontier handling decision.');
+        throw new Error('Video planner omitted its frontier handling decision.');
     }
     if (disposition === 'fulfill' && reasonCode !== 'none') {
-        throw new Error('GPT-5.6 Sol returned an inconsistent frontier handling decision.');
+        throw new Error('Video planner returned an inconsistent frontier handling decision.');
     }
     if (disposition === 'reject') {
         const plannerProvider = videoTextModelCapabilities(plannerModel).provider;
@@ -2263,22 +2263,22 @@ function validatePlanAgainstAnalysis(
     if (dialogueMode !== 'none' && !planHasDialogue(plan)) {
         if (protectedDialogueLines.length) {
             throw new ProtectedDialogueMismatchError(
-                'GPT-5.6 Sol omitted verbatim dialogue protected by its independent prompt analysis.',
+                'Video planner omitted verbatim dialogue protected by its independent prompt analysis.',
             );
         }
-        throw new Error('GPT-5.6 Sol omitted dialogue required by its independent prompt analysis.');
+        throw new Error('Video planner omitted dialogue required by its independent prompt analysis.');
     }
     if (dialogueMode === 'none' && planHasDialogue(plan)) {
-        throw new Error('GPT-5.6 Sol added dialogue after its independent prompt analysis found no speech.');
+        throw new Error('Video planner added dialogue after its independent prompt analysis found no speech.');
     }
     if (!protectedDialogueLines.length && planRecitesCreativeBrief(plan, prompt)) {
-        throw new Error('GPT-5.6 Sol recited the visual creative brief as dialogue.');
+        throw new Error('Video planner recited the visual creative brief as dialogue.');
     }
     const missingVerbatim = protectedDialogueLines
         .filter((line: string) => !planPreservesDialogueLine(plan, line));
     if (missingVerbatim.length) {
         throw new ProtectedDialogueMismatchError(
-            'GPT-5.6 Sol rewrote or omitted dialogue protected by its independent prompt analysis.',
+            'Video planner rewrote or omitted dialogue protected by its independent prompt analysis.',
         );
     }
 }
@@ -2478,7 +2478,7 @@ export async function createFrontierVideoPlan(
                 rejectedCandidateAnalysis = promptAnalysis;
                 const plan = combined?.plan;
                 if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
-                    throw new Error('GPT-5.6 Sol returned an invalid combined screenplay object.');
+                    throw new Error('Video planner returned an invalid combined screenplay object.');
                 }
                 expandExhaustiveSequentialPlan(plan, promptAnalysis, model);
                 stageFrontierVisibleText(plan, promptAnalysis);
@@ -2709,7 +2709,7 @@ export async function createFrontierVideoPlan(
                 repairCandidate = extractOutputText(body);
                 const plan = JSON.parse(repairCandidate);
                 if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
-                    throw new Error('GPT-5.6 Sol returned an invalid screenplay object.');
+                    throw new Error('Video planner returned an invalid screenplay object.');
                 }
                 lastParsedCandidate = plan;
                 expandExhaustiveSequentialPlan(plan, promptAnalysis, model);
@@ -2846,7 +2846,7 @@ export async function createFrontierVideoPlan(
                 console.warn(`Frontier screenplay validation failed; requesting one repair: ${repairFailure}`);
             }
         }
-        throw new Error(repairFailure || 'GPT-5.6 Sol could not produce a valid screenplay.');
+        throw new Error(repairFailure || 'Video planner could not produce a valid screenplay.');
     } finally {
         clearTimeout(timeout);
     }
