@@ -1,0 +1,403 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -1582,6 +1582,8 @@
+     )
+     parser.add_argument("--recovery-keyframe-input", type=Path, help=argparse.SUPPRESS)
+     parser.add_argument("--recovery-keyframe-output", type=Path, help=argparse.SUPPRESS)
++    parser.add_argument("--image-job-input", type=Path, help=argparse.SUPPRESS)
++    parser.add_argument("--image-job-output", type=Path, help=argparse.SUPPRESS)
+     parser.add_argument(
+         "--frontier-prompt-analysis",
+         type=Path,
+@@ -1662,7 +1664,7 @@
+         if args.prompt:
+             parser.error("server lifecycle commands do not accept a prompt")
+         return args
+-    if not args.prompt and args.resume is None:
++    if not args.prompt and args.resume is None and args.image_job_input is None:
+         parser.error("prompt cannot be empty")
+     if args.image is not None:
+         args.mode = "i2v"
+@@ -1742,6 +1744,8 @@
+         parser.error("--fast-duration-aware requires --model h3 --fast")
+     if (args.recovery_keyframe_input is None) != (args.recovery_keyframe_output is None):
+         parser.error("--recovery-keyframe-input and --recovery-keyframe-output must be used together")
++    if (args.image_job_input is None) != (args.image_job_output is None):
++        parser.error("--image-job-input and --image-job-output must be used together")
+     if args.conservative_semantic_analysis and args.local_plan_output is None:
+         parser.error("--conservative-semantic-analysis requires --local-plan-output")
+     if args.local_plan_output is not None and (
+@@ -6685,6 +6689,28 @@
+                                   run_root, timeout_seconds, references)
+ 
+ 
++def generate_image_job(server: str, spec: dict[str, Any], seed: int, timeout_seconds: float) -> Path:
++    """A standalone $qwenimage or $qwenedit request: the user's prompt, unmodified, on the chosen model."""
++    prompt = str(spec.get("prompt") or "").strip()
++    if not prompt:
++        raise VideoGenError("an image job needs a prompt")
++    references = [Path(value) for value in spec.get("references") or []]
++    aspect = str(spec.get("aspect") or "")
++    if aspect not in KEYFRAME_DIMENSIONS:
++        aspect = nearest_aspect(references[0]) if references else "1:1"
++    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
++    run_root = OUTPUT_DIR / "image_jobs" / f"{timestamp}_{uuid.uuid4().hex[:6]}"
++    model = spec.get("model")
++    if model == "qwenimage":
++        steps = max(25, int(os.environ.get("VIDEO_QWEN_KEYFRAME_STEPS", "25")))
++        return generate_qwen_keyframe(server, prompt, aspect, seed, run_root, timeout_seconds, steps, references)
++    if model == "qwenedit":
++        if not references:
++            raise VideoGenError("Qwen-Image-Edit needs at least one reference image")
++        return generate_edit_keyframe(server, prompt, aspect, seed, run_root, timeout_seconds, references)
++    raise VideoGenError(f"unknown image model: {model}")
++
++
+ def edit_keyframe_graph(prompt: str, aspect: str, seed: int, prefix: str, reference_names: list[str]) -> dict[str, Any]:
+     """Qwen-Image-Edit-2511 with its Lightning LoRA, following the official ComfyUI template."""
+     width, height = KEYFRAME_DIMENSIONS[aspect]
+@@ -8154,6 +8180,18 @@
+             shutil.copy2(opening, destination)
+             print(f"Local recovery opening written: {destination}", flush=True)
+             return 0
++        if args.image_job_input is not None:
++            image = generate_image_job(
++                args.server,
++                json.loads(args.image_job_input.read_text(encoding="utf-8")),
++                args.seed if args.seed is not None else random.SystemRandom().randrange(0, 2**63 - 2),
++                min(args.timeout_minutes * 60, 10 * 60),
++            )
++            destination = args.image_job_output.expanduser().resolve()
++            destination.parent.mkdir(parents=True, exist_ok=True)
++            shutil.copy2(image, destination)
++            print(f"Image job written: {destination}", flush=True)
++            return 0
+ 
+         state: dict[str, Any] = {"schema_version": 1, "completed": {}}
+         if args.resume is not None:
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -37,6 +37,9 @@
+ PLAN_DIR = SCRIPT_DIR / "worker_plans"
+ KEYFRAME_DIR = SCRIPT_DIR / "worker_keyframes"
+ GPUQ_RESERVATION_DIR = SCRIPT_DIR / "worker_gpuq"
++IMAGE_JOB_DIR = SCRIPT_DIR / "worker_images"
++IMAGE_JOB_MODELS = ("qwenimage", "qwenedit")
++IMAGE_RESULT_LIMIT = 25 * 1024 * 1024
+ DEFAULT_DELIVERY_LIMIT = 10 * 1024 * 1024
+ MAX_DELIVERY_LIMIT = 100 * 1024 * 1024
+ DELIVERY_SIZE_SAFETY = 0.90
+@@ -895,6 +898,11 @@
+ 
+ 
+ class DesktopVideoWorker:
++    # A standalone image job runs between video jobs, never alongside one.
++    image_job: dict[str, Any] | None = None
++    image_task: asyncio.Task[None] | None = None
++    image_process: asyncio.subprocess.Process | None = None
++
+     def __init__(self) -> None:
+         self.config = read_json(CONFIG_PATH, {})
+         self.worker_id = str(self.config.get("workerId") or "zp-5090")
+@@ -1458,6 +1466,11 @@
+                     "protocol": PROTOCOL_VERSION,
+                     "worker_id": self.worker_id,
+                     "capabilities": list(MODEL_ARGS),
++                    "image_models": list(IMAGE_JOB_MODELS),
++                    "current_image_job": (
++                        {"id": self.image_job["id"], "lease_id": self.image_job["lease_id"]}
++                        if self.image_job else None
++                    ),
+                     "recovery_version": 3,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+@@ -1484,7 +1497,7 @@
+                         "waiting for lease release.",
+                         flush=True,
+                     )
+-            else:
++            elif not self.image_job:
+                 # A broker restart discards its in-memory ready flag. Re-advertise
+                 # idle capacity after every newly acknowledged connection.
+                 await self.send_ready()
+@@ -1712,7 +1725,7 @@
+                 self.event_acks[event_id].set()
+         elif kind == "job":
+             job = message.get("job")
+-            if self.current_job or not isinstance(job, dict):
++            if self.current_job or self.image_job or not isinstance(job, dict):
+                 return
+             if job.get("model") not in MODEL_ARGS:
+                 await self.send(
+@@ -1738,7 +1751,25 @@
+                 await self.discard_current()
+             else:
+                 await self.cancel_current(reason)
+-        elif kind == "unload" and not self.current_job:
++        elif kind == "image_job":
++            job = message.get("job")
++            if not isinstance(job, dict) or not job.get("id") or not job.get("lease_id"):
++                return
++            if self.current_job or self.image_job or job.get("model") not in IMAGE_JOB_MODELS:
++                await self.send({
++                    "type": "image_event",
++                    "event": "failed",
++                    "job_id": job.get("id"),
++                    "lease_id": job.get("lease_id"),
++                    "error": "Worker is busy or does not support the requested image model.",
++                    "retryable": job.get("model") in IMAGE_JOB_MODELS,
++                })
++                return
++            self.image_job = job
++            self.image_task = asyncio.create_task(self.run_image_job(job))
++        elif kind == "image_cancel" and self.image_job and message.get("job_id") == self.image_job.get("id"):
++            await self.cancel_image_job()
++        elif kind == "unload" and not self.current_job and not self.image_job:
+             await self.interrupt_comfy()
+         elif kind == "gpuq_gaming":
+             enabled = message.get("enabled")
+@@ -1747,6 +1778,151 @@
+                 return
+             await self.set_gpuq_gaming(enabled, request_id)
+ 
++    def image_url(self, job: dict[str, Any], operation: str) -> str:
++        url = re.sub(r"^wss://", "https://", self.broker_url)
++        return re.sub(r"/v1/worker$", f"/v1/worker/image-jobs/{job['id']}/{operation}", url)
++
++    def image_headers(self, job: dict[str, Any]) -> dict[str, str]:
++        return {"Authorization": f"Bearer {self.token}", "X-Video-Lease": str(job["lease_id"])}
++
++    async def send_image_event(self, job: dict[str, Any], event: str, **fields: Any) -> None:
++        value = {"type": "image_event", "event": event, "job_id": job["id"], "lease_id": job["lease_id"], **fields}
++        if event in {"complete", "failed"}:
++            await self.wait_and_send(value)
++        else:
++            await self.send(value)
++
++    async def request_image_reference(self, job: dict[str, Any], index: int, root: Path) -> Path:
++        if not self.http_session:
++            raise RuntimeError("Broker HTTP session is unavailable.")
++        async with self.http_session.post(
++            f"{self.image_url(job, 'reference')}?index={index}",
++            json={},
++            headers=self.image_headers(job),
++            timeout=aiohttp.ClientTimeout(total=2 * 60, connect=20),
++        ) as response:
++            if response.status != 200:
++                raise RuntimeError(f"Reference image {index + 1} is unavailable ({response.status}).")
++            extension = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
++                str(response.headers.get("content-type") or "").split(";", 1)[0].lower()
++            )
++            payload = await response.read()
++        if not extension or not payload or len(payload) > KEYFRAME_LIMIT:
++            raise RuntimeError(f"Reference image {index + 1} is not a usable PNG, JPEG, or WebP file.")
++        destination = root / f"reference-{index}{extension}"
++        destination.write_bytes(payload)
++        return destination
++
++    async def upload_image_result(self, job: dict[str, Any], path: Path) -> None:
++        payload = path.read_bytes()
++        if not payload or len(payload) > IMAGE_RESULT_LIMIT:
++            raise RuntimeError("The generated image is empty or exceeds 25 MiB.")
++        headers = {
++            **self.image_headers(job),
++            "Content-Type": "image/png",
++            "X-Content-SHA256": hashlib.sha256(payload).hexdigest(),
++        }
++        for attempt in range(3):
++            await self.connected.wait()
++            if not self.http_session:
++                raise RuntimeError("Broker HTTP session is unavailable.")
++            try:
++                async with self.http_session.put(
++                    self.image_url(job, "result"),
++                    data=payload,
++                    headers=headers,
++                    timeout=aiohttp.ClientTimeout(total=5 * 60, connect=20),
++                ) as response:
++                    if response.status == 200:
++                        return
++                    detail = await response.text()
++                    if 400 <= response.status < 500:
++                        raise RuntimeError(f"Broker rejected the image ({response.status}): {detail}")
++            except (aiohttp.ClientError, asyncio.TimeoutError):
++                pass
++            await asyncio.sleep(2 * (attempt + 1))
++        raise RuntimeError("Could not upload the generated image.")
++
++    async def run_image_job(self, job: dict[str, Any]) -> None:
++        """Generate one standalone Qwen image under its own gpuq admission."""
++        job_id = str(job["id"])
++        root = IMAGE_JOB_DIR / job_id
++        shutil.rmtree(root, ignore_errors=True)
++        root.mkdir(parents=True, exist_ok=True)
++        log_path = LOG_DIR / f"image-{job_id}.log"
++        started = time.time()
++        stage_failed = "preparing the references"
++        try:
++            references = [
++                await self.request_image_reference(job, index, root)
++                for index in range(max(0, int(job.get("reference_count") or 0)))
++            ]
++            stage_failed = "generating the image"
++            spec = root / "spec.json"
++            output = root / "result.png"
++            atomic_json(spec, {
++                "model": job["model"],
++                "prompt": str(job.get("prompt") or ""),
++                "aspect": job.get("aspect"),
++                "references": [str(path) for path in references],
++            })
++            await self.send_image_event(job, "progress", stage="Generating")
++            command = self.gpuq_command([
++                console_python_executable(), "-s", str(GENERATOR),
++                "--image-job-input", str(spec), "--image-job-output", str(output),
++                "--seed", str(stable_job_seed(job_id)),
++            ], "video-h3", "normal")
++            LOG_DIR.mkdir(parents=True, exist_ok=True)
++            with log_path.open("w", encoding="utf-8") as log:
++                self.image_process = await asyncio.create_subprocess_exec(
++                    *command,
++                    cwd=str(ROOT_DIR),
++                    stdout=log,
++                    stderr=asyncio.subprocess.STDOUT,
++                    env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
++                    creationflags=CREATE_NO_WINDOW,
++                )
++                code = await self.image_process.wait()
++            self.image_process = None
++            if code != 0 or not output.is_file():
++                raise RuntimeError(self.last_log_error(log_path) or f"The image generator exited with code {code}.")
++            stage_failed = "uploading the image"
++            await self.send_image_event(job, "progress", stage="Uploading")
++            await self.upload_image_result(job, output)
++            await self.send_image_event(job, "complete", runtime_seconds=round(time.time() - started, 3))
++        except asyncio.CancelledError:
++            pass
++        except Exception as exc:
++            print(f"Image job {job_id} failed while {stage_failed}: {exc}", flush=True)
++            await self.send_image_event(
++                job,
++                "failed",
++                error=f"Failed while {stage_failed}: {exc}"[:1000],
++                retryable=stage_failed != "preparing the references",
++            )
++        finally:
++            self.image_process = None
++            self.image_job = None
++            self.image_task = None
++            shutil.rmtree(root, ignore_errors=True)
++            await self.send_ready()
++
++    async def cancel_image_job(self) -> None:
++        process = self.image_process
++        if process and process.returncode is None:
++            subprocess.run(
++                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
++                stdout=subprocess.DEVNULL,
++                stderr=subprocess.DEVNULL,
++                check=False,
++                creationflags=CREATE_NO_WINDOW,
++            )
++            await self.interrupt_comfy()
++        task = self.image_task
++        if task and task is not asyncio.current_task() and not task.done():
++            task.cancel()
++            await asyncio.gather(task, return_exceptions=True)
++
+     async def discard_current(self) -> None:
+         """Drop broker-released local state without mutating an already-terminal server job."""
+         self.cancel_reason = "release"
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -242,6 +242,90 @@
+         self.assertFalse(any(key.startswith('image') for key in text_only['positive_text']['inputs']))
+         self.assertEqual(text_only['latent']['inputs']['width'], 1344)
+ 
++    def test_image_jobs_send_the_raw_prompt_to_the_chosen_qwen_model(self):
++        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
++            self.skipTest('Run on installed desktop sources.')
++        import video_gen
++        with tempfile.TemporaryDirectory() as temporary:
++            from PIL import Image
++            portrait = Path(temporary) / 'portrait.png'
++            Image.new('RGB', (100, 150), 'red').save(portrait)
++            with mock.patch.object(video_gen, 'generate_qwen_keyframe', return_value=portrait) as generate:
++                video_gen.generate_image_job('http://server', {'model': 'qwenimage', 'prompt': 'A duck.'}, 7, 60)
++                _server, prompt, aspect, seed, _root, _timeout, steps, references = generate.call_args.args
++                self.assertEqual((prompt, aspect, seed, steps, references), ('A duck.', '1:1', 7, 25, []))
++                video_gen.generate_image_job('http://server', {'model': 'qwenimage', 'prompt': 'A duck.',
++                                                                'aspect': '9:16', 'references': [str(portrait)]}, 7, 60)
++                self.assertEqual((generate.call_args.args[2], generate.call_args.args[7]), ('9:16', [portrait]))
++            with mock.patch.object(video_gen, 'generate_edit_keyframe', return_value=portrait) as generate:
++                video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.',
++                                                                'references': [str(portrait)]}, 7, 60)
++                _server, prompt, aspect, *_rest, references = generate.call_args.args
++                self.assertEqual((prompt, aspect, references), ('Add a hat.', '2:3', [portrait]))
++                with self.assertRaises(video_gen.VideoGenError):
++                    video_gen.generate_image_job('http://server', {'model': 'qwenedit', 'prompt': 'Add a hat.'}, 7, 60)
++            with self.assertRaises(video_gen.VideoGenError):
++                video_gen.generate_image_job('http://server', {'model': 'other', 'prompt': 'A duck.'}, 7, 60)
++        with mock.patch.object(sys, 'argv', ['video_gen.py', '--image-job-input', 'in.json', 'x']):
++            with self.assertRaises(SystemExit):
++                video_gen.parse_args()
++
++    def image_worker(self, root: Path, exit_code: int):
++        import video_worker
++        worker = object.__new__(video_worker.DesktopVideoWorker)
++        worker.current_job = None
++        worker.request_image_reference = mock.AsyncMock(return_value=root / 'reference.png')
++        worker.upload_image_result = mock.AsyncMock()
++        worker.send_image_event = mock.AsyncMock()
++        worker.send_ready = mock.AsyncMock()
++        worker.send = mock.AsyncMock(return_value=True)
++        profiles = []
++
++        def gpuq_command(command, profile, priority):
++            profiles.append((profile, priority))
++            output = command[command.index('--image-job-output') + 1]
++            script = f"open({output!r}, 'wb').write(b'png') if {exit_code} == 0 else print('ERROR: out of memory')"
++            return [sys.executable, '-c', f'{script}; raise SystemExit({exit_code})']
++
++        worker.gpuq_command = gpuq_command
++        return worker, profiles
++
++    def test_worker_runs_an_image_job_under_gpuq_and_reports_back(self):
++        if not (Path(__file__).resolve().parent / 'video_worker.py').is_file():
++            self.skipTest('Run on installed desktop sources.')
++        import video_worker
++        job = {'id': 'image-job', 'lease_id': 'lease', 'model': 'qwenedit', 'prompt': 'Add a hat.', 'reference_count': 1}
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            with mock.patch.object(video_worker, 'IMAGE_JOB_DIR', root / 'images'), \
++                    mock.patch.object(video_worker, 'LOG_DIR', root / 'logs'):
++                worker, profiles = self.image_worker(root, 0)
++                worker.image_job = job
++                asyncio.run(worker.run_image_job(job))
++                self.assertEqual(profiles, [('video-h3', 'normal')])
++                worker.request_image_reference.assert_awaited_once()
++                self.assertEqual(worker.upload_image_result.await_args.args[1].name, 'result.png')
++                events = [call.args[1] for call in worker.send_image_event.await_args_list]
++                self.assertEqual(events, ['progress', 'progress', 'complete'])
++                worker.send_ready.assert_awaited_once()
++                self.assertIsNone(worker.image_job)
++                self.assertFalse((root / 'images' / 'image-job').exists())
++
++                failing, _profiles = self.image_worker(root, 1)
++                asyncio.run(failing.run_image_job(job))
++                failing.upload_image_result.assert_not_awaited()
++                event = failing.send_image_event.await_args_list[-1]
++                self.assertEqual(event.args[1], 'failed')
++                self.assertIn('out of memory', event.kwargs['error'])
++                self.assertTrue(event.kwargs['retryable'])
++                failing.send_ready.assert_awaited_once()
++
++            busy, _profiles = self.image_worker(root, 0)
++            busy.current_job = {'id': 'video'}
++            asyncio.run(busy.handle_message({'type': 'image_job', 'job': job}))
++            self.assertEqual(busy.send.await_args.args[0]['event'], 'failed')
++            self.assertIsNone(busy.image_job)
++
+     def exercise(self, original=False, render_failures=0, image_outage=False,
+                  review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
+         from PIL import Image
