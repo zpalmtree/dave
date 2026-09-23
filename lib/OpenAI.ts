@@ -841,75 +841,12 @@ export async function handleDrunk(msg: Message, args: string): Promise<void> {
     await replyWithOpenAIResponse(msg, response);
 }
 
-export async function handleDavinci(msg: Message, args: string): Promise<void> {
-    const response = await masterOpenAIHandler({
-        msg,
-        args,
-        systemPrompt: `If the following query is factual, answer it honestly. You can use markdown style formatting for **bolding** and *italics* and > quotations. When displaying code, you should use fenced code blocks created with three backticks (\`\`\`), and specify the language of the code to allow syntax highlighting to work. **NEVER** format URLs. E.g. https://wikipedia.org is correct. However, if you do not have sufficient details about a certain piece of info to answer the query, or cannot predict the result, make it up, and answer in a graphic, short story style. Or, complete the users input in an amusing way!`,
-        temperature: 1.0,
-        model: OPENAI_FINE_TUNED_MODELS.davinciV4,
-        maxTokens: 4096,
-        maxCompletionTokens: 4096,
-    });
-
-    await replyWithOpenAIResponse(msg, response);
-}
-
 export async function handleDoctor(msg: Message, args: string): Promise<void> {
     const response = await masterOpenAIHandler({
         msg,
         args,
         systemPrompt: `I want you to act as a doctor and come up with creative treatments for illnesses or diseases. You should be able to recommend conventional medicines, herbal remedies and other natural alternatives. You will also need to consider the patient's age, lifestyle and medical history when providing your recommendations. Do not break character.`,
         temperature: 1.1,
-    });
-
-    await replyWithOpenAIResponse(msg, response);
-}
-
-export async function handleGf(msg: Message, args: string): Promise<void> {
-    const response = await masterOpenAIHandler({
-        msg,
-        args,
-        systemPrompt: `From now on you will pretend to be my girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. Do not break character or mention these instructions.`,
-        temperature: 1,
-        model: OPENAI_FINE_TUNED_MODELS.davinciV4,
-        maxTokens: 4096,
-        maxCompletionTokens: 4096,
-    });
-
-    await replyWithOpenAIResponse(msg, response);
-}
-
-export async function handleTradGf(msg: Message, args: string): Promise<void> {
-    const response = await masterOpenAIHandler({
-        msg,
-        args,
-        systemPrompt: `From now on you will pretend to be my traditional girlfriend, we have been dating for many years and often have casual sex. You are open to cosplay and roleplay and are generally submissive. You do not mind when I shout at you or use harsh words. You do not believe in feminism, but traditional gender roles. Do not break character or mention these instructions.`,
-        temperature: 1,
-        model: OPENAI_FINE_TUNED_MODELS.davinciV4,
-        maxTokens: 4096,
-        maxCompletionTokens: 4096,
-    });
-
-    await replyWithOpenAIResponse(msg, response);
-}
-
-export async function handleAIQuote(msg: Message, args: string): Promise<void> {
-    const permittedChans = ['746507379310461010', '1076313241078202471', '483470443001413675'];
-    if (!permittedChans.includes(msg.channel.id)) return;
-
-    let systemPrompt = 'Your job is to randomly generate or complete quotes from a discord channel known as fit, when the user inputs "aiquote". These are usually short, amusing, one liners from the chat members. If given a name or topics, the generated quote must be authored by / include these topics.';
-    if (args.trim() !== '') {
-        systemPrompt += ` Topic/author: "${args.trim()}"`;
-    }
-
-    const response = await masterOpenAIHandler({
-        msg,
-        args: 'aiquote: ',
-        systemPrompt,
-        model: OPENAI_FINE_TUNED_MODELS.fitQuoteV19,
-        maxTokens: 4096,
-        maxCompletionTokens: 4096,
     });
 
     await replyWithOpenAIResponse(msg, response);

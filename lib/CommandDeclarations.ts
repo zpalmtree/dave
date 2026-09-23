@@ -71,10 +71,6 @@ import {
     handleGLADOS,
     handleDrunk,
     handleDoctor,
-    handleGf,
-    handleTradGf,
-    handleAIQuote,
-    handleDavinci,
     handleTranscribe,
     handleBuggles,
     handleO3,
@@ -1027,14 +1023,6 @@ const sharedCommands: Command[] = [
         },
     },
     {
-        aliases: ['ai'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDavinci,
-            description: 'Provide a prompt to the AI and get a completion',
-        },
-    },
-    {
         aliases: ['over', 'itsover'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -1064,7 +1052,6 @@ const sharedCommands: Command[] = [
             description: 'Ask ChatGPT something',
         },
         relatedCommands: [
-            'ai',
             'glados',
             'drunk',
             'doctor',
@@ -1099,7 +1086,6 @@ const sharedCommands: Command[] = [
             description: 'Ask GLaDOS something',
         },
         relatedCommands: [
-            'ai',
             'chatgpt',
             'drunk',
             'doctor',
@@ -1116,7 +1102,6 @@ const sharedCommands: Command[] = [
             description: 'Ask a drunk person something',
         },
         relatedCommands: [
-            'ai',
             'chatgpt',
             'glados',
             'doctor',
@@ -1133,24 +1118,6 @@ const sharedCommands: Command[] = [
             description: 'Ask the doctor something',
         },
         relatedCommands: [
-            'ai',
-            'chatgpt',
-            'glados',
-            'drunk',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['aiquote'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleAIQuote,
-            description: 'Generate AI quote',
-        },
-        relatedCommands: [
-            'ai',
             'chatgpt',
             'glados',
             'drunk',
@@ -1187,28 +1154,6 @@ const sharedCommands: Command[] = [
         ],
     },
     {
-        aliases: ['gf'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGf,
-            description: 'Talk to your virtual gf',
-        },
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['tradgf'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleTradGf,
-            description: 'Talk to your trad virtual gf',
-        },
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
         aliases: ['transcribe'],
         primaryCommand: {
             argsFormat: Args.Combined,
@@ -1227,7 +1172,6 @@ const sharedCommands: Command[] = [
             description: 'Ask Claude something',
         },
         relatedCommands: [
-            'ai',
             'glados',
             'drunk',
             'doctor',
@@ -1244,7 +1188,6 @@ const sharedCommands: Command[] = [
             description: 'Ask GPT o3 something',
         },
         relatedCommands: [
-            'ai',
             'glados',
             'drunk',
             'claude',
@@ -1267,7 +1210,6 @@ const sharedCommands: Command[] = [
             description: 'Ask Grok something',
         },
         relatedCommands: [
-            'ai',
             'chatgpt',
             'claude',
             'grokimage',
@@ -1530,7 +1472,6 @@ const trackCommands: Command[] = [
             description: 'Generate autism quote',
         },
         relatedCommands: [
-            'ai',
             'chatgpt',
             'glados',
             'drunk',
