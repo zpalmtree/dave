@@ -100,6 +100,11 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         output: 0,
         perAudioMinute: 0.0045,
     },
+    'grok-4.7': {
+        input: 2,
+        output: 6,
+        cacheRead: 0.5,
+    },
     'grok-4.6': {
         input: 2,
         output: 6,
@@ -120,6 +125,12 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         output: 0,
         /* 1K medium quality */
         perImage: 0.06,
+    },
+    'gemini-3.8-flash': {
+        /* Introductory pricing through December 31, 2026. */
+        input: 0.75,
+        output: 3.75,
+        cacheRead: 0.075,
     },
     'gemini-3.7-flash': {
         /* Introductory pricing through December 31, 2026. */

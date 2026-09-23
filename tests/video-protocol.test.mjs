@@ -127,7 +127,7 @@ test('Discord video delivery limits follow the guild boost tier', () => {
 });
 
 test('fast segment frame planning targets only independently generated hard cuts', () => {
-    assert.equal(VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL, 'gemini-3.7-flash');
+    assert.equal(VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL, 'gemini-3.8-flash');
     assert.deepEqual(videoSegmentKeyframeTargetIndexes({
         segments: [
             { transition: 'start' },

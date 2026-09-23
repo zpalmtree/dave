@@ -46,7 +46,7 @@ test('uses low reasoning effort for latency-sensitive Grok text replies', async 
         await handleGrok(msg, 'rewrite this');
 
         assert.match(requestUrl, /\/responses$/);
-        assert.equal(requestBody.model, 'grok-4.6');
+        assert.equal(requestBody.model, 'grok-4.7');
         assert.deepEqual(requestBody.reasoning, { effort: 'low' });
         assert.equal(replies[0].content, 'Rewritten text.');
     } finally {
