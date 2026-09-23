@@ -30,4 +30,5 @@ resize.sh
 /artifacts/video-keyframe-prompt-benchmarks/
 /artifacts/video-keyframe-step-benchmarks/
 /artifacts/video-optimization/
+/artifacts/video-opus-ab/
 /artifacts/video-shot-split/

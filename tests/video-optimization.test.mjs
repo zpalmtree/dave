@@ -8,7 +8,7 @@ import { REVIEW_PAGE } from '../scripts/video-cost-ab-review-ui.mjs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { configuredVideoPlannerVariant, supportsSinglePassVideoPlanning, requestPlannerResponse, validateFrontierVideoPlanForKeyframe } from '../dist/VideoFrontierPlanner.js';
+import { anthropicCompatibleResponseSchema, configuredVideoPlannerVariant, supportsSinglePassVideoPlanning, requestPlannerResponse, validateFrontierVideoPlanForKeyframe, videoPlannerSystemInstructions } from '../dist/VideoFrontierPlanner.js';
 import { requestedVideoDurationSeconds, videoPromptContentNumbers, VIDEO_MODELS } from '../dist/VideoProtocol.js';
 import { openAIVideoUsage, videoUsageCost } from '../dist/VideoUsage.js';
 import { VideoExperimentLedger, ledgerTotals, executionFingerprint } from '../scripts/video-experiment-ledger.mjs';
@@ -20,11 +20,47 @@ import { assessVideoComponent, buildOptimizationRelease } from '../scripts/repor
 import { renderAnchorCase } from '../scripts/prepare-video-optimization-renders.mjs';
 
 test('requested models are explicit and Astra/Flash retain single-pass capability', () => {
-    for (const model of ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gemini-3.8-flash']) {
+    for (const model of ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gemini-3.8-flash']) {
         assert.equal(configuredVideoPlannerVariant({ VIDEO_PLANNER_MODEL: model }).plannerModel, model);
         assert.equal(supportsSinglePassVideoPlanning(model), true);
     }
+    assert.equal(configuredVideoPlannerVariant({ VIDEO_PLANNER_MODEL: 'claude-opus-5-5' }).plannerModel, 'claude-opus-5-5');
+    assert.equal(supportsSinglePassVideoPlanning('claude-opus-5-5'), false);
     assert.throws(() => configuredVideoPlannerVariant({ VIDEO_PLANNER_MODEL: 'gpt-6-typo' }), /Unsupported/);
+});
+
+test('Opus adapter converts images and structured output while recording provider usage', async () => {
+    const oldFetch = globalThis.fetch;
+    const events = [];
+    try {
+        globalThis.fetch = async (url, request) => {
+            assert.equal(url, 'https://api.anthropic.com/v1/messages');
+            const body = JSON.parse(request.body);
+            assert.equal(body.model, 'claude-opus-5-5');
+            assert.equal(body.output_config.effort, 'medium');
+            assert.equal(body.output_config.format.schema.properties.items.maxItems, undefined);
+            assert.equal(body.messages[0].content[1].source.media_type, 'image/png');
+            return { ok: true, json: async () => ({ model: 'claude-opus-5-5', stop_reason: 'end_turn',
+                content: [{ type: 'text', text: '{"ok":true}' }],
+                usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 30 } }) };
+        };
+        const response = await requestPlannerResponse({ model: 'claude-opus-5-5',
+            reasoning: { effort: 'medium' }, instructions: 'Test',
+            input: [{ role: 'user', content: [
+                { type: 'input_text', text: 'Test' },
+                { type: 'input_image', image_url: 'data:image/png;base64,aGVsbG8=' },
+            ] }], text: { format: { schema: { type: 'object', properties: {
+                items: { type: 'array', maxItems: 2, items: { type: 'string' } },
+            } } } }, max_output_tokens: 200 }, AbortSignal.timeout(5000), 'test',
+        { onUsage: event => events.push(event) });
+        assert.deepEqual(JSON.parse(response.output_text), { ok: true });
+        assert.equal(events[0].provider, 'anthropic');
+        assert.equal(events[0].cacheReadTokens, 30);
+        assert.equal(videoUsageCost(events[0]), 0.000806);
+    } finally { globalThis.fetch = oldFetch; }
+    assert.equal(anthropicCompatibleResponseSchema({ type: 'array', maxItems: 2 }).maxItems, undefined);
+    assert.equal(videoPlannerSystemInstructions('OpenAI frontier planning path', 'opus-tuned').includes('OpenAI'), false);
+    assert.equal(videoPlannerSystemInstructions('original'), 'original');
 });
 
 test('the served review page contains valid executable JavaScript', () => {

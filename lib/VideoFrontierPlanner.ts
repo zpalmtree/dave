@@ -533,24 +533,34 @@ Within the combined response, the analysis rule saying not to write a screenplay
 SCREENPLAY RULES
 ${VIDEO_PLANNER_INSTRUCTIONS}`;
 
+export function videoPlannerSystemInstructions(
+    instructions: string,
+    variant: 'baseline' | 'opus-tuned' = 'baseline',
+): string {
+    if (variant === 'baseline') return instructions;
+    return `Return one complete JSON object matching the requested schema. Fill every required field. Preserve exact wording, counts, sequence, and source-image identity. Prefer literal staging when the request is ambiguous. Put all decisions in the structured fields; add no preface or code fence.\n\n${instructions.replaceAll('OpenAI frontier planning path', 'frontier planning path')}`;
+}
+
 export function videoPlannerFingerprint(
     model = VIDEO_PLANNER_MODEL,
     analysisReasoningEffort: 'low' | 'medium' | 'high' = 'high',
     screenplayReasoningEffort: 'low' | 'medium' | 'high' = 'high',
     plannerGuidance = '',
     plannerStrategy: VideoPlannerStrategy = 'two-pass',
+    promptVariant: 'baseline' | 'opus-tuned' = 'baseline',
 ): string {
     return createHash('sha256').update(JSON.stringify({
         model,
         analysisReasoningEffort,
         screenplayReasoningEffort,
-        analysisInstructions: VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
-        plannerInstructions: VIDEO_PLANNER_INSTRUCTIONS,
+        analysisInstructions: videoPlannerSystemInstructions(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, promptVariant),
+        plannerInstructions: videoPlannerSystemInstructions(VIDEO_PLANNER_INSTRUCTIONS, promptVariant),
         analysisSchema: VIDEO_PROMPT_ANALYSIS_SCHEMA,
         planSchema: VIDEO_PLAN_SCHEMA,
-        singlePassInstructions: VIDEO_SINGLE_PASS_INSTRUCTIONS,
+        singlePassInstructions: videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, promptVariant),
         singlePassSchema: VIDEO_SINGLE_PASS_SCHEMA,
         plannerStrategy,
+        promptVariant,
         ...(plannerGuidance ? { plannerGuidance } : {}),
         ...(model.startsWith('gemini-')
             ? { geminiSchemaMode: VIDEO_PLANNER_GEMINI_SCHEMA_MODE }
@@ -2014,15 +2024,139 @@ async function requestSolResponse(
     throw lastError instanceof Error ? lastError : new Error('OpenAI request failed.');
 }
 
+function anthropicPlannerMessages(input: any): Array<{ role: 'user' | 'assistant'; content: any[] }> {
+    const messages = typeof input === 'string' ? [{ role: 'user', content: [{ type: 'input_text', text: input }] }] : input;
+    if (!Array.isArray(messages)) throw new Error('Invalid Anthropic planner input.');
+    return messages.map(message => ({
+        role: message.role === 'assistant' ? 'assistant' as const : 'user' as const,
+        content: (Array.isArray(message.content) ? message.content : [{ type: 'input_text', text: message.content }])
+            .map((part: any) => {
+                if (part.type === 'input_text') return { type: 'text', text: String(part.text || '') };
+                if (part.type === 'input_image') {
+                    const image = /^data:(image\/(?:jpeg|png|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(part.image_url || ''));
+                    if (!image) throw new Error('Unsupported Anthropic planner image.');
+                    return { type: 'image', source: { type: 'base64', media_type: image[1], data: image[2] } };
+                }
+                throw new Error(`Unsupported Anthropic planner content: ${part.type}.`);
+            }),
+    }));
+}
+
+export function anthropicCompatibleResponseSchema(schema: Record<string, any>): Record<string, any> {
+    const unsupported = new Set([
+        'minItems', 'maxItems', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+        'minLength', 'maxLength', 'pattern', 'minProperties', 'maxProperties',
+    ]);
+    const simplify = (value: any): any => Array.isArray(value) ? value.map(simplify)
+        : value && typeof value === 'object'
+            ? Object.fromEntries(Object.entries(value)
+                .filter(([key]) => !unsupported.has(key))
+                .map(([key, nested]) => [key, simplify(nested)]))
+            : value;
+    return simplify(schema);
+}
+
+async function requestAnthropicPlannerResponse(
+    payload: Record<string, any>,
+    signal: AbortSignal,
+    stage: string,
+    options: VideoFrontierCallOptions,
+): Promise<any> {
+    if (options.serviceTier && options.serviceTier !== 'default') {
+        throw new Error('Anthropic video planning supports the default service tier only.');
+    }
+    const plannerModel = String(payload.model);
+    const maxAttempts = options.maxRequestAttempts || 2;
+    let lastError: unknown;
+    let expandOutputBudget = false;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const started = Date.now();
+        let outcome: 'success' | 'error' = 'error';
+        let detail: string | undefined;
+        let retryable = true;
+        try {
+            const maximum = Number(payload.max_output_tokens || 16_000);
+            const maxTokens = expandOutputBudget ? Math.min(128_000, Math.max(12_000, maximum * 2)) : maximum;
+            await options.beforeRequest?.({ stage, attempt, provider: 'anthropic', model: plannerModel,
+                serviceTier: 'default', maxInputTokens: videoRequestInputTokenBound(payload), maxOutputTokens: maxTokens });
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST', signal,
+                headers: {
+                    'x-api-key': config.claudeApiKey,
+                    'anthropic-version': '2023-06-01',
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: plannerModel,
+                    max_tokens: maxTokens,
+                    system: String(payload.instructions || ''),
+                    messages: anthropicPlannerMessages(payload.input),
+                    output_config: {
+                        effort: String(payload.reasoning?.effort || 'medium'),
+                        ...(payload.text?.format?.schema ? { format: {
+                            type: 'json_schema', schema: anthropicCompatibleResponseSchema(payload.text.format.schema),
+                        } } : {}),
+                    },
+                }),
+            });
+            const body: any = await response.json();
+            const usage = body?.usage;
+            const outputText = (body?.content || []).filter((part: any) => part?.type === 'text')
+                .map((part: any) => String(part.text || '')).join('').trim();
+            const complete = response.ok && body?.stop_reason === 'end_turn' && Boolean(outputText);
+            if (usage || response.ok) {
+                await options.onUsage?.({ stage, attempt, outcome: complete ? 'success' : 'error',
+                    provider: 'anthropic', model: String(body.model || plannerModel), serviceTier: 'default',
+                    inputTokens: Number(usage?.input_tokens || 0),
+                    outputTokens: Number(usage?.output_tokens || 0),
+                    cacheReadTokens: Number(usage?.cache_read_input_tokens || 0),
+                    cacheWriteTokens: Number(usage?.cache_creation_input_tokens || 0),
+                    rawUsage: usage, usageMissing: !usage,
+                });
+            }
+            if (!response.ok) {
+                detail = body?.error?.message || `Anthropic returned HTTP ${response.status}.`;
+                retryable = [408, 409, 429].includes(response.status) || response.status >= 500;
+                if (retryable && attempt < maxAttempts) continue;
+                throw new Error(detail);
+            }
+            if (!complete) {
+                detail = body?.stop_reason === 'max_tokens'
+                    ? 'Anthropic planner response exceeded its output budget.'
+                    : `Anthropic planner returned ${body?.stop_reason || 'no text'}.`;
+                retryable = body?.stop_reason === 'max_tokens';
+                expandOutputBudget = retryable;
+                if (retryable && attempt < maxAttempts) continue;
+                throw new Error(detail);
+            }
+            outcome = 'success';
+            return { status: 'completed', model: body.model || plannerModel, output_text: outputText,
+                usage: { input_tokens: Number(usage?.input_tokens || 0)
+                    + Number(usage?.cache_read_input_tokens || 0) + Number(usage?.cache_creation_input_tokens || 0),
+                    output_tokens: Number(usage?.output_tokens || 0) } };
+        } catch (error) {
+            lastError = error;
+            detail = error instanceof Error ? error.message : String(error);
+            if (error instanceof VideoUsagePersistenceError) throw error;
+            if (signal.aborted || !retryable || attempt >= maxAttempts) throw error;
+        } finally {
+            await options.onAttempt?.({ stage, attempt, outcome, provider: 'anthropic', model: plannerModel,
+                serviceTier: 'default', durationSeconds: (Date.now() - started) / 1000, detail });
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Anthropic request failed.');
+}
+
 export async function requestPlannerResponse(
     payload: Record<string, any>,
     signal: AbortSignal,
     stage: string,
     options: VideoFrontierCallOptions,
 ): Promise<any> {
-    return String(payload.model || '').startsWith('gemini-')
-        ? requestGeminiPlannerResponse(payload, signal, stage, options)
-        : requestSolResponse(payload, signal, stage, options);
+    const provider = videoTextModelCapabilities(String(payload.model || VIDEO_PLANNER_MODEL)).provider;
+    if (provider === 'google') return requestGeminiPlannerResponse(payload, signal, stage, options);
+    if (provider === 'anthropic') return requestAnthropicPlannerResponse(payload, signal, stage, options);
+    return requestSolResponse(payload, signal, stage, options);
 }
 
 async function validatedPromptAnalysis(
@@ -2091,7 +2225,7 @@ async function validatedPromptAnalysis(
         throw new Error('GPT-5.6 Sol returned an inconsistent frontier handling decision.');
     }
     if (disposition === 'reject') {
-        const plannerProvider = plannerModel.startsWith('gemini-') ? 'google' : 'openai';
+        const plannerProvider = videoTextModelCapabilities(plannerModel).provider;
         await options.onAttempt?.({
             stage: decisionStage,
             attempt: 1,
@@ -2191,7 +2325,7 @@ async function analyzePromptWithPlanner(
     const body = await requestPlannerResponse({
         model: plannerModel,
         reasoning: { effort: reasoningEffort },
-        instructions: VIDEO_PROMPT_ANALYZER_INSTRUCTIONS,
+        instructions: videoPlannerSystemInstructions(VIDEO_PROMPT_ANALYZER_INSTRUCTIONS, options.plannerPromptVariant),
         input: [{ role: 'user', content }],
         text: {
             verbosity: 'low',
@@ -2231,7 +2365,7 @@ export async function createFrontierVideoPlan(
     const sourceImages = normalizeVideoPlanSourceImages(sourceImage);
     const plannerModel = options.plannerModel || defaultConfigured.plannerModel;
     videoTextModelCapabilities(plannerModel);
-    const plannerProvider = plannerModel.startsWith('gemini-') ? 'google' : 'openai';
+    const plannerProvider = videoTextModelCapabilities(plannerModel).provider;
     const plannerStrategy: VideoPlannerStrategy = options.plannerStrategy === 'single-pass'
         && supportsSinglePassVideoPlanning(plannerModel)
         ? 'single-pass'
@@ -2251,6 +2385,7 @@ export async function createFrontierVideoPlan(
         screenplayReasoningEffort,
         options.plannerGuidance,
         plannerStrategy,
+        options.plannerPromptVariant,
     );
     const attributed = <T extends Record<string, any>>(plan: T): T => {
         (plan as any)._planner_model = plannerModel;
@@ -2259,6 +2394,7 @@ export async function createFrontierVideoPlan(
             model: plannerModel, strategy: plannerStrategy,
             analysis_effort: analysisReasoningEffort, screenplay_effort: screenplayReasoningEffort,
             service_tier: options.serviceTier || 'default',
+            prompt_variant: options.plannerPromptVariant || 'baseline',
             streaming_first_frame: videoTextModelCapabilities(plannerModel).streamingFirstFrame
                 && Boolean(options.onProvisionalKeyframe),
         };
@@ -2313,7 +2449,7 @@ export async function createFrontierVideoPlan(
                 const body = await requestPlannerResponse({
                     model: plannerModel,
                     reasoning: { effort: screenplayReasoningEffort },
-                    instructions: VIDEO_SINGLE_PASS_INSTRUCTIONS,
+                    instructions: videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, options.plannerPromptVariant),
                     input: [{ role: 'user', content }],
                     text: {
                         verbosity: 'low',
@@ -2551,7 +2687,7 @@ export async function createFrontierVideoPlan(
             const body = await requestPlannerResponse({
                 model: plannerModel,
                 reasoning: { effort: fallbackScreenplayReasoningEffort },
-                instructions: VIDEO_PLANNER_INSTRUCTIONS,
+                instructions: videoPlannerSystemInstructions(VIDEO_PLANNER_INSTRUCTIONS, options.plannerPromptVariant),
                 input: [{
                     role: 'user',
                     content,

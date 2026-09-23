@@ -10,7 +10,7 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 - `$ltx <prompt>` queues an automatic-length, maximum-quality LTX 2.5 video of up to two minutes.
 - `$minimax <prompt>` queues an automatic-length, maximum-quality MiniMax H3 video of up to two minutes.
 - A video clip attached to the command, or to the message it replies to, supplies a frame as the starting image. The broker probes the clip with ffmpeg over HTTPS range requests and stores the middle frame as PNG. If that frame is nearly black, it tries the 25% and then the 75% points. ffmpeg may only read HTTPS and plain video containers, so an uploaded playlist cannot make the broker fetch other URLs. If ffmpeg is missing or fails, the broker falls back to Discord's media-proxy first frame. The planner is told the image came from a clip. An attached image takes precedence over a clip, and the command message's own attachment takes precedence over the replied message's.
-- `$qwenimage <prompt>` makes a still image with the desktop's Qwen Image 2.1, and `$qwenedit <prompt>` edits or combines up to three attached or replied-to images with Qwen-Image-Edit-2511 and its 4-step Lightning LoRA. Both take an optional leading `--aspect 16:9` (1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9); otherwise text-only images are square and edits follow the first image's shape. Text from a replied-to message is prepended to the prompt, as with `$grokimage`. The prompt reaches the model unmodified. Image jobs share the desktop worker with video: they lease ahead of queued videos but wait for a render already in progress, each takes its own `gpuq` admission on the `video-h3` profile, and a job interrupted by a disconnect or failure is retried once. Each user may have three unfinished images. The finished PNG is posted as a reply to the command. The broker leases image jobs only to a worker that advertises `image_models` in its hello, so it is safe to deploy the broker before the worker.
+- `$qwenimage <prompt>` makes or edits an image with the desktop's Qwen Image 2.1 (official int8 weights), and `$qwenedit <prompt>` edits or combines up to three attached or replied-to images with Qwen-Image-Edit-2511. `$qwenimage` also accepts up to three images: it keeps their subjects and follows edit instructions, and its output takes the first image's shape. `$qwenedit` runs the official template's full 40-step, CFG 4 mode by default (about 90 seconds once loaded), which follows unusual edits much better; `--fast` selects the 4-step Lightning LoRA (about 10 seconds). Both take an optional leading `--aspect 16:9` (1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9) for text-only images and `$qwenedit`; otherwise text-only images are square and edits follow the first image's shape. Text from a replied-to message is prepended to the prompt, as with `$grokimage`. The prompt reaches the model unmodified. Image jobs share the desktop worker with video: they lease ahead of queued videos but wait for a render already in progress, each takes its own `gpuq` admission on the `video-h3` profile, and a job interrupted by a disconnect or failure is retried once. Each user may have three unfinished images. The finished PNG is posted as a reply to the command. The broker leases image jobs only to a worker that advertises `image_models` in its hello, so it is safe to deploy the broker before the worker. Qwen Image 2.1 edits need ComfyUI v0.37.1 or newer; the hand-ported support on v0.33.1 copied the reference instead of editing it.
 - `$oalgo <prompt>` (also `$minimutt` and `$meximutt`) runs the MiniMax H3 pipeline with the built-in OALGO portrait and character dialogue guidance. With an attached or replied-to image, it first combines OALGO with that scene. Sunburst is the default image provider; use `$oalgo --image-provider grok <prompt>` to explicitly select Grok Imagine, or `--image-provider sunburst` to name the default. The option must precede the prompt and requires an attachment or reply image; it selects only the image-compositing provider, not the video renderer. Every candidate is reviewed against both originals for likeness, retained subjects/props, and coherent composition. A rejected candidate gets one corrective edit using both originals plus that candidate. The shared composition deadline is nine minutes. Moderation refusals, failed reviews, and unavailable review reject the submission without queuing a video. Provider selection never automatically retries a refused request with another provider.
 
 The September 19 paired ten-scene comparison produced 10/10 automated passes for Sunburst (nine initially, one after repair) and 7/10 for Grok (six initially, one after repair). Grok had two composition rejections and one moderation refusal; the user gave blanket approval of the displayed images, without individual saved ratings. Grok's median submission time was 32.2 seconds; Sunburst's median generation-plus-review work was 57.2 seconds, reconstructed after a benchmark-only PNG decoder error. This small diagnostic cohort contained no Sunburst failures for Grok to rescue. It does not demonstrate a fix for the reported failures. The production reviewer was kept unchanged. Grok charges, including billed moderation refusals, are recorded from the provider's reported USD ticks; absent cost data remains explicitly unpriced in the usage ledger.
@@ -194,6 +194,27 @@ visual gate accepts it; a rejection, generation error, or unavailable reviewer
 runs the unchanged Pro 2K serial pipeline. Each job records its experiment, pipeline variant, planner
 fingerprint, keyframe strategy, provider timings, queue wait, and end-to-end
 latency so alternatives can be compared without mixing cohorts.
+
+### Opus 5.5 historical video experiment
+
+`scripts/benchmark-video-opus.mjs` runs a paired minimax/oalgo comparison from
+an ignored `artifacts/video-opus-ab/historical-cases.json` file. Each case names
+the original delivered job ID, command, prompt, and optional source image.
+The three arms are the production Sol planner, Opus 5.5 with the existing
+instructions, and Opus 5.5 with a concise provider-specific instruction
+preface. Opus uses two planning passes because its structured-output grammar
+cannot compile the combined single-pass schema. The experiment keeps the same
+source image, renderer, quality setting, and seed across arms. Set
+`experiment_duration_seconds` per case to compare videos at a common finished
+length; the historical prompt itself is preserved.
+
+After `yarn build`, run `node scripts/benchmark-video-opus.mjs --phase=plan`
+and `node scripts/benchmark-video-opus.mjs --phase=render --dry-run` before
+`node scripts/benchmark-video-opus.mjs --phase=render`. The render phase uses
+GPUq admission and resumes completed videos. `--phase=report` writes a blinded
+review packet and a separate answer key in the run directory. Planner usage,
+latency, and generated videos are kept in ignored artifacts; the production
+planner remains on Sol.
 
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
 - `VIDEO_PLANNER_MODEL=gemini-3.7-flash` enables the Flash planner adapter.
