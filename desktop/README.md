@@ -14,6 +14,10 @@ and review scenes with local Qwen when GPT-5.6 Sol or the image providers reject
 request. See [video recovery](../docs/video-recovery.md#local-qwen-fallback).
 Install with `python3 scripts/apply-video-local-fallback-desktop.py --check`, then
 without `--check`, and reload the idle worker child before deploying the broker.
+Patches 5 and 6 add the `$qwenimage` and `$qwenedit` image jobs; patch 6 expects
+ComfyUI v0.37.1 or newer and the official Qwen Image 2.1 int8 weights
+(`qwen_image_2.1_int8_convrot.safetensors` in `models/diffusion_models`,
+`qwen3vl_8b_int8_convrot.safetensors` in `models/text_encoders`).
 
 ## Audio continuity
 

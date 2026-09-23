@@ -24,14 +24,28 @@ function inferredImageMime(name: string | null | undefined): string | null {
     return null;
 }
 
-/** A leading `--aspect 16:9` (or `--ar`) picks the canvas; otherwise the worker chooses. */
-export function parseQwenImageArgs(args: string): { prompt: string; aspect?: QwenImageAspect } {
-    const match = /^\s*--(?:aspect|ar)[=\s]+(\S+)\s*/i.exec(args);
-    if (!match) return { prompt: args.trim() };
-    if (!QWEN_IMAGE_ASPECTS.includes(match[1] as QwenImageAspect)) {
-        throw new Error(`Aspect must be one of ${QWEN_IMAGE_ASPECTS.join(', ')}.`);
+/**
+ * Leading options, in any order: `--aspect 16:9` (or `--ar`) picks the canvas, otherwise the
+ * worker chooses; `--fast` selects the 4-step Lightning edit.
+ */
+export function parseQwenImageArgs(args: string): { prompt: string; aspect?: QwenImageAspect; fast?: boolean } {
+    let rest = args;
+    let aspect: QwenImageAspect | undefined;
+    let fast: boolean | undefined;
+    for (;;) {
+        const option = /^\s*--(?:(aspect|ar)[=\s]+(\S+)|(fast))(?=\s|$)\s*/i.exec(rest);
+        if (!option) break;
+        if (option[3]) {
+            fast = true;
+        } else {
+            if (!QWEN_IMAGE_ASPECTS.includes(option[2] as QwenImageAspect)) {
+                throw new Error(`Aspect must be one of ${QWEN_IMAGE_ASPECTS.join(', ')}.`);
+            }
+            aspect = option[2] as QwenImageAspect;
+        }
+        rest = rest.slice(option[0].length);
     }
-    return { prompt: args.slice(match[0].length).trim(), aspect: match[1] as QwenImageAspect };
+    return { prompt: rest.trim(), ...(aspect ? { aspect } : {}), ...(fast ? { fast } : {}) };
 }
 
 /** Image attachments on the command message, then on the replied-to message. */
@@ -64,7 +78,7 @@ export function qwenImageReferencesFromMessages(
 }
 
 export function formatQwenImageStatus(job: QwenImageJobView): string {
-    const title = `**${QWEN_IMAGE_MODELS[job.model].displayName}**`;
+    const title = `**${QWEN_IMAGE_MODELS[job.model].displayName}${job.fast ? ' (fast)' : ''}**`;
     if (job.status === 'running') return `${title} · ${job.stage || 'Generating'}…`;
     if (job.status === 'failed') return `${title} · Failed: ${job.error || 'unknown error'}`;
     if (job.status !== 'queued') return `${title} · Done.`;
@@ -196,9 +210,11 @@ async function handleQwenImageRequest(msg: Message, args: string, model: QwenIma
     }
     let prompt: string;
     let aspect: QwenImageAspect | undefined;
+    let fast: boolean | undefined;
     let references: SubmittedVideoAttachmentSourceImage[];
     try {
-        ({ prompt, aspect } = parseQwenImageArgs(args));
+        ({ prompt, aspect, fast } = parseQwenImageArgs(args));
+        if (fast && model !== 'qwenedit') throw new Error('`--fast` only applies to `$qwenedit`.');
         references = qwenImageReferencesFromMessages([msg, referenced]);
     } catch (error) {
         await msg.reply(error instanceof Error ? error.message : String(error));
@@ -223,6 +239,7 @@ async function handleQwenImageRequest(msg: Message, args: string, model: QwenIma
                 model,
                 prompt: effectivePrompt,
                 aspect,
+                fast,
                 prompt_tease: tease || undefined,
                 references,
                 requester_id: msg.author.id,

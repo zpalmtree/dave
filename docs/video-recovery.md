@@ -32,7 +32,10 @@ Lightning LoRA, which receives up to three source references when the contract
 uses them. Qwen Image 2.1 was replaced on 2026-09-21: its reference path gave a
 supplied face crusty, over-sharpened skin with the 4-bit GGUF and the official
 int8 build alike, and at every CFG, step count, and reference resolution tested,
-and it tended to re-render the reference instead of the requested scene.
+and it tended to re-render the reference instead of the requested scene. On
+2026-09-23 that turned out to be the hand-ported 2.1 support on ComfyUI v0.33.1,
+which copied references even in the official template example. ComfyUI v0.37.1
+edits correctly with natural skin, so 2.1 is again a candidate for openings.
 Edit-2511 kept the identity, followed the scene, and was faster (about 10 s per
 frame once loaded). The benchmark frames are on the desktop in
 `video_gen/benchmark_outputs/qwen_image_skin_ab_20260921`. Provider outages still wait and
@@ -120,10 +123,12 @@ GPU work, including validation, still uses `gpuq` and respects Gaming Mode.
 Install the local-fallback update (protocol version 3) with
 `python3 scripts/apply-video-local-fallback-desktop.py --check`, then run it
 without `--check`. Each desktop file's recorded hash chain shows which of the
-five archived patches it still needs; the installer applies those in order
+six archived patches it still needs; the installer applies those in order
 and verifies the result. The third patch removes the worker's scene-review
 sampling and local review mode. The fifth adds the standalone `$qwenimage` and
-`$qwenedit` image jobs (see [local video generation](../VIDEO_GENERATION.md)). Reload
+`$qwenedit` image jobs (see [local video generation](../VIDEO_GENERATION.md)).
+The sixth moves Qwen Image 2.1 to its official int8 weights, samples its edits on
+the reference-shaped latent, and adds Edit-2511's full 40-step mode for `$qwenedit`. Reload
 the supervised worker child while idle so it advertises version 3, then deploy
 the broker. A broker running version 3 leases nothing to a version 2 worker,
 so update the worker first to avoid a stalled queue.

@@ -186,6 +186,7 @@ interface ImageJobRow {
     model: QwenImageModelId;
     prompt: string;
     aspect: string | null;
+    fast: number;
     prompt_tease: string | null;
     requester_id: string;
     origin_bot_id: string;
@@ -1912,6 +1913,8 @@ export class VideoBroker {
             runtime_seconds REAL,
             notified_at INTEGER
         )`);
+        const imageColumns = new Set((await this.all<{ name: string }>('PRAGMA table_info(image_jobs)')).map(row => row.name));
+        if (!imageColumns.has('fast')) await this.run('ALTER TABLE image_jobs ADD COLUMN fast INTEGER NOT NULL DEFAULT 0');
         await this.run(`CREATE INDEX IF NOT EXISTS image_jobs_status_idx ON image_jobs(status, id)`);
         await this.run(`CREATE INDEX IF NOT EXISTS image_jobs_origin_idx ON image_jobs(origin_bot_id, status)`);
     }
@@ -2284,6 +2287,8 @@ export class VideoBroker {
         if (descriptors.length > QWEN_IMAGE_MAX_REFERENCES) {
             return { status: 400, body: { error: `Attach at most ${QWEN_IMAGE_MAX_REFERENCES} images.` } };
         }
+        const fast = body.fast === true;
+        if (fast && model !== 'qwenedit') return { status: 400, body: { error: 'Only Qwen-Image-Edit has a fast mode.' } };
         if (QWEN_IMAGE_MODELS[model].requiresReference && !descriptors.length) {
             return { status: 400, body: { error: 'Attach or reply to an image to edit.' } };
         }
@@ -2333,12 +2338,12 @@ export class VideoBroker {
             }
             const now = nowSeconds();
             await this.run(
-                `INSERT INTO image_jobs(public_id, idempotency_key, model, prompt, aspect, prompt_tease,
+                `INSERT INTO image_jobs(public_id, idempotency_key, model, prompt, aspect, fast, prompt_tease,
                     requester_id, origin_bot_id, channel_id, guild_id, command_message_id, status_message_id,
                     status, stage, reference_json, created_at, updated_at)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'queued','Queued',?,?,?)`,
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'queued','Queued',?,?,?)`,
                 [
-                    publicId, idempotencyKey, model, prompt, aspect,
+                    publicId, idempotencyKey, model, prompt, aspect, fast ? 1 : 0,
                     sanitizeVideoWorkerText(body.prompt_tease, '', 120).trim() || null,
                     String(body.requester_id), String(body.origin_bot_id), String(body.channel_id),
                     body.guild_id ? String(body.guild_id) : null,
@@ -2363,6 +2368,7 @@ export class VideoBroker {
             model: row.model,
             prompt: row.prompt,
             prompt_tease: row.prompt_tease,
+            fast: Boolean(row.fast),
             requester_id: row.requester_id,
             channel_id: row.channel_id,
             command_message_id: row.command_message_id,
@@ -2405,6 +2411,7 @@ export class VideoBroker {
                 model: row.model,
                 prompt: row.prompt,
                 aspect: row.aspect,
+                fast: Boolean(row.fast),
                 reference_count: JSON.parse(row.reference_json || '[]').length,
                 lease_id: leaseId,
             },
