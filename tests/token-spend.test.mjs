@@ -24,6 +24,8 @@ test('resolves pricing for exact model ids', () => {
 test('resolves pricing for versioned model ids by longest prefix', () => {
     assert.ok(resolveModelPricing('grok-4.5-latest'));
     assert.ok(resolveModelPricing('grok-4.6-2026-08-01'));
+    assert.ok(resolveModelPricing('grok-4.7'));
+    assert.ok(resolveModelPricing('gemini-3.8-flash'));
     assert.ok(resolveModelPricing('grok-imagine-image-2.0'));
     assert.ok(resolveModelPricing('gpt-5.6-sol-2026-08-01'));
 });

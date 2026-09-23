@@ -217,7 +217,7 @@ latency, and generated videos are kept in ignored artifacts; the production
 planner remains on Sol.
 
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
-- `VIDEO_PLANNER_MODEL=gemini-3.7-flash` enables the Flash planner adapter.
+- `VIDEO_PLANNER_MODEL=gemini-3.8-flash` enables the Flash planner adapter.
 - `VIDEO_PLANNER_ANALYSIS_EFFORT` and `VIDEO_PLANNER_SCREENPLAY_EFFORT` accept
   `low`, `medium`, or `high`. Single-pass planning defaults to the A/B-tested
   `low`; set both to `medium` for immediate quality rollback without a deploy.
