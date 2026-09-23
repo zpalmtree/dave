@@ -81,6 +81,7 @@ export interface VideoFrontierCallOptions extends VideoProviderHooks {
     serviceTier?: VideoServiceTier;
     plannerModel?: string;
     plannerStrategy?: 'two-pass' | 'single-pass';
+    plannerPromptVariant?: 'baseline' | 'opus-tuned';
     analysisReasoningEffort?: 'low' | 'medium' | 'high';
     screenplayReasoningEffort?: 'low' | 'medium' | 'high';
     plannerGuidance?: string;
@@ -136,6 +137,7 @@ export interface VideoTokenPricing {
  */
 export const OPENAI_VIDEO_TOKEN_PRICING: Readonly<Record<string, VideoTokenPricing>> = {
     'gpt-6-astra': { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
+    'gpt-6-sol': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
     'gpt-5.6-sol': { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 },
     'gpt-5.6-terra': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
     'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 },
@@ -171,6 +173,9 @@ export function videoUsageCost(usage: VideoProviderUsage): number {
                 * (longContext ? 2 : 1) / 1_000_000
             + output * pricing.output * (longContext ? 1.5 : 1) / 1_000_000
         );
+    }
+    if (usage.model === 'claude-opus-5-5') {
+        return (input * 4 + output * 20 + cacheRead * 0.2 + cacheWrite * 5) / 1_000_000;
     }
     if (/^gemini-3\.[78]-flash(?:$|-)/.test(usage.model)) {
         const multiplier = (usage.pricingDate || new Date().toISOString().slice(0, 10)) >= '2027-01-01' ? 2 : 1;

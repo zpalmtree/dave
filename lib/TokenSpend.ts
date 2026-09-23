@@ -40,7 +40,7 @@ export interface ExternalTokenSpendMetadata {
 }
 
 /* USD prices. Token prices are per million tokens; images, web searches, and
- * audio minutes are priced per unit. Prices are current as of August 2026.
+ * audio minutes are priced per unit. Prices are current as of September 2026.
  * Models missing from this table still have their usage recorded at $0. */
 export interface ModelPricing {
     input: number;
@@ -53,6 +53,13 @@ export interface ModelPricing {
 }
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
+    'claude-opus-5-5': {
+        input: 4,
+        output: 20,
+        cacheRead: 0.2,
+        cacheWrite: 5,
+        perWebSearch: 0.01,
+    },
     'claude-opus-5': {
         input: 5,
         output: 25,
@@ -76,11 +83,17 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         perWebSearch: 0.01,
     },
     'gpt-5.6-sol': {
-        input: 5,
-        output: 30,
-        cacheRead: 0.5,
+        input: 4,
+        output: 20,
+        cacheRead: 0.4,
         /* image_generation tool output, medium quality estimate */
         perImage: 0.04,
+    },
+    'gpt-6-sol': {
+        input: 2,
+        output: 10,
+        cacheRead: 0.2,
+        cacheWrite: 2.5,
     },
     'gpt-transcribe': {
         input: 0,
