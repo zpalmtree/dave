@@ -575,7 +575,7 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
         const attachment = new AttachmentBuilder(buffer, { name: 'image.jpg' });
         const tease = await promptTease;
         await msg.reply({
-            files: [attachment],
+            files: [attachment.setSpoiler(Boolean(tease))],
             ...(tease ? { content: tease } : {}),
         });
     } else if (response.error) {

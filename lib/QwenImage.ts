@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { Client, Message } from 'discord.js';
+import { AttachmentBuilder, Client, Message } from 'discord.js';
 
 import { config } from './Config.js';
 import { classifyPromptTease } from './PromptTease.js';
@@ -108,7 +108,8 @@ class QwenImageService {
             return;
         }
         const payload = {
-            files: [{ attachment: job.result_path, name: `${job.model}-${job.id.slice(0, 8)}.png` }],
+            files: [new AttachmentBuilder(job.result_path, { name: `${job.model}-${job.id.slice(0, 8)}.png` })
+                .setSpoiler(Boolean(job.prompt_tease))],
             ...(job.prompt_tease ? { content: job.prompt_tease } : {}),
             allowedMentions: { repliedUser: true },
         };

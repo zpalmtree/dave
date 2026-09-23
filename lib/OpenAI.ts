@@ -1611,7 +1611,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
             const attachments = buildImageAttachments(result.payload.images ?? []);
             const tease = await promptTease;
             await msg.reply({
-                files: attachments,
+                files: attachments.map(attachment => attachment.setSpoiler(Boolean(tease))),
                 ...(tease ? { content: tease } : {}),
             });
         } catch (error: any) {

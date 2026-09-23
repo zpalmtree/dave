@@ -521,7 +521,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
 
             const tease = await promptTease;
             await msg.reply({
-                files: attachments,
+                files: attachments.map(attachment => attachment.setSpoiler(Boolean(tease))),
                 ...(tease ? { content: tease } : {}),
             });
 
@@ -953,7 +953,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
 
         const tease = await promptTease;
         await msg.reply({
-            files: attachments,
+            files: attachments.map(attachment => attachment.setSpoiler(Boolean(tease))),
             ...(tease ? { content: tease } : {}),
         });
     } catch (error: unknown) {
