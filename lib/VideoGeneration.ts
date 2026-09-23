@@ -243,8 +243,17 @@ export interface SubmittedVideoPresetSourceImage {
     preset: 'meximutt' | 'oalgo';
 }
 
-export type SubmittedVideoSourceImage =
+export interface SubmittedVideoClipSourceImage {
+    clip_url: string;
+    name: string;
+}
+
+export type SubmittedVideoAttachmentOrClipSourceImage =
     | SubmittedVideoAttachmentSourceImage
+    | SubmittedVideoClipSourceImage;
+
+export type SubmittedVideoSourceImage =
+    | SubmittedVideoAttachmentOrClipSourceImage
     | SubmittedVideoPresetSourceImage;
 
 function inferredImageMime(name: string | null | undefined): string | null {
@@ -282,13 +291,43 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachm
     };
 }
 
+const VIDEO_CLIP_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm', 'mkv'];
+
+/** The broker extracts a representative frame from the clip with ffmpeg. */
+export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoClipSourceImage | null {
+    const clips = [...msg.attachments.values()].filter(attachment => {
+        const mime = attachment.contentType?.split(';')[0].toLowerCase();
+        const extension = attachment.name?.split('.').pop()?.toLowerCase();
+        return Boolean(mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.includes(extension)));
+    });
+    if (clips.length > 1) {
+        throw new Error('LTX and MiniMax accept one starting image. Attach exactly one image or video clip.');
+    }
+    if (!clips.length) return null;
+    return { clip_url: clips[0].url, name: clips[0].name || 'clip' };
+}
+
+/** The command message's own attachment wins over the replied message's, and
+ * an image wins over a video clip on the same message. */
 export function videoSourceImageFromMessages(
     commandMessage: Message,
     referencedMessage: Message | null,
-): SubmittedVideoAttachmentSourceImage | null {
-    return videoSourceImageFromMessage(commandMessage)
-        || (referencedMessage ? videoSourceImageFromMessage(referencedMessage) : null);
+): SubmittedVideoAttachmentOrClipSourceImage | null {
+    for (const message of [commandMessage, referencedMessage]) {
+        if (!message) continue;
+        const source = videoSourceImageFromMessage(message) || videoClipSourceImageFromMessage(message);
+        if (source) return source;
+    }
+    return null;
 }
+
+export function isVideoClipSourceImage(
+    source: SubmittedVideoSourceImage | null,
+): source is SubmittedVideoClipSourceImage {
+    return Boolean(source && 'clip_url' in source);
+}
+
+export const VIDEO_CLIP_FRAME_PLANNER_GUIDANCE = 'The starting image is a frame from partway through a video clip the user attached, not a standalone picture. Treat it as representative of what that footage shows.';
 
 export function videoPromptFromMessages(commandPrompt: string, referencedMessage: Message | null): string {
     const current = commandPrompt.trim();
@@ -1009,7 +1048,7 @@ export async function handleVideoRequest(
 ): Promise<void> {
     const referencedMessage = await fetchReferencedVideoMessage(msg);
     const earlierReplyChain = fetchEarlierVideoReplyChain(referencedMessage);
-    let attachedSourceImage: SubmittedVideoAttachmentSourceImage | null;
+    let attachedSourceImage: SubmittedVideoAttachmentOrClipSourceImage | null;
     try {
         attachedSourceImage = videoSourceImageFromMessages(msg, referencedMessage);
     } catch (error) {
@@ -1038,7 +1077,11 @@ export async function handleVideoRequest(
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(initialVideoRequestStatus(model));
-    const plannerGuidance = [options.plannerGuidance, videoReplyChainGuidance(await earlierReplyChain)]
+    const plannerGuidance = [
+        options.plannerGuidance,
+        isVideoClipSourceImage(sourceImage) ? VIDEO_CLIP_FRAME_PLANNER_GUIDANCE : '',
+        videoReplyChainGuidance(await earlierReplyChain),
+    ]
         .filter(Boolean)
         .join(' ');
     let response: { job: VideoJobView };

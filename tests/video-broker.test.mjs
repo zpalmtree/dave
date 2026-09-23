@@ -16,6 +16,7 @@ import {
     videoSegmentUsesFrameZeroIdentity,
     videoPlanRuntimeScale,
     videoFailureDisposition,
+    videoClipProxyFrameUrl,
 } from '../dist/VideoBroker.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
@@ -742,6 +743,56 @@ test('source-image download does not hold the enqueue write lock', async () => {
         await broker.stop();
         rmSync(directory, { recursive: true, force: true });
     }
+});
+
+test('video clip starting images reach the source downloader only from Discord', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-clip-source-'));
+    const descriptors = [];
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        sourceImageDownloader: async (descriptor, targetDirectory) => {
+            descriptors.push(descriptor);
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'source.png');
+            writeFileSync(path, Buffer.from('frame'));
+            return { path, mimeType: 'image/png', bytes: 5 };
+        },
+    });
+    await broker.start();
+    const submit = (message, source_image) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({
+            model: 'minimax', prompt: 'Show this game finished', requester_id: message,
+            origin_bot_id: 'bot-1', channel_id: 'channel-1',
+            command_message_id: message, status_message_id: `status-${message}`,
+            source_image,
+        }),
+    });
+    try {
+        const clipUrl = 'https://cdn.discordapp.com/attachments/1/2/clip.mov?ex=1&is=2&hm=3&';
+        const accepted = await submit('clip', { clip_url: clipUrl, name: 'clip.mov' });
+        assert.equal(accepted.status, 201);
+        assert.equal((await accepted.json()).job.has_source_image, true);
+        assert.deepEqual(descriptors, [{ clip_url: clipUrl, name: 'clip.mov' }]);
+
+        const rejected = await submit('foreign', { clip_url: 'https://example.com/clip.mp4', name: 'clip.mp4' });
+        assert.equal(rejected.status, 400);
+        assert.match((await rejected.json()).error, /not a Discord attachment/);
+        assert.equal(descriptors.length, 1);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('the clip fallback frame comes from the Discord media proxy, not the CDN', () => {
+    assert.equal(
+        videoClipProxyFrameUrl('https://cdn.discordapp.com/attachments/1/2/clip.mov?ex=1&is=2&hm=3&'),
+        'https://media.discordapp.net/attachments/1/2/clip.mov?ex=1&is=2&hm=3&format=webp&quality=lossless',
+    );
 });
 
 test('concurrent duplicate OALGO submissions retain both paid composition records', async () => {
