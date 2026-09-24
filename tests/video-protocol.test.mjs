@@ -222,6 +222,9 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
     assert.equal(configuredVideoPlannerStrategy('483470443001413675', {
         VIDEO_PLANNER_STRATEGY: 'two-pass',
     }), 'two-pass');
+    assert.equal(configuredVideoPlannerStrategy('other-channel', {
+        VIDEO_PLANNER_STRATEGY: 'hybrid-single-pass',
+    }), 'single-pass');
     assert.equal(configuredVideoPlannerStrategy('outside-old-canary', {
         VIDEO_PLANNER_CANARY_CHANNELS: 'canary-one, canary-two',
     }), 'single-pass');
@@ -1216,6 +1219,73 @@ test('single-pass frontier planner returns validated analysis and screenplay fro
         assert.equal(result.planner_metrics.screenplay_attempts, 1);
         assert.deepEqual(result.prompt_analysis, frontierAnalysis());
         assert.notEqual(result._planner_fingerprint, videoPlannerFingerprint());
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('Anthropic hybrid single pass validates serialized analysis and structured screenplay', async () => {
+    await assert.rejects(
+        createFrontierVideoPlan('A dog runs.', 'minimaxfast', 'non-anthropic-hybrid', undefined,
+            { plannerModel: 'gpt-6-sol', plannerStrategy: 'hybrid-single-pass' }),
+        /requires an Anthropic model/,
+    );
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        const request = JSON.parse(init.body);
+        requests.push(request);
+        return { ok: true, json: async () => ({
+            model: 'claude-opus-5-5', stop_reason: 'end_turn',
+            content: [{ type: 'text', text: JSON.stringify({
+                prompt_analysis_json: JSON.stringify(frontierAnalysis()),
+                plan: frontierPlan(),
+            }) }],
+            usage: { input_tokens: 100, output_tokens: 50 },
+        }) };
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.', 'minimaxfast', 'requester-anthropic-hybrid', undefined,
+            { plannerModel: 'claude-opus-5-5', plannerStrategy: 'hybrid-single-pass' },
+        );
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0].output_config.effort, 'medium');
+        assert.deepEqual(Object.keys(requests[0].output_config.format.schema.properties),
+            ['prompt_analysis_json', 'plan']);
+        assert.equal(requests[0].system[0].cache_control.type, 'ephemeral');
+        assert.equal(result._planner_configuration.strategy, 'hybrid-single-pass');
+        assert.equal(result.planner_metrics.single_pass, true);
+        assert.deepEqual(result.prompt_analysis, frontierAnalysis());
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('invalid Anthropic hybrid analysis falls back to two-pass at medium effort', async () => {
+    const requests = [];
+    const replies = [
+        { prompt_analysis_json: '{', plan: frontierPlan() },
+        frontierAnalysis(), frontierPlan(),
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return { ok: true, json: async () => ({
+            model: 'claude-opus-5-5', stop_reason: 'end_turn',
+            content: [{ type: 'text', text: JSON.stringify(replies.shift()) }],
+            usage: { input_tokens: 100, output_tokens: 50 },
+        }) };
+    };
+    try {
+        const result = await createFrontierVideoPlan(
+            'A dog runs through a park.', 'minimaxfast', 'requester-anthropic-hybrid-fallback', undefined,
+            { plannerModel: 'claude-opus-5-5', plannerStrategy: 'hybrid-single-pass' },
+        );
+        assert.equal(requests.length, 3);
+        assert.ok(requests.every(request => request.output_config.effort === 'medium'));
+        assert.ok(result.planner_metrics.single_pass_fallback_seconds >= 0);
+        assert.equal(result.planner_metrics.single_pass, undefined);
     } finally {
         globalThis.fetch = originalFetch;
     }
