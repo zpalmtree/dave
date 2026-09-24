@@ -25,6 +25,8 @@ test('requested models are explicit and Astra/Flash retain single-pass capabilit
         assert.equal(supportsSinglePassVideoPlanning(model), true);
     }
     assert.equal(configuredVideoPlannerVariant({ VIDEO_PLANNER_MODEL: 'claude-opus-5-5' }).plannerModel, 'claude-opus-5-5');
+    assert.equal(configuredVideoPlannerVariant({ VIDEO_PLANNER_MODEL: 'claude-opus-5-5' }).screenplayReasoningEffort, 'medium');
+    assert.equal(configuredVideoPlannerVariant({}, 'two-pass', 'claude-opus-5-5').analysisReasoningEffort, 'medium');
     assert.equal(supportsSinglePassVideoPlanning('claude-opus-5-5'), false);
     assert.throws(() => configuredVideoPlannerVariant({ VIDEO_PLANNER_MODEL: 'gpt-6-typo' }), /Unsupported/);
 });
