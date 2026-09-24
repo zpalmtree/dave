@@ -84,17 +84,19 @@ export function configuredVideoPlannerStrategy(
 export function configuredVideoPlannerVariant(
     environment: NodeJS.ProcessEnv = process.env,
     strategy: VideoPlannerStrategy = 'two-pass',
+    modelOverride?: string,
 ): {
     plannerModel: string;
     analysisReasoningEffort: 'low' | 'medium' | 'high';
     screenplayReasoningEffort: 'low' | 'medium' | 'high';
 } {
-    const plannerModel = environment.VIDEO_PLANNER_MODEL || VIDEO_PLANNER_MODEL;
+    const plannerModel = modelOverride || environment.VIDEO_PLANNER_MODEL || VIDEO_PLANNER_MODEL;
     videoTextModelCapabilities(plannerModel);
     const effort = (name: string): 'low' | 'medium' | 'high' => {
         const value = environment[name];
         if (value === 'low' || value === 'medium' || value === 'high') return value;
-        return strategy === 'single-pass' ? 'low' : 'high';
+        if (strategy === 'single-pass') return 'low';
+        return plannerModel === 'claude-opus-5-5' ? 'medium' : 'high';
     };
     return {
         plannerModel,
@@ -2374,7 +2376,7 @@ export async function createFrontierVideoPlan(
         && supportsSinglePassVideoPlanning(plannerModel)
         ? 'single-pass'
         : 'two-pass';
-    const configured = configuredVideoPlannerVariant(process.env, plannerStrategy);
+    const configured = configuredVideoPlannerVariant(process.env, plannerStrategy, plannerModel);
     const analysisReasoningEffort = options.analysisReasoningEffort || configured.analysisReasoningEffort;
     const screenplayReasoningEffort = options.screenplayReasoningEffort || configured.screenplayReasoningEffort;
     const fallbackAnalysisReasoningEffort = plannerStrategy === 'single-pass'
