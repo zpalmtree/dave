@@ -13,6 +13,7 @@ import {
     initialVideoRequestStatus,
     isVideoCancellationReaction,
     OALGO_VIDEO_PLANNER_GUIDANCE,
+    completedVideoAttachmentName,
     completedVideoPost,
     failedVideoPost,
     fetchEarlierVideoReplyChain,
@@ -378,6 +379,8 @@ test('video replies preserve the full accepted prompt', () => {
     assert.doesNotMatch(status, /Pervert/);
     assert.match(completed, /\nPervert\.\n> /);
     assert.doesNotMatch(failed, /Pervert/);
+    assert.equal(completedVideoAttachmentName(job), 'SPOILER_minimax-a1869ead.mp4');
+    assert.equal(completedVideoAttachmentName({ ...job, prompt_tease: null }), 'minimax-a1869ead.mp4');
 });
 
 test('video replies fit when a referenced prompt uses Discord\'s full content allowance', () => {

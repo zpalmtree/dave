@@ -216,6 +216,12 @@ export function completedVideoPost(job: VideoJobView): string {
     return formatVideoReplyWithFullPrompt(result, job, true);
 }
 
+export function completedVideoAttachmentName(job: VideoJobView): string {
+    // Discord hides attachments whose filename starts with SPOILER_.
+    const teased = sanitizeVideoWorkerText(job.prompt_tease, '', 120).trim();
+    return `${teased ? 'SPOILER_' : ''}${job.model}-${shortJobId(job.id)}.mp4`;
+}
+
 function videoFailureDetail(job: VideoJobView, maxLength: number): string {
     const error = sanitizeVideoWorkerText(job.error, 'Unknown worker error.', maxLength);
     const generic = /^(?:(?:generator|local planner) exited with code \d+|worker failure|unknown worker error)\.?$/i;
@@ -747,7 +753,7 @@ export class VideoGenerationService {
         const channel = statusMessage.channel;
         const payload = {
             content: completedVideoPost(job),
-            files: [{ attachment: job.result_path, name: `${job.model}-${shortJobId(job.id)}.mp4` }],
+            files: [{ attachment: job.result_path, name: completedVideoAttachmentName(job) }],
             allowedMentions: { repliedUser: true },
         };
         const existing = await this.existingDelivery(job, channel);
