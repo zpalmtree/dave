@@ -66,7 +66,7 @@ export const UNIQUE_US_PRESIDENTS = [
     'Donald Trump',
     'Joe Biden',
 ] as const;
-export type VideoPlannerStrategy = 'two-pass' | 'single-pass';
+export type VideoPlannerStrategy = 'two-pass' | 'single-pass' | 'hybrid-single-pass';
 
 export function supportsSinglePassVideoPlanning(model: string): boolean {
     return VIDEO_TEXT_MODELS[model]?.singlePass === true;
@@ -419,6 +419,17 @@ export const VIDEO_SINGLE_PASS_SCHEMA = {
     },
 } as const;
 
+/** The analysis is parsed and validated locally; only the large screenplay is grammar constrained. */
+export const VIDEO_ANTHROPIC_HYBRID_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['prompt_analysis_json', 'plan'],
+    properties: {
+        prompt_analysis_json: { type: 'string' },
+        plan: VIDEO_PLAN_SCHEMA,
+    },
+} as const;
+
 export const VIDEO_IMAGE_ONLY_CONTENT_INSTRUCTIONS = `For image-only auto-direction, read the meaningful legible content before choosing a source-image strategy. The internal request marker is not a user preference for a static hold or tiny motion. Classify the container separately from its content: a social_or_app_screenshot or document_or_text can contain an anecdote, joke, conversation, hypothetical scene, or claim worth acting out. Put a concise grounded account of that premise in resolved_intent and distinctive_details, and its setup, action, and consequence in source_narrative_beats. Subjects and actions should describe the story participants and events, not just posts, typography, scrolling, or engagement icons.
 
 When legible text supports a concrete scene, prefer narrative_adaptation even if there are no depicted actors and the text is first-person, second-person, a fragment, or a punchline rather than a complete plot. Preserve the relationships, reversal, and tone that make it distinctive. A reply can supply the reaction or payoff to its parent post; unrelated stacked posts are not automatically a conversation, chronology, or shared universe. For unrelated posts, choose the clearest complete visualizable premise and identify that choice in resolved_intent; do not splice their people or events together. Ignore incidental handles, timestamps, engagement counts, avatar identities, and app chrome as story requirements unless their meaning is essential to the premise. Do not infer a depicted participant's identity from an unrelated profile avatar.
@@ -543,6 +554,13 @@ export function videoPlannerSystemInstructions(
     return `Return one complete JSON object matching the requested schema. Fill every required field. Preserve exact wording, counts, sequence, and source-image identity. Prefer literal staging when the request is ambiguous. Put all decisions in the structured fields; add no preface or code fence.\n\n${instructions.replaceAll('OpenAI frontier planning path', 'frontier planning path')}`;
 }
 
+function anthropicHybridSystemInstructions(variant: 'baseline' | 'opus-tuned' = 'baseline'): string {
+    return `${videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, variant)}\n\n`
+        + 'In the output, prompt_analysis_json must be a JSON-serialized object matching the analysis schema below. '
+        + 'Complete it before plan, and make plan follow it. Do not add a prompt_analysis property.\n'
+        + JSON.stringify(VIDEO_PROMPT_ANALYSIS_SCHEMA);
+}
+
 export function videoPlannerFingerprint(
     model = VIDEO_PLANNER_MODEL,
     analysisReasoningEffort: 'low' | 'medium' | 'high' = 'high',
@@ -561,6 +579,12 @@ export function videoPlannerFingerprint(
         planSchema: VIDEO_PLAN_SCHEMA,
         singlePassInstructions: videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, promptVariant),
         singlePassSchema: VIDEO_SINGLE_PASS_SCHEMA,
+        ...(plannerStrategy === 'hybrid-single-pass'
+            ? {
+                hybridInstructions: anthropicHybridSystemInstructions(promptVariant),
+                hybridSchema: VIDEO_ANTHROPIC_HYBRID_SCHEMA,
+            }
+            : {}),
         plannerStrategy,
         promptVariant,
         ...(plannerGuidance ? { plannerGuidance } : {}),
@@ -912,6 +936,16 @@ function singlePassSchemaForMaximum(maximum: number): Record<string, unknown> {
     const schema: any = JSON.parse(JSON.stringify(VIDEO_SINGLE_PASS_SCHEMA));
     schema.properties.plan = videoPlanSchemaForMaximum(maximum);
     return schema;
+}
+
+function anthropicHybridSchemaForMaximum(maximum: number): Record<string, unknown> {
+    return {
+        ...VIDEO_ANTHROPIC_HYBRID_SCHEMA,
+        properties: {
+            prompt_analysis_json: { type: 'string' },
+            plan: videoPlanSchemaForMaximum(maximum),
+        },
+    };
 }
 
 function semanticPlanParts(plan: any): string[] {
@@ -2362,10 +2396,14 @@ export async function createFrontierVideoPlan(
     const plannerModel = options.plannerModel || defaultConfigured.plannerModel;
     videoTextModelCapabilities(plannerModel);
     const plannerProvider = videoTextModelCapabilities(plannerModel).provider;
-    const plannerStrategy: VideoPlannerStrategy = options.plannerStrategy === 'single-pass'
-        && supportsSinglePassVideoPlanning(plannerModel)
-        ? 'single-pass'
-        : 'two-pass';
+    if (options.plannerStrategy === 'hybrid-single-pass' && plannerProvider !== 'anthropic') {
+        throw new Error('Hybrid single-pass video planning requires an Anthropic model.');
+    }
+    const plannerStrategy: VideoPlannerStrategy = options.plannerStrategy === 'hybrid-single-pass'
+        ? 'hybrid-single-pass'
+        : options.plannerStrategy === 'single-pass' && supportsSinglePassVideoPlanning(plannerModel)
+            ? 'single-pass'
+            : 'two-pass';
     const configured = configuredVideoPlannerVariant(process.env, plannerStrategy, plannerModel);
     const analysisReasoningEffort = options.analysisReasoningEffort || configured.analysisReasoningEffort;
     const screenplayReasoningEffort = options.screenplayReasoningEffort || configured.screenplayReasoningEffort;
@@ -2409,7 +2447,8 @@ export async function createFrontierVideoPlan(
     let singlePassFallbackSeconds = 0;
     try {
         const safetyIdentifier = `video_${createHash('sha256').update(requesterId).digest('hex').slice(0, 24)}`;
-        if (plannerStrategy === 'single-pass') {
+        if (plannerStrategy === 'single-pass' || plannerStrategy === 'hybrid-single-pass') {
+            const hybrid = plannerStrategy === 'hybrid-single-pass';
             const singlePassStarted = Date.now();
             let rejectedCandidateReason: string | null = null;
             let rejectedCandidateAnalysis: Record<string, any> | null = null;
@@ -2445,24 +2484,31 @@ export async function createFrontierVideoPlan(
                 const body = await requestPlannerResponse({
                     model: plannerModel,
                     reasoning: { effort: screenplayReasoningEffort },
-                    instructions: videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, options.plannerPromptVariant),
+                    instructions: hybrid
+                        ? anthropicHybridSystemInstructions(options.plannerPromptVariant)
+                        : videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, options.plannerPromptVariant),
                     input: [{ role: 'user', content }],
                     text: {
                         verbosity: 'low',
                         format: {
                             type: 'json_schema',
-                            name: 'local_video_analysis_and_screenplay',
+                            name: hybrid ? 'local_video_hybrid' : 'local_video_analysis_and_screenplay',
                             strict: true,
-                            schema: singlePassSchemaForMaximum(segmentMaximum),
+                            schema: hybrid
+                                ? anthropicHybridSchemaForMaximum(segmentMaximum)
+                                : singlePassSchemaForMaximum(segmentMaximum),
                         },
                     },
                     max_output_tokens: 24_000,
                     safety_identifier: safetyIdentifier,
                     store: false,
-                }, controller.signal, 'single_pass', options);
+                }, controller.signal, hybrid ? 'single_pass_hybrid' : 'single_pass', options);
                 const combined = JSON.parse(extractOutputText(body));
+                const analysisCandidate = hybrid
+                    ? JSON.parse(String(combined?.prompt_analysis_json || ''))
+                    : combined?.prompt_analysis;
                 const promptAnalysis = await validatedPromptAnalysis(
-                    combined?.prompt_analysis,
+                    analysisCandidate,
                     plannerModel,
                     options,
                     'single_pass_decision',
