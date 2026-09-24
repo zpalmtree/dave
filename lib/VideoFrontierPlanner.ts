@@ -2156,9 +2156,10 @@ async function requestAnthropicPlannerResponse(
             const usage = body?.usage;
             const outputText = (body?.content || []).filter((part: any) => part?.type === 'text')
                 .map((part: any) => String(part.text || '')).join('').trim();
-            const complete = response.ok && body?.stop_reason === 'end_turn' && Boolean(outputText);
+            const refused = body?.stop_reason === 'refusal' || body?.stop_details?.type === 'refusal';
+            const complete = response.ok && body?.stop_reason === 'end_turn' && !refused && Boolean(outputText);
             if (usage || response.ok) {
-                await options.onUsage?.({ stage, attempt, outcome: complete ? 'success' : 'error',
+                await options.onUsage?.({ stage, attempt, outcome: refused ? 'rejected' : complete ? 'success' : 'error',
                     provider: 'anthropic', model: String(body.model || plannerModel), serviceTier: 'default',
                     inputTokens: Number(usage?.input_tokens || 0),
                     outputTokens: Number(usage?.output_tokens || 0),
@@ -2171,6 +2172,11 @@ async function requestAnthropicPlannerResponse(
                 detail = body?.error?.message || `Anthropic returned HTTP ${response.status}.`;
                 retryable = [408, 409, 429].includes(response.status) || response.status >= 500;
                 if (retryable && attempt < maxAttempts) continue;
+                throw new Error(detail);
+            }
+            if (refused) {
+                detail = body?.stop_details?.explanation || 'Anthropic planner refused the request.';
+                retryable = false;
                 throw new Error(detail);
             }
             if (!complete) {
@@ -2474,6 +2480,7 @@ export async function createFrontierVideoPlan(
         if (plannerStrategy === 'single-pass' || plannerStrategy === 'hybrid-single-pass') {
             const hybrid = plannerStrategy === 'hybrid-single-pass';
             const singlePassStarted = Date.now();
+            let candidateReceived = false;
             let rejectedCandidateReason: string | null = null;
             let rejectedCandidateAnalysis: Record<string, any> | null = null;
             try {
@@ -2527,6 +2534,7 @@ export async function createFrontierVideoPlan(
                     safety_identifier: safetyIdentifier,
                     store: false,
                 }, controller.signal, hybrid ? 'single_pass_hybrid' : 'single_pass', options);
+                candidateReceived = true;
                 const combined = JSON.parse(extractOutputText(body));
                 const analysisCandidate = hybrid
                     ? JSON.parse(String(combined?.prompt_analysis_json || ''))
@@ -2665,6 +2673,7 @@ export async function createFrontierVideoPlan(
                 }
                 if (error instanceof FrontierPlannerRejectedError
                     || error instanceof VideoUsagePersistenceError) throw error;
+                if (hybrid && !candidateReceived) throw error;
                 singlePassFallbackSeconds = Math.max(0.001, (Date.now() - singlePassStarted) / 1000);
                 const detail = error instanceof Error ? error.message : String(error);
                 console.warn(`Single-pass video planner failed validation; using two-pass baseline: ${detail}`);

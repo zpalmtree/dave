@@ -1284,6 +1284,54 @@ test('invalid Anthropic hybrid analysis falls back to two-pass at medium effort'
     }
 });
 
+test('Anthropic refusal and provider failures never trigger two-pass hybrid fallback', async () => {
+    const originalFetch = globalThis.fetch;
+    const cases = [
+        {
+            name: 'refusal',
+            response: { ok: true, status: 200, json: async () => ({
+                model: 'claude-opus-5-5', stop_reason: 'refusal',
+                stop_details: { type: 'refusal', explanation: 'The request was refused.' },
+                content: [{ type: 'text', text: 'I cannot help with that.' }],
+                usage: { input_tokens: 100, output_tokens: 20 },
+            }) },
+            requests: 1,
+            pattern: /refused/,
+        },
+        {
+            name: 'provider error',
+            response: { ok: false, status: 503, json: async () => ({
+                error: { message: 'Anthropic temporarily unavailable.' },
+            }) },
+            requests: 2,
+            pattern: /temporarily unavailable/,
+        },
+    ];
+    try {
+        for (const item of cases) {
+            let requests = 0;
+            const attempts = [];
+            globalThis.fetch = async () => {
+                requests += 1;
+                return item.response;
+            };
+            await assert.rejects(
+                createFrontierVideoPlan('A dog runs through a park.', 'minimaxfast',
+                    `requester-${item.name}`, undefined, {
+                        plannerModel: 'claude-opus-5-5',
+                        plannerStrategy: 'hybrid-single-pass',
+                        onAttempt: attempt => attempts.push(attempt),
+                    }),
+                item.pattern,
+            );
+            assert.equal(requests, item.requests);
+            assert.equal(attempts.some(attempt => attempt.stage === 'single_pass_fallback'), false);
+        }
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('single-pass frontier planner requires adaptation even when a policy-rejected screenplay is structurally valid', async () => {
     const analysis = frontierAnalysis();
     analysis.frontier_handling = {
