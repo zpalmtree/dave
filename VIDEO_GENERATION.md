@@ -187,12 +187,16 @@ with the same face.
 
 ## Optimization experiments
 
-Production remains on Sol and uses the review-gated `fast-gated-v3` first-frame
-path. Jobs first try Gemini Flash Lite at 1K and keep it only when the same GPT-6 Sol
-visual gate accepts it; a rejection, generation error, or unavailable reviewer
-runs the unchanged Pro 2K serial pipeline. Each job records its experiment, pipeline variant, planner
-fingerprint, keyframe strategy, provider timings, queue wait, and end-to-end
-latency so alternatives can be compared without mixing cohorts.
+Production planning uses Claude Opus 5.5 with the tuned prompt and hybrid
+single-pass strategy. Invalid hybrid plans retry through the two-pass Opus path.
+The review-gated `fast-gated-v3` first-frame path still tries Gemini Flash Lite
+at 1K and keeps it only when the GPT-6 Sol visual gate accepts it; a rejection,
+generation error, or unavailable reviewer runs the unchanged Pro 2K serial
+pipeline. Each job records its experiment, pipeline variant, planner fingerprint,
+keyframe strategy, provider timings, queue wait, and end-to-end latency so
+alternatives can be compared without mixing cohorts. Set
+`VIDEO_PLANNER_MODEL=gpt-6-sol` to return the production broker to Sol's
+single-pass/low-effort planner.
 
 ### Opus 5.5 historical video experiment
 
@@ -212,14 +216,20 @@ and `node scripts/benchmark-video-opus.mjs --phase=render --dry-run` before
 `node scripts/benchmark-video-opus.mjs --phase=render`. The render phase uses
 GPUq admission and resumes completed videos. `--phase=report` writes a blinded
 review packet and a separate answer key in the run directory. Planner usage,
-latency, and generated videos are kept in ignored artifacts; the production
-planner remains on Sol.
+latency, and generated videos are kept in ignored artifacts. A later six-prompt
+direct MiniMax review preferred tuned Opus over GPT-6 Sol on five prompts;
+the hybrid Opus route won four of six clips against two-pass Opus, including
+one job where hybrid planning fell back to two-pass.
 
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
-- `VIDEO_PLANNER_MODEL=gemini-3.8-flash` enables the Flash planner adapter.
+- `VIDEO_PLANNER_MODEL` overrides the Opus production default. Use
+  `gpt-6-sol` for the Sol baseline or `gemini-3.8-flash` for the Flash adapter.
+- `VIDEO_PLANNER_STRATEGY` accepts `hybrid-single-pass`, `two-pass`, or
+  `single-pass`. By default Opus uses hybrid with two-pass fallback and Sol uses
+  single-pass. Hybrid requires an Anthropic model; plain single-pass on Opus
+  resolves to two-pass.
 - `VIDEO_PLANNER_ANALYSIS_EFFORT` and `VIDEO_PLANNER_SCREENPLAY_EFFORT` accept
-  `low`, `medium`, or `high`. Single-pass planning defaults to the A/B-tested
-  `low`; set both to `medium` for immediate quality rollback without a deploy.
+  `low`, `medium`, or `high`. Opus defaults to medium and Sol single-pass to low.
 - `VIDEO_OPENAI_SERVICE_TIER` accepts `fast` or `flex`. It is unset by default,
   which uses standard OpenAI processing; set it to `fast` only as an emergency
   latency rollback because priority processing costs more.

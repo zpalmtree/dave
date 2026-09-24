@@ -54,8 +54,7 @@ import {
     FrontierPlannerRejectedError,
     VIDEO_PLANNER_MODEL,
     VideoPlanSourceImage,
-    configuredVideoPlannerStrategy,
-    configuredVideoPlannerVariant,
+    configuredPrimaryVideoPlannerOptions,
     createFrontierVideoPlan,
     validateLocalVideoPlanForKeyframe,
     videoPlannerFingerprint,
@@ -3378,8 +3377,7 @@ export class VideoBroker {
     }
 
     private frontierOptions(job: JobRow, _criticalPath: boolean): VideoKeyframeOptions {
-        const plannerStrategy = configuredVideoPlannerStrategy(job.channel_id);
-        const configured = configuredVideoPlannerVariant(process.env, plannerStrategy);
+        const configured = configuredPrimaryVideoPlannerOptions(job.channel_id);
         const plannerGuidance = [job.planner_guidance]
             .map(value => String(value || '').trim())
             .filter(Boolean)
@@ -3387,7 +3385,6 @@ export class VideoBroker {
         return {
             serviceTier: configuredVideoOpenAIServiceTier(),
             ...configured,
-            plannerStrategy,
             ...this.optimization(job)?.options,
             ...(plannerGuidance ? { plannerGuidance } : {}),
             ...(job.requested_duration_seconds !== null ? {
@@ -3650,6 +3647,7 @@ export class VideoBroker {
                             plannerOptions.screenplayReasoningEffort,
                             plannerOptions.plannerGuidance,
                             plannerOptions.plannerStrategy,
+                            plannerOptions.plannerPromptVariant,
                         );
                     const plannerMetrics = (plan as any).planner_metrics;
                     if (plannerMetrics && typeof plannerMetrics === 'object') {
@@ -3696,6 +3694,7 @@ export class VideoBroker {
                                     rejectionVariant.screenplayReasoningEffort,
                                     rejectionVariant.plannerGuidance || '',
                                     rejectionStrategy,
+                                    rejectionVariant.plannerPromptVariant,
                                 ),
                                 // Keep the rejected run's dialogue contract; a retry hits the
                                 // cached-rejection path and would otherwise plan locally blind.

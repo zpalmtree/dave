@@ -50,6 +50,7 @@ import {
     VIDEO_PLANNER_FAST_MODEL,
     VIDEO_PLANNER_GEMINI_SCHEMA_MODE,
     VIDEO_PLANNER_MODEL,
+    VIDEO_PLANNER_PRIMARY_MODEL,
     UNIQUE_US_PRESIDENTS,
     FrontierPlannerRejectedError,
     compileBestEffortFrontierVideoPlan,
@@ -58,6 +59,7 @@ import {
     geminiCompatibleResponseSchema,
     configuredVideoPlannerStrategy,
     configuredVideoPlannerVariant,
+    configuredPrimaryVideoPlannerOptions,
     expandExhaustiveSequentialPlan,
     reconcileFrontierKeyframeMotionGeometry,
     stageFrontierDialogueVisually,
@@ -224,10 +226,36 @@ test('fast planner and reasoning variants are explicit and fingerprinted', () =>
     }), 'two-pass');
     assert.equal(configuredVideoPlannerStrategy('other-channel', {
         VIDEO_PLANNER_STRATEGY: 'hybrid-single-pass',
-    }), 'single-pass');
+    }), 'hybrid-single-pass');
     assert.equal(configuredVideoPlannerStrategy('outside-old-canary', {
         VIDEO_PLANNER_CANARY_CHANNELS: 'canary-one, canary-two',
     }), 'single-pass');
+});
+
+test('production video routing uses the reviewed Opus configuration and keeps Sol configurable', () => {
+    assert.equal(VIDEO_PLANNER_PRIMARY_MODEL, 'claude-opus-5-5');
+    assert.deepEqual(configuredPrimaryVideoPlannerOptions('video-channel', {}), {
+        plannerModel: 'claude-opus-5-5',
+        plannerStrategy: 'hybrid-single-pass',
+        plannerPromptVariant: 'opus-tuned',
+        analysisReasoningEffort: 'medium',
+        screenplayReasoningEffort: 'medium',
+    });
+    assert.deepEqual(configuredPrimaryVideoPlannerOptions('video-channel', {
+        VIDEO_PLANNER_MODEL: 'gpt-6-sol',
+    }), {
+        plannerModel: 'gpt-6-sol',
+        plannerStrategy: 'single-pass',
+        plannerPromptVariant: 'baseline',
+        analysisReasoningEffort: 'low',
+        screenplayReasoningEffort: 'low',
+    });
+    assert.equal(configuredPrimaryVideoPlannerOptions('video-channel', {
+        VIDEO_PLANNER_STRATEGY: 'two-pass',
+    }).plannerStrategy, 'two-pass');
+    assert.equal(configuredPrimaryVideoPlannerOptions('video-channel', {
+        VIDEO_PLANNER_STRATEGY: 'single-pass',
+    }).plannerStrategy, 'two-pass');
 });
 
 test('Gemini planner schema keeps nested types while removing complexity constraints', () => {
