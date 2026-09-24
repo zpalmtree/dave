@@ -189,6 +189,8 @@ with the same face.
 
 Production planning uses Claude Opus 5.5 with the tuned prompt and hybrid
 single-pass strategy. Invalid hybrid plans retry through the two-pass Opus path.
+Provider refusals, API failures, and missing usage records do not start a second
+planning route.
 The review-gated `fast-gated-v3` first-frame path still tries Gemini Flash Lite
 at 1K and keeps it only when the GPT-6 Sol visual gate accepts it; a rejection,
 generation error, or unavailable reviewer runs the unchanged Pro 2K serial
