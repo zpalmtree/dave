@@ -17,6 +17,7 @@ import {
 } from './VideoUsage.js';
 
 export const VIDEO_PLANNER_MODEL = 'gpt-6-sol';
+export const VIDEO_PLANNER_PRIMARY_MODEL = 'claude-opus-5-5';
 export const VIDEO_PLANNER_FAST_MODEL = AI_MODELS.geminiChat;
 export const VIDEO_PLANNER_GEMINI_SCHEMA_MODE = 'compatible-structured-v1';
 export const UNIQUE_US_PRESIDENTS = [
@@ -75,10 +76,18 @@ export function supportsSinglePassVideoPlanning(model: string): boolean {
 export function configuredVideoPlannerStrategy(
     _channelId: string,
     environment: NodeJS.ProcessEnv = process.env,
+    model = environment.VIDEO_PLANNER_MODEL || VIDEO_PLANNER_MODEL,
 ): VideoPlannerStrategy {
     const globalStrategy = environment.VIDEO_PLANNER_STRATEGY;
-    if (globalStrategy === 'two-pass' || globalStrategy === 'single-pass') return globalStrategy;
-    return 'single-pass';
+    if (globalStrategy === 'single-pass' && !supportsSinglePassVideoPlanning(model)) return 'two-pass';
+    if (globalStrategy === 'two-pass' || globalStrategy === 'single-pass' || globalStrategy === 'hybrid-single-pass') {
+        return globalStrategy;
+    }
+    return videoTextModelCapabilities(model).provider === 'anthropic' ? 'hybrid-single-pass' : 'single-pass';
+}
+
+export function configuredVideoPlannerPromptVariant(model: string): 'baseline' | 'opus-tuned' {
+    return model === 'claude-opus-5-5' ? 'opus-tuned' : 'baseline';
 }
 
 export function configuredVideoPlannerVariant(
@@ -102,6 +111,20 @@ export function configuredVideoPlannerVariant(
         plannerModel,
         analysisReasoningEffort: effort('VIDEO_PLANNER_ANALYSIS_EFFORT'),
         screenplayReasoningEffort: effort('VIDEO_PLANNER_SCREENPLAY_EFFORT'),
+    };
+}
+
+export function configuredPrimaryVideoPlannerOptions(
+    channelId: string,
+    environment: NodeJS.ProcessEnv = process.env,
+): Pick<VideoFrontierCallOptions, 'plannerModel' | 'plannerStrategy' | 'plannerPromptVariant'
+    | 'analysisReasoningEffort' | 'screenplayReasoningEffort'> {
+    const plannerModel = environment.VIDEO_PLANNER_MODEL || VIDEO_PLANNER_PRIMARY_MODEL;
+    const plannerStrategy = configuredVideoPlannerStrategy(channelId, environment, plannerModel);
+    return {
+        ...configuredVideoPlannerVariant(environment, plannerStrategy, plannerModel),
+        plannerStrategy,
+        plannerPromptVariant: configuredVideoPlannerPromptVariant(plannerModel),
     };
 }
 
@@ -2395,6 +2418,7 @@ export async function createFrontierVideoPlan(
     const sourceImages = normalizeVideoPlanSourceImages(sourceImage);
     const plannerModel = options.plannerModel || defaultConfigured.plannerModel;
     videoTextModelCapabilities(plannerModel);
+    const promptVariant = options.plannerPromptVariant || configuredVideoPlannerPromptVariant(plannerModel);
     const plannerProvider = videoTextModelCapabilities(plannerModel).provider;
     if (options.plannerStrategy === 'hybrid-single-pass' && plannerProvider !== 'anthropic') {
         throw new Error('Hybrid single-pass video planning requires an Anthropic model.');
@@ -2419,7 +2443,7 @@ export async function createFrontierVideoPlan(
         screenplayReasoningEffort,
         options.plannerGuidance,
         plannerStrategy,
-        options.plannerPromptVariant,
+        promptVariant,
     );
     const attributed = <T extends Record<string, any>>(plan: T): T => {
         (plan as any)._planner_model = plannerModel;
@@ -2428,7 +2452,7 @@ export async function createFrontierVideoPlan(
             model: plannerModel, strategy: plannerStrategy,
             analysis_effort: analysisReasoningEffort, screenplay_effort: screenplayReasoningEffort,
             service_tier: options.serviceTier || 'default',
-            prompt_variant: options.plannerPromptVariant || 'baseline',
+            prompt_variant: promptVariant,
             streaming_first_frame: videoTextModelCapabilities(plannerModel).streamingFirstFrame
                 && Boolean(options.onProvisionalKeyframe),
         };
@@ -2485,8 +2509,8 @@ export async function createFrontierVideoPlan(
                     model: plannerModel,
                     reasoning: { effort: screenplayReasoningEffort },
                     instructions: hybrid
-                        ? anthropicHybridSystemInstructions(options.plannerPromptVariant)
-                        : videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, options.plannerPromptVariant),
+                        ? anthropicHybridSystemInstructions(promptVariant)
+                        : videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, promptVariant),
                     input: [{ role: 'user', content }],
                     text: {
                         verbosity: 'low',
@@ -2665,7 +2689,7 @@ export async function createFrontierVideoPlan(
             safetyIdentifier,
             sourceImages,
             controller.signal,
-            options,
+            { ...options, plannerPromptVariant: promptVariant },
         );
         const promptAnalysisSeconds = (Date.now() - analysisStarted) / 1000;
         const dialogueMode = String(promptAnalysis.dialogue_contract?.mode || 'none');
@@ -2729,7 +2753,7 @@ export async function createFrontierVideoPlan(
             const body = await requestPlannerResponse({
                 model: plannerModel,
                 reasoning: { effort: fallbackScreenplayReasoningEffort },
-                instructions: videoPlannerSystemInstructions(VIDEO_PLANNER_INSTRUCTIONS, options.plannerPromptVariant),
+                instructions: videoPlannerSystemInstructions(VIDEO_PLANNER_INSTRUCTIONS, promptVariant),
                 input: [{
                     role: 'user',
                     content,
