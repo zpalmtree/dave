@@ -38,6 +38,8 @@ test('Opus adapter converts images and structured output while recording provide
             const body = JSON.parse(request.body);
             assert.equal(body.model, 'claude-opus-5-5');
             assert.equal(body.output_config.effort, 'medium');
+            assert.deepEqual(body.system, [{ type: 'text', text: 'Test',
+                cache_control: { type: 'ephemeral' } }]);
             assert.equal(body.output_config.format.schema.properties.items.maxItems, undefined);
             assert.equal(body.messages[0].content[1].source.media_type, 'image/png');
             return { ok: true, json: async () => ({ model: 'claude-opus-5-5', stop_reason: 'end_turn',
