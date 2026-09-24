@@ -2079,7 +2079,11 @@ async function requestAnthropicPlannerResponse(
                 body: JSON.stringify({
                     model: plannerModel,
                     max_tokens: maxTokens,
-                    system: String(payload.instructions || ''),
+                    system: [{
+                        type: 'text',
+                        text: String(payload.instructions || ''),
+                        cache_control: { type: 'ephemeral' },
+                    }],
                     messages: anthropicPlannerMessages(payload.input),
                     output_config: {
                         effort: String(payload.reasoning?.effort || 'medium'),
