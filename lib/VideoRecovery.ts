@@ -48,7 +48,8 @@ export function recoveryDialogue(plan: any): any[] {
 function speechSeconds(lines: any[]): number {
     return lines.reduce((total, line) => total
         + (String(line.spoken_text || line.text || '').match(/[\p{L}\p{N}_'-]+/gu) || []).length / (140 / 60)
-        + (String(line.spoken_text || line.text || '').match(/[.!?;,]/g) || []).length * 0.15
+        // A run such as "..." or "?!" is one pause, not one per mark.
+        + (String(line.spoken_text || line.text || '').match(/[.!?;,\u2026]+/g) || []).length * 0.15
         + 0.3, lines.length ? 1.25 : 0);
 }
 

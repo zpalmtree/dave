@@ -61,6 +61,17 @@ test('timing repair reserves speech time within a shot even when the whole segme
     assert.equal(value.segments[1].transition, 'cut');
 });
 
+test('timing repair counts an ellipsis as one pause', () => {
+    const repaired = text => {
+        const value = plan(text);
+        value.segments[0].shots[0].duration_seconds = 2;
+        repairVideoTiming(value, 15, 5);
+        return value.segments[0].shots[0].duration_seconds;
+    };
+    assert.equal(repaired('What was his intent... is this old man some type of wizard?'),
+        repaired('What was his intent. is this old man some type of wizard?'));
+});
+
 test('approved dialogue may add Spanish accents while preserving the authored text', () => {
     const value = plan('mae Luis libereme, necesito cotizar mae, saqueme de aqui');
     const text = 'Mae, Luis, libéreme, necesito cotizar, mae, sáqueme de aquí.';
