@@ -1,3 +1,4 @@
+import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { existsSync } from 'fs';
 import fetch, { RequestInit, Response } from 'node-fetch';
 import { Client, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
@@ -1055,8 +1056,11 @@ export async function handleVideoRequest(
     const referencedMessage = await fetchReferencedVideoMessage(msg);
     const earlierReplyChain = fetchEarlierVideoReplyChain(referencedMessage);
     let attachedSourceImage: SubmittedVideoAttachmentOrClipSourceImage | null;
+    let sourceAudio: SubmittedVideoSourceAudio | null;
     try {
         attachedSourceImage = videoSourceImageFromMessages(msg, referencedMessage);
+        sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
+        if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
     } catch (error) {
         await msg.reply(error instanceof Error ? error.message : String(error));
         return;
@@ -1072,6 +1076,7 @@ export async function handleVideoRequest(
         return;
     }
     prompt = videoPromptFromMessages(prompt, referencedMessage);
+    if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
     }
@@ -1084,7 +1089,7 @@ export async function handleVideoRequest(
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(initialVideoRequestStatus(model));
     const plannerGuidance = [
-        options.plannerGuidance,
+        sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : options.plannerGuidance,
         isVideoClipSourceImage(sourceImage) ? VIDEO_CLIP_FRAME_PLANNER_GUIDANCE : '',
         videoReplyChainGuidance(await earlierReplyChain),
     ]
@@ -1108,11 +1113,12 @@ export async function handleVideoRequest(
                 command_message_id: msg.id,
                 status_message_id: pending.id,
                 source_image: sourceImage,
+                source_audio: sourceAudio,
                 source_image_composite: compositeSourceImage,
                 source_image_provider: options.compositeProvider,
                 planner_guidance: plannerGuidance || undefined,
             }),
-        }, compositeSourceImage ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
+        }, (compositeSourceImage || sourceAudio) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
         return;

@@ -226,6 +226,8 @@ export interface VideoJobView {
     result_path: string | null;
     result_bytes: number | null;
     has_source_image: boolean;
+    has_source_audio?: boolean;
+    source_audio_seconds?: number | null;
     source_image_composition?: 'generated' | 'local_qwen' | null;
     created_at: number;
     updated_at: number;
@@ -288,6 +290,7 @@ export function isQwenImageModel(value: unknown): value is QwenImageModelId {
 }
 
 export interface VideoWorkerHello {
+    source_audio_version?: number;
     recovery_version?: number;
     type: 'hello';
     protocol: number;
