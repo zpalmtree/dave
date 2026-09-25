@@ -17,7 +17,6 @@ const DOT_GRAPH_HEIGHT = 150;
 
 const SHADOW_BLUR = 2.75;
 
-const GCP2_CACHE_MS = 5000;
 const DOT_GRAPH_MAX_TIMESPAN = 86400;
 const DOT_GRAPH_MIN_CORE_HEIGHT = 0.55 / DOT_GRAPH_HEIGHT;
 const DOT_GRAPH_MIN_FADE_HEIGHT = 1.65 / DOT_GRAPH_HEIGHT;
@@ -75,8 +74,6 @@ interface DotGraphBand {
     q3: number
     a: number
 }
-
-let gcp2Cache: { expiresAt: number, promise: Promise<Gcp2Response> } | undefined;
 
 export async function initDot() {
     if (DOT_IMAGES.length === 0) {
@@ -161,31 +158,6 @@ async function generateDotImages(): Promise<Canvas[]> {
     return images;
 }
 
-async function fetchGcp2Data(): Promise<Gcp2Response> {
-    const now = Date.now();
-
-    if (gcp2Cache && gcp2Cache.expiresAt > now) {
-        return gcp2Cache.promise;
-    }
-
-    const promise = fetchGcp2Snapshot();
-
-    gcp2Cache = {
-        expiresAt: now + GCP2_CACHE_MS,
-        promise,
-    };
-
-    try {
-        return await promise;
-    } catch (err) {
-        if (gcp2Cache?.promise === promise) {
-            gcp2Cache = undefined;
-        }
-
-        throw err;
-    }
-}
-
 function finiteNumber(value: unknown): number | null {
     const parsed = Number(value);
 
@@ -242,8 +214,8 @@ function calculatePercentile(value: number, history: DotGraphPoint[]): number {
     return clamp(count / sorted.length, 0, 1);
 }
 
-async function getDotStats(): Promise<{ currentNetvar: number, currentDotValue: number, history: DotGraphPoint[] }> {
-    const data = await fetchGcp2Data();
+async function getDotStats(data?: Gcp2Response): Promise<{ currentNetvar: number, currentDotValue: number, history: DotGraphPoint[] }> {
+    data = data ?? await fetchGcp2Snapshot();
     const history = parseHistory(data);
     const currentNetvar = getCurrentNetvar(data, history);
 
@@ -293,8 +265,8 @@ function renderDotCanvas(currentDotValue: number): [string, Canvas] {
     return [ rgbToHex(blendRGB), dotCanvas ];
 }
 
-export async function renderDot(): Promise<[string, number, Canvas]> {
-    const { currentDotValue } = await getDotStats();
+export async function renderDot(data?: Gcp2Response): Promise<[string, number, Canvas]> {
+    const { currentDotValue } = await getDotStats(data);
     const [ currentDotColor, dotCanvas ] = renderDotCanvas(currentDotValue);
 
     return [ currentDotColor, currentDotValue, dotCanvas ];
@@ -592,8 +564,8 @@ function renderGraphCanvas(points: DotGraphPoint[], history: DotGraphPoint[]): C
     return outCanvas;
 }
 
-export async function renderDotGraph(timespan: number): Promise<[ number, Canvas ]> {
-    const { history } = await getDotStats();
+export async function renderDotGraph(timespan: number, data?: Gcp2Response): Promise<[ number, Canvas ]> {
+    const { history } = await getDotStats(data);
     const graphPoints = selectGraphPoints(history, timespan);
     const values = synthesizeGraphBands(graphPoints, history).map((point) => point.a);
     const variance = calculateVariance(values);
