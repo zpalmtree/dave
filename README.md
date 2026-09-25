@@ -2,6 +2,10 @@
 
 Dave is a chat bot. It runs on Discord and Uproar (uproar.chat) at the same time; the Uproar side is optional and stays off until you configure it (see [Uproar](#uproar-uproarchat) below).
 
+[![Watch the Dave commands ad](creative/dave-animation/contact-sheet-commands.jpg)](creative/dave-animation/dave-commands-720p.mp4)
+
+[Watch the commands ad](creative/dave-animation/dave-commands-720p.mp4) — a 30-second animated tour of Dave's image, video, and chat commands.
+
 The operator-hosted Discord bots' data practices and privacy contact are described
 in the [Dave and Sluglicious privacy policy](PRIVACY.md).
 
