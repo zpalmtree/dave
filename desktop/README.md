@@ -1,5 +1,11 @@
 # Desktop video optimization changes
 
+## Original-song lip-sync
+
+See [original-song lip-sync](../docs/video-source-audio.md) for command usage, audio
+conditioning, fixed scene timing, installation and verification. Apply with
+`python3 scripts/apply-video-source-audio-desktop.py` and reload the worker while idle.
+
 ## Durable video recovery
 
 See [video recovery](../docs/video-recovery.md) for the approved-story pipeline,

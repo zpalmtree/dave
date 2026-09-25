@@ -1,0 +1,337 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -1437,6 +1437,7 @@
+     parser.add_argument("prompt", nargs="*", help="Video prompt; quote it for easiest shell use")
+     parser.add_argument("--model", choices=("h3", "ltx", "both"), default="h3")
+     parser.add_argument("--mode", choices=("t2v", "i2v"), default="t2v")
++    parser.add_argument("--source-audio", type=Path, help="Original WAV song for an audio-timed approved plan")
+     parser.add_argument("--image", type=Path, help="Reference image; automatically selects I2V")
+     endpoint = parser.add_mutually_exclusive_group()
+     endpoint.add_argument(
+@@ -3007,7 +3008,7 @@
+         ):
+             raise VideoGenError("screenplay did not preserve the explicit every-president roster")
+     plan = expand_exhaustive_sequential_plan(copy.deepcopy(plan), segment_min, segment_max)
+-    music_lyrics = requested_music_performance_lyrics(raw_prompt)
++    music_lyrics = None if plan.get("source_audio") else requested_music_performance_lyrics(raw_prompt)
+     if music_lyrics:
+         delivery = "fast, clear, rhythmic rap delivery over one continuous beat"
+         dialogue = [{
+@@ -4985,13 +4986,23 @@
+     segment_min = 4.0 if requested_duration is not None and "h3" in models else (
+         5.0 if "h3" in models else 3.0
+     )
++    song = candidate.get("source_audio")
+     plan = validate_plan_shape(
+-        candidate,
+-        raw_prompt,
+-        requested_duration,
+-        segment_max,
+-        segment_min,
+-    )
++        candidate, raw_prompt, None if song else requested_duration,
++        segment_max, 0.5 if song else segment_min,
++    )
++    if song:
++        if len(plan["segments"]) != len(candidate["segments"]):
++            raise VideoGenError("Song scene count changed during validation")
++        plan["source_audio"] = copy.deepcopy(song)
++        for segment, authored in zip(plan["segments"], candidate["segments"]):
++            for field in ("source_audio_start_seconds", "source_audio_frames", "target_seconds", "output_seconds"):
++                segment[field] = authored[field]
++            segment["shots"] = copy.deepcopy(authored["shots"])
++            segment["transition"] = authored["transition"]
++            segment["audio_transition"] = "cut"
++        plan["target_total_seconds"] = sum(s["output_seconds"] for s in plan["segments"])
++        plan["generation_total_seconds"] = plan["target_total_seconds"]
+     plan["planner"] = {
+         "provider": planner_model.split("/", 1)[0] if "/" in planner_model else "frontier",
+         "model": planner_model,
+@@ -5449,6 +5460,8 @@
+ ) -> str:
+     parts: list[str] = []
+     has_dialogue = any(shot.get("dialogue") for shot in segment["shots"])
++    has_source_audio = "source_audio_frames" in segment
++    vocal_motion = has_dialogue or has_source_audio
+     mouthless = bool(re.search(r"\b(?:mouthless\b|(?:no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b(?!\s+(?:mov\w*|motion|animation|articulation|opening|sound\w*|noise\w*)))",
+                               " ".join(str(shot.get("visual", "")) for shot in segment["shots"]), re.I))
+     dialogue_lead_in = h3_dialogue_lead_in_seconds()
+@@ -5488,12 +5501,12 @@
+                     "composition, and camera axis in <Picture 1>. Picture 1 overrides any conflicting "
+                     "description in the screenplay. "
+                     f"{motion_contract_text(motion_contract, dialogue_lead_in if has_dialogue else 0.0)} "
+-                    f"{h3_first_frame_face_identity_instruction(has_dialogue, mouthless)}"
++                    f"{h3_first_frame_face_identity_instruction(vocal_motion, mouthless)}"
+                 )
+             else:
+                 image_anchor = (
+                     "After the cut, this remains the same subject from <Picture 1>. "
+-                    f"{h3_first_frame_face_identity_reanchor(has_dialogue, mouthless)}"
++                    f"{h3_first_frame_face_identity_reanchor(vocal_motion, mouthless)}"
+                 )
+             visual = f"{image_anchor} {visual}"
+         body = f"{opening} {visual.rstrip('.')} . {shot['camera'].rstrip('.')} ."
+@@ -5506,6 +5519,8 @@
+                 )
+             else:
+                 body += f" At the very beginning of this shot, {dialogue}."
++        elif has_source_audio:
++            body += " The performer lip-syncs to the supplied original vocals from the first frame, without generating new speech."
+         else:
+             body += " No speech occurs in this shot; character names and scene directions are not spoken."
+         body += f" {shot['audio'].rstrip('.')} ."
+@@ -7985,6 +8000,14 @@
+         h3_shift_video=args.h3_shift_video,
+         h3_shift_audio=args.h3_shift_audio,
+     )
++    if args.source_audio:
++        if model != "h3" or "source_audio_frames" not in segment:
++            raise VideoGenError("Song lip-sync requires an audio-timed H3 screenplay")
++        from video_source_audio import audio_window, condition_h3_on_song
++        song_name = f"video_gen_song_{run_root.name}_{segment['index']}.wav"
++        audio_window(ffmpeg_executable(), args.source_audio, INPUT_DIR / song_name,
++                     segment["source_audio_start_seconds"], segment["effective_seconds"])
++        prompt = condition_h3_on_song(prompt, song_name)
+     print(
+         f"Generating {model.upper()} segment {segment['index']}/{segment_count} | "
+         f"{mode.upper()} | {args.quality} | {aspect} | "
+@@ -8347,6 +8370,7 @@
+             args.h3_sampler = settings.get("h3_sampler")
+             args.h3_scheduler = settings.get("h3_scheduler")
+             args.h3_shift_video = settings.get("h3_shift_video")
++            args.source_audio = Path(settings["source_audio"]) if settings.get("source_audio") else None
+             args.h3_shift_audio = settings.get("h3_shift_audio")
+             args.ltx_one_stage = bool(settings.get("ltx_one_stage", False))
+             args.benchmark_label = settings.get("benchmark_label") or args.benchmark_label
+@@ -8443,7 +8467,7 @@
+                         models,
+                     )
+                 except VideoGenError as exc:
+-                    if experiment_contract is not None or args.approved_plan_only:
++                    if experiment_contract is not None or args.approved_plan_only or args.source_audio:
+                         raise
+                     print(
+                         f"WARNING: frontier screenplay failed local validation ({exc}); "
+@@ -8466,6 +8490,7 @@
+                 )
+             elif (
+                 models == ("h3",)
++                and not args.source_audio
+                 and (not args.fast or args.preserve_base_segmentation)
+                 and not args.turbo4
+                 and not args.benchmark_label
+@@ -8489,7 +8514,7 @@
+                 or (args.keyframe == "auto" and bool(plan["keyframe"]["recommended"]))
+                 or args.loop_close
+             )
+-            if not args.prompt_only and GPU_RUNTIME_BUDGET_SECONDS > 0:
++            if not args.source_audio and not args.prompt_only and GPU_RUNTIME_BUDGET_SECONDS > 0:
+                 original_segment_count = len(plan.get("segments") or [])
+                 plan, gpu_low, gpu_high, observations, gpu_truncated = truncate_plan_to_gpu_runtime_budget(
+                     plan,
+@@ -8604,10 +8629,16 @@
+                     bool(args.loop_close),
+                     bool(args.fast_duration_aware),
+                 )
++            if args.source_audio:
++                from video_source_audio import prepare_song_segments
++                if models != ("h3",) or not plan.get("source_audio"):
++                    raise VideoGenError("Song lip-sync requires an audio-timed H3 screenplay")
++                prepare_song_segments(compiled_models["h3"], plan)
+             artifact = {
+                 "schema_version": 1,
+                 "created_at": datetime.now().astimezone().isoformat(),
+                 "settings": {
++                    "source_audio": str(args.source_audio) if args.source_audio else None,
+                     "raw_prompt": args.prompt,
+                     "model": args.model,
+                     "mode": args.mode,
+@@ -8743,12 +8774,14 @@
+                 dialogue_guard_seconds = h3_dialogue_lead_in_seconds()
+                 dialogue_guard_required = (
+                     model == "h3"
++                    and not args.source_audio
+                     and has_segment_speech
+                     and dialogue_guard_seconds > 0
+                     and h3_dialogue_opening_guard_enabled(segment["index"])
+                 )
+                 qwen_opening_stabilizer_required = (
+                     args.stabilize_qwen_opening
++                    and not args.source_audio
+                     and model == "h3"
+                     and segment["index"] == 1
+                 )
+@@ -9033,7 +9066,12 @@
+                 print(f"Completed segment: {output}", flush=True)
+ 
+             transitions = [str(segment["transition"]) for segment in prepared]
+-            if len(segment_paths) > 1:
++            if args.source_audio and len(segment_paths) > 1:
++                from video_source_audio import assemble_song_video
++                final_output = assemble_song_video(ffmpeg_executable(), segment_paths, prepared,
++                    run_root / model / "song-video.mp4")
++                final_validation = validate_video(final_output)
++            elif len(segment_paths) > 1:
+                 final_output = run_root / model / f"{model}_final.mp4"
+                 final_validation = assemble_segments(
+                     segment_paths,
+@@ -9045,12 +9083,21 @@
+             else:
+                 final_output = segment_paths[0]
+                 final_validation = validations[0]
++            if args.source_audio:
++                from video_source_audio import mux_original_song
++                final_output = mux_original_song(ffmpeg_executable(), final_output,
++                    args.source_audio, run_root / model / "song-final.mp4",
++                    prepared[0]["source_audio_start_seconds"],
++                    sum(item["source_audio_frames"] for item in prepared))
++                final_validation = validate_video(final_output)
++                if final_validation.get("decoded_video_frames") != sum(item["source_audio_frames"] for item in prepared):
++                    raise VideoGenError("Song video frame count no longer matches the original audio timeline")
+             loop_optimization: dict[str, Any] | None = None
+             auto_loop_trim_enabled = (
+                 os.environ.get("VIDEO_H3_AUTO_LOOP_TRIM", "1").casefold()
+                 not in {"0", "false", "no", "off"}
+             )
+-            if auto_loop_trim_enabled and should_auto_optimize_h3_loop(
++            if not args.source_audio and auto_loop_trim_enabled and should_auto_optimize_h3_loop(
+                 model=model,
+                 segment_count=len(prepared),
+                 has_first_frame=bool(input_name),
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -1471,6 +1471,7 @@
+                         {"id": self.image_job["id"], "lease_id": self.image_job["lease_id"]}
+                         if self.image_job else None
+                     ),
++                    "source_audio_version": 1,
+                     "recovery_version": 3,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+@@ -2208,6 +2209,9 @@
+                 try:
+                     planner_model, plan_identity = await self.upload_local_plan(job, plan)
+                     job["plan_identity"] = plan_identity
++                    if job.get("has_source_audio"):
++                        plan_path, planner_model, plan, _ = await self.request_frontier_plan(job)
++                        planner_args = ["--frontier-plan", str(plan_path)]
+                 except Exception as exc:
+                     print(
+                         f"WARNING: Could not share the local screenplay for reference discovery ({exc}); "
+@@ -2459,11 +2463,15 @@
+                     derived_frames[str(segment_index)] = str(path)
+                 if derived_frames:
+                     self.save_journal(segment_keyframes=derived_frames)
++        song_args = []
++        if job.get("has_source_audio"):
++            song_args = ["--source-audio", str(await self.request_job_source_audio(job))]
+         command = [
+             console_python_executable(),
+             "-s",
+             str(GENERATOR),
+             *MODEL_ARGS[str(job["model"])],
++            *song_args,
+             *planner_guidance_args(job),
+             *requested_duration_args(job),
+             *planner_args,
+@@ -2684,6 +2692,37 @@
+         temporary.replace(destination)
+         return destination, provider, model, cached
+ 
++    async def request_job_source_audio(self, job: dict[str, Any]) -> Path:
++        job_id = str(job["id"])
++        url = re.sub(r"^ws(s?)://", lambda match: "http" + match[1] + "://", self.broker_url)
++        url = re.sub(r"/v1/worker$", f"/v1/worker/jobs/{job_id}/source-audio", url)
++        destination = SCRIPT_DIR / "worker_audio" / f"{job_id}.wav"
++        destination.parent.mkdir(parents=True, exist_ok=True)
++        temporary = destination.with_suffix(".part")
++        try:
++            async with self.http_session.post(url, json={}, headers=self.worker_headers(),
++                    timeout=aiohttp.ClientTimeout(total=120, connect=20)) as response:
++                if response.status != 200:
++                    raise RuntimeError(f"Song service returned HTTP {response.status}")
++                if response.headers.get("content-type", "").split(";", 1)[0] != "audio/wav":
++                    raise RuntimeError("Song service returned an invalid audio type")
++                size = 0
++                with temporary.open("wb") as handle:
++                    async for chunk in response.content.iter_chunked(65536):
++                        size += len(chunk)
++                        if size > 25 * 1024 * 1024:
++                            raise RuntimeError("Song exceeds 25 MiB")
++                        handle.write(chunk)
++            import wave
++            with wave.open(str(temporary), "rb") as audio:
++                duration = audio.getnframes() / audio.getframerate()
++                if not 4 <= duration <= 120 or abs(duration - float(job["source_audio_seconds"])) > .05:
++                    raise RuntimeError("Song duration does not match the job")
++            temporary.replace(destination)
++            return destination
++        finally:
++            temporary.unlink(missing_ok=True)
++
+     async def request_job_source_image(
+         self,
+         job: dict[str, Any],
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -92,7 +92,7 @@
+     return destination
+ 
+ 
+-def normalize_clip(source: Path, destination: Path) -> Path:
++def normalize_clip(source: Path, destination: Path, song_frames: int | None = None) -> Path:
+     """Use a common timebase, geometry and audio layout before stream concatenation."""
+     import av
+     with av.open(str(source)) as container:
+@@ -100,11 +100,16 @@
+     inputs = ['-i', str(source)]
+     if not has_audio:
+         inputs += ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']
+-    media_command([*inputs, '-map', '0:v:0', '-map', '0:a:0' if has_audio else '1:a:0',
++    media_command([*inputs, '-map', '0:v:0',
++        *(['-an', '-frames:v', str(song_frames)] if song_frames else ['-map', '0:a:0' if has_audio else '1:a:0']),
+         '-vf', 'scale=960:720:force_original_aspect_ratio=decrease,pad=960:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24',
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
+-        '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest', str(destination)])
++        *([] if song_frames else ['-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest']), str(destination)])
+     duration(destination)
++    if song_frames:
++        with av.open(str(destination)) as container:
++            if container.streams.video[0].frames != song_frames:
++                raise RuntimeError('Song scene frame count does not match the audio timeline')
+     return destination
+ 
+ 
+@@ -215,6 +220,7 @@
+             save_image(source, path)
+             source_paths.append(path)
+         plan = prepared['plan']
++        song = await worker.request_job_source_audio(job) if job.get('has_source_audio') else None
+         clips, artifacts = [], []
+         for index, segment in enumerate(plan['segments']):
+             scene_root = root / f'scene-{index}'
+@@ -370,6 +376,7 @@
+                     scene['video_attempts'] = scene.get('video_attempts', 0) + 1
+                     worker.save_journal(run_dir=None, pid=None)
+                     command = [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[renderer],
++                        *(['--source-audio', str(song)] if song else []),
+                         '--frontier-plan', str(plan_path), '--approved-plan-only', '--image', str(image), '--keyframe', 'never',
+                         '--seed', str((stable_job_seed(job['id']) + index * 101 + scene['video_attempts'] + scene.get('cycles', 0) * 1009) % (2 ** 63)),
+                         'Render the supplied approved scene.']
+@@ -414,8 +421,15 @@
+             scene_root = root / f'scene-{index}'
+             original = Path(scene['video_path'])
+             artifacts.append({'sha256': digest(original)})
+-            clips.append(await asyncio.to_thread(normalize_clip, original, scene_root / 'normalized.mp4'))
++            if song:
++                clips.append(await asyncio.to_thread(normalize_clip, original, scene_root / 'normalized.mp4', segment['source_audio_frames']))
++            else:
++                clips.append(await asyncio.to_thread(normalize_clip, original, scene_root / 'normalized.mp4'))
+         final = await asyncio.to_thread(join_clips, clips, root / 'final.mp4')
++        if song:
++            from video_source_audio import mux_original_song
++            final = await asyncio.to_thread(mux_original_song, ffmpeg(), final, song, root / 'song-final.mp4',
++                0.0, int(plan['source_audio']['output_frames']))
+         delivery = await worker.prepare_delivery(final, job['id'], duration(final))
+         await asyncio.to_thread(duration, delivery)
+         await request('quality', {'format': checkpoint['format'], 'result_sha256': digest(delivery), 'artifacts': artifacts})

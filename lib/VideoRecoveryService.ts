@@ -1,3 +1,4 @@
+import { pinVideoPlanToAudio } from './VideoSourceAudio.js';
 import { createFrontierVideoPlan, FrontierPlannerRejectedError, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
 import { VideoFrontierCallOptions } from './VideoUsage.js';
 import { VideoModelId } from './VideoProtocol.js';
@@ -23,6 +24,7 @@ function localPlanRequired(reasonCode: string, promptAnalysis: Record<string, an
 export async function prepareRecoveryPlan(input: {
     prompt: string; model: VideoModelId; requester: string; sources: VideoPlanSourceImage[];
     options: VideoFrontierCallOptions; planner?: typeof createFrontierVideoPlan;
+    sourceAudioSeconds?: number;
     requireSourceIdentity?: boolean; requireOriginalFirstFrame?: boolean;
 }): Promise<any> {
     if ((input.requireSourceIdentity || input.requireOriginalFirstFrame) && !input.sources.length) {
@@ -50,6 +52,7 @@ export async function prepareRecoveryPlan(input: {
                 throw new Error('The screenplay did not retain the required original portrait as its opening frame.');
             }
             repairVideoTiming(plan, 15, 5);
+            if (input.sourceAudioSeconds) pinVideoPlanToAudio(plan, input.sourceAudioSeconds);
             const contract = approvedRecoveryContract(plan, prompt, notice, useSources);
             if (input.requireSourceIdentity || input.requireOriginalFirstFrame) contract.source_reference_required = true;
             if (input.requireOriginalFirstFrame) contract.original_first_frame = true;
