@@ -36,6 +36,7 @@ import {
     renderDot,
     initDot,
 } from './Dot.js';
+import { fetchGcp2Snapshot, Gcp2RateLimitError, Gcp2Snapshot } from './Gcp2.js';
 
 import {
     chunk,
@@ -2410,13 +2411,20 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     let currentDotColor = '#000000';
     let currentDotValue = 0;
     let dot;
+    let snapshot: Gcp2Snapshot;
 
     try {
+        snapshot = await fetchGcp2Snapshot();
         [ [ , dotGraph ], [ currentDotColor, currentDotValue, dot ] ] = await Promise.all([
-            renderDotGraph(timeSpan * -1),
-            renderDot(),
+            renderDotGraph(timeSpan * -1, snapshot),
+            renderDot(snapshot),
         ]);
     } catch (err) {
+        if (err instanceof Gcp2RateLimitError) {
+            const seconds = Math.max(1, Math.ceil((err.retryAt - Date.now()) / 1000));
+            await msg.reply(`The dot provider is busy right now. Please try again in ${seconds} seconds.`);
+            return;
+        }
         await msg.reply(`Failed to get dot data :( [ ${(err as any).toString()} ]`);
         return;
     }
@@ -2456,6 +2464,11 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
         .setThumbnail('attachment://dot.png')
         .setImage('attachment://dot-graph.png')
         .setDescription(description);
+
+    if (snapshot.stale) {
+        embed.setFooter({ text: 'Provider rate limited · Showing a cached reading from' })
+            .setTimestamp(snapshot.fetchedAt);
+    }
 
     await (msg.channel as TextChannel).send({
         embeds: [embed],
