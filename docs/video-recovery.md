@@ -98,8 +98,9 @@ Authorized regeneration increments a delivery revision and replaces attachments
 on the existing Discord message; stale delivery acknowledgments cannot complete
 the new revision.
 
-Recovery performance telemetry records one span per scene render attempt, GPU
-admission wait, final upload, output duration, and completed-job service time.
+Recovery performance telemetry records one span per scene render attempt, H3
+sampling and other ComfyUI stages, GPU admission wait, final upload, output
+duration, and completed-job service time.
 Telemetry upload is best effort and cannot prevent delivery. The desktop change
 is archived in `desktop/video-recovery-telemetry.patch` with exact before/after
 hashes; `scripts/apply-video-recovery-telemetry-desktop.py --check` verifies it
