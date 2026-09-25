@@ -1,0 +1,129 @@
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -382,10 +382,14 @@
+                         'Render the supplied approved scene.']
+                     scene['render_interrupted'] = True
+                     await save()
++                    render_started = time.monotonic()
+                     try:
+                         code = await worker.run_reserved_command(command)
+                         output = worker.find_output(renderer) if code == 0 else None
+                     finally:
++                        worker.add_span('worker', f'generator_attempt_{scene["video_attempts"]}',
++                                        time.monotonic() - render_started, segment_index=index,
++                                        metadata={'renderer': renderer})
+                         await release_recovery_reservation(worker)
+                     scene.pop('render_interrupted', None)
+                     await save()
+@@ -431,10 +435,31 @@
+             final = await asyncio.to_thread(mux_original_song, ffmpeg(), final, song, root / 'song-final.mp4',
+                 0.0, int(plan['source_audio']['output_frames']))
+         delivery = await worker.prepare_delivery(final, job['id'], duration(final))
+-        await asyncio.to_thread(duration, delivery)
++        delivery_duration = await asyncio.to_thread(duration, delivery)
+         await request('quality', {'format': checkpoint['format'], 'result_sha256': digest(delivery), 'artifacts': artifacts})
+         await worker.send({'type': 'event', 'event': 'uploading', 'job_id': job['id']})
++        upload_started = time.monotonic()
+         await worker.upload(job['id'], delivery)
++        worker.add_span('worker', 'result_upload', time.monotonic() - upload_started)
++        if worker.job_metrics:
++            try:
++                import av
++                with av.open(str(delivery)) as container:
++                    video = container.streams.video[0]
++                    width, height = video.width, video.height
++                    fps = float(video.average_rate) if video.average_rate else None
++                worker.job_metrics['output'].update({
++                    'bytes': delivery.stat().st_size, 'duration_seconds': delivery_duration,
++                    'width': width, 'height': height, 'fps': fps,
++                    'segment_count': len(plan['segments']), 'source_image': bool(source_paths),
++                })
++                queue_wait = sum(span['duration_seconds'] for span in worker.job_metrics['spans']
++                                 if span['name'] == 'gpu_queue_wait')
++                worker.job_metrics['total_seconds'] = max(0.01, round(time.time() - started - queue_wait, 3))
++                worker.job_metrics['environment']['warm_model_after'] = worker.warm_model
++                await worker.upload_metrics(job['id'], worker.job_metrics)
++            except Exception as error:
++                print(f'WARNING: Could not store recovery performance telemetry ({error}).', flush=True)
+         notice = prepared.get('notice', '')
+         if any(scene.get('renderer') != job['model'] for scene in checkpoint['scenes'].values()):
+             notice = (notice + ' An alternate video renderer recovered the scene.').strip()
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -56,6 +56,25 @@
+ 
+     def test_one_targeted_retry_can_succeed(self):
+         self.exercise(render_failures=1)
++
++    def test_recovery_uploads_metrics_for_each_scene(self):
++        worker = self.exercise(continuation=True)
++        worker.upload_metrics.assert_awaited_once()
++        job_id, metrics = worker.upload_metrics.await_args.args
++        self.assertEqual(job_id, 'test-job')
++        self.assertEqual(metrics['output']['segment_count'], 2)
++        self.assertGreater(metrics['output']['duration_seconds'], 0)
++        self.assertGreater(metrics['output']['bytes'], 0)
++        self.assertGreater(metrics['total_seconds'], 0)
++        self.assertEqual([(span['segment_index'], span['name']) for span in metrics['spans']
++                          if span['name'].startswith('generator_attempt_')],
++                         [(0, 'generator_attempt_1'), (1, 'generator_attempt_1')])
++
++    def test_telemetry_outage_does_not_block_video_delivery(self):
++        worker = self.exercise(telemetry_outage=True)
++        worker.upload.assert_awaited_once()
++        worker.upload_metrics.assert_awaited_once()
++        worker.wait_and_send_terminal.assert_awaited_once()
+ 
+     def test_second_failed_render_stops_without_uploading_a_storyboard(self):
+         self.exercise(render_failures=2)
+@@ -177,6 +196,8 @@
+                 return True
+             worker = types.SimpleNamespace(broker_url='wss://test/v1/worker', http_session=Session(),
+                 cancel_reason=None, journal={}, worker_headers=lambda: {}, begin_metrics=mock.Mock(),
++                job_metrics={'output': {}, 'environment': {}, 'spans': []}, warm_model=None,
++                add_span=mock.Mock(), upload_metrics=mock.AsyncMock(),
+                 save_journal=mock.Mock(), send=mock.AsyncMock(), ensure_gpu_reservation=mock.AsyncMock(side_effect=admit),
+                 run_reserved_command=mock.AsyncMock(side_effect=run), create_local_plan=create_local_plan,
+                 find_output=mock.Mock(return_value=candidate), finish_gpuq_reservation=mock.AsyncMock(),
+@@ -374,7 +395,8 @@
+             self.assertIsNone(busy.image_job)
+ 
+     def exercise(self, original=False, render_failures=0, image_outage=False,
+-                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
++                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False,
++                 continuation=False, authored_cut=False, restart_exhausted=False, telemetry_outage=False):
+         from PIL import Image
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+@@ -424,11 +446,14 @@
+ 
+             worker = types.SimpleNamespace(broker_url='wss://test/v1/worker', http_session=Session(),
+                 cancel_reason=None, journal={}, worker_headers=lambda: {}, begin_metrics=mock.Mock(),
++                job_metrics={'output': {}, 'environment': {}, 'spans': []}, warm_model=None,
++                add_span=mock.Mock(),
+                 save_journal=mock.Mock(), send=mock.AsyncMock(), ensure_gpu_reservation=mock.AsyncMock(),
+                 run_reserved_command=mock.AsyncMock(side_effect=[1] * render_failures + [0] * 4),
+                 find_output=mock.Mock(return_value=candidate), finish_gpuq_reservation=mock.AsyncMock(),
+                 stop_gpu_monitor=mock.AsyncMock(), prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_args: path),
+                 upload=mock.AsyncMock(side_effect=RuntimeError('upload offline') if upload_outage else None),
++                upload_metrics=mock.AsyncMock(side_effect=RuntimeError('telemetry offline') if telemetry_outage else None),
+                 wait_and_send_terminal=mock.AsyncMock(), clear_journal=mock.Mock(), send_ready=mock.AsyncMock(),
+                 fail_current=mock.AsyncMock(), finish_cancelled_job=mock.AsyncMock())
+             async def admit(job):
+@@ -444,6 +469,8 @@
+                 renderers.append(job['model'])
+                 return True
+             worker.ensure_gpu_reservation.side_effect = admit
++            worker.add_span.side_effect = lambda source, name, seconds, **kwargs: worker.job_metrics['spans'].append({
++                'source': source, 'name': name, 'duration_seconds': seconds, **kwargs})
+             fake = types.SimpleNamespace(SCRIPT_DIR=root, MODEL_ARGS={'minimax': ['--model', 'h3'], 'ltx': ['--model', 'ltx']},
+                 GENERATOR=root / 'generator.py', console_python_executable=lambda: sys.executable,
+                 atomic_json=lambda path, value: path.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8'), stable_job_seed=lambda _: 1)
+@@ -492,6 +519,7 @@
+                     self.assertEqual(worker.run_reserved_command.await_count, 2)
+                 if render_failures == 1: self.assertEqual(renderers, ['minimax', 'minimax'])
+                 self.assertGreater(recovery.duration(root / 'worker_recovery/test-job/final.mp4'), 0)
++                return worker
+ 
+ 
+ if __name__ == '__main__':

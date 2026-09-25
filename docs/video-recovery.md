@@ -98,6 +98,14 @@ Authorized regeneration increments a delivery revision and replaces attachments
 on the existing Discord message; stale delivery acknowledgments cannot complete
 the new revision.
 
+Recovery performance telemetry records one span per scene render attempt, GPU
+admission wait, final upload, output duration, and completed-job service time.
+Telemetry upload is best effort and cannot prevent delivery. The desktop change
+is archived in `desktop/video-recovery-telemetry.patch` with exact before/after
+hashes; `scripts/apply-video-recovery-telemetry-desktop.py --check` verifies it
+against an installed worker. The live desktop source was updated on September 25,
+2026. A running worker must restart before it loads the change.
+
 ## Desktop installation and Qwen
 
 Run `python3 scripts/apply-video-recovery-desktop.py --check`, then run it without
