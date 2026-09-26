@@ -15,6 +15,24 @@ prompt-level identity. Matching is case-insensitive. Text conditioning cannot
 guarantee identical synthesized voices; no audio reference conditioning or voice
 replacement is introduced here.
 
+Frontier dialogue staging respects an explicit `off-screen` or `voice-over`
+description in a speaker's profile. Those turns remain audible without adding a
+visible speaker or making the pictured character lip-sync the narrator's words.
+An explicit `on-screen` or `off-screen` in a turn's `dialogue.delivery` overrides
+the profile's default placement for that turn, while keeping its voice identity.
+Other speakers in the same shot keep their own visible performance. Restaging a
+saved plan replaces the old compiler-generated staging suffix, including the
+previous unconditional visible-speaker instruction. Plans without explicit
+placement retain the existing visible-speaker default.
+
+The frontier planner also preserves vocal gender/presentation, age range and
+register along with the existing accent and texture, and keeps narrator identity
+separate from the pictured character. These changes use the existing planning
+call and renderer; they add no TTS service, model call, or render stage. Normal
+camera changes already stay within a continuous segment when the duration and
+action permit. Independent renders can still drift in voice identity; this is
+prompt consistency, not an audio voice lock.
+
 Each segment selects `audio_transition` independently from its picture transition:
 
 | Value | Picture cut or continuation | Picture dissolve |
