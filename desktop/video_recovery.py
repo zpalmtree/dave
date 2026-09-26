@@ -220,6 +220,11 @@ async def run_recovery_job(worker, job: dict) -> None:
             scene_root = root / f'scene-{index}'
             scene_root.mkdir(exist_ok=True)
             scene = checkpoint['scenes'].setdefault(str(index), {})
+            # Original references never get replaced by a generated continuation.
+            # A text-only job uses its first accepted opening as its permanent anchor.
+            identity_paths = source_paths or ([root / 'scene-0' / 'opening.png'] if index > 0 else [])
+            identity_payload = ({'identity_anchor': data_image(identity_paths[0])}
+                                if index > 0 and not source_paths else {})
             if (not scene.get('video_accepted') and render_budget_used(scene)
                     and not scene.get('pending_video') and not scene.get('render_interrupted')):
                 raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
@@ -242,7 +247,7 @@ async def run_recovery_job(worker, job: dict) -> None:
                 aspect_image = (root / 'scene-0' / 'opening.png') if previous.get('image_accepted') else (
                     source_paths[-1] if source_paths else None)
                 atomic_json(spec, {'prompt': keyframe.get('prompt', ''), 'motion_contract': keyframe.get('motion_contract') or {},
-                    'references': [str(source) for source in source_paths] if directive.get('use_references') else [],
+                    'references': [str(source) for source in identity_paths] if directive.get('use_references') else [],
                     'aspect_image': str(aspect_image) if aspect_image else None})
                 await run_local_step(worker, job, f'scene-{index}-local-opening-{attempt}-{int(time.time())}',
                     [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[job['model']],
@@ -270,9 +275,27 @@ async def run_recovery_job(worker, job: dict) -> None:
                     seconds = await asyncio.to_thread(duration, previous)
                     await asyncio.to_thread(media_command, ['-ss', str(max(0, seconds - .15)),
                         '-i', str(previous), '-frames:v', '1', str(image)])
-                    scene['pending_image'] = digest(image)
-                    scene['image_attempts'] = 1
-                    scene['image_source'] = 'continuation'
+                    frame_hash = digest(image)
+                    decision = scene.get('continuity')
+                    if not decision or scene.get('continuity_frame_hash') != frame_hash:
+                        await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
+                                           'progress': None, 'stage': f'Checking returning characters for scene {index + 1}'})
+                        decision = await request('continuity', {'segment_index': index,
+                            'frame': data_image(image), **identity_payload})
+                        if (decision.get('action') not in ('continue', 'reanchor')
+                                or not isinstance(decision.get('identity_description'), str)):
+                            raise RuntimeError('Character continuity service returned no usable decision.')
+                        scene['continuity'] = decision
+                        scene['continuity_frame_hash'] = frame_hash
+                    if decision['action'] == 'continue':
+                        scene['pending_image'] = frame_hash
+                        scene['image_attempts'] = 1
+                        scene['image_source'] = 'continuation'
+                    else:
+                        scene['image_issues'] = ['Restore the original recurring character identity: '
+                                                 + decision['identity_description']]
+                        await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
+                                           'progress': None, 'stage': f'Restoring original characters for scene {index + 1}'})
                     await save()
                 while scene.get('pending_image') or scene.get('image_attempts', 0) < 2:
                     pending = scene.get('pending_image')
@@ -284,7 +307,8 @@ async def run_recovery_job(worker, job: dict) -> None:
                         scene['image_attempts'] = scene.get('image_attempts', 0) + 1
                         await save()
                         try:
-                            value = await request('image', {'segment_index': index, 'correction': scene.get('image_issues', [])})
+                            value = await request('image', {'segment_index': index,
+                                'correction': scene.get('image_issues', []), **identity_payload})
                             if value.get('local_image_required'):
                                 await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'], 'progress': None,
                                                    'stage': f'Composing scene {index + 1} opening locally'})
@@ -338,6 +362,12 @@ async def run_recovery_job(worker, job: dict) -> None:
                     one = copy.deepcopy(plan)
                     one['segments'] = [copy.deepcopy(segment)]
                     one['segments'][0]['transition'] = 'start'
+                    identity_description = (scene.get('continuity') or {}).get('identity_description', '')
+                    if identity_description:
+                        for shot in one['segments'][0]['shots']:
+                            shot['visual'] += (' Recurring cast identity, only for characters appearing in this shot; '
+                                'retain these original features except for explicitly requested changes: '
+                                + identity_description)
                     if index > 0:
                         one['keyframe'] = {'recommended': False,
                             'reason': 'Use the accepted opening image for this scene.',

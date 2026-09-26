@@ -2,6 +2,7 @@ import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDE
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
+import { checkVideoCharacterContinuity, decodeContinuityImage, validateContinuityDecision } from './VideoCharacterContinuity.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { execFile } from 'child_process';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
@@ -134,6 +135,7 @@ interface BrokerOptions {
     sourceVideoDownloader?: typeof storeVideoSourceClip;
     recoveryEnabled?: boolean;
     recoveryPlanner?: typeof prepareRecoveryPlan;
+    characterContinuityChecker?: typeof checkVideoCharacterContinuity;
     host: string;
     port: number;
     dbPath: string;
@@ -5487,6 +5489,25 @@ export class VideoBroker {
                 return;
             }
             const index = Number(body.segment_index);
+            if (operation === 'continuity') {
+                if (!Number.isInteger(index) || index < 1 || index >= prepared.plan.segments.length
+                    || prepared.plan.segments[index].transition !== 'continue') throw new Error('Invalid continuity segment.');
+                const anchors = prepared.contract.use_source_images && sources.length ? sources
+                    : [decodeContinuityImage(body.identity_anchor)];
+                const frame = decodeContinuityImage(body.frame);
+                const key = recoveryHash({ contract: prepared.contract_hash, index,
+                    anchors: anchors.map(anchor => createHash('sha256').update(anchor.data).digest('hex')),
+                    frame: createHash('sha256').update(frame.data).digest('hex') });
+                state.continuity ||= {};
+                if (state.continuity[index]?.key !== key) {
+                    const decision = validateContinuityDecision(await (this.options.characterContinuityChecker
+                        || checkVideoCharacterContinuity)(prepared.plan, index, anchors, frame, options));
+                    state.continuity[index] = { key, ...decision };
+                    await persist();
+                }
+                writeJson(res, 200, state.continuity[index]);
+                return;
+            }
             if (operation === 'image' || operation === 'review') {
                 if (!Number.isInteger(index) || index < 0 || index >= prepared.plan.segments.length) throw new Error('Invalid segment.');
                 const segment = prepared.plan.segments[index];
@@ -5499,15 +5520,23 @@ export class VideoBroker {
                         segments: prepared.plan.segments.map((value: any, position: number) => position === index
                             ? { ...value, transition: 'cut' } : value),
                     }, index + 1);
+                    const continuity = state.continuity?.[index];
                     const keyframe = { ...scenePlan.keyframe, recommended: true,
                         prompt: `${scenePlan.keyframe?.prompt || segment.shots[0].visual} Create only this scene's opening instant; later actions and camera reveals need not already be visible. ${Array.isArray(body.correction) ? body.correction.slice(0, 5).map(String).join('; ').slice(0, 1000) : ''}` };
-                    const references: VideoKeyframeReference[] = prepared.contract.use_source_images
-                        ? sources.map((source, sourceIndex) => ({
-                            label: sourceIndex ? 'Attached scene and all its subjects' : 'Original identity',
-                            kind: sourceIndex ? 'object' : 'identity',
-                            visualFactsToPreserve: sourceIndex ? 'Keep every main subject and story-defining prop recognizable.' : 'Preserve the original person and clothing.',
-                            bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
-                        })) : [];
+                    if (continuity?.action === 'reanchor') {
+                        keyframe.prompt += ` Restore the recurring cast from the permanent original references: ${continuity.identity_description}.`
+                            + ' Stage the earliest recognizable instant of their return in this scene, preserving the planned setting and requested transformations.'
+                            + ' The original background and pose are not this new scene. Do not invent a replacement face.';
+                    }
+                    const identitySources = prepared.contract.use_source_images && sources.length ? sources
+                        : index > 0 && continuity?.action === 'reanchor' && body.identity_anchor
+                            ? [decodeContinuityImage(body.identity_anchor)] : [];
+                    const references: VideoKeyframeReference[] = identitySources.map((source, sourceIndex) => ({
+                        label: sourceIndex ? 'Attached scene and all its subjects' : 'Original identity',
+                        kind: sourceIndex ? 'object' : 'identity',
+                        visualFactsToPreserve: 'Preserve each recurring character’s original face and distinguishing appearance. Apply only the appearance changes explicitly requested for this scene; do not import absent cast or the original staging.',
+                        bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
+                    }));
                     // The frontier providers draw far better frames, and a single scene of a
                     // rejected story is often unobjectionable, so they always go first. A
                     // refusal or review veto has the desktop compose the opening with local
@@ -5573,7 +5602,7 @@ export class VideoBroker {
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
         if (await this.handleImageWorkerHttp(req, res, url)) return;
-        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|review|checkpoint|quality)$/.exec(url.pathname);
+        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);
             return;

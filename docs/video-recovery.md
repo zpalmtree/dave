@@ -53,11 +53,11 @@ replacement keyframe is rejected.
 
 Each scene gets an opening image. When the approved plan calls for the original
 portrait at frame zero, the worker uses that image directly. Continuing scenes
-use the previous accepted clip's final frame. New shots get their own opening
+check the previous accepted clip's final frame before using it. New shots get their own opening
 composition, without inheriting a frame-zero crop restriction. Generated openings
 still pass through the image generator's own identity and composition repair.
 
-No model reviews the rendered scenes. Model review rejected usable videos over
+No model reviews complete rendered scenes. Model review rejected usable videos over
 minor issues and added Sol, Gemini, or local Qwen calls to every scene, so it
 was removed on 2026-09-21. A scene is accepted once its render produces a
 decodable clip. The worker still records each scene's file hash with the broker
@@ -67,6 +67,35 @@ recovery pass. A render that produces no valid output is retried once with the
 requested renderer: two render attempts total per scene, across reconnects and
 recovery passes. The worker persists this count and stops before reserving more
 GPU work once it is exhausted.
+
+### Character continuity at clip boundaries
+
+Before a continuation, a focused Gemini Flash vision check compares the candidate
+frame against the permanent original references and the next scene's cast. It
+does not grade acting, effects, audio, or general quality. If the next scene needs
+a returning character whose identity is hidden, absent, unreadable, or clearly
+changed, the worker requests a new opening composed from the originals. The
+opening stages the earliest recognizable instant of the return, retaining the
+planned setting and requested transformations. MiniMax H3 still renders the clip.
+
+The original references never become the previous generated face. Text-only jobs
+use their first accepted opening as the permanent reference for this check and
+for replacement openings. New cast that does not recur from those references is
+not forced to resemble it. Recognizable continuations keep the previous frame.
+The check's character descriptions are repeated in the next clip's visual prompts.
+
+Decisions are cached by contract, segment, original reference bytes, and candidate
+frame bytes. Reconnects reuse them; a changed frame requires a fresh check. An
+unavailable or malformed check defers the job without consuming a render attempt
+or discarding completed clips. Existing accepted clips are not regenerated. This
+reduces drift at clip boundaries; it does not guarantee identity within a clip or
+add a final-video identity review.
+
+Install the desktop update with
+`python3 scripts/apply-video-character-continuity-desktop.py --check`, followed by
+the same command without `--check`. The hash-checked patch preserves the installed
+source-audio and telemetry updates. Deploy the broker first, then reload an idle
+desktop worker. Older workers can finish their current leases.
 
 Only actual generated video can pass final approval. Storyboards, slideshows,
 and caption cards are never substitutes for requested action. Exhausted render
