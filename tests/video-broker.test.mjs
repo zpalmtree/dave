@@ -884,6 +884,73 @@ test('replacement jobs retain the clip, target, and replacement image without pl
         /Discord attachment/);
 });
 
+test('long replacement clips wait for a segmented-edit worker', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-long-video-edit-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        sourceVideoDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 31 };
+        },
+        sourceImageDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'replacement.png');
+            writeFileSync(path, 'image');
+            return { path, bytes: 5, mimeType: 'image/png' };
+        },
+    });
+    await broker.start();
+    try {
+        const accepted = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'Keep the original timing.',
+                requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+                command_message_id: 'long-replacement', status_message_id: 'status',
+                source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4',
+                    name: 'clip.mp4', bytes: 1234 },
+                source_image: { url: 'https://cdn.discordapp.com/attachments/1/2/replacement.png',
+                    mime_type: 'image/png', bytes: 1234, name: 'replacement.png' },
+                video_edit_target: 'the red car' }),
+        });
+        assert.equal(accepted.status, 201);
+        const job = (await accepted.json()).job;
+        assert.equal(job.requested_duration_seconds, 31);
+        const connect = async version => {
+            const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+                headers: { authorization: 'Bearer worker-secret' },
+            });
+            const take = socketInbox(socket);
+            await new Promise((resolve, reject) => {
+                socket.once('open', resolve);
+                socket.once('error', reject);
+            });
+            socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
+                capabilities: ['minimax'], current_job: null, video_edit_version: version }));
+            await take(value => value.type === 'hello_ack');
+            return { socket, take };
+        };
+        const oldWorker = await connect(1);
+        await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
+        oldWorker.socket.close();
+        await new Promise(resolve => oldWorker.socket.once('close', resolve));
+        const newWorker = await connect(2);
+        try {
+            const lease = await newWorker.take(value => value.type === 'job');
+            assert.equal(lease.job.id, job.id);
+            assert.equal(lease.job.source_video_seconds, 31);
+        } finally {
+            newWorker.socket.close();
+        }
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('concurrent duplicate OALGO submissions retain both paid composition records', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-race-'));
     let arrived = 0, release;

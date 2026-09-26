@@ -1,5 +1,5 @@
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
-import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip } from './VideoSourceClip.js';
+import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
@@ -2824,7 +2824,9 @@ export class VideoBroker {
                 if (sourceImage || sourceAudio || sourceVideo) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
             }
-            const estimate = await this.runtimeEstimate(body.model as VideoModelId);
+            const baseEstimate = await this.runtimeEstimate(body.model as VideoModelId);
+            const editSegments = sourceVideo ? Math.ceil(sourceVideo.duration / VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS) : 1;
+            const estimate = { low: baseEstimate.low * editSegments, high: baseEstimate.high * editSegments };
             const now = nowSeconds();
             try {
                 await this.run(
@@ -4241,7 +4243,8 @@ export class VideoBroker {
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
              AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)
              AND (source_audio_path IS NULL OR ${this.worker.sourceAudioVersion >= 1 ? 1 : 0} = 1)
-             AND (source_video_path IS NULL OR ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR (source_video_seconds <= ${VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS} AND ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
+                  OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -5080,7 +5083,8 @@ export class VideoBroker {
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
              AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)
              AND (source_audio_path IS NULL OR ${this.worker.sourceAudioVersion >= 1 ? 1 : 0} = 1)
-             AND (source_video_path IS NULL OR ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR (source_video_seconds <= ${VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS} AND ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
+                  OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );

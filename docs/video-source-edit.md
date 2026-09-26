@@ -13,10 +13,10 @@ of input. `$oalgo` uses its built-in portrait if no replacement image is supplie
 Quote the subject if its name includes “with,” for example
 `replace "the woman with a red coat" with the attached image`.
 
-The source clip must be MP4, MOV, M4V, WebM, or MKV, 5–15 seconds, and no larger
-than 100 MiB. MiniMax H3 generates one continuous 5–15 second video per run;
-longer clips need separate renders joined at segment boundaries. The clip is
-downloaded to the broker before queueing so its Discord URL
+The source clip must be MP4, MOV, M4V, WebM, or MKV, 5–120 seconds, and no larger
+than 100 MiB. MiniMax H3 generates 5–15 seconds per run. Longer clips are split
+into frame-aligned segments, edited in order, and joined with the original audio.
+The clip is downloaded to the broker before queueing so its Discord URL
 cannot expire while it waits. The desktop normalizes it to 24 fps, tracks the
 named subject with SAM3.1, and rejects an empty or nearly full-frame mask.
 MiniMax H3 Ref2VA receives the replacement image. Fun ControlNet receives the
@@ -26,9 +26,10 @@ that region over the source frames and muxes the original soundtrack. AAC source
 audio is copied; other codecs are converted to AAC for Discord delivery.
 Delivery may compress the result to meet the channel's upload limit.
 
-This workflow edits one continuous shot. Cuts, a target hidden for much of the
-clip, or large differences in body shape can confuse automatic tracking and
-replacement. A portrait reference may produce a cropped body in a full-body
+Cuts, a target hidden for much of the clip, or large differences in body shape
+can confuse automatic tracking and replacement. Each segment tracks the target
+independently, so a visible seam can occur where two renders meet. A portrait
+reference may produce a cropped body in a full-body
 shot. The original video is retained outside the replacement region. The
 underlying H3 workflow uses the separate Ref2VA diffusion checkpoint, the Fun
 ControlNet Union 2.0 patch, and the SAM3.1 checkpoint on the Windows desktop.
