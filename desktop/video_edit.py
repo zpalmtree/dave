@@ -15,6 +15,7 @@ import numpy as np
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -113,8 +114,8 @@ def segmentation_graph(clip_name: str, target: str, prefix: str) -> dict:
     }
 
 
-def render_graph(clip_name: str, image_name: str, mask_name: str, target: str,
-                 direction: str, width: int, height: int, frames: int, prefix: str) -> dict:
+def render_graph(clip_name: str, image_name: str, mask_name: str, direction: str,
+                 width: int, height: int, frames: int, prefix: str) -> dict:
     graph = copy.deepcopy(json.loads(TEMPLATE.read_text(encoding="utf-8")))
     for name in ("114", "119", "120", "115", "105:121", "105:122",
                  "105:123", "105:125", "105:126"):
@@ -133,17 +134,17 @@ def render_graph(clip_name: str, image_name: str, mask_name: str, target: str,
                                   mask=["mask", 0], source_video=["source_frames", 0])
     graph["105:9"]["inputs"]["model"] = ["patched_model", 0]
     graph["105:9"]["inputs"]["steps"] = ["105:124", 0]
+    graph["105:124"]["inputs"]["value"] = 40
     graph["105:16"]["inputs"]["model"] = ["patched_model", 0]
     graph["105:107"]["inputs"]["expression"] = str(frames)
     graph["105:104"] = node("MiniMaxH3ReferenceToVideo",
                             clip=["105:13", 0], vae=["105:11", 0],
                             audio_vae=["105:24", 0],
-                            prompt=(f"<Video 1> is the source shot. Replace {target} with the subject in "
-                                    f"<Picture 1>. Keep the source shot's action, timing, camera movement, "
+                            prompt=("<Picture 1> is the new subject in the masked region. "
+                                    "Show that subject following the source shot's action, timing, camera movement, "
                                     f"lighting, and unmasked background. {direction}"),
                             width=width, height=height, length=frames, ref_image_size="match",
-                            **{"ref_images.ref_image_0": ["replacement", 0],
-                               "ref_videos.ref_video_0": ["source_frames", 0]})
+                            **{"ref_images.ref_image_0": ["replacement", 0]})
     graph["92"]["inputs"]["filename_prefix"] = prefix
     return graph
 
@@ -192,6 +193,35 @@ def mask_coverage(path: Path) -> float:
     if not samples:
         raise RuntimeError("Could not inspect the tracked replacement mask")
     return sum(samples) / len(samples) / 255
+
+
+def tracked_edit_mask(source: Path, destination: Path, width: int, height: int) -> None:
+    """Give the replacement room to differ from the tracked object's outline."""
+    with tempfile.TemporaryDirectory(prefix="video-edit-mask-") as directory:
+        raw = Path(directory) / "tracked.gray"
+        expanded = Path(directory) / "expanded.gray"
+        command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+                "-f", "rawvideo", "-pix_fmt", "gray", str(raw))
+        frame_bytes = width * height
+        with raw.open("rb") as incoming, expanded.open("wb") as outgoing:
+            while data := incoming.read(frame_bytes):
+                if len(data) != frame_bytes:
+                    raise RuntimeError("Tracked replacement mask ended mid-frame")
+                tracked = np.frombuffer(data, dtype=np.uint8).reshape(height, width) > 127
+                frame = np.zeros((height, width), dtype=np.uint8)
+                rows, columns = np.nonzero(tracked)
+                if rows.size:
+                    left, right = int(columns.min()), int(columns.max()) + 1
+                    top, bottom = int(rows.min()), int(rows.max()) + 1
+                    pad_x = max(24, round((right - left) * 0.15))
+                    pad_y = max(24, min(96, round(max(bottom - top, right - left) * 0.25)))
+                    frame[max(0, top - pad_y):min(height, bottom + pad_y),
+                          max(0, left - pad_x):min(width, right + pad_x)] = 255
+                outgoing.write(frame.tobytes())
+        command("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "rawvideo",
+                "-pix_fmt", "gray", "-video_size", f"{width}x{height}",
+                "-framerate", "24", "-i", str(expanded), "-an", "-c:v", "libx264",
+                "-crf", "0", "-pix_fmt", "yuv420p", str(destination))
 
 
 def rgb_frame(path: Path, seconds: float, width: int, height: int) -> np.ndarray:
@@ -254,12 +284,12 @@ def main() -> None:
         coverage = mask_coverage(mask_file)
         if coverage < 0.003 or coverage > 0.85:
             raise RuntimeError(f"Could not isolate '{args.target}' in the source clip (mask coverage {coverage:.1%}).")
-        mask_input.write_bytes(mask_file.read_bytes())
+        tracked_edit_mask(mask_file, mask_input, width, height)
         print("Rendering masked replacement with MiniMax H3", flush=True)
         rendered = run_graph(args.server, render_graph(normalized.name, replacement.name,
-                             mask_input.name, args.target, args.prompt, width, height,
+                             mask_input.name, args.prompt, width, height,
                              frames, f"video/edits/{run_id}-render"), "92", 7200)
-        reject_blank_edit(rendered, mask_file, normalized, args.image, duration, width, height)
+        reject_blank_edit(rendered, mask_input, normalized, args.image, duration, width, height)
         print("Restoring original soundtrack", flush=True)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         source_audio = audio_codec(args.clip)
@@ -269,7 +299,7 @@ def main() -> None:
                         ",gblur=sigma=2[mask];[1:v][mask]alphamerge[edited];" +
                         "[0:v][edited]overlay=shortest=1:format=auto[v]")
         command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(normalized),
-                "-i", str(rendered), "-i", str(mask_file), "-i", str(args.clip),
+                "-i", str(rendered), "-i", str(mask_input), "-i", str(args.clip),
                 "-filter_complex", filter_graph, "-map", "[v]", "-map", "3:a:0?",
                 "-t", f"{duration:.3f}", "-c:v", "libx264", "-crf", "18",
                 "-pix_fmt", "yuv420p", "-c:a", "copy" if source_audio == "aac" else "aac",
