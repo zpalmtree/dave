@@ -26,6 +26,8 @@ class VideoEditTests(unittest.TestCase):
             self.assertEqual(frames % 17, 5)
             self.assertEqual((width, height), (320, 180))
             self.assertEqual(video_edit.audio_codec(source), "aac")
+            self.assertEqual(video_edit.canvas(1920, 1080), (896, 512))
+            self.assertEqual(video_edit.canvas(320, 180), (288, 160))
             video_edit.normalized_clip(source, normalized, 320, 160, frames)
             info = json.loads(video_edit.command("ffprobe", "-v", "error", "-select_streams", "v:0",
                                                 "-show_entries", "stream=nb_frames,width,height",

@@ -27,4 +27,6 @@ This workflow edits one continuous shot. Cuts, a target hidden for much of the
 clip, or large differences in body shape can confuse automatic tracking and
 replacement. The original video is retained outside the tracked mask. The
 underlying H3 workflow uses the separate Ref2VA diffusion checkpoint, the Fun
-ControlNet patch, and the SAM3.1 checkpoint on the Windows desktop.
+ControlNet Union 2.0 patch, and the SAM3.1 checkpoint on the Windows desktop.
+Union 2.0 needs the compatibility patch in `desktop/minimax-h3-fun-v2-compat.patch`
+on ComfyUI v0.37.1; apply it before restarting an idle ComfyUI server.
