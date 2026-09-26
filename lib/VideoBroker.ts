@@ -5325,7 +5325,10 @@ export class VideoBroker {
                     if (state.prepared) {
                         state.prepared.plan.generation_notice = state.prepared.notice;
                         await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
-                            [JSON.stringify(state.prepared.plan), VIDEO_PLANNER_MODEL,
+                            [JSON.stringify(state.prepared.plan),
+                                typeof state.prepared.plan._planner_model === 'string'
+                                    ? state.prepared.plan._planner_model
+                                    : options.plannerModel || VIDEO_PLANNER_MODEL,
                                 JSON.stringify(state.prepared.contract.analysis), id]);
                         await persist();
                     }
