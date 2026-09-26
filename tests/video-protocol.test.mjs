@@ -23,6 +23,9 @@ import {
     videoJobDirection,
     videoSourceImageFromMessage,
     videoClipSourceImageFromMessage,
+    videoClipFromMessages,
+    videoAttachmentImageFromMessages,
+    parseVideoReplacement,
     videoSourceImageFromMessages,
     videoPollDelayMs,
     VIDEO_CANCEL_REACTION,
@@ -2274,11 +2277,11 @@ test('video clip attachments are sent for broker frame extraction', () => {
         name: 'Screen_Recording.mov',
         size: 75_128_885,
     };
-    const expected = { clip_url: clip.url, name: 'Screen_Recording.mov' };
+    const expected = { clip_url: clip.url, name: 'Screen_Recording.mov', bytes: clip.size };
     assert.equal(videoClipSourceImageFromMessage({ attachments: new Map() }), null);
     assert.deepEqual(
         videoClipSourceImageFromMessage({ attachments: new Map([['clip', { ...clip, contentType: null, name: 'x.mp4' }]]) }),
-        { clip_url: clip.url, name: 'x.mp4' },
+        { clip_url: clip.url, name: 'x.mp4', bytes: clip.size },
     );
     assert.throws(
         () => videoClipSourceImageFromMessage({ attachments: new Map([['a', clip], ['b', clip]]) }),
@@ -2306,6 +2309,18 @@ test('video clip attachments are sent for broker frame extraction', () => {
         ),
         expected,
     );
+    assert.deepEqual(videoClipFromMessages({ attachments: new Map() },
+        { attachments: new Map([['clip', clip]]) }), expected);
+    assert.equal(videoAttachmentImageFromMessages({ attachments: new Map([['clip', clip]]) },
+        { attachments: new Map([['image', image]]) }).url, image.url);
+});
+
+test('replacement target parsing supports quoted subjects and natural replacement prompts', () => {
+    assert.deepEqual(parseVideoReplacement('--replace "the woman in red" keep the soundtrack'),
+        { target: 'the woman in red', prompt: 'keep the soundtrack' });
+    assert.deepEqual(parseVideoReplacement('replace the blue car with the attached image'),
+        { target: 'the blue car', prompt: 'replace the blue car with the attached image' });
+    assert.throws(() => parseVideoReplacement('--replace person'), /Use --replace/);
 });
 
 test('video reply prompts preserve supplied text and handle missing or blank inputs', () => {

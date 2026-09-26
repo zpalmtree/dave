@@ -1,4 +1,5 @@
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
+import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
@@ -130,6 +131,7 @@ interface StoredVideoSourceImage {
 }
 
 interface BrokerOptions {
+    sourceVideoDownloader?: typeof storeVideoSourceClip;
     recoveryEnabled?: boolean;
     recoveryPlanner?: typeof prepareRecoveryPlan;
     host: string;
@@ -170,6 +172,7 @@ interface BrokerOptions {
 interface WorkerConnection {
     recoveryVersion: number;
     sourceAudioVersion: number;
+    videoEditVersion: number;
     socket: WebSocket;
     id: string;
     capabilities: VideoModelId[];
@@ -316,6 +319,9 @@ interface JobRow {
     planner_model: string | null;
     source_audio_path: string | null;
     source_audio_seconds: number | null;
+    source_video_path: string | null;
+    source_video_seconds: number | null;
+    video_edit_target: string | null;
     source_image_path: string | null;
     source_image_mime: string | null;
     source_image_bytes: number | null;
@@ -1545,6 +1551,9 @@ export class VideoBroker {
             planner_json TEXT,
             planner_model TEXT,
             source_image_path TEXT,
+            source_video_path TEXT,
+            source_video_seconds REAL,
+            video_edit_target TEXT,
             source_image_mime TEXT,
             source_image_bytes INTEGER,
             source_image_composite_path TEXT,
@@ -1647,6 +1656,8 @@ export class VideoBroker {
             ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'],
+            ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
+            ['video_edit_target', 'TEXT'],
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -2593,15 +2604,26 @@ export class VideoBroker {
             return { status: 400, body: { error: 'Missing Discord job identity.' } };
         }
         let sourceDescriptor: VideoSourceImageDescriptor | null;
+        let videoDescriptor: SubmittedVideoSourceClip | null;
         let audioDescriptor: SubmittedVideoSourceAudio | null;
         let compositeDescriptor: VideoSourceImageDescriptor | null;
         try {
             audioDescriptor = sourceAudioDescriptor(body.source_audio);
             if (audioDescriptor && body.model !== 'minimax') throw new Error('Song lip-sync is supported by MiniMax and OALGO.');
             sourceDescriptor = sourceImageDescriptor(body.source_image);
+            videoDescriptor = sourceClipDescriptor(body.source_video);
             compositeDescriptor = sourceImageDescriptor(body.source_image_composite);
         } catch (error) {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
+        }
+        const videoEditTarget = String(body.video_edit_target || '').trim();
+        if (videoDescriptor && (!videoEditTarget || videoEditTarget.length > 120
+            || !sourceDescriptor || isClipSourceImage(sourceDescriptor)
+            || audioDescriptor || compositeDescriptor || body.model !== 'minimax')) {
+            return { status: 400, body: { error: 'Video replacement needs a subject, one source clip, and one replacement image; separate audio and image composition are unsupported.' } };
+        }
+        if (!videoDescriptor && videoEditTarget) {
+            return { status: 400, body: { error: 'Video replacement needs a source clip.' } };
         }
         if (compositeDescriptor && (!sourceDescriptor
             || !isPresetSourceImage(sourceDescriptor)
@@ -2658,10 +2680,11 @@ export class VideoBroker {
         if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo'] : [])].includes(commandVariant)) {
             return { status: 400, body: { error: 'Invalid video command variant.' } };
         }
-        const sourceMode = compositeDescriptor ? 'preset_composite'
+        const sourceMode = videoDescriptor ? 'video_edit' : compositeDescriptor ? 'preset_composite'
             : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset' : 'attachment') : 'generated';
         const publicId = randomUUID();
-        const optimization = body.model === 'minimax' ? configuredVideoOptimization(commandVariant, publicId) : null;
+        const optimization = body.model === 'minimax' && !videoDescriptor
+            ? configuredVideoOptimization(commandVariant, publicId) : null;
         await this.run(`INSERT INTO video_submission_metrics(public_id, command_variant, source_mode, requested_at, received_at)
             VALUES(?,?,?,?,?)`, [publicId, commandVariant, sourceMode, requestedAt, receivedAt]);
         const submissionHooks = this.providerHooks({
@@ -2670,6 +2693,17 @@ export class VideoBroker {
             channel_id: String(body.channel_id), guild_id: body.guild_id ? String(body.guild_id) : null,
         });
         const directory = resolve(this.options.resultsDir, publicId);
+        let sourceVideo: StoredVideoSourceClip | null = null;
+        if (videoDescriptor) {
+            try {
+                sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory);
+                requestedDuration = sourceVideo.duration;
+            } catch (error) {
+                rmSync(directory, { recursive: true, force: true });
+                await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
+                return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
+            }
+        }
         let sourceAudio: StoredVideoSourceAudio | null = null;
         if (audioDescriptor) {
             try {
@@ -2777,7 +2811,7 @@ export class VideoBroker {
                 [String(body.command_message_id)],
             );
             if (existing) {
-                if (sourceImage || sourceAudio) rmSync(directory, { recursive: true, force: true });
+                if (sourceImage || sourceAudio || sourceVideo) rmSync(directory, { recursive: true, force: true });
                 return { status: 200, body: { job: (await this.views([existing]))[0], duplicate: true } };
             }
             const global = await this.get<{ count: number }>(
@@ -2785,7 +2819,7 @@ export class VideoBroker {
                 UNFINISHED_VIDEO_STATUSES,
             );
             if ((global?.count || 0) >= VIDEO_MAX_GLOBAL_JOBS) {
-                if (sourceImage || sourceAudio) rmSync(directory, { recursive: true, force: true });
+                if (sourceImage || sourceAudio || sourceVideo) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `The video queue is full (${VIDEO_MAX_GLOBAL_JOBS} jobs).` } };
             }
             const user = await this.get<{ count: number }>(
@@ -2794,7 +2828,7 @@ export class VideoBroker {
                 [String(body.requester_id), ...UNFINISHED_VIDEO_STATUSES],
             );
             if (!bypassUserLimit && (user?.count || 0) >= VIDEO_MAX_USER_JOBS) {
-                if (sourceImage || sourceAudio) rmSync(directory, { recursive: true, force: true });
+                if (sourceImage || sourceAudio || sourceVideo) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
             }
             const estimate = await this.runtimeEstimate(body.model as VideoModelId);
@@ -2809,11 +2843,12 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_audio_path, source_audio_seconds,
+                        source_video_path, source_video_seconds, video_edit_target,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2834,6 +2869,7 @@ export class VideoBroker {
                         now,
                         now,
                         sourceAudio?.path || null, sourceAudio?.duration || null,
+                        sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
@@ -2866,7 +2902,7 @@ export class VideoBroker {
                     });
                 }
             } catch (error) {
-                if (sourceImage || sourceAudio) rmSync(directory, { recursive: true, force: true });
+                if (sourceImage || sourceAudio || sourceVideo) rmSync(directory, { recursive: true, force: true });
                 throw error;
             }
             const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
@@ -2989,7 +3025,7 @@ export class VideoBroker {
     private async prepareInitialEstimate(publicId: string): Promise<VideoJobView | null> {
         let job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
         if (!job) return null;
-        if (!this.options.recoveryEnabled && ACTIVE_VIDEO_STATUSES.includes(job.status)) {
+        if (!job.source_video_path && !this.options.recoveryEnabled && ACTIVE_VIDEO_STATUSES.includes(job.status)) {
             try {
                 const { plan } = await this.ensurePlan(job, true);
                 await this.storePlanEstimate(job, plan);
@@ -4212,6 +4248,7 @@ export class VideoBroker {
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
              AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)
              AND (source_audio_path IS NULL OR ${this.worker.sourceAudioVersion >= 1 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -4223,7 +4260,7 @@ export class VideoBroker {
             && VIDEO_MODELS[candidates[1].model].generatorModel === this.worker.warmModel) {
             row = candidates[1];
         }
-        if (!this.preparationComplete(row)) this.schedulePreparation(row.public_id, false);
+        if (!row.source_video_path && !this.preparationComplete(row)) this.schedulePreparation(row.public_id, false);
     }
 
     private async cancelJob(id: string, requesterId: string, isAdmin: boolean): Promise<any> {
@@ -4377,6 +4414,9 @@ export class VideoBroker {
                 result_bytes: row.result_bytes,
                 has_source_audio: Boolean(row.source_audio_path),
                 source_audio_seconds: row.source_audio_seconds,
+                has_source_video: Boolean(row.source_video_path),
+                source_video_seconds: row.source_video_seconds,
+                video_edit_target: row.video_edit_target,
                 has_source_image: Boolean(row.source_image_path),
                 source_image_composition: row.source_image_composition || null,
                 created_at: row.created_at,
@@ -4439,6 +4479,7 @@ export class VideoBroker {
                         capabilities: hello.capabilities,
                         recoveryVersion: Number(hello.recovery_version) || 0,
                         sourceAudioVersion: Number(hello.source_audio_version) || 0,
+                        videoEditVersion: Number(hello.video_edit_version) || 0,
                         lastHeartbeat: Date.now(),
                         currentJob: hello.current_job,
                         ready: !hello.current_job,
@@ -5069,6 +5110,7 @@ export class VideoBroker {
             `SELECT * FROM video_jobs WHERE status = 'queued' AND model IN (${placeholders})
              AND COALESCE(recovery_next_at, 0) <= CAST(strftime('%s', 'now') AS INTEGER)
              AND (source_audio_path IS NULL OR ${this.worker.sourceAudioVersion >= 1 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -5086,7 +5128,7 @@ export class VideoBroker {
                 [nowSeconds(), oldest.public_id],
             );
         }
-        if (!this.options.recoveryEnabled && this.options.preplanQueuedJobs
+        if (!row.source_video_path && !this.options.recoveryEnabled && this.options.preplanQueuedJobs
             && !this.preparationComplete(row) && !this.preparationAttempted.has(row.public_id)) {
             this.schedulePreparation(row.public_id, true);
             return;
@@ -5125,6 +5167,9 @@ export class VideoBroker {
                 command_variant: row.command_variant,
                 has_source_audio: Boolean(row.source_audio_path),
                 source_audio_seconds: row.source_audio_seconds,
+                has_source_video: Boolean(row.source_video_path),
+                source_video_seconds: row.source_video_seconds,
+                video_edit_target: row.video_edit_target,
                 has_source_image: Boolean(row.source_image_path),
                 source_image_composition: row.source_image_composition || null,
                 lease_id: leaseId,
@@ -5620,6 +5665,19 @@ export class VideoBroker {
             }
             return;
         }
+        const sourceVideo = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/source-video$/.exec(url.pathname);
+        if (sourceVideo && req.method === 'POST') {
+            const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [sourceVideo[1]]);
+            if (!job || job.worker_id !== this.worker?.id || sourceVideo[1] !== this.worker.currentJob
+                || !this.workerLeaseMatches(req, job)) {
+                writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+            } else if (!job.source_video_path || !existsSync(job.source_video_path)) {
+                writeJson(res, 404, { error: 'The source video is unavailable.' });
+            } else {
+                writeImage(res, job.source_video_path, 'application/octet-stream', {});
+            }
+            return;
+        }
         const sourceAudio = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/source-audio$/.exec(url.pathname);
         if (sourceAudio && req.method === 'POST') {
             const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [sourceAudio[1]]);
@@ -5641,7 +5699,7 @@ export class VideoBroker {
                 writeJson(res, 409, { error: 'Job is not leased to this worker.' });
                 return;
             }
-            if (job.source_image_composition !== 'local_qwen') {
+            if (job.source_image_composition !== 'local_qwen' && !job.source_video_path) {
                 writeJson(res, 409, { error: 'This job does not require local Qwen source-image composition.' });
                 return;
             }
@@ -5911,12 +5969,12 @@ export class VideoBroker {
             `SELECT * FROM video_jobs
              WHERE status IN ('ready','delivered','failed','cancelled')
              AND COALESCE(delivered_at, completed_at, updated_at) < ?
-             AND (result_path IS NOT NULL OR source_image_path IS NOT NULL OR source_audio_path IS NOT NULL OR keyframe_path IS NOT NULL)`,
+             AND (result_path IS NOT NULL OR source_image_path IS NOT NULL OR source_audio_path IS NOT NULL OR source_video_path IS NOT NULL OR keyframe_path IS NOT NULL)`,
             [cutoff],
         );
         for (const row of rows) {
             try {
-                const storedPath = row.result_path || row.source_image_path || row.source_audio_path || row.keyframe_path;
+                const storedPath = row.result_path || row.source_image_path || row.source_audio_path || row.source_video_path || row.keyframe_path;
                 if (storedPath) rmSync(dirname(resolve(storedPath)), { recursive: true, force: true });
             } catch (error) {
                 console.warn(`Could not clean video result ${row.public_id}`, error);
@@ -5924,7 +5982,7 @@ export class VideoBroker {
             }
             await this.run('DELETE FROM video_segment_keyframes WHERE job_public_id = ?', [row.public_id]);
             await this.run(
-                `UPDATE video_jobs SET result_path = NULL, source_image_path = NULL, source_audio_path = NULL, keyframe_path = NULL,
+                `UPDATE video_jobs SET result_path = NULL, source_image_path = NULL, source_audio_path = NULL, source_video_path = NULL, keyframe_path = NULL,
                  updated_at = ? WHERE public_id = ?`,
                 [nowSeconds(), row.public_id],
             );

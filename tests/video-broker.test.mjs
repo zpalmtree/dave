@@ -21,6 +21,7 @@ import {
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtocol.js';
+import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
 
 test('authenticated owner submissions bypass the personal limit but retain the global cap', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-owner-limit-'));
@@ -793,6 +794,94 @@ test('the clip fallback frame comes from the Discord media proxy, not the CDN', 
         videoClipProxyFrameUrl('https://cdn.discordapp.com/attachments/1/2/clip.mov?ex=1&is=2&hm=3&'),
         'https://media.discordapp.net/attachments/1/2/clip.mov?ex=1&is=2&hm=3&format=webp&quality=lossless',
     );
+});
+
+test('replacement jobs retain the clip, target, and replacement image without planning a start frame', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        sourceVideoDownloader: async (_source, targetDirectory) => {
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 7.5 };
+        },
+        sourceImageDownloader: async (_source, targetDirectory) => {
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'replacement.png');
+            writeFileSync(path, 'image');
+            return { path, bytes: 5, mimeType: 'image/png' };
+        },
+    });
+    await broker.start();
+    const clip = { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4',
+        name: 'clip.mp4', bytes: 1234 };
+    const image = { url: 'https://cdn.discordapp.com/attachments/1/2/replacement.png',
+        mime_type: 'image/png', bytes: 1234, name: 'replacement.png' };
+    const submit = body => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+        method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'minimax', prompt: 'Keep the original timing.',
+            requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+            command_message_id: body.command_message_id, status_message_id: 'status', ...body }),
+    });
+    try {
+        const accepted = await submit({ command_message_id: 'replacement', source_video: clip,
+            source_image: image, video_edit_target: 'the red car' });
+        assert.equal(accepted.status, 201);
+        const job = (await accepted.json()).job;
+        assert.equal(job.has_source_image, true);
+        const row = await broker.get('SELECT source_video_path, source_video_seconds, video_edit_target FROM video_jobs WHERE public_id=?', [job.id]);
+        assert.equal(row.video_edit_target, 'the red car');
+        assert.equal(row.source_video_seconds, 7.5);
+        assert.equal(existsSync(row.source_video_path), true);
+        const rejected = await submit({ command_message_id: 'missing-image', source_video: clip,
+            video_edit_target: 'the red car' });
+        assert.equal(rejected.status, 400);
+        assert.match((await rejected.json()).error, /replacement image/);
+        const connect = async version => {
+            const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+                headers: { authorization: 'Bearer worker-secret' },
+            });
+            const take = socketInbox(socket);
+            await new Promise((resolve, reject) => {
+                socket.once('open', resolve);
+                socket.once('error', reject);
+            });
+            socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
+                capabilities: ['minimax'], current_job: null, video_edit_version: version }));
+            await take(value => value.type === 'hello_ack');
+            return { socket, take };
+        };
+        const oldWorker = await connect(0);
+        await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
+        oldWorker.socket.close();
+        await new Promise(resolve => oldWorker.socket.once('close', resolve));
+        const editWorker = await connect(1);
+        try {
+            const lease = await editWorker.take(value => value.type === 'job');
+            assert.equal(lease.job.id, job.id);
+            assert.equal(lease.job.has_source_video, true);
+            assert.equal(lease.job.video_edit_target, 'the red car');
+            for (const [path, expected] of [['source-video', 'clip'], ['source-image?role=base', 'image']]) {
+                const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/${path}`, {
+                    method: 'POST', headers: { authorization: 'Bearer worker-secret',
+                        'x-video-lease': lease.job.lease_id, 'content-type': 'application/json' },
+                    body: '{}',
+                });
+                assert.equal(response.status, 200);
+                assert.equal(await response.text(), expected);
+            }
+        } finally {
+            editWorker.socket.close();
+        }
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+    assert.throws(() => sourceClipDescriptor({ ...clip, clip_url: 'https://example.com/clip.mp4' }),
+        /Discord attachment/);
 });
 
 test('concurrent duplicate OALGO submissions retain both paid composition records', async () => {
