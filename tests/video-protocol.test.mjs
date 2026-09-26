@@ -19,6 +19,7 @@ import {
     fetchEarlierVideoReplyChain,
     singleVideoResponderGate,
     videoPromptFromMessages,
+    videoPromptPlainText,
     videoReplyChainGuidance,
     videoJobDirection,
     videoSourceImageFromMessage,
@@ -41,6 +42,7 @@ import {
     parsePauseDuration,
     requestedVideoDurationSeconds,
     sanitizeVideoWorkerText,
+    videoPromptContentNumbers,
 } from '../dist/VideoProtocol.js';
 import {
     VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS,
@@ -2257,6 +2259,27 @@ test('replacement target parsing supports quoted subjects and natural replacemen
     assert.deepEqual(parseVideoReplacement('replace the blue car with the attached image'),
         { target: 'the blue car', prompt: 'replace the blue car with the attached image' });
     assert.throws(() => parseVideoReplacement('--replace person'), /Use --replace/);
+});
+
+test('video prompts replace Discord markup IDs so planners never require them as numbers', () => {
+    const train = "I'm shidding on a train <:toastie:623996725509750785> (in the toilet)";
+    assert.equal(videoPromptPlainText(train), "I'm shidding on a train :toastie: (in the toilet)");
+    assert.deepEqual(videoPromptContentNumbers(videoPromptPlainText(train)), []);
+    assert.equal(videoPromptPlainText('<a:dance:123456789012345678> <@123456789012345678> <@!123456789012345678> '
+        + '<@&123456789012345678> <#123456789012345678> </video:123456789012345678>'),
+    ':dance: @someone @someone @role #channel /video');
+    assert.equal(videoPromptPlainText('party <t:1790380800:R>'), 'party September 26, 2026');
+    assert.equal(videoPromptPlainText('Show 3 ducks <:duck:123456789012345678>'), 'Show 3 ducks :duck:');
+    const channel = {
+        type: 0,
+        guild: { members: { cache: new Map([['123456789012345678', { displayName: 'Zpalm' }]]) }, roles: { cache: new Map() } },
+        client: { users: { cache: new Map() }, channels: { cache: new Map([['223456789012345678', { name: 'videos' }]]) } },
+    };
+    assert.equal(videoPromptPlainText('<@123456789012345678> posts in <#223456789012345678> <@323456789012345678>', channel),
+        '@Zpalm posts in #videos @someone');
+    assert.equal(videoPromptFromMessages('react <:toastie:623996725509750785>', { content: 'lol <:kek:523996725509750785>' }),
+        'Context from the replied message:\nlol :kek:\n\nCurrent instruction (takes priority):\nreact :toastie:');
+    assert.doesNotMatch(videoReplyChainGuidance([{ content: 'earlier <:kek:523996725509750785>' }]), /523996725509750785/);
 });
 
 test('video reply prompts preserve supplied text and handle missing or blank inputs', () => {
