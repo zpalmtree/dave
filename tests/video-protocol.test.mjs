@@ -596,7 +596,7 @@ test('global video queue identifies same-server requesters without exposing cros
     };
     const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
     assert.match(formatted, /\*\*#2 · Queued\*\*/);
-    assert.match(formatted, /ETA <t:2000000450:R>/);
+    assert.match(formatted, /ETA ~.+ from this check/);
     assert.doesNotMatch(formatted, /Rough ETA|Dispatch paused/);
     assert.doesNotMatch(formatted, /Expected start|estimate.*-/i);
     assert.doesNotMatch(formatted, /MiniMax H3|12345678/);

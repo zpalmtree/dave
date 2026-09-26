@@ -601,8 +601,10 @@ export function formatGlobalVideoQueueJob(
     } else {
         status = 'Failed';
     }
-    const eta = job.expected_finish_at
-        ? `ETA <t:${Math.floor(job.expected_finish_at)}:R>`
+    const remaining = job.expected_finish_at
+        ? Math.ceil(job.expected_finish_at - Date.now() / 1000) : null;
+    const eta = remaining !== null
+        ? remaining > 0 ? `ETA ~${formatVideoRuntime(remaining)} from this check` : 'ETA being recalculated'
         : ['ready', 'delivered', 'cancelled', 'failed'].includes(job.status)
             ? ''
             : `ETA ${roughRuntimeRange(job)} after start`;
@@ -649,7 +651,7 @@ export function globalVideoQueueEmbeds(
     limit = 3900,
     revealAllRequesters = false,
     dispatchPaused = false,
-): Array<{ title: string; description: string; color: number; footer?: { text: string } }> {
+): Array<{ title: string; description: string; color: number; footer?: { text: string }; timestamp: string }> {
     if (!jobs.length) return [];
     const chunks = globalVideoQueueChunks(jobs, viewerGuildId, limit, revealAllRequesters);
     const title = `Video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}`;
@@ -657,7 +659,9 @@ export function globalVideoQueueEmbeds(
         title: `${title}${index ? ' · continued' : ''}`,
         description,
         color: 0x5865F2,
-        ...(dispatchPaused ? { footer: { text: 'Dispatch paused' } } : {}),
+        timestamp: new Date().toISOString(),
+        footer: { text: dispatchPaused ? 'Dispatch paused'
+            : `Snapshot at command time · Estimates may change · Run ${config.prefix}videoqueue to refresh` },
     }));
 }
 

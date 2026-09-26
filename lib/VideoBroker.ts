@@ -1,3 +1,4 @@
+import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
@@ -4326,10 +4327,11 @@ export class VideoBroker {
 
     private async views(rows: JobRow[]): Promise<VideoJobView[]> {
         if (rows.length === 0) return [];
-        const allActive = await this.all<JobRow>(
+        rows = rows.map(row => ({ ...row, ...recoveryVideoProgress(row) }));
+        const allActive = (await this.all<JobRow>(
             `SELECT * FROM video_jobs WHERE status IN (${ACTIVE_SQL})
              ORDER BY CASE WHEN status = 'queued' THEN 1 ELSE 0 END, id ASC`,
-        );
+        )).map(row => ({ ...row, ...recoveryVideoProgress(row) }));
         const control = await this.control();
         const online = Boolean(this.worker);
         const busy = Boolean(this.worker?.currentJob);
@@ -4649,6 +4651,22 @@ export class VideoBroker {
         return { resumeCurrentJob: false };
     }
 
+    private async updateRecoveryProgress(message: any): Promise<boolean> {
+        const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [message.job_id]);
+        const progress = row && recoveryVideoProgress(row, message);
+        if (!progress) return false;
+        await this.run(`UPDATE video_jobs SET
+            status=CASE WHEN ? AND status IN ('leased', 'planning', 'running_disconnected')
+                THEN 'running' ELSE status END,
+            stage=COALESCE(?, stage), progress=?, progress_scope='job',
+            segment_index=?, segment_count=?, segment_progress=?, lease_expires_at=?, updated_at=?
+            WHERE public_id=?`, [message.type === 'event' ? 1 : 0,
+            message.stage === undefined ? null : sanitizeVideoWorkerText(message.stage, 'Generating'),
+            progress.progress, progress.segment_index, progress.segment_count, progress.segment_progress,
+            nowSeconds() + 60, nowSeconds(), message.job_id]);
+        return true;
+    }
+
     private async handleWorkerMessage(message: any): Promise<void> {
         if (!this.worker) return;
         this.worker.lastHeartbeat = Date.now();
@@ -4658,7 +4676,8 @@ export class VideoBroker {
                 this.worker.scheduler = workerScheduler(message.scheduler);
                 await this.synchronizeSchedulerGaming(previousScheduler);
             }
-            if (message.job_id && message.job_id === this.worker.currentJob) {
+            if (message.job_id && message.job_id === this.worker.currentJob
+                && !(await this.updateRecoveryProgress(message))) {
                 const workerProgress = workerProgressFields(message);
                 await this.run(
                     `UPDATE video_jobs SET lease_expires_at = ?, stage = COALESCE(?, stage),
@@ -4842,14 +4861,18 @@ export class VideoBroker {
                     ],
                 );
             } else if (event === 'plan') {
+                const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [jobId]);
+                const context = row && recoveryProgressContext(row);
+                // Recovery generator estimates describe only its current scene.
+                const estimateScale = context ? context.total / context.weights[context.index] : 1;
                 const estimateLow = Number(message.estimate_low_seconds) > 0
-                    ? Math.max(1, Number(message.estimate_low_seconds))
+                    ? Math.max(1, Math.round(Number(message.estimate_low_seconds) * estimateScale))
                     : null;
                 const estimateHigh = Number(message.estimate_high_seconds) > 0
-                    ? Math.max(1, Number(message.estimate_high_seconds))
+                    ? Math.max(1, Math.round(Number(message.estimate_high_seconds) * estimateScale))
                     : null;
                 await this.run(
-                    `UPDATE video_jobs SET status = 'planning', stage = ?,
+                    `UPDATE video_jobs SET status = ?, stage = ?,
                      estimate_low_seconds = COALESCE(?, estimate_low_seconds),
                      estimate_high_seconds = COALESCE(?, estimate_high_seconds),
                      estimate_ready = CASE WHEN ? IS NOT NULL AND ? IS NOT NULL
@@ -4860,6 +4883,7 @@ export class VideoBroker {
                         THEN COALESCE(initial_estimate_recorded_at, ?) ELSE initial_estimate_recorded_at END,
                      updated_at = ? WHERE public_id = ?`,
                     [
+                        context ? 'running' : 'planning',
                         sanitizeVideoWorkerText(message.stage, 'Planning'),
                         estimateLow,
                         estimateHigh,
@@ -4875,6 +4899,7 @@ export class VideoBroker {
                     ],
                 );
             } else if (event === 'progress') {
+                if (await this.updateRecoveryProgress(message)) return;
                 const workerProgress = workerProgressFields(message);
                 await this.run(
                     `UPDATE video_jobs SET status = 'running', stage = ?,
@@ -5484,7 +5509,14 @@ export class VideoBroker {
                     }
                 }
                 state.checkpoint = body.checkpoint;
-                await persist();
+                const progress = recoveryCheckpointProgress(job, state);
+                await this.run(`UPDATE video_jobs SET recovery_json=?, updated_at=?,
+                    progress=COALESCE(?, progress), progress_scope=COALESCE(?, progress_scope),
+                    segment_index=COALESCE(?, segment_index), segment_count=COALESCE(?, segment_count),
+                    segment_progress=? WHERE public_id=?`, [JSON.stringify(state), nowSeconds(),
+                    progress?.progress ?? null, progress?.progress_scope ?? null,
+                    progress?.segment_index ?? null, progress?.segment_count ?? null,
+                    progress?.segment_progress ?? null, id]);
                 writeJson(res, 200, { ok: true });
                 return;
             }
