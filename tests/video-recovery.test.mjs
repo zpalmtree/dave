@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, repairVideoTiming, recoveryLimitReached,
+import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, repairVideoTiming, recoveryLimitReached,
     VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
@@ -46,6 +46,31 @@ test('contract cannot approve omitted dialogue, bypassed quality, or policy reje
     value.prompt_analysis.frontier_handling.disposition = 'reject';
     assert.throws(() => approvedRecoveryContract(value, 'explorers return'), /approved story/);
     assert.throws(() => approvedRecoveryContract({ ...plan(), quality_gate_bypassed: true }, 'explorers'), /preserves/);
+});
+
+test('local recovery refuses quality bypass and lost verbatim speech', () => {
+    const value = plan();
+    const analysis = value.prompt_analysis;
+    assert.doesNotThrow(() => approvedLocalRecoveryContract(value, 'explorers return', 'provider_policy', '', true, analysis));
+    assert.throws(() => approvedLocalRecoveryContract({ ...value, quality_gate_bypassed: true },
+        'explorers return', 'provider_policy', '', true, analysis), /quality gate/);
+    value.segments[0].shots[0].dialogue = [];
+    assert.throws(() => approvedLocalRecoveryContract(value, 'explorers return', 'provider_policy', '', true, analysis),
+        /dialogue is missing/);
+    value.segments[0].shots[0].dialogue = [{ text: 'We made it elsewhere.' }];
+    assert.throws(() => approvedLocalRecoveryContract(value, 'explorers return', 'provider_policy', '', true, analysis),
+        /dialogue was lost/);
+});
+
+test('local recovery stops an unbroken generated-frame chain before visual drift compounds', () => {
+    const value = plan();
+    for (let index = 1; index < 5; index++) {
+        value.segments.push({ ...structuredClone(value.segments[0]), transition: 'continue' });
+    }
+    assert.throws(() => approvedLocalRecoveryContract(value, 'explorers return', 'provider_policy'),
+        /fresh shot after four linked scenes/);
+    value.segments[4].transition = 'cut';
+    assert.doesNotThrow(() => approvedLocalRecoveryContract(value, 'explorers return', 'provider_policy'));
 });
 
 test('timing repair reserves speech time within a shot even when the whole segment has enough time', () => {
@@ -522,6 +547,16 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
             'local-fallback:provider_policy');
         assert.equal((await request('local-plan', { plan: { segments: [] } })).status, 503, 'An empty local screenplay is refused.');
+        assert.equal((await request('local-plan', { plan: { ...plan(), quality_gate_bypassed: true } })).status,
+            422, 'A bypassed local quality gate stops before rendering.');
+        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?',
+            [JSON.stringify({ local_plan: { reason_code: 'provider_policy', prompt_analysis: analysis } }), id]);
+        const speechless = plan();
+        speechless.segments[0].shots[0].dialogue = [];
+        assert.equal((await request('local-plan', { plan: speechless })).status, 422,
+            'A local screenplay that drops protected speech stops before rendering.');
+        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?',
+            [JSON.stringify({ local_plan: { reason_code: 'provider_policy', prompt_analysis: analysis } }), id]);
         const local = { ...plan(), prompt_analysis: analysis, generation_notice: 'Planned by the local model.' };
         local.segments.push({ ...structuredClone(local.segments[0]), transition: 'cut' });
         local.segments[1].shots[0].visual = 'The explorers remain at the door, still waving.';
