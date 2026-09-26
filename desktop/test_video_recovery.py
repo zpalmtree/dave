@@ -42,6 +42,15 @@ class RecoveryTests(unittest.TestCase):
     def test_continuation_uses_previous_video_frame(self):
         self.exercise(original=True, continuation=True)
 
+    def test_missing_returning_character_gets_original_reference_opening(self):
+        self.exercise(original=True, continuation=True, reanchor=True)
+
+    def test_generated_cast_keeps_first_opening_as_permanent_anchor(self):
+        self.exercise(continuation=True, reanchor=True)
+
+    def test_boundary_check_outage_preserves_previous_render(self):
+        self.exercise(original=True, continuation=True, continuity_outage=True)
+
     def test_authored_cut_gets_a_new_opening_instead_of_inheriting_a_closeup_of_other_subjects(self):
         self.exercise(original=True, continuation=True, authored_cut=True)
 
@@ -374,7 +383,8 @@ class RecoveryTests(unittest.TestCase):
             self.assertIsNone(busy.image_job)
 
     def exercise(self, original=False, render_failures=0, image_outage=False,
-                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False):
+                 review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False, continuation=False, authored_cut=False, restart_exhausted=False,
+                 reanchor=False, continuity_outage=False):
         from PIL import Image
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -395,7 +405,7 @@ class RecoveryTests(unittest.TestCase):
                 prepared['plan']['segments'].append({**copy.deepcopy(segment), 'transition': 'continue'})
                 if authored_cut: prepared['plan']['segments'][1]['shots'][0]['visual'] = 'Cut to a closeup of the duck waving.'
             state, calls, renderers, reservation_scopes = {}, [], [], set()
-            outages = {'review': review_outage, 'admission': admission_outage}
+            outages = {'review': review_outage, 'admission': admission_outage, 'continuity': continuity_outage}
 
             class Response:
                 status = 200
@@ -410,6 +420,15 @@ class RecoveryTests(unittest.TestCase):
                     result = Response()
                     if operation == 'plan': result.value = {**prepared, 'checkpoint': copy.deepcopy(state)}
                     elif operation == 'checkpoint': state.update(copy.deepcopy(json['checkpoint'])); result.value = {'ok': True}
+                    elif operation == 'continuity':
+                        if outages['continuity']:
+                            outages['continuity'] = False
+                            result.status = 503
+                            result.value = {'error': 'continuity unavailable'}
+                        else:
+                            result.value = {'action': 'reanchor' if reanchor else 'continue',
+                                            'identity_description': 'The original duck has a green head and yellow beak.',
+                                            'reason': 'The returning duck is hidden.' if reanchor else 'The duck is visible.'}
                     elif operation == 'image':
                         result.status = 503 if image_outage else 200
                         result.value = (None if invalid_response else {'error': 'provider offline'}) if image_outage else {'image': encoded}
@@ -468,7 +487,7 @@ class RecoveryTests(unittest.TestCase):
                         self.assertEqual(renderers, ['minimax', 'minimax'])
                         self.assertFalse(worker.fail_current.await_args.args[1])
                     return
-                if review_outage or upload_outage or admission_outage:
+                if review_outage or upload_outage or admission_outage or continuity_outage:
                     worker.fail_current.assert_awaited_once()
                     before = worker.run_reserved_command.await_count
                     if admission_outage:
@@ -480,15 +499,21 @@ class RecoveryTests(unittest.TestCase):
                         stored['feedback_note'] = '\u201cUnicode feedback\u201d'
                         checkpoint.write_text(json.dumps(stored, ensure_ascii=False), encoding='utf-8')
                     asyncio.run(recovery.run_recovery_job(worker, job))
-                    self.assertEqual(worker.run_reserved_command.await_count, before + int(admission_outage))
+                    self.assertEqual(worker.run_reserved_command.await_count, before + int(admission_outage or continuity_outage))
                 worker.wait_and_send_terminal.assert_awaited_once()
                 self.assertEqual(state['format'], 'generated')
                 if original:
-                    self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut))
+                    self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut or reanchor))
                     self.assertFalse(any(operation == 'review' and body['kind'] == 'image' and body['segment_index'] == 0
                                          for operation, body in calls), 'The original portrait is never reviewed away.')
                 if continuation:
-                    if not authored_cut: self.assertEqual(state['scenes']['1']['image_source'], 'continuation')
+                    if not authored_cut:
+                        self.assertEqual(state['scenes']['1']['image_source'], 'generated' if reanchor else 'continuation')
+                        checks = [body for operation, body in calls if operation == 'continuity']
+                        self.assertEqual(len(checks), 2 if continuity_outage else 1)
+                        self.assertEqual('identity_anchor' in checks[-1], not original)
+                        scene_plan = json.loads((root / 'worker_recovery/test-job/scene-1/plan.json').read_text())
+                        self.assertIn('green head and yellow beak', scene_plan['segments'][0]['shots'][0]['visual'])
                     self.assertEqual(worker.run_reserved_command.await_count, 2)
                 if render_failures == 1: self.assertEqual(renderers, ['minimax', 'minimax'])
                 self.assertGreater(recovery.duration(root / 'worker_recovery/test-job/final.mp4'), 0)
