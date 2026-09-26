@@ -1087,7 +1087,7 @@ export function parseVideoReplacement(prompt: string): { target: string; prompt:
         throw new Error('Use --replace "subject to replace" before the prompt.');
     }
     const natural = /^replace\s+(.{1,120}?)\s+with\s+([\s\S]+)$/i.exec(prompt.trim());
-    return natural ? { target: natural[1].trim(), prompt: prompt.trim() } : null;
+    return natural ? { target: natural[1].trim(), prompt: natural[2].trim() } : null;
 }
 
 // Preferred in the blinded Stargate accent comparison; keep this wording as
@@ -1158,7 +1158,7 @@ export async function handleVideoRequest(
         return;
     }
     prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel);
-    if (replacement && !prompt) prompt = `Replace ${replacement.target} with the reference image while preserving the source clip's action, background, camera movement, and timing.`;
+    if (replacement && !prompt) prompt = "Use the replacement image as the new subject while preserving the source clip's action, background, camera movement, and timing.";
     if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
