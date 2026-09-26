@@ -253,6 +253,7 @@ export interface SubmittedVideoPresetSourceImage {
 export interface SubmittedVideoClipSourceImage {
     clip_url: string;
     name: string;
+    bytes?: number;
 }
 
 export type SubmittedVideoAttachmentOrClipSourceImage =
@@ -311,7 +312,31 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
         throw new Error('LTX and MiniMax accept one starting image. Attach exactly one image or video clip.');
     }
     if (!clips.length) return null;
-    return { clip_url: clips[0].url, name: clips[0].name || 'clip' };
+    return { clip_url: clips[0].url, name: clips[0].name || 'clip', bytes: clips[0].size };
+}
+
+export function videoAttachmentImageFromMessages(
+    commandMessage: Message,
+    referencedMessage: Message | null,
+): SubmittedVideoAttachmentSourceImage | null {
+    for (const message of [commandMessage, referencedMessage]) {
+        if (!message) continue;
+        const image = videoSourceImageFromMessage(message);
+        if (image) return image;
+    }
+    return null;
+}
+
+export function videoClipFromMessages(
+    commandMessage: Message,
+    referencedMessage: Message | null,
+): SubmittedVideoClipSourceImage | null {
+    for (const message of [commandMessage, referencedMessage]) {
+        if (!message) continue;
+        const clip = videoClipSourceImageFromMessage(message);
+        if (clip) return clip;
+    }
+    return null;
 }
 
 /** The command message's own attachment wins over the replied message's, and
@@ -1026,6 +1051,16 @@ interface VideoRequestOptions {
     plannerGuidance?: string;
 }
 
+export function parseVideoReplacement(prompt: string): { target: string; prompt: string } | null {
+    const option = /^--replace\s+(["'])(.{1,120}?)\1(?:\s+([\s\S]*))?$/i.exec(prompt.trim());
+    if (option) return { target: option[2].trim(), prompt: (option[3] || '').trim() };
+    if (/^--replace(?:\s|$)/i.test(prompt.trim())) {
+        throw new Error('Use --replace "subject to replace" before the prompt.');
+    }
+    const natural = /^replace\s+(.{1,120}?)\s+with\s+([\s\S]+)$/i.exec(prompt.trim());
+    return natural ? { target: natural[1].trim(), prompt: prompt.trim() } : null;
+}
+
 // Preferred in the blinded Stargate accent comparison; keep this wording as
 // the default delivery while allowing a scene's explicitly requested emotion.
 export const OALGO_DIALOGUE_DELIVERY = 'boastful and conversational adult male, with a low, chest-resonant voice and a strong Mexican Spanish accent on every English phrase, using full vowels, a lightly tapped r, crisp consonants, and animated rise-and-fall intonation';
@@ -1057,25 +1092,43 @@ export async function handleVideoRequest(
     const earlierReplyChain = fetchEarlierVideoReplyChain(referencedMessage);
     let attachedSourceImage: SubmittedVideoAttachmentOrClipSourceImage | null;
     let sourceAudio: SubmittedVideoSourceAudio | null;
+    let replacement: ReturnType<typeof parseVideoReplacement>;
+    let sourceVideo: SubmittedVideoClipSourceImage | null = null;
     try {
-        attachedSourceImage = videoSourceImageFromMessages(msg, referencedMessage);
+        const availableClip = model === 'minimax' ? videoClipFromMessages(msg, referencedMessage) : null;
+        replacement = model === 'minimax' && (availableClip || /^--replace(?:\s|$)/i.test(prompt.trim()))
+            ? parseVideoReplacement(prompt) : null;
+        sourceVideo = replacement ? availableClip : null;
+        if (replacement && !sourceVideo) throw new Error('Video replacement needs one attached or replied-to video clip.');
+        attachedSourceImage = replacement
+            ? videoAttachmentImageFromMessages(msg, referencedMessage)
+            : videoSourceImageFromMessages(msg, referencedMessage);
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
+        if (replacement && sourceAudio) throw new Error('Video replacement keeps the clip soundtrack; remove the separate song attachment.');
+        if (replacement && !attachedSourceImage && !options.presetSourceImage) {
+            throw new Error('Video replacement needs one attached or replied-to replacement image.');
+        }
     } catch (error) {
         await msg.reply(error instanceof Error ? error.message : String(error));
         return;
     }
-    const sourceImage: SubmittedVideoSourceImage | null = options.presetSourceImage
+    const sourceImage: SubmittedVideoSourceImage | null = options.presetSourceImage && !replacement
         ? { preset: options.presetSourceImage }
-        : attachedSourceImage;
-    const compositeSourceImage = options.presetSourceImage && options.compositeAttachedImage
+        : attachedSourceImage || (replacement && options.presetSourceImage ? { preset: options.presetSourceImage } : null);
+    const compositeSourceImage = !replacement && options.presetSourceImage && options.compositeAttachedImage
         ? attachedSourceImage
         : null;
+    if (replacement && options.compositeProvider) {
+        await msg.reply('Image-provider selection is for scene composition, not video replacement.');
+        return;
+    }
     if (options.compositeProvider && !compositeSourceImage) {
         await msg.reply('An image provider can only be selected when Meximutt has an attached or replied-to image to combine.');
         return;
     }
-    prompt = videoPromptFromMessages(prompt, referencedMessage);
+    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage);
+    if (replacement && !prompt) prompt = `Replace ${replacement.target} with the reference image while preserving the source clip's action, background, camera movement, and timing.`;
     if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
@@ -1113,12 +1166,14 @@ export async function handleVideoRequest(
                 command_message_id: msg.id,
                 status_message_id: pending.id,
                 source_image: sourceImage,
+                source_video: sourceVideo,
+                video_edit_target: replacement?.target,
                 source_audio: sourceAudio,
                 source_image_composite: compositeSourceImage,
                 source_image_provider: options.compositeProvider,
                 planner_guidance: plannerGuidance || undefined,
             }),
-        }, (compositeSourceImage || sourceAudio) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
+        }, (compositeSourceImage || sourceAudio || sourceVideo) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
     } catch (error) {
         await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
         return;
@@ -1142,6 +1197,7 @@ export async function handleVideoRequest(
             }
         }
         try {
+            if (sourceVideo) return;
             const prepared = await brokerRequest<{ job: VideoJobView }>(
                 `/v1/jobs/${job.id}/prepare`,
                 { method: 'POST', body: '{}' },

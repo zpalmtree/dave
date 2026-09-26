@@ -1,0 +1,134 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -28,6 +28,7 @@
+ SCRIPT_DIR = Path(__file__).resolve().parent
+ ROOT_DIR = SCRIPT_DIR.parent
+ GENERATOR = SCRIPT_DIR / "video_gen.py"
++VIDEO_EDIT_GENERATOR = SCRIPT_DIR / "video_edit.py"
+ GPUQ = Path(os.environ.get("GPUQ_EXE", r"D:\AI\gpuq\gpuq.exe"))
+ CONFIG_PATH = Path(os.environ.get("DAVE_VIDEO_WORKER_CONFIG", SCRIPT_DIR / "video_worker.json"))
+ JOURNAL_PATH = SCRIPT_DIR / "video_worker.journal.json"
+@@ -1471,6 +1472,7 @@
+                         {"id": self.image_job["id"], "lease_id": self.image_job["lease_id"]}
+                         if self.image_job else None
+                     ),
++                    "video_edit_version": 1,
+                     "recovery_version": 3,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+@@ -2065,7 +2067,55 @@
+             )
+         return str(body.get("planner_model") or LOCAL_PLANNER_MODEL), plan_identity
+ 
++    async def run_video_edit_job(self, job: dict[str, Any]) -> None:
++        job_id = str(job["id"])
++        started = time.time()
++        output_dir = SCRIPT_DIR / "worker_video_edits" / job_id
++        output_dir.mkdir(parents=True, exist_ok=True)
++        LOG_DIR.mkdir(parents=True, exist_ok=True)
++        output = output_dir / "edited.mp4"
++        error_file = output_dir / "edit-error.txt"
++        error_file.unlink(missing_ok=True)
++        self.begin_metrics(job, started)
++        self.save_journal(started=started, log=str(LOG_DIR / f"{job_id}.log"),
++                          run_dir=str(output_dir), source_video=True)
++        try:
++            await self.send({"type": "event", "event": "plan", "job_id": job_id,
++                             "stage": "Downloading source clip and replacement image"})
++            source_video = await self.request_job_source_video(job, output_dir / "source-video.input")
++            replacement = await self.request_job_source_image(job, "base")
++            if not await self.ensure_gpu_reservation(job):
++                await self.finish_cancelled_job(job_id)
++                return
++            await self.send({"type": "event", "event": "progress", "job_id": job_id,
++                             "stage": "Tracking and replacing the named subject"})
++            command = [console_python_executable(), "-s", str(VIDEO_EDIT_GENERATOR),
++                       "--clip", str(source_video), "--image", str(replacement),
++                       "--target", str(job["video_edit_target"]),
++                       "--prompt", str(job["prompt"]), "--output", str(output),
++                       "--error-file", str(error_file)]
++            render_started = time.monotonic()
++            try:
++                code = await self.run_reserved_command(command)
++            finally:
++                await self.finish_gpuq_reservation()
++            self.add_span("worker", "video_edit_render", time.monotonic() - render_started)
++            if self.cancel_reason:
++                await self.finish_cancelled_job(job_id)
++                return
++            if code != 0 or not output.is_file():
++                reason = error_file.read_text(encoding="utf-8") if error_file.is_file() else f"Video replacement exited with code {code}."
++                raise RuntimeError(reason[:1000])
++            await self.finish_output(output, started)
++        except WorkerLeaseLost:
++            await self.discard_current()
++        except Exception as exc:
++            await self.fail_current(str(exc), False)
++
+     async def run_job(self, job: dict[str, Any]) -> None:
++        if job.get("has_source_video"):
++            await self.run_video_edit_job(job)
++            return
+         if job.get("recovery_version", 0) >= 1:
+             from video_recovery import run_recovery_job
+             await run_recovery_job(self, job)
+@@ -2684,6 +2734,35 @@
+         temporary.replace(destination)
+         return destination, provider, model, cached
+ 
++    async def request_job_source_video(self, job: dict[str, Any], destination: Path) -> Path:
++        job_id = str(job["id"])
++        url = re.sub(r"^wss://", "https://", self.broker_url)
++        url = re.sub(r"/v1/worker$", f"/v1/worker/jobs/{job_id}/source-video", url)
++        if not self.http_session:
++            raise RuntimeError("Broker HTTP session is unavailable.")
++        destination.parent.mkdir(parents=True, exist_ok=True)
++        temporary = destination.with_suffix(".part")
++        try:
++            async with self.http_session.post(url, json={}, headers=self.worker_headers(),
++                    timeout=aiohttp.ClientTimeout(total=180, connect=20)) as response:
++                if response.status != 200:
++                    raise RuntimeError(f"Source video service returned HTTP {response.status}")
++                if int(response.headers.get("content-length") or 0) > 100 * 1024 * 1024:
++                    raise RuntimeError("Source video exceeds 100 MiB")
++                size = 0
++                with temporary.open("wb") as handle:
++                    async for chunk in response.content.iter_chunked(65536):
++                        size += len(chunk)
++                        if size > 100 * 1024 * 1024:
++                            raise RuntimeError("Source video exceeds 100 MiB")
++                        handle.write(chunk)
++            if size == 0:
++                raise RuntimeError("Source video is empty")
++            temporary.replace(destination)
++            return destination
++        finally:
++            temporary.unlink(missing_ok=True)
++
+     async def request_job_source_image(
+         self,
+         job: dict[str, Any],
+@@ -2957,6 +3036,7 @@
+             output,
+             job_id,
+             finite_number(output_metrics.get("duration_seconds"), 0.01),
++            preserve_audio=bool(self.current_job.get("has_source_video")),
+         )
+         self.add_span("worker", "delivery_compression", time.monotonic() - delivery_started)
+         await self.wait_and_send(
+@@ -2998,13 +3078,14 @@
+         output: Path,
+         job_id: str,
+         duration_seconds: float | None = None,
++        preserve_audio: bool = False,
+     ) -> Path:
+         ffmpeg = shutil.which("ffmpeg")
+         if not ffmpeg:
+             raise RuntimeError("FFmpeg is required to prepare a Discord-compatible delivery copy.")
+ 
+         normalization_started = time.monotonic()
+-        normalized = await self.normalize_delivery_audio(ffmpeg, output, job_id)
++        normalized = output if preserve_audio else await self.normalize_delivery_audio(ffmpeg, output, job_id)
+         self.add_span(
+             "worker",
+             "audio_loudness_normalization",

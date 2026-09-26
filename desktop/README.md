@@ -1,5 +1,15 @@
 # Desktop video optimization changes
 
+## Source-video replacement
+
+See [generic video replacement](../docs/video-source-edit.md). `video_edit.py`
+and `test_video_edit.py` archive the live desktop files. The worker integration is
+recorded in `video-source-edit-worker.patch` against the desktop Git baseline;
+the live worker also contains unrelated local changes. Copy the two Python files
+to `video_gen`, apply the worker patch to a compatible checkout, install the three
+model files named in `video_edit.py`, and reload the worker while idle. This
+feature requires the broker's `video_edit_version` lease gate.
+
 ## Original-song lip-sync
 
 See [original-song lip-sync](../docs/video-source-audio.md) for command usage, audio
