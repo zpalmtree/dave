@@ -194,6 +194,7 @@ if (isRead) {
         console.log([
             state.worker_online ? '1' : '0',
             state.current_job || '-',
+            state.dispatch_paused ? '1' : '0',
         ].join(' '));
     } else if (outputMode === 'recovery') {
         const expectedOnline = process.env.VIDEO_EXPECT_WORKER_ONLINE === '1';
@@ -255,7 +256,16 @@ resume_video_dispatch() {
 }
 
 pause_video_dispatch() {
-    local result snapshot
+    local result snapshot already_paused
+    snapshot="$(video_control /v1/control snapshot)"
+    read -r VIDEO_EXPECT_WORKER_ONLINE VIDEO_EXPECT_CURRENT_JOB already_paused <<<"$snapshot"
+    if [ "$VIDEO_EXPECT_CURRENT_JOB" = "-" ]; then
+        VIDEO_EXPECT_CURRENT_JOB=
+    fi
+    if [ "$already_paused" = "1" ]; then
+        echo "Preserving the existing video dispatch hold; this deployment will not resume it."
+        return
+    fi
     VIDEO_DISPATCH_DRAINED=1
     result="$(video_control /v1/control/drain)"
     if [ "$result" = "unsupported" ]; then
@@ -264,7 +274,7 @@ pause_video_dispatch() {
         VIDEO_LEGACY_DRAINED=1
     fi
     snapshot="$(video_control /v1/control snapshot)"
-    read -r VIDEO_EXPECT_WORKER_ONLINE VIDEO_EXPECT_CURRENT_JOB <<<"$snapshot"
+    read -r VIDEO_EXPECT_WORKER_ONLINE VIDEO_EXPECT_CURRENT_JOB already_paused <<<"$snapshot"
     if [ "$VIDEO_EXPECT_CURRENT_JOB" = "-" ]; then
         VIDEO_EXPECT_CURRENT_JOB=
     fi
