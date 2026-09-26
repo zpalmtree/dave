@@ -2329,6 +2329,8 @@ test('replacement target parsing supports quoted subjects and natural replacemen
         { target: 'the woman in red', prompt: 'keep the soundtrack' });
     assert.deepEqual(parseVideoReplacement('replace the blue car with the attached image'),
         { target: 'the blue car', prompt: 'the attached image' });
+    assert.deepEqual(parseVideoReplacement('replace "the woman with a red coat" with the attached image'),
+        { target: 'the woman with a red coat', prompt: 'the attached image' });
     assert.throws(() => parseVideoReplacement('--replace person'), /Use --replace/);
 });
 
