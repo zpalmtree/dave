@@ -457,6 +457,8 @@ test('broker stops rewritten plans, missing identity, and replacement openings, 
             candidate => { candidate.prompt = 'An automatically rewritten request'; },
             candidate => { candidate.contract.use_source_images = false; },
             candidate => { candidate.plan.keyframe.recommended = true; },
+            candidate => { candidate.contract.planner = 'local'; candidate.plan.quality_gate_bypassed = true; },
+            candidate => { candidate.contract.planner = 'local'; candidate.plan.segments[0].shots[0].dialogue = []; },
         ]) {
             const candidate = structuredClone(prepared); change(candidate);
             await reset({ prepared: candidate });
