@@ -32,25 +32,28 @@ class SongTests(unittest.TestCase):
         sys.path.insert(0, str(LIVE))
         import video_gen as gen
         from test_video_gen import sample_plan
-        plan = sample_plan()
-        segment = plan['segments'][0]
-        segment.update(source_audio_frames=99, source_audio_start_seconds=14.125,
-                       target_seconds=99 / 24, output_seconds=99 / 24)
-        segment['shots'][0]['duration_seconds'] = 99 / 24
-        plan['source_audio'] = {'duration_seconds': 18.25, 'output_frames': 438}
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'plan.json'
-            path.write_text(json.dumps(plan))
-            loaded = gen.load_frontier_video_plan(path, 'Perform the approved scene', None, ('h3',))
-            prepared = gen.prepare_model_segments('', loaded, 'h3', 'portrait.png', {}, True, 1)
-            audio.prepare_song_segments(prepared, loaded)
-            self.assertEqual(prepared[0]['source_audio_start_seconds'], 14.125)
-            self.assertEqual(prepared[0]['output_seconds'], 99 / 24)
-            self.assertGreaterEqual(prepared[0]['frame_count'], 99)
-            self.assertEqual(prepared[0]['frame_count'] % 17, 5)
-            self.assertNotIn('No speech occurs', prepared[0]['prompt'])
-            self.assertNotIn('lips remain closed', prepared[0]['prompt'])
-            self.assertNotIn('no human voice or mouth movement', prepared[0]['prompt'])
+        for frames, start, duration in [(99, 14.125, 18.25), (60, 0, 2.5)]:
+            with self.subTest(frames=frames):
+                plan = sample_plan()
+                segment = plan['segments'][0]
+                segment.update(source_audio_frames=frames, source_audio_start_seconds=start,
+                               target_seconds=frames / 24, output_seconds=frames / 24)
+                segment['shots'][0]['duration_seconds'] = frames / 24
+                plan['source_audio'] = {'duration_seconds': duration,
+                                        'output_frames': round(duration * 24)}
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / 'plan.json'
+                    path.write_text(json.dumps(plan))
+                    loaded = gen.load_frontier_video_plan(path, 'Perform the approved scene', None, ('h3',))
+                    prepared = gen.prepare_model_segments('', loaded, 'h3', 'portrait.png', {}, True, 1)
+                    audio.prepare_song_segments(prepared, loaded)
+                    self.assertEqual(prepared[0]['source_audio_start_seconds'], start)
+                    self.assertEqual(prepared[0]['output_seconds'], frames / 24)
+                    self.assertGreaterEqual(prepared[0]['frame_count'], frames)
+                    self.assertEqual(prepared[0]['frame_count'] % 17, 5)
+                    self.assertNotIn('No speech occurs', prepared[0]['prompt'])
+                    self.assertNotIn('lips remain closed', prepared[0]['prompt'])
+                    self.assertNotIn('no human voice or mouth movement', prepared[0]['prompt'])
 
     def test_windows_are_sample_aligned_and_pad_only_after_song_end(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -26,7 +26,7 @@ test('song selection supports replies and independent image attachments, rejecti
 });
 
 test('song timelines cover all original samples without accumulating H3 frame rounding or invented lyrics', () => {
-    for (const seconds of [4, 14, 15.123, 31.013, 119.99, 120]) {
+    for (const seconds of [1, 2.5, 3.75, 4, 14, 15.123, 31.013, 119.99, 120]) {
         const value = plan();
         pinVideoPlanToAudio(value, seconds);
         let frames = 0;
@@ -45,17 +45,19 @@ test('song timelines cover all original samples without accumulating H3 frame ro
     }
 });
 
-test('audio decoding rejects invalid files and overlong uploads instead of silently truncating', async () => {
+test('audio decoding accepts short clips and rejects invalid or overlong uploads', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'song-decode-'));
     try {
         const input = join(directory, 'input.wav'), output = join(directory, 'output.wav');
-        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4.125', input]);
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2.5', input]);
         const value = await normalizeVideoSourceAudio(input, output);
-        assert.ok(Math.abs(value.duration - 4.125) <= 1 / 48000 + 1e-6);
+        assert.ok(Math.abs(value.duration - 2.5) <= 1 / 48000 + 1e-6);
+        execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.75', input]);
+        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 1 and 120/);
         writeFileSync(input, 'not audio');
         await assert.rejects(normalizeVideoSourceAudio(input, output), /Could not decode/);
         execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=8000:cl=mono', '-t', '121.5', input]);
-        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 4 and 120/);
+        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 1 and 120/);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
