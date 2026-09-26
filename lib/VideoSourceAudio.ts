@@ -50,8 +50,8 @@ export async function normalizeVideoSourceAudio(input: string, output: string): 
             '-t', '121', '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', output], { timeout: 60_000 });
         const result = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', output], { timeout: 10_000 });
         const duration = Number(JSON.parse(result.stdout).format?.duration);
-        if (!Number.isFinite(duration) || duration < 4 || duration > 120) {
-            throw new Error('Use a song excerpt between 4 and 120 seconds long.');
+        if (!Number.isFinite(duration) || duration < 1 || duration > 120) {
+            throw new Error('Use a song excerpt between 1 and 120 seconds long.');
         }
         return { path: output, bytes: statSync(output).size, duration };
     } catch (error) {
@@ -87,7 +87,7 @@ export async function storeVideoSourceAudio(source: SubmittedVideoSourceAudio, d
 
 /** Frame-aligned cuts keep every rendered scene on the same immutable song timeline. */
 export function pinVideoPlanToAudio(plan: any, seconds: number): void {
-    if (!Number.isFinite(seconds) || seconds < 4 || seconds > 120 || !plan.segments?.length) throw new Error('Invalid song timeline.');
+    if (!Number.isFinite(seconds) || seconds < 1 || seconds > 120 || !plan.segments?.length) throw new Error('Invalid song timeline.');
     const totalFrames = Math.ceil(seconds * 24 - 1e-6);
     const originalWeight = plan.segments.reduce((sum: number, s: any) => sum + Number(s.target_seconds), 0);
     if (!Number.isFinite(originalWeight) || originalWeight <= 0) throw new Error('Invalid song screenplay timings.');

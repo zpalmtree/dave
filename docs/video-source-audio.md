@@ -11,7 +11,7 @@ Examples:
 - Reply to a song attachment: `$oalgo`
 
 Supported files: MP3, WAV, FLAC, OGG, Opus, M4A and AAC, up to 25 MiB and
-4–120 seconds. Trim longer songs to the excerpt you want before uploading.
+1–120 seconds. Trim longer songs to the excerpt you want before uploading.
 The audio attachment's duration determines the finished video duration, rounded
 up to the next video frame. The command's own song takes precedence over a
 replied-to song. Image and audio selection are independent. Multiple songs on

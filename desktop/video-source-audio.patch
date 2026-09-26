@@ -262,7 +262,7 @@
 +            import wave
 +            with wave.open(str(temporary), "rb") as audio:
 +                duration = audio.getnframes() / audio.getframerate()
-+                if not 4 <= duration <= 120 or abs(duration - float(job["source_audio_seconds"])) > .05:
++                if not 1 <= duration <= 120 or abs(duration - float(job["source_audio_seconds"])) > .05:
 +                    raise RuntimeError("Song duration does not match the job")
 +            temporary.replace(destination)
 +            return destination

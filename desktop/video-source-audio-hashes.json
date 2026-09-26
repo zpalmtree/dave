@@ -5,7 +5,7 @@
   },
   "video_worker.py": {
     "before_sha256": "59727373503b86d69b18424e1e8cbd7dc4f10dea8ad8a80633de4c5d28739c9d",
-    "after_sha256": "d30b67d3cf80c247022245bd698c0a7d5e7e7c235e7938bda7847223f2fa9c4c"
+    "after_sha256": "6be7fc6ad891948a45516db243b167c6ee5db0841c54f3d81dbbd58d675a537f"
   },
   "video_recovery.py": {
     "before_sha256": "f32e782dd2d7fdec4f68031b17b0d05794e7ddb82bf6da3ced662e341053ca26",
