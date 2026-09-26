@@ -6,7 +6,8 @@ import { pipeline } from 'stream/promises';
 import fetch from 'node-fetch';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
 
-export const VIDEO_EDIT_MIN_SECONDS = 5;
+export const VIDEO_EDIT_MIN_SECONDS = 0.5;
+export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
 export const VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS = 15;
 export const VIDEO_EDIT_MAX_SECONDS = VIDEO_MAX_TOTAL_DURATION_SECONDS;
 export const VIDEO_EDIT_MAX_BYTES = 100 * 1024 * 1024;
