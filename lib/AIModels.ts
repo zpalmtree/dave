@@ -15,7 +15,6 @@ export const AI_MODELS = {
     /* A/B testing found 4.5 faster and more natural for Discord recaps. */
     grokSummary: 'grok-4.5-latest',
     grokImage: 'grok-imagine-image-2.0',
-    gabChat: 'arya',
 } as const;
 
 export const AI_REQUEST_TIMEOUTS = {

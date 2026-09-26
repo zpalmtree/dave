@@ -114,10 +114,6 @@ import {
 } from './Claude.js';
 
 import {
-    handleGab,
-} from './Gab.js';
-
-import {
     handleGrok,
     handleGrokImage,
 } from './Grok.js';
@@ -1082,24 +1078,6 @@ const sharedCommands: Command[] = [
             'glados',
             'drunk',
             'doctor',
-            'gab',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['gab'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGab,
-            description: 'Ask Gab AI something',
-        },
-        relatedCommands: [
-            'chatgpt',
-            'claude',
-            'grok',
-            'gemini',
         ],
         commandGates: [
             slugUserGate,

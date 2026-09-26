@@ -20,7 +20,6 @@ test('uses the audited production model for each provider capability', () => {
         grokChat: 'grok-4.7',
         grokSummary: 'grok-4.5-latest',
         grokImage: 'grok-imagine-image-2.0',
-        gabChat: 'arya',
     });
 });
 
