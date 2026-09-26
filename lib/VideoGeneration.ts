@@ -1086,8 +1086,8 @@ export function parseVideoReplacement(prompt: string): { target: string; prompt:
     if (/^--replace(?:\s|$)/i.test(prompt.trim())) {
         throw new Error('Use --replace "subject to replace" before the prompt.');
     }
-    const natural = /^replace\s+(.{1,120}?)\s+with\s+([\s\S]+)$/i.exec(prompt.trim());
-    return natural ? { target: natural[1].trim(), prompt: natural[2].trim() } : null;
+    const natural = /^replace\s+(?:"([^"]{1,120})"|'([^']{1,120})'|(.{1,120}?))\s+with\s+([\s\S]+)$/i.exec(prompt.trim());
+    return natural ? { target: (natural[1] || natural[2] || natural[3]).trim(), prompt: natural[4].trim() } : null;
 }
 
 // Preferred in the blinded Stargate accent comparison; keep this wording as
@@ -1126,8 +1126,7 @@ export async function handleVideoRequest(
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
     try {
         const availableClip = model === 'minimax' ? videoClipFromMessages(msg, referencedMessage) : null;
-        replacement = model === 'minimax' && (availableClip || /^--replace(?:\s|$)/i.test(prompt.trim()))
-            ? parseVideoReplacement(prompt) : null;
+        replacement = model === 'minimax' ? parseVideoReplacement(prompt) : null;
         sourceVideo = replacement ? availableClip : null;
         if (replacement && !sourceVideo) throw new Error('Video replacement needs one attached or replied-to video clip.');
         attachedSourceImage = replacement

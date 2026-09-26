@@ -3,18 +3,20 @@
 Use either video command with a source clip and a replacement image:
 
 ```text
-$minimax --replace "the red car" keep the route and camera movement
-$oalgo --replace "the dancer" keep the same moves
+$minimax replace the red car with the blue car in the attached image
+$oalgo replace the dancer with Meximutt, keeping the same moves
 ```
 
 The clip and image may be attached to the command or to the message it replies
 to. The command message's attachment wins when both messages have the same kind
 of input. `$oalgo` uses its built-in portrait if no replacement image is supplied.
-With a clip present, `replace the red car with the attached image` also works.
-The quoted `--replace` form is best when several similar subjects appear.
+Quote the subject if its name includes “with,” for example
+`replace "the woman with a red coat" with the attached image`.
 
 The source clip must be MP4, MOV, M4V, WebM, or MKV, 5–15 seconds, and no larger
-than 100 MiB. It is downloaded to the broker before queueing so its Discord URL
+than 100 MiB. MiniMax H3 generates one continuous 5–15 second video per run;
+longer clips need separate renders joined at segment boundaries. The clip is
+downloaded to the broker before queueing so its Discord URL
 cannot expire while it waits. The desktop normalizes it to 24 fps, tracks the
 named subject with SAM3.1, and rejects an empty or nearly full-frame mask.
 MiniMax H3 Ref2VA receives the replacement image. Fun ControlNet receives the
