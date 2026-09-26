@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { VideoBroker } from '../dist/VideoBroker.js';
+import { VideoBroker, projectedVideoFinishAt } from '../dist/VideoBroker.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress } from '../dist/VideoProgress.js';
 import { formatGlobalVideoQueueJob, globalVideoQueueEmbeds } from '../dist/VideoGeneration.js';
 
@@ -21,6 +21,12 @@ function legacyRow(state = recoveryState()) {
     return { recovery_version: 3, recovery_json: JSON.stringify(state), status: 'running',
         progress: 0.98, progress_scope: 'job', segment_index: 1, segment_count: 1, segment_progress: 0.9 };
 }
+
+test('an overdue historical estimate cannot erase the remaining time from measured progress', () => {
+    const finish = projectedVideoFinishAt({ now: 3000, startedAt: 600, expectedRuntime: 300,
+        progress: 0.8, progressScope: 'job' });
+    assert.equal(finish, 3540, 'Measured progress still requires nine minutes, not a rolling 30-second ETA');
+});
 
 test('recovery maps the stuck 98% and 1/1 to duration-weighted progress across six scenes', () => {
     const row = legacyRow();

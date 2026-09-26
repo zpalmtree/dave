@@ -840,9 +840,13 @@ export function projectedVideoFinishAt({
     // roughly one third of the render while retaining a little historical
     // stability for pauses and coarse progress boundaries.
     const observedWeight = Math.min(0.9, Math.max(0, (progress - 0.02) * 3));
-    const projectedRuntime = expectedRuntime * (1 - observedWeight)
-        + observedRuntime * observedWeight;
-    return Math.max(now + 30, Math.round(startedAt + projectedRuntime));
+    // An expired historical estimate has zero remaining work, not negative work
+    // that can cancel out the time still needed at the measured render pace.
+    const historicalRemaining = Math.max(0, historicalFinish - now);
+    const observedRemaining = Math.max(0, observedRuntime - elapsed);
+    const remaining = historicalRemaining * (1 - observedWeight)
+        + observedRemaining * observedWeight;
+    return Math.max(now + 30, Math.round(now + remaining));
 }
 
 interface WorkerProgressFields {
