@@ -5347,6 +5347,19 @@ export class VideoBroker {
                 throw new RecoveryStoppedError('The required original Meximutt reference is missing.');
             }
             if (!state.prepared) return;
+            if (state.prepared.contract?.planner === 'local') {
+                try {
+                    approvedLocalRecoveryContract(state.prepared.plan, job.prompt,
+                        state.prepared.contract.local_reason || '', state.prepared.notice || '',
+                        state.prepared.contract.use_source_images,
+                        state.local_plan?.prompt_analysis);
+                } catch (error) {
+                    if (error instanceof UnapprovedLocalRecoveryPlanError) {
+                        throw new RecoveryStoppedError(error.message);
+                    }
+                    throw error;
+                }
+            }
             if (state.prepared.prompt !== job.prompt || state.prepared.contract.prompt !== job.prompt) {
                 throw new RecoveryStoppedError('The saved plan rewrote the original request. Regenerate to plan the original request without an automatic rewrite.');
             }
