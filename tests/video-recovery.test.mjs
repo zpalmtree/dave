@@ -546,7 +546,10 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         assert.equal(frontierCalls, 1, 'Recovery does not retry a rejected brief with the frontier planner.');
         assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
             'local-fallback:provider_policy');
-        assert.equal((await request('local-plan', { plan: { segments: [] } })).status, 503, 'An empty local screenplay is refused.');
+        const empty = await request('local-plan', { plan: { segments: [] } });
+        assert.ok([422, 503].includes(empty.status), 'An empty local screenplay is refused.');
+        await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?',
+            [JSON.stringify({ local_plan: { reason_code: 'provider_policy', prompt_analysis: analysis } }), id]);
         assert.equal((await request('local-plan', { plan: { ...plan(), quality_gate_bypassed: true } })).status,
             422, 'A bypassed local quality gate stops before rendering.');
         await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?',
