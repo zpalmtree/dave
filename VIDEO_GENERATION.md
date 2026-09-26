@@ -225,6 +225,27 @@ direct MiniMax review preferred tuned Opus over GPT-6 Sol on five prompts;
 the hybrid Opus route won four of six clips against two-pass Opus, including
 one job where hybrid planning fell back to two-pass.
 
+### Comedy guidance
+
+For comedic, absurd, satirical, crude, or meme-like requests, the screenplay
+rules treat the user's premise and verbatim lines as the setup of a sketch:
+heighten one idea, end on an unpredicted button rather than a smile or a restated
+premise, keep characters playing it straight, and cut generated lines that
+paraphrase the prompt. Short comedic prompts budget roughly 12-20 seconds so
+the escalation survives. A reaction after a spoken punchline gets its own
+dialogue-free shot with concrete non-speech audio, because H3 invents words in
+silence after speech. Binding contracts still take precedence. The `$oalgo`
+guidance gives Meximutt a consistent comedic personality and keeps his slang
+frequent.
+
+On September 26, twelve recent and holdout prompts were planned once each by
+the production Opus hybrid path with the previous and the new instructions, then
+judged blind by Sol in both orders. The new instructions won 24 of 24 judgments:
+mean funniness on the ten comedic prompts rose from 6.1 to 8.7 with no fidelity loss, and neither control
+(a serene landscape and an exact-line OALGO performance) changed character. The
+judge rated renderability about one point lower, and total planned runtime rose
+12%. This is a plan-level result from one sample per arm, not a render review.
+
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
 - `VIDEO_PLANNER_MODEL` overrides the Opus production default. Use
   `gpt-6-sol` for the Sol baseline or `gemini-3.8-flash` for the Flash adapter.

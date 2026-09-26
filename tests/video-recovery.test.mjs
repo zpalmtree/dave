@@ -299,6 +299,8 @@ test('broker persists recovery and requires every recorded scene for the matchin
             return { status: result.status, body: await result.json() };
         };
         assert.equal((await request('plan')).status, 200);
+        assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
+            'claude-opus-5-5', 'A recovery plan records the configured planner rather than the Sol constant.');
         assert.equal((await request('image', { segment_index: 0 })).status, 200);
         assert.equal((await request('checkpoint', { checkpoint: { scenes: { '0': { video_attempts: 1 } } } })).status, 200);
         assert.equal((await request('plan')).body.checkpoint.scenes['0'].video_attempts, 1);

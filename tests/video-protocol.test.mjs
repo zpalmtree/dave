@@ -307,6 +307,8 @@ test('local video commands are declared as Discord-only', () => {
         assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, new RegExp(phrase));
     }
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /explicitly requested verbatim/);
+    assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /Season nearly every new Meximutt line with slang/);
+    assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /instead of describing the premise/);
     for (const retired of ['minimaxdraft', 'ltx', 'ltxfast']) {
         assert.equal(Commands.some(candidate => candidate.aliases.includes(retired)), false);
     }
@@ -826,6 +828,11 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /Do not force an idea into that shape/);
     assert.match(VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS, /multi-character discovery/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /exactly one segment containing exactly one shot/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /write the screenplay as a comedy sketch/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /ending on a button/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /cut any generated line that paraphrases or restates the prompt/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /dialogue-free shot whose shot\.audio carries a concrete sound effect/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /never override verbatim dialogue, visible-text, coverage, frame-zero/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /vehicle nose, visible road\/path ahead/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /positive-only diffusion prompt/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not put the franchise name/);
