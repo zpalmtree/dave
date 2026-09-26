@@ -1,7 +1,7 @@
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { existsSync } from 'fs';
 import fetch, { RequestInit, Response } from 'node-fetch';
-import { Client, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
+import { Client, cleanContent, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
 
 import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
@@ -361,9 +361,36 @@ export function isVideoClipSourceImage(
 
 export const VIDEO_CLIP_FRAME_PLANNER_GUIDANCE = 'The starting image is a frame from partway through a video clip the user attached, not a standalone picture. Treat it as representative of what that footage shows.';
 
-export function videoPromptFromMessages(commandPrompt: string, referencedMessage: Message | null): string {
-    const current = commandPrompt.trim();
-    const referenced = referencedMessage?.content?.trim() || '';
+// Planners require every number in a prompt to appear in the plan, so Discord
+// mention and emoji IDs must never reach them. Unresolvable mentions become
+// neutral placeholders rather than raw IDs.
+export function videoPromptPlainText(text: string, channel?: Message['channel']): string {
+    let resolved = text;
+    if (channel) {
+        try { resolved = cleanContent(text, channel); }
+        catch { resolved = text; }
+    }
+    return resolved
+        .replace(/<a?:(\w+):\d{17,20}>/g, ':$1:')
+        .replace(/<\/([^:<>]+):\d{17,20}>/g, '/$1')
+        .replace(/<@!?\d{17,20}>/g, '@someone')
+        .replace(/<@&\d{17,20}>/g, '@role')
+        .replace(/<#\d{17,20}>/g, '#channel')
+        .replace(/<t:(-?\d{1,13})(?::[tTdDfFR])?>/g, (match, seconds: string) => {
+            const date = new Date(Number(seconds) * 1000);
+            return Number.isNaN(date.getTime()) ? match : date.toLocaleDateString('en-US', {
+                year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+            });
+        });
+}
+
+export function videoPromptFromMessages(
+    commandPrompt: string,
+    referencedMessage: Pick<Message, 'content'> & Partial<Pick<Message, 'channel'>> | null,
+    channel?: Message['channel'],
+): string {
+    const current = videoPromptPlainText(commandPrompt, channel).trim();
+    const referenced = videoPromptPlainText(referencedMessage?.content || '', referencedMessage?.channel).trim();
     if (current && referenced) {
         return `Context from the replied message:\n${referenced}\n\nCurrent instruction (takes priority):\n${current}`;
     }
@@ -397,10 +424,12 @@ export async function fetchEarlierVideoReplyChain(referencedMessage: Message | n
 
 // The prompt is checked for verbatim quotes, numbers, and durations by both
 // planners, so earlier chain messages travel as planner guidance instead.
-export function videoReplyChainGuidance(earlierMessages: Array<Pick<Message, 'content'>>): string {
+export function videoReplyChainGuidance(
+    earlierMessages: Array<Pick<Message, 'content'> & Partial<Pick<Message, 'channel'>>>,
+): string {
     const texts = earlierMessages
         .map(message => truncatePrompt(
-            String(message.content || '').replace(/\s+/g, ' ').trim(),
+            videoPromptPlainText(String(message.content || ''), message.channel).replace(/\s+/g, ' ').trim(),
             VIDEO_REPLY_CHAIN_MESSAGE_MAX_CHARS,
         ))
         .filter(Boolean);
@@ -1128,7 +1157,7 @@ export async function handleVideoRequest(
         await msg.reply('An image provider can only be selected when Meximutt has an attached or replied-to image to combine.');
         return;
     }
-    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage);
+    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel);
     if (replacement && !prompt) prompt = `Replace ${replacement.target} with the reference image while preserving the source clip's action, background, camera movement, and timing.`;
     if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {
