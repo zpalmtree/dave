@@ -11,6 +11,7 @@ import argparse
 import copy
 import json
 import math
+import numpy as np
 import re
 import subprocess
 import sys
@@ -26,7 +27,7 @@ INPUT = COMFY / "input"
 OUTPUT = COMFY / "output"
 TEMPLATE = ROOT / "templates" / "h3_i2v.json"
 REF_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
-FUN_PATCH = "minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors"
+FUN_PATCH = "minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors"
 SAM_MODEL = "sam3.1_multiplex_fp16.safetensors"
 
 
@@ -53,7 +54,10 @@ def clip_details(path: Path) -> tuple[float, int, int]:
     duration = float(info["format"]["duration"])
     if not 5 <= duration <= 15:
         raise RuntimeError("Video replacement supports 5–15 second clips")
-    return duration, int(stream["width"]), int(stream["height"])
+    width, height = int(stream["width"]), int(stream["height"])
+    if width < 32 or height < 32:
+        raise RuntimeError("Source clip must be at least 32×32 pixels")
+    return duration, width, height
 
 
 def audio_codec(path: Path) -> str | None:
@@ -68,8 +72,12 @@ def canvas(width: int, height: int) -> tuple[int, int]:
     # for those extra tokens on the 32 GiB desktop card.
     long_edge, short_edge = (896, 512)
     limit_w, limit_h = (long_edge, short_edge) if width >= height else (short_edge, long_edge)
-    scale = min(1.0, limit_w / width, limit_h / height)
-    return max(32, int(width * scale) // 32 * 32), max(32, int(height * scale) // 32 * 32)
+    candidates = [(w, h) for w in range(32, min(width, limit_w) + 1, 32)
+                  for h in range(32, min(height, limit_h) + 1, 32)]
+    aspect_error = lambda size: abs(math.log((size[0] / size[1]) / (width / height)))
+    close = [size for size in candidates if aspect_error(size) <= 0.02]
+    return (max(close, key=lambda size: size[0] * size[1]) if close else
+            min(candidates, key=lambda size: (aspect_error(size), -(size[0] * size[1]))))
 
 
 def legal_frames(duration: float) -> int:
@@ -79,7 +87,7 @@ def legal_frames(duration: float) -> int:
 
 def normalized_clip(source: Path, destination: Path, width: int, height: int, frames: int) -> None:
     command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
-            "-vf", f"fps=24,scale={width}:{height}:flags=lanczos,tpad=stop_mode=clone:stop_duration=1",
+            "-vf", f"fps=24,scale={width}:{height}:flags=lanczos,setsar=1,tpad=stop_mode=clone:stop_duration=1",
             "-frames:v", str(frames), "-an", "-c:v", "libx264", "-crf", "18",
             "-pix_fmt", "yuv420p", str(destination))
 
@@ -186,6 +194,37 @@ def mask_coverage(path: Path) -> float:
     return sum(samples) / len(samples) / 255
 
 
+def rgb_frame(path: Path, seconds: float, width: int, height: int) -> np.ndarray:
+    process = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seconds:.3f}",
+         "-i", str(path), "-frames:v", "1", "-vf", f"scale={width}:{height}",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=False,
+    )
+    if process.returncode or len(process.stdout) != width * height * 3:
+        raise RuntimeError(f"Could not inspect video replacement: {process.stderr[-300:].decode(errors='replace')}")
+    return np.frombuffer(process.stdout, dtype=np.uint8).reshape(height, width, 3)
+
+
+def reject_blank_edit(rendered: Path, mask: Path, source: Path, reference: Path,
+                      duration: float, width: int, height: int) -> None:
+    reference_pixels = rgb_frame(reference, 0, 256, 256)
+    if np.mean(np.max(reference_pixels, axis=2) < 25) >= 0.2:
+        return
+    blank_samples = 0
+    for fraction in (0.25, 0.5, 0.75):
+        second = duration * fraction
+        selected = np.mean(rgb_frame(mask, second, width, height), axis=2) > 127
+        if np.count_nonzero(selected) < width * height * 0.003:
+            continue
+        source_dark = np.mean(np.max(rgb_frame(source, second, width, height)[selected], axis=1) < 25)
+        rendered_dark = np.mean(np.max(rgb_frame(rendered, second, width, height)[selected], axis=1) < 25)
+        if source_dark < 0.35 and rendered_dark > 0.8:
+            blank_samples += 1
+    if blank_samples >= 2:
+        raise RuntimeError("The model left the tracked subject nearly black. Try a reference with a closer shape or style.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip", type=Path, required=True)
@@ -220,6 +259,7 @@ def main() -> None:
         rendered = run_graph(args.server, render_graph(normalized.name, replacement.name,
                              mask_input.name, args.target, args.prompt, width, height,
                              frames, f"video/edits/{run_id}-render"), "92", 7200)
+        reject_blank_edit(rendered, mask_file, normalized, args.image, duration, width, height)
         print("Restoring original soundtrack", flush=True)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         source_audio = audio_codec(args.clip)

@@ -7,7 +7,9 @@ and `test_video_edit.py` archive the live desktop files. The worker integration 
 recorded in `video-source-edit-worker.patch` against the desktop Git baseline;
 the live worker also contains unrelated local changes. Copy the two Python files
 to `video_gen`, apply the worker patch to a compatible checkout, install the three
-model files named in `video_edit.py`, and reload the worker while idle. This
+model files named in `video_edit.py`, and reload the worker while idle. Apply
+`minimax-h3-fun-v2-compat.patch` to ComfyUI v0.37.1 and restart ComfyUI while
+idle before using the Union 2.0 model. This
 feature requires the broker's `video_edit_version` lease gate.
 
 ## Original-song lip-sync

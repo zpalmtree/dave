@@ -1,0 +1,67 @@
+diff --git a/comfy/ldm/minimax/controlnet.py b/comfy/ldm/minimax/controlnet.py
+index 5037c8c7..42467104 100644
+--- a/comfy/ldm/minimax/controlnet.py
++++ b/comfy/ldm/minimax/controlnet.py
+@@ -21,11 +21,13 @@ class MiniMaxH3FunControl(torch.nn.Module):
+     def __init__(self, control_in_dim=49, injection_layers=(0, 10, 20, 30, 40), hidden_size=5376,
+                  num_attention_heads=56, attention_head_dim=128, ffn_hidden_size=14336,
+                  time_embed_dim=2688, patch_size=(1, 2, 2), norm_eps=1e-5, qk_norm_eps=1e-5,
+-                 use_adaln_curves=False, dtype=None, device=None, operations=None):
++                 use_adaln_curves=False, inpaint_post_norm=False, dtype=None, device=None, operations=None):
+         super().__init__()
+         self.dtype = dtype
+         self.patch_size = tuple(patch_size)
+         self.injection_layers = tuple(injection_layers)
++        # v2 checkpoints mask the source video after VAE normalization (holes at mid-gray, not black)
++        self.inpaint_post_norm = inpaint_post_norm
+         if not self.injection_layers or self.injection_layers[0] != 0:
+             raise ValueError("MiniMax H3 Fun control injection layers must start at layer 0")
+         if self.injection_layers != tuple(sorted(set(self.injection_layers))):
+diff --git a/comfy_extras/nodes_minimax_h3.py b/comfy_extras/nodes_minimax_h3.py
+index 1baa33cb..8f01cecb 100644
+--- a/comfy_extras/nodes_minimax_h3.py
++++ b/comfy_extras/nodes_minimax_h3.py
+@@ -24,6 +24,7 @@ import comfy.patcher_extension
+ import comfy.utils
+ import node_helpers
+ from comfy.ldm.minimax.model import FRAME_PER_TOKEN, FRAME_RESCALE
++from comfy.ldm.minimax.vae import IMAGENET_MEAN
+ from comfy_api.latest import ComfyExtension, io
+ 
+ CANVAS_MULTIPLE = 32
+@@ -460,7 +461,12 @@ class MiniMaxH3FunControlPatch:
+                     source = torch.zeros(frame_count, 3, height, width, dtype=visibility.dtype, device=visibility.device)
+                 else:
+                     source = self._fit_frames(self.source_video, frame_count, width, height)
+-                masked_latent = self._encode(source * visibility.to(source.device), target_shape)
++                visibility = visibility.to(source.device)
++                masked = source * visibility
++                if self.model_patch.model.inpaint_post_norm:
++                    # the pixel the VAE normalizes to zero, i.e. holes at mid-gray instead of black
++                    masked += (1.0 - visibility) * torch.tensor(IMAGENET_MEAN, dtype=source.dtype, device=source.device).view(1, 3, 1, 1)
++                masked_latent = self._encode(masked, target_shape)
+                 if hint is None:
+                     hint = torch.zeros_like(masked_latent)
+                 visibility_latent = F.interpolate(
+diff --git a/comfy_extras/nodes_model_patch.py b/comfy_extras/nodes_model_patch.py
+index eb461de6..111db022 100644
+--- a/comfy_extras/nodes_model_patch.py
++++ b/comfy_extras/nodes_model_patch.py
+@@ -288,7 +288,8 @@ class ModelPatchLoader:
+             num_blocks = 0
+             while "control_blocks.{}.after_proj.weight".format(num_blocks) in sd:
+                 num_blocks += 1
+-            injection_layers = tuple(range(0, num_blocks * 10, 10))
++            # spread evenly over the 50 base blocks: v1 has 5 (every 10), v2 has 10 (every 5)
++            injection_layers = tuple(range(0, 50, 50 // num_blocks))
+             if metadata is not None and "control_blocks_places" in metadata:
+                 injection_layers = tuple(json.loads(metadata["control_blocks_places"]))
+                 if len(injection_layers) != num_blocks:
+@@ -300,6 +301,7 @@ class ModelPatchLoader:
+             model = comfy.ldm.minimax.controlnet.MiniMaxH3FunControl(
+                 control_in_dim=49,
+                 injection_layers=injection_layers,
++                inpaint_post_norm=metadata is not None and metadata.get("inpaint_masked_pixel_mode") == "post_norm",
+                 hidden_size=sd["control_proj_in.weight"].shape[0],
+                 num_attention_heads=qkv.shape[0] // (3 * head_dim),
+                 attention_head_dim=head_dim,
