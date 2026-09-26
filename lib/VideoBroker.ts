@@ -1,6 +1,6 @@
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip } from './VideoSourceClip.js';
-import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
+import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { execFile } from 'child_process';
@@ -5416,7 +5416,16 @@ export class VideoBroker {
                     if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds);
                     if (originalFrameRequired) plan.keyframe = { ...(plan.keyframe || {}), recommended: false };
                     const notice = sanitizeVideoWorkerText(String(plan.generation_notice || ''), '', 1000).trim();
-                    const contract = approvedLocalRecoveryContract(plan, job.prompt, state.local_plan.reason_code, notice);
+                    let contract;
+                    try {
+                        contract = approvedLocalRecoveryContract(plan, job.prompt, state.local_plan.reason_code,
+                            notice, true, state.local_plan.prompt_analysis);
+                    } catch (error) {
+                        if (error instanceof UnapprovedLocalRecoveryPlanError) {
+                            throw new RecoveryStoppedError(error.message);
+                        }
+                        throw error;
+                    }
                     if (sourceRequired) contract.source_reference_required = true;
                     if (originalFrameRequired) contract.original_first_frame = true;
                     plan.generation_notice = notice;

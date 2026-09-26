@@ -45,6 +45,27 @@ export function recoveryDialogue(plan: any): any[] {
         (segment.shots || []).flatMap((shot: any) => shot.dialogue || []));
 }
 
+export class UnapprovedLocalRecoveryPlanError extends Error {}
+
+function requireProtectedRecoveryDialogue(plan: any, analyses: any[]): void {
+    const actual = normalizedRecoverySpeech(recoveryDialogue(plan).map(line => line.text).join(' '));
+    for (const analysis of analyses) {
+        const contract = analysis?.dialogue_contract;
+        if (!contract || contract.mode === 'none') continue;
+        if (!actual) throw new UnapprovedLocalRecoveryPlanError('Required dialogue is missing from the local screenplay.');
+        let cursor = 0;
+        for (const line of contract.lines || []) {
+            if (!line?.verbatim) continue;
+            const required = normalizedRecoverySpeech(line.text);
+            const index = actual.indexOf(required, cursor);
+            if (required && index < 0) {
+                throw new UnapprovedLocalRecoveryPlanError('Approved dialogue was lost during local planning.');
+            }
+            cursor = index + required.length;
+        }
+    }
+}
+
 function speechSeconds(lines: any[]): number {
     return lines.reduce((total, line) => total
         + (String(line.spoken_text || line.text || '').match(/[\p{L}\p{N}_'-]+/gu) || []).length / (140 / 60)
@@ -177,10 +198,22 @@ export function continueUnbrokenLocalSegments(plan: any): void {
  * becomes the contract; the rejected frontier content decision no longer applies.
  */
 export function approvedLocalRecoveryContract(plan: any, prompt: string, reason: string,
-    notice = '', useSources = true): VideoRecoveryContract {
+    notice = '', useSources = true, frontierAnalysis?: any): VideoRecoveryContract {
     if (!Array.isArray(plan?.segments) || !plan.segments.length
         || plan.segments.some((segment: any) => !Array.isArray(segment?.shots) || !segment.shots.length)) {
-        throw new Error('The local screenplay has no renderable scenes.');
+        throw new UnapprovedLocalRecoveryPlanError('The local screenplay has no renderable scenes.');
+    }
+    if (plan.quality_gate_bypassed) {
+        throw new UnapprovedLocalRecoveryPlanError('The local screenplay failed its quality gate.');
+    }
+    requireProtectedRecoveryDialogue(plan, [frontierAnalysis, plan.prompt_analysis, plan.semantic_analysis]);
+    let linkedScenes = 0;
+    for (const segment of plan.segments) {
+        linkedScenes = segment.transition === 'continue' ? linkedScenes + 1 : 1;
+        if (linkedScenes > 4) {
+            throw new UnapprovedLocalRecoveryPlanError(
+                'The local screenplay needs a fresh shot after four linked scenes to prevent visual drift.');
+        }
     }
     return JSON.parse(JSON.stringify({
         version: 1, prompt, analysis: plan.prompt_analysis || plan.semantic_analysis || {},
