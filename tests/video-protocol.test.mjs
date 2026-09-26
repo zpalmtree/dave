@@ -851,7 +851,7 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /clean 0\.35-second visual lead-in/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /from 00:00\.000 until 00:00\.350/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Apply this lead-in consistently in shot\.visual and keyframe\.motion_contract\.first_second_action/);
-    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Use dialogue\.delivery only for vocal and performance qualities/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Use dialogue\.delivery for vocal and performance qualities and explicit on-screen\/off-screen placement, never timing instructions/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /dialogue turn can overrun its authored shot boundary/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /reserve a small overflow margin/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /do not take that margin from the following payoff/);

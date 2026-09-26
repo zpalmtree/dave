@@ -505,7 +505,7 @@ Budget action density for reliable generation before polishing prose. In a shot 
 
 For MiniMax H3, when dialogue, a consequential contact or collision, its prop aftermath, and the character reaction are all important, do not stack them in one authored shot. Isolate the spoken setup, the causal action, and the already-achieved aftermath/reaction into consecutive shots of roughly two to four seconds, carrying the same location, identity, screen axis, and explicit entry/exit state across each cut.
 
-When speech must accompany ongoing physical action, keep that action visibly underway through the silent lead-in and the spoken turn. Bind dialogue.speaker_id to the same identifiable participant described in shot.visual, with visible speaking anatomy and a camera angle that can show it. Put a subsequent finish, stop, or victory payoff in a later shot when it would otherwise compete with the moving spoken beat; carry forward velocity, travel direction, cast, and spatial relationships across the cut. Do not separate simultaneous speech and action into a stationary speech shot followed by a silent reenactment. Preserve explicitly delayed speech and uninterrupted-shot requests. For a passage or finish, describe the traversable opening and clear destination in the action and camera directions; decorative structures and camera placement must not obstruct the subject's path.
+When speech must accompany ongoing physical action, keep that action visibly underway through the silent lead-in and the spoken turn. For an on-screen speaker, bind dialogue.speaker_id to the same identifiable participant described in shot.visual, with visible speaking anatomy and a camera angle that can show it. An explicitly off-screen speaker or narrator stays out of frame; visible characters must not lip-sync that speaker's words. Put a subsequent finish, stop, or victory payoff in a later shot when it would otherwise compete with the moving spoken beat; carry forward velocity, travel direction, cast, and spatial relationships across the cut. Do not separate simultaneous speech and action into a stationary speech shot followed by a silent reenactment. Preserve explicitly delayed speech and uninterrupted-shot requests. For a passage or finish, describe the traversable opening and clear destination in the action and camera directions; decorative structures and camera placement must not obstruct the subject's path.
 
 Make cast continuity explicit in each shot's visual and camera fields, including close-ups. Identify whose shoulder, hands, helmet, face, or reflection is visible and where that person's body is relative to the camera and prop. In a one-person scene, a subjective view of their own hands cannot also place a separate, opposing version of that person across the prop. Use a physically connected side view, a subjective insert without an opposing body, or a return to the same person's established wider position for the reaction. In multi-person scenes, preserve each intended participant and distinguish the foreground actor from the person they face. These ownership rules preserve requested additional characters, reflections, doubles, and deliberate reveals rather than forbidding them.
 
@@ -525,7 +525,7 @@ For a seamless loop, define the complete frame-zero state and physically return 
 
 Make every transformation mechanically legible. If disconnected letters or parts become one rigid object, show their own material visibly bridge, expand, compress, fold, or lock together before it moves as a unit. Match sound to the achieved state: a hanging-open hatch creaks or settles at its hinge, while an impact requires visible contact. For explanatory graphics, stopping or conserving a flow halts future loss and retains unused material at the source; never imply conservation by reversing already expelled material upstream unless time reversal is requested.
 
-Treat explicit speaking intent as authority to write speech. First distinguish production direction from diegetic wording. A request that itself reads like something a character would say—including a first-person confession, direct address, greeting, plea, boast, rant, chant, catchphrase, or speaker-name colon line—is spoken wording even without quotation marks or a verb such as "says." This requires evidence of a speech act in the wording, such as first person, direct address, an explicit vocal cue, or a speaker label. Unquoted third-person narrative or scene prose is visual direction even when it is emotional, inflammatory, slogan-like, or written in a dramatic voice. For example, "and there she was, the captain herself leading the fleet into a better tomorrow" describes a scene; it does not ask a narrator to recite that sentence. Do not invent a narrator or visible speaker merely to read the creative brief aloud. Preserve actual supplied spoken wording verbatim in dialogue and infer a visible speaker whose mouth movement and performance match it. Terse labels such as sound:, audio:, ambience:, music:, style:, scene:, and shot: are production directions, not speakers. When the user asks subjects to speak, talk, discuss, converse, argue, debate, interview, narrate, announce, shout, sing, or otherwise vocalize but leaves some or all wording unspecified, write the shortest natural original dialogue or lyrics needed to express the requested topic and interaction. You may also add concise original in-world dialogue when it improves a character-driven, narrative, confrontational, absurd, or comedic screenplay, even if the user did not explicitly request speech. Prefer a memorable line, reaction, or brief exchange that advances the scene; never use dialogue merely to have a narrator recite or closely paraphrase the creative brief. Give distinct participants concise turn-taking lines, identify the correct speaker and language, and make the corresponding shot.visual describe visible speaking or singing with synchronized mouth movement. Set dialogue.language to the spoken language name alone, such as English, Spanish, or Spanish-English code-switching; never append fidelity or accent notes such as "as written" or "verbatim" there, because the renderer voices every extra word in that field. Express accent and performance through dialogue.delivery; verbatim fidelity is already secured by copying the wording into dialogue.text. Fill dialogue.spoken_text with the same line as the renderer must voice it: keep every word and its order, but write out any acronym, initialism, or chat abbreviation that people say as a phrase, such as WTF, SMH, IDK, NGL, or TBH, as that phrase; leave ones people say as letters, such as FBI, CEO, or GG, unchanged. When nothing needs expanding, copy dialogue.text into spoken_text exactly. Never put the expansion into dialogue.text itself. If the user supplies quoted spoken wording, reproduce that wording verbatim for its intended turn: never paraphrase, censor, translate, extend, or pad a quoted line. For MiniMax H3, put a single short user-supplied line in the first shot of its segment and reserve a clean 0.35-second visual lead-in before it begins: from 00:00.000 until 00:00.350 there is no human voice, mumbling, or mouth movement. Apply this lead-in consistently in shot.visual and keyframe.motion_contract.first_second_action; neither may say or imply that speech begins immediately. Use dialogue.delivery only for vocal and performance qualities, never timing instructions such as "begins immediately." Retain later placement only when the user explicitly sequences or delays the line. This priority does not apply to generated punchlines or multi-turn dialogue whose timing serves the story. Respect explicit requests for silence or no dialogue. The shot.audio field contains only ambience, sound effects, and non-speech sound; all words belong in dialogue.
+Treat explicit speaking intent as authority to write speech. First distinguish production direction from diegetic wording. A request that itself reads like something a character would say—including a first-person confession, direct address, greeting, plea, boast, rant, chant, catchphrase, or speaker-name colon line—is spoken wording even without quotation marks or a verb such as "says." This requires evidence of a speech act in the wording, such as first person, direct address, an explicit vocal cue, or a speaker label. Unquoted third-person narrative or scene prose is visual direction even when it is emotional, inflammatory, slogan-like, or written in a dramatic voice. For example, "and there she was, the captain herself leading the fleet into a better tomorrow" describes a scene; it does not ask a narrator to recite that sentence. Do not invent a narrator or visible speaker merely to read the creative brief aloud. Preserve actual supplied spoken wording verbatim in dialogue. For on-screen dialogue, infer a visible speaker whose mouth movement and performance match it; preserve explicitly off-screen narration without assigning its words to a visible character. Terse labels such as sound:, audio:, ambience:, music:, style:, scene:, and shot: are production directions, not speakers. When the user asks subjects to speak, talk, discuss, converse, argue, debate, interview, narrate, announce, shout, sing, or otherwise vocalize but leaves some or all wording unspecified, write the shortest natural original dialogue or lyrics needed to express the requested topic and interaction. You may also add concise original in-world dialogue when it improves a character-driven, narrative, confrontational, absurd, or comedic screenplay, even if the user did not explicitly request speech. Prefer a memorable line, reaction, or brief exchange that advances the scene; never use dialogue merely to have a narrator recite or closely paraphrase the creative brief. Give distinct participants concise turn-taking lines, identify the correct speaker and language, and make the corresponding shot.visual describe visible speaking or singing with synchronized mouth movement only for on-screen turns; keep off-screen turns audible without visible lip-sync. Set dialogue.language to the spoken language name alone, such as English, Spanish, or Spanish-English code-switching; never append fidelity or accent notes such as "as written" or "verbatim" there, because the renderer voices every extra word in that field. Express accent and performance through dialogue.delivery; verbatim fidelity is already secured by copying the wording into dialogue.text. Fill dialogue.spoken_text with the same line as the renderer must voice it: keep every word and its order, but write out any acronym, initialism, or chat abbreviation that people say as a phrase, such as WTF, SMH, IDK, NGL, or TBH, as that phrase; leave ones people say as letters, such as FBI, CEO, or GG, unchanged. When nothing needs expanding, copy dialogue.text into spoken_text exactly. Never put the expansion into dialogue.text itself. If the user supplies quoted spoken wording, reproduce that wording verbatim for its intended turn: never paraphrase, censor, translate, extend, or pad a quoted line. For MiniMax H3, put a single short user-supplied line in the first shot of its segment and reserve a clean 0.35-second visual lead-in before it begins: from 00:00.000 until 00:00.350 there is no human voice, mumbling, or mouth movement. Apply this lead-in consistently in shot.visual and keyframe.motion_contract.first_second_action; neither may say or imply that speech begins immediately. Use dialogue.delivery for vocal and performance qualities and explicit on-screen/off-screen placement, never timing instructions such as "begins immediately." Retain later placement only when the user explicitly sequences or delays the line. This priority does not apply to generated punchlines or multi-turn dialogue whose timing serves the story. Respect explicit requests for silence or no dialogue. The shot.audio field contains only ambience, sound effects, and non-speech sound; all words belong in dialogue.
 
 For MiniMax H3, a dialogue turn can overrun its authored shot boundary by several frames and shorten the following shot. When explicit user sequencing requires a later line and a continuity-critical or payoff shot follows in the same segment, reserve a small overflow margin by nominally starting the following shot a few frames early; do not take that margin from the following payoff. If the line needs the full authored window, extend the duration or move the following payoff to a new segment instead.
 
@@ -642,40 +642,74 @@ function planHasDialogue(plan: any): boolean {
     ));
 }
 
-const DIALOGUE_STAGING_MARKER = 'Visible dialogue staging:';
+const DIALOGUE_STAGING_MARKER = 'Dialogue staging:';
+const DIALOGUE_STAGING_END = 'End dialogue staging.';
 
-/**
- * MiniMax receives shot visuals separately from structured dialogue. Make the
- * visible performance explicit without another model call so a good line is
- * not rendered as voice-over or omitted because its speaker only appeared in
- * dialogue metadata.
- */
+function withoutGeneratedDialogueStaging(visual: string): string {
+    return visual
+        .replace(/(?:^|\s+)Dialogue staging: [\s\S]*? End dialogue staging\./g, '')
+        .replace(/(?:^|\s+)Visible dialogue staging: [^\n]+? remains visible and (?:delivers the assigned line|deliver their assigned lines) (?:with synchronized mouth movement\.|through the established voice mechanism\. Preserve each subject's source anatomy; mouthless faces remain rigid and mouthless\.)/g, '')
+        .trim();
+}
+
+/** Explicit per-turn placement overrides a speaker's default placement, not their voice. */
+function dialoguePlacement(description: unknown): 'on-screen' | 'off-screen' | undefined {
+    const text = String(description || '')
+        .replace(/\b(?:not|never|no|without)\s+(?:an?\s+)?(?:on[- ]screen|off[- ]screen|voice[- ]?over)\b/gi, '');
+    const placement = text.match(/\b(?:on[- ]screen|off[- ]screen|voice[- ]?over)\b/i)?.[0];
+    if (!placement) return undefined;
+    return /^on[- ]screen$/i.test(placement) ? 'on-screen' : 'off-screen';
+}
+
+/** Keep visible dialogue explicit without turning an off-screen voice into a pictured speaker. */
 export function stageFrontierDialogueVisually(plan: any): number {
+    const profiles = new Map<string, any>((plan?.speaker_profiles || []).map((profile: any) => [
+        String(profile.speaker_id || '').trim().toLowerCase(), profile,
+    ]));
     let stagedShots = 0;
     for (const segment of plan?.segments || []) {
         for (const shot of segment?.shots || []) {
             const lines = (Array.isArray(shot?.dialogue) ? shot.dialogue : [])
                 .filter((line: any) => String(line?.text || '').trim());
-            if (!lines.length || String(shot?.visual || '').includes(DIALOGUE_STAGING_MARKER)) continue;
-            const speakers = [...new Set(lines.map((line: any) =>
-                String(line?.speaker_id || 'speaker')
-                    .trim()
-                    .replace(/[_-]+/g, ' '),
-            ).filter(Boolean))];
-            const subject = speakers.length === 1
-                ? speakers[0]
-                : `${speakers.slice(0, -1).join(', ')} and ${speakers.at(-1)}`;
-            const action = speakers.length === 1 ? 'delivers the assigned line' : 'deliver their assigned lines';
+            const original = String(shot?.visual || '');
+            // Replace only our generated block, preserving later scene/contract
+            // instructions and repairing the legacy unconditional visible staging.
+            const visual = withoutGeneratedDialogueStaging(original);
+            const visible = new Set<string>();
+            const offscreen = new Set<string>();
+            for (const line of lines) {
+                const id = String(line.speaker_id || 'speaker').trim();
+                const profile = profiles.get(id.toLowerCase());
+                const placement = dialoguePlacement(line.delivery)
+                    || dialoguePlacement(profile?.voice_description);
+                const name = id.replace(/[_-]+/g, ' ');
+                (placement === 'off-screen' ? offscreen : visible).add(name);
+            }
             const mouthless = /\b(?:mouthless\b|(?:no (?:human )?mouth|without (?:a )?(?:human )?mouth)\b(?!\s+(?:mov\w*|motion|animation|articulation|opening|sound\w*|noise\w*)))/i
-                .test(`${plan.continuity_bible || ''} ${shot.visual || ''}`);
-            shot.visual = [
-                String(shot.visual || '').trim(),
-                `${DIALOGUE_STAGING_MARKER} ${subject} remains visible and ${action} `
+                .test(`${plan.continuity_bible || ''} ${visual}`);
+            const directions: string[] = [];
+            if (visible.size) {
+                const speakers = [...visible];
+                const subject = speakers.length === 1
+                    ? speakers[0]
+                    : `${speakers.slice(0, -1).join(', ')} and ${speakers.at(-1)}`;
+                const action = speakers.length === 1 ? 'delivers the assigned line' : 'deliver their assigned lines';
+                directions.push(`${offscreen.size ? 'For the on-screen turns, ' : ''}${subject} remains visible and ${action} `
                     + (mouthless
                         ? "through the established voice mechanism. Preserve each subject's source anatomy; mouthless faces remain rigid and mouthless."
-                        : 'with synchronized mouth movement.'),
-            ].filter(Boolean).join(' ');
-            stagedShots += 1;
+                        : 'with synchronized mouth movement.'));
+            }
+            for (const speaker of offscreen) {
+                directions.push(`${speaker} delivers the assigned off-screen lines with the established voice identity. `
+                    + `Keep ${speaker} out of frame during those lines; visible characters do not lip-sync those words.`);
+            }
+            const staged = directions.length
+                ? `${visual}${visual ? ' ' : ''}${DIALOGUE_STAGING_MARKER} ${directions.join(' ')} ${DIALOGUE_STAGING_END}`
+                : visual;
+            if (staged !== original) {
+                shot.visual = staged;
+                stagedShots += 1;
+            }
         }
     }
     return stagedShots;
