@@ -1,6 +1,6 @@
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
-import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
+import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { checkVideoCharacterContinuity, decodeContinuityImage, validateContinuityDecision } from './VideoCharacterContinuity.js';
@@ -1030,7 +1030,7 @@ function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
     }
     if (value.clip_url !== undefined) {
         const clipUrl = String(value.clip_url);
-        if (!isDiscordAttachmentUrl(clipUrl)) throw new Error('The video clip is not a Discord attachment.');
+        if (!isVideoSourceClipUrl(clipUrl)) throw new Error('The video clip is not a Discord attachment or resolved Twitter/X MP4.');
         return { clip_url: clipUrl, name: String(value.name || 'clip').slice(0, 255) };
     }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
@@ -1180,7 +1180,7 @@ async function extractVideoClipFrame(
     return luma ? Number(luma[1]) : null;
 }
 
-/** Store a representative frame of a Discord video clip as the starting image. */
+/** Store a representative frame of a supported video clip as the starting image. */
 export async function extractVideoClipSourceImage(
     descriptor: VideoClipSourceImageDescriptor,
     directory: string,
@@ -1217,6 +1217,9 @@ export async function extractVideoClipSourceImage(
         }
         throw new Error('ffmpeg produced no frame.');
     } catch (error) {
+        if (!isDiscordAttachmentUrl(descriptor.clip_url)) {
+            throw new Error('Could not extract a starting frame from the Twitter/X video. Try attaching the video directly.');
+        }
         console.warn(`[Video] Could not extract a frame from ${descriptor.name} with ffmpeg; using Discord's first frame.`, error);
         return downloadDiscordSourceImage({
             url: videoClipProxyFrameUrl(descriptor.clip_url),
@@ -1276,6 +1279,24 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
                 camera_relation: 'Use a coherent single camera view wide enough to show recognizable Meximutt, the attached subjects, and their story-defining props with clear sightlines for interaction.',
                 first_second_action: requestedAction,
             },
+        },
+        segments: [],
+    };
+}
+
+export function videoReplacementReferencePlan(prompt: string): Record<string, unknown> {
+    return {
+        intent: `Create a visual reference for this replacement subject: ${prompt}`,
+        keyframe: {
+            recommended: true,
+            prompt: [
+                `Depict the replacement requested by the user: ${prompt}`,
+                'Create a clear appearance reference for inserting this subject into an existing video.',
+                'Show the entire subject, including its full body or complete shape, at a useful scale against a simple neutral background.',
+                'Honor the requested species, number, colors, clothing, proportions, and visual style. For plural subjects, show the requested group together.',
+                'Only depict the new replacement; do not include the original subject being removed, captions, diagrams, or multiple views.',
+            ].join(' '),
+            reference_requirements: [],
         },
         segments: [],
     };
@@ -2624,10 +2645,14 @@ export class VideoBroker {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
         }
         const videoEditTarget = String(body.video_edit_target || '').trim();
+        const replacementPrompt = String(body.video_replacement_prompt || '').trim();
+        if (replacementPrompt && (!videoDescriptor || sourceDescriptor || replacementPrompt.length > 2000)) {
+            return { status: 400, body: { error: 'A generated replacement needs a source video, a description up to 2000 characters, and no replacement image.' } };
+        }
         if (videoDescriptor && (!videoEditTarget || videoEditTarget.length > 120
-            || !sourceDescriptor || isClipSourceImage(sourceDescriptor)
+            || (!sourceDescriptor && !replacementPrompt) || (sourceDescriptor && isClipSourceImage(sourceDescriptor))
             || audioDescriptor || compositeDescriptor || body.model !== 'minimax')) {
-            return { status: 400, body: { error: 'Video replacement needs a subject, one source clip, and one replacement image; separate audio and image composition are unsupported.' } };
+            return { status: 400, body: { error: 'Video replacement needs a subject, one source clip, and a replacement image or description; separate audio and image composition are unsupported.' } };
         }
         if (!videoDescriptor && videoEditTarget) {
             return { status: 400, body: { error: 'Video replacement needs a source clip.' } };
@@ -2731,11 +2756,26 @@ export class VideoBroker {
         let sourceImageDownloadSeconds: number | null = null;
         let sourceImageCompositionSeconds: number | null = null;
         let sourceImageComposition: 'generated' | 'local_qwen' | null = null;
-        if (sourceDescriptor) {
+        if (sourceDescriptor || replacementPrompt) {
             const sourceImageStarted = Date.now();
             try {
                 const sourceImageDownloader = this.options.sourceImageDownloader || storeVideoSourceImage;
-                if (compositeDescriptor) {
+                if (replacementPrompt) {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS);
+                    try {
+                        const generated = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
+                            videoReplacementReferencePlan(replacementPrompt), [], {
+                                ...submissionHooks,
+                                aspectRatio: '1:1', abortSignal: controller.signal,
+                                onAttempt: attempt => submissionHooks.onAttempt?.({ ...attempt, stage: `replacement_reference_${attempt.stage}` }),
+                                onUsage: usage => submissionHooks.onUsage?.({ ...usage, stage: `replacement_reference_${usage.stage}` }),
+                            },
+                        );
+                        sourceImage = storeCompositedSourceImage(generated, directory);
+                        sourceImageCompositionSeconds = (Date.now() - sourceImageStarted) / 1000;
+                    } finally { clearTimeout(timeout); }
+                } else if (compositeDescriptor && sourceDescriptor) {
                     const base = await sourceImageDownloader(
                         sourceDescriptor,
                         join(directory, 'composite-base'),
@@ -2799,7 +2839,7 @@ export class VideoBroker {
                             rmSync(join(directory, 'composite-attached'), { recursive: true, force: true });
                         }
                     }
-                } else {
+                } else if (sourceDescriptor) {
                     sourceImage = await sourceImageDownloader(sourceDescriptor, directory);
                     sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
                 }

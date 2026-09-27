@@ -137,7 +137,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxVideo,
-            description: 'Generate a MiniMax H3 video, or replace a named subject in an attached clip with an image',
+            description: 'Generate a MiniMax H3 video, or replace a subject in an attached or Twitter-linked clip using an image or description',
             examples: [{ value: 'minimax an arcade kart race between historical figures' },
                 { value: 'minimax replace the red car with the blue car in the attached image' }],
         },
@@ -150,7 +150,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleOalgoVideo,
-            description: 'Generate a Meximutt video, or replace a named subject in a clip with Meximutt or an attached image',
+            description: 'Generate a Meximutt video, or replace a subject in an attached or Twitter-linked clip using Meximutt, an image, or a description',
             examples: [{ value: 'oalgo celebrates a championship victory' },
                 { value: 'oalgo --image-provider grok reacts to the attached image' },
                 { value: 'oalgo replace the dancer with Meximutt, keeping the same moves' }],

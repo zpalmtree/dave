@@ -1,15 +1,36 @@
 # Generic video replacement
 
-Use either video command with a source clip and a replacement image:
+Use either video command with a source clip and a replacement image or description:
 
 ```text
 $minimax replace the red car with the blue car in the attached image
 $oalgo replace the dancer with Meximutt, keeping the same moves
+$minimax replace the character with slugs
 ```
 
 The clip and image may be attached to the command or to the message it replies
 to. The command message's attachment wins when both messages have the same kind
-of input. `$oalgo` uses its built-in portrait if no replacement image is supplied.
+of input. A source clip can also come from a public Twitter/X, fxtwitter,
+fixupx, or vxtwitter post link in the command or the message it replies to.
+For example, reply to `https://fxtwitter.com/juhrafftrades/status/2103886182404772256`
+with `$minimax replace the character with slugs` or
+`$oalgo replace the character with slugs`. Attach a slug image to control its
+appearance, or omit it to have the bot generate a replacement reference from
+your description before queueing the edit. Reference generation uses the existing
+cloud image service and adds preparation time and image-generation cost.
+
+`$oalgo replace the character with Meximutt` uses its built-in portrait when no
+image is supplied. An explicit different replacement such as “slugs” generates
+that subject instead. `$oalgo --replace "the character"` retains the portrait default.
+An attached image always takes precedence over a generated reference or portrait.
+
+Link resolution uses the public [FxTwitter API](https://docs.fxembed.com/api/twitter/operations/2statusid/)
+and downloads an MP4 from Twitter's media CDN; no Twitter API key is needed.
+Use one post per message; for posts with multiple videos, select the desired
+media using `/video/1`, `/video/2`, etc. Private/deleted posts and API failures
+return an error asking you to retry or attach the video. Without a `replace`
+instruction, a linked video supplies a representative starting frame, just like
+an attached clip.
 Quote the subject if its name includes “with,” for example
 `replace "the woman with a red coat" with the attached image`.
 
@@ -17,7 +38,7 @@ The source clip must be MP4, MOV, M4V, WebM, or MKV, 0.5–120 seconds, and no l
 than 100 MiB. MiniMax H3 generates 5–15 seconds per run. Shorter clips are padded
 for generation and trimmed back to the source length. Longer clips are split
 into frame-aligned segments, edited in order, and joined with the original audio.
-The clip is downloaded to the broker before queueing so its Discord URL
+The clip is downloaded to the broker before queueing so its media URL
 cannot expire while it waits. The desktop normalizes it to 24 fps, tracks the
 named subject with SAM3.1, and rejects an empty or nearly full-frame mask.
 MiniMax H3 Ref2VA receives the replacement image. Fun ControlNet receives the

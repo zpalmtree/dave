@@ -1,4 +1,5 @@
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
+import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
 import fetch, { RequestInit, Response } from 'node-fetch';
 import { Client, cleanContent, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
@@ -353,6 +354,30 @@ export function videoSourceImageFromMessages(
     return null;
 }
 
+/** Resolve each message in precedence order, preserving explicit attachments. */
+export async function videoSourcesFromMessages(
+    commandMessage: Message,
+    referencedMessage: Message | null,
+    replacement: boolean,
+    resolveLink = twitterVideoFromMessage,
+): Promise<{ image: SubmittedVideoAttachmentOrClipSourceImage | null; clip: SubmittedVideoClipSourceImage | null }> {
+    const image = replacement ? videoAttachmentImageFromMessages(commandMessage, referencedMessage) : null;
+    for (const message of [commandMessage, referencedMessage]) {
+        if (!message) continue;
+        if (!replacement) {
+            const attachment = videoSourceImageFromMessage(message);
+            if (attachment) return { image: attachment, clip: null };
+        }
+        const clip = videoClipSourceImageFromMessage(message) || await resolveLink(message);
+        if (clip) return replacement ? { image, clip } : { image: clip, clip: null };
+    }
+    return { image, clip: null };
+}
+
+export function videoReplacementUsesPreset(prompt: string): boolean {
+    return !prompt.trim() || /^(?:meximutt|oalgo)\b/i.test(prompt.trim());
+}
+
 export function isVideoClipSourceImage(
     source: SubmittedVideoSourceImage | null,
 ): source is SubmittedVideoClipSourceImage {
@@ -389,8 +414,8 @@ export function videoPromptFromMessages(
     referencedMessage: Pick<Message, 'content'> & Partial<Pick<Message, 'channel'>> | null,
     channel?: Message['channel'],
 ): string {
-    const current = videoPromptPlainText(commandPrompt, channel).trim();
-    const referenced = videoPromptPlainText(referencedMessage?.content || '', referencedMessage?.channel).trim();
+    const current = videoPromptPlainText(stripTwitterPostLinks(commandPrompt), channel).trim();
+    const referenced = videoPromptPlainText(stripTwitterPostLinks(referencedMessage?.content || ''), referencedMessage?.channel).trim();
     if (current && referenced) {
         return `Context from the replied message:\n${referenced}\n\nCurrent instruction (takes priority):\n${current}`;
     }
@@ -1128,19 +1153,20 @@ export async function handleVideoRequest(
     let sourceAudio: SubmittedVideoSourceAudio | null;
     let replacement: ReturnType<typeof parseVideoReplacement>;
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
+    prompt = stripTwitterPostLinks(prompt);
     try {
-        const availableClip = model === 'minimax' ? videoClipFromMessages(msg, referencedMessage) : null;
         replacement = model === 'minimax' ? parseVideoReplacement(prompt) : null;
-        sourceVideo = replacement ? availableClip : null;
-        if (replacement && !sourceVideo) throw new Error('Video replacement needs one attached or replied-to video clip.');
-        attachedSourceImage = replacement
-            ? videoAttachmentImageFromMessages(msg, referencedMessage)
-            : videoSourceImageFromMessages(msg, referencedMessage);
+        const sources = model === 'minimax'
+            ? await videoSourcesFromMessages(msg, referencedMessage, Boolean(replacement))
+            : { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null };
+        sourceVideo = sources.clip;
+        if (replacement && !sourceVideo) throw new Error('Video replacement needs one attached video or Twitter/X video link, in your message or the message you reply to.');
+        attachedSourceImage = sources.image;
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
         if (replacement && sourceAudio) throw new Error('Video replacement keeps the clip soundtrack; remove the separate song attachment.');
-        if (replacement && !attachedSourceImage && !options.presetSourceImage) {
-            throw new Error('Video replacement needs one attached or replied-to replacement image.');
+        if (replacement && !attachedSourceImage && !options.presetSourceImage && !replacement.prompt) {
+            throw new Error('Attach a replacement image or describe the replacement: replace the character with slugs.');
         }
     } catch (error) {
         await msg.reply(error instanceof Error ? error.message : String(error));
@@ -1148,7 +1174,9 @@ export async function handleVideoRequest(
     }
     const sourceImage: SubmittedVideoSourceImage | null = options.presetSourceImage && !replacement
         ? { preset: options.presetSourceImage }
-        : attachedSourceImage || (replacement && options.presetSourceImage ? { preset: options.presetSourceImage } : null);
+        : attachedSourceImage || (replacement && options.presetSourceImage && videoReplacementUsesPreset(replacement.prompt)
+            ? { preset: options.presetSourceImage } : null);
+    const replacementImagePrompt = replacement && !sourceImage ? replacement.prompt : null;
     const compositeSourceImage = !replacement && options.presetSourceImage && options.compositeAttachedImage
         ? attachedSourceImage
         : null;
@@ -1173,9 +1201,11 @@ export async function handleVideoRequest(
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
-    const pending = await msg.reply(initialVideoRequestStatus(model));
+    const pending = await msg.reply(replacementImagePrompt
+        ? 'Preparing your video edit: downloading the clip and generating a replacement reference from your description.'
+        : initialVideoRequestStatus(model));
     const plannerGuidance = [
-        sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : options.plannerGuidance,
+        sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement ? '' : options.plannerGuidance,
         isVideoClipSourceImage(sourceImage) ? VIDEO_CLIP_FRAME_PLANNER_GUIDANCE : '',
         videoReplyChainGuidance(await earlierReplyChain),
     ]
@@ -1201,6 +1231,7 @@ export async function handleVideoRequest(
                 source_image: sourceImage,
                 source_video: sourceVideo,
                 video_edit_target: replacement?.target,
+                video_replacement_prompt: replacementImagePrompt,
                 source_audio: sourceAudio,
                 source_image_composite: compositeSourceImage,
                 source_image_provider: options.compositeProvider,
