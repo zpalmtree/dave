@@ -420,6 +420,29 @@ test('video replies preserve the full accepted prompt', () => {
     assert.equal(completedVideoAttachmentName({ ...job, prompt_tease: null }), 'minimax-a1869ead.mp4');
 });
 
+test('video replies keep multiline prompts inside a Discord multiline quote', () => {
+    const job = {
+        id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
+        model: 'minimaxfast',
+        command_variant: 'oalgofast',
+        prompt: 'First paragraph.\n\nSecond paragraph.\nFinal line.',
+        status: 'queued',
+        queue_position: 2,
+        worker_online: true,
+        expected_finish_at: 2_000_000_450,
+    };
+    for (const format of [formatVideoStatusPost, completedVideoPost, failedVideoPost]) {
+        const reply = format(job);
+        assert.ok(reply.endsWith(`\n>>> ${job.prompt}`));
+        assert.ok(reply.length <= 1999);
+
+        const longReply = format({ ...job, prompt: job.prompt.repeat(50) });
+        assert.ok(longReply.length <= 1999);
+        assert.match(longReply, /\n>>> First paragraph\.\n\nSecond paragraph\./);
+        assert.ok(longReply.endsWith('…'));
+    }
+});
+
 test('video replies fit when a referenced prompt uses Discord\'s full content allowance', () => {
     const prompt = 'Maximum-length replied-message prompt. '.repeat(60).slice(0, 2000).padEnd(2000, 'x');
     const job = {
