@@ -1,0 +1,14 @@
+{
+  "ComfyUI/comfy/cli_args.py": {
+    "before_sha256": "70be4fb6830ccd7e43df06330f6da31f76c0ad11ee135d04913f5d8c1d9f4cde",
+    "after_sha256": "0b92bfeb9e2378ea937e039b186caed33e2400197832252f4cf5502a5c84bccc"
+  },
+  "video_gen/templates/h3_i2v.json": {
+    "before_sha256": "d8a39bbb7cf9669e64d676d1130229085ef618a6de3c513bb33aa7af6c2d8352",
+    "after_sha256": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3"
+  },
+  "video_gen/templates/h3_t2v.json": {
+    "before_sha256": "d920d81bc4f5353d88785d77ee71956f44685f842e990cb866b48aa0fb1d9723",
+    "after_sha256": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+  }
+}
