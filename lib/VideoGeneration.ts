@@ -1077,7 +1077,7 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 }
 
 interface VideoRequestOptions {
-    commandVariant?: 'meximutt' | 'oalgo';
+    commandVariant?: 'meximutt' | 'oalgo' | 'oalgofast';
     presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
     compositeAttachedImage?: boolean;
     compositeProvider?: VideoSourceCompositeProvider;
@@ -1265,11 +1265,19 @@ export function parseOalgoImageProvider(prompt: string): { prompt: string; provi
 }
 
 export async function handleOalgoVideo(msg: Message, prompt: string): Promise<void> {
+    await handleOalgoVideoRequest('minimax', msg, prompt);
+}
+
+export async function handleOalgoFastVideo(msg: Message, prompt: string): Promise<void> {
+    await handleOalgoVideoRequest('minimaxfast', msg, prompt);
+}
+
+async function handleOalgoVideoRequest(model: 'minimax' | 'minimaxfast', msg: Message, prompt: string): Promise<void> {
     let parsed: ReturnType<typeof parseOalgoImageProvider>;
     try { parsed = parseOalgoImageProvider(prompt); }
     catch (error) { await msg.reply(error instanceof Error ? error.message : String(error)); return; }
-    await handleVideoRequest('minimax', msg, parsed.prompt, {
-        commandVariant: 'oalgo',
+    await handleVideoRequest(model, msg, parsed.prompt, {
+        commandVariant: model === 'minimaxfast' ? 'oalgofast' : 'oalgo',
         presetSourceImage: 'meximutt',
         compositeAttachedImage: true,
         compositeProvider: parsed.provider,

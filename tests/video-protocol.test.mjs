@@ -294,7 +294,7 @@ test('Gemini planner schema keeps nested types while removing complexity constra
 });
 
 test('local video commands are declared as Discord-only', () => {
-    for (const name of ['minimax', 'minimaxfast', 'oalgo', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
+    for (const name of ['minimax', 'minimaxfast', 'oalgo', 'oalgofast', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command, `${name} command is present`);
         assert.equal(command.discordOnly, true);
@@ -317,7 +317,7 @@ test('local video commands are declared as Discord-only', () => {
 });
 
 test('test channel video commands have one silent Dave responder', () => {
-    for (const name of ['minimax', 'minimaxfast', 'oalgo', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
+    for (const name of ['minimax', 'minimaxfast', 'oalgo', 'oalgofast', 'meximutt', 'minimutt', 'videoqueue', 'videogen', 'videostats']) {
         const command = Commands.find(candidate => candidate.aliases.includes(name));
         assert.ok(command.commandGates.includes(singleVideoResponderGate));
     }

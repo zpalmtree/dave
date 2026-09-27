@@ -2645,7 +2645,8 @@ export class VideoBroker {
         if (compositeProvider !== 'sunburst' && compositeProvider !== 'grok') {
             return { status: 400, body: { error: 'Image provider must be sunburst or grok.' } };
         }
-        if (body.source_image_provider !== undefined && (!compositeDescriptor || body.model !== 'minimax')) {
+        if (body.source_image_provider !== undefined && (!compositeDescriptor
+            || (body.model !== 'minimax' && body.model !== 'minimaxfast'))) {
             return { status: 400, body: { error: 'Image provider selection requires a Meximutt image combination.' } };
         }
         const existingBeforeDownload = await this.get<JobRow>(
@@ -2678,13 +2679,15 @@ export class VideoBroker {
         const suppliedRequestedAt = Number(body.requested_at);
         const requestedAt = Number.isFinite(suppliedRequestedAt) && suppliedRequestedAt <= receivedAt
             && suppliedRequestedAt > receivedAt - 86400 ? suppliedRequestedAt : receivedAt;
+        const characterVariant = body.model === 'minimax' ? 'oalgo'
+            : body.model === 'minimaxfast' ? 'oalgofast' : null;
         const requestedCommandVariant = String(body.command_variant || (
-            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? 'oalgo' : VIDEO_MODELS[body.model as VideoModelId].command
+            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? characterVariant : VIDEO_MODELS[body.model as VideoModelId].command
         ));
         // Older clients may still send an alias; share rollout selection and metrics.
         const commandVariant = ['meximutt', 'minimutt'].includes(requestedCommandVariant)
             ? 'oalgo' : requestedCommandVariant;
-        if (![VIDEO_MODELS[body.model as VideoModelId].command, ...(body.model === 'minimax' ? ['oalgo'] : [])].includes(commandVariant)) {
+        if (![VIDEO_MODELS[body.model as VideoModelId].command, characterVariant].includes(commandVariant)) {
             return { status: 400, body: { error: 'Invalid video command variant.' } };
         }
         const sourceMode = videoDescriptor ? 'video_edit' : compositeDescriptor ? 'preset_composite'
@@ -5374,7 +5377,7 @@ export class VideoBroker {
         };
         const sources = this.recoverySources(job);
         const options = this.frontierOptions(job, true);
-        const sourceRequired = job.command_variant === 'oalgo';
+        const sourceRequired = job.command_variant === 'oalgo' || job.command_variant === 'oalgofast';
         const originalFrameRequired = sourceRequired && !job.source_image_composite_path;
         const validateReferences = () => {
             if (state.terminal_error) throw new RecoveryStoppedError(state.terminal_error);

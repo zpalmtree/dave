@@ -393,7 +393,8 @@ test('broker persists recovery and requires every recorded scene for the matchin
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('broker stops rewritten plans, missing identity, and replacement openings, and routes refusals locally', async () => {
+for (const [model, variant] of [['minimax', 'oalgo'], ['minimaxfast', 'oalgofast']])
+test(`${variant} recovery preserves identity and openings and routes refusals locally`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-identity-'));
     const portrait = join(directory, 'portrait.png');
     writeFileSync(portrait, Buffer.from('portrait'));
@@ -422,18 +423,18 @@ test('broker stops rewritten plans, missing identity, and replacement openings, 
         const base = `http://127.0.0.1:${broker.listeningPort()}`;
         const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
             headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
-            body: JSON.stringify({ model: 'minimax', prompt: 'The original request', requester_id: '1', origin_bot_id: '2',
+            body: JSON.stringify({ model, prompt: 'The original request', requester_id: '1', origin_bot_id: '2',
                 channel_id: '3', command_message_id: '4', status_message_id: '5' }),
         });
         assert.equal(submitted.status, 201);
         const id = (await submitted.json()).job.id;
         broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
-            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+            capabilities: [model], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
             scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
         const reset = async (state = {}, source = portrait) => {
             broker.worker.currentJob = id;
-            await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=2, command_variant='oalgo', source_image_path=?, source_image_mime='image/png', recovery_json=? WHERE public_id=?",
-                [source, JSON.stringify(state), id]);
+            await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=2, command_variant=?, source_image_path=?, source_image_mime='image/png', recovery_json=? WHERE public_id=?",
+                [variant, source, JSON.stringify(state), id]);
         };
         const request = async (operation, body = {}) => {
             const response = await fetch(`${base}/v1/worker/jobs/${id}/recovery/${operation}`, { method: 'POST',
