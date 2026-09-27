@@ -122,7 +122,9 @@ function formatVideoReplyWithFullPrompt(
     includePromptTease = false,
 ): string {
     const direction = videoJobDirection(job);
-    const separator = '\n> ';
+    // Discord's multiline quote keeps blank lines and later paragraphs inside
+    // the prompt instead of making them look like the bot's own commentary.
+    const separator = direction.includes('\n') ? '\n>>> ' : '\n> ';
     const promptTease = includePromptTease
         ? sanitizeVideoWorkerText(job.prompt_tease, '', 120).trim()
         : '';
