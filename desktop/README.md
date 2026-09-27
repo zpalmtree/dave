@@ -1,5 +1,14 @@
 # Desktop video optimization changes
 
+## H3 VAE speed update
+
+See [H3 VAE speed](../docs/h3-vae-speed.md). ComfyUI v0.37.1 already includes
+the upstream optimization. `h3-vae-speed.patch` selects the official INT8 video
+VAE in both H3 templates and enables FP16 accumulation by default in this
+portable installation, including GPUq launches. Install with
+`python3 scripts/apply-h3-vae-speed-desktop.py`, then refresh ComfyUI through
+GPUq after active work finishes.
+
 ## Source-video replacement
 
 See [generic video replacement](../docs/video-source-edit.md). `video_edit.py`

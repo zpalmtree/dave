@@ -1,0 +1,36 @@
+--- a/ComfyUI/comfy/cli_args.py
++++ b/ComfyUI/comfy/cli_args.py
+@@ -305,9 +305,9 @@
+     args.enable_manager = True
+ 
+ 
+-# '--fast' is not provided, use an empty set
++# Portable desktop default, including GPUq launches: enable the H3 VAE fast path.
+ if args.fast is None:
+-    args.fast = set()
++    args.fast = {PerformanceFeature.Fp16Accumulation}
+ # '--fast' is provided with an empty list, enable all optimizations
+ elif args.fast == []:
+     args.fast = set(PerformanceFeature)
+--- a/video_gen/templates/h3_i2v.json
++++ b/video_gen/templates/h3_i2v.json
+@@ -62,7 +62,7 @@
+   },
+   "105:11": {
+     "inputs": {
+-      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
++      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+     },
+     "class_type": "VAELoader",
+     "_meta": {
+--- a/video_gen/templates/h3_t2v.json
++++ b/video_gen/templates/h3_t2v.json
+@@ -27,7 +27,7 @@
+   },
+   "140:119": {
+     "inputs": {
+-      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
++      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+     },
+     "class_type": "VAELoader",
+     "_meta": {
