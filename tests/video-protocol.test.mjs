@@ -370,7 +370,7 @@ test('video runtime is formatted for the delivered post', () => {
         model: 'minimax',
         runtime_seconds: 65.6,
         prompt: 'An anime family battle',
-    }), /a1869ead.*completed in \*\*1m 6s\*\*/);
+    }), /a1869ead.*took \*\*1m 6s\*\*/);
     assert.match(completedVideoPost({
         id: 'legacy-draft-job',
         model: 'minimaxdraft',
@@ -383,7 +383,7 @@ test('video runtime is formatted for the delivered post', () => {
         runtime_seconds: 65.6,
         prompt: 'An anime family battle',
         generation_notice: 'The screenplay was truncated.',
-    }), /\*\*Note:\*\* The screenplay was truncated\./);
+    }), /The screenplay was truncated\./);
 });
 
 test('video replies preserve the full accepted prompt', () => {
@@ -466,7 +466,7 @@ test('failed video post is a standalone sanitized reply', () => {
     assert.doesNotMatch(text, /D:\\|private|video\.plan/);
 });
 
-test('generic worker failures include the last reported pipeline stage', () => {
+test('generic worker failures give a next step without internal pipeline details', () => {
     const job = {
         id: 'e2b81b99-1f4f-42ae-9ac1-0a350f991aef',
         model: 'minimaxfast',
@@ -478,9 +478,9 @@ test('generic worker failures include the last reported pipeline stage', () => {
     };
     assert.match(
         failedVideoPost(job),
-        /Generator exited with code 1\. Last reported stage: First frame ready from gemini \/ gemini-3-pro-image\./,
+        /Something went wrong while making your video\. Please try again\./,
     );
-    assert.match(formatVideoJob(job), /Last reported stage: First frame ready from gemini/);
+    assert.doesNotMatch(formatVideoJob(job), /exited|gemini|Last reported stage/);
 });
 
 test('worker progress never exposes local filesystem paths', () => {
@@ -516,8 +516,8 @@ test('fast video commands map to explicit quality tradeoffs', () => {
 });
 
 test('initial and offline queue messages always expose a clearly qualified rough ETA', () => {
-    assert.match(initialVideoRequestStatus('minimax'), /Rough ETA: \*\*10m–30m\*\*/);
-    assert.match(initialVideoRequestStatus('minimax'), /plus any work already queued/);
+    assert.match(initialVideoRequestStatus('minimax'), /Usually takes \*\*10m–30m\*\*/);
+    assert.match(initialVideoRequestStatus('minimax'), /plus any queue time/);
     const text = formatVideoJob({
         id: '12345678-1234-1234-1234-123456789abc',
         model: 'minimax',
@@ -552,9 +552,9 @@ test('initial and offline queue messages always expose a clearly qualified rough
         paused_until: null,
         dispatch_paused: false,
     });
-    assert.match(text, /Queue position: \*\*2\*\*/);
+    assert.match(text, /\*\*#2 in line/);
     assert.match(text, /offline/);
-    assert.match(text, /Rough render ETA: \*\*10s–20s\*\*/);
+    assert.match(text, /Usually takes \*\*10s–20s\*\* once it starts/);
     assert.doesNotMatch(text, /Expected (start|finish)/);
 });
 
@@ -595,7 +595,7 @@ test('global video queue identifies same-server requesters without exposing cros
     };
     const formatted = formatGlobalVideoQueueJob(queued, 'guild-a');
     assert.match(formatted, /\*\*#2 · Queued\*\*/);
-    assert.match(formatted, /ETA ~.+ from this check/);
+    assert.match(formatted, /About .+ left/);
     assert.doesNotMatch(formatted, /Rough ETA|Dispatch paused/);
     assert.doesNotMatch(formatted, /Expected start|estimate.*-/i);
     assert.doesNotMatch(formatted, /MiniMax H3|12345678/);
@@ -613,7 +613,7 @@ test('global video queue identifies same-server requesters without exposing cros
     assert.match(dispatchPaused, /\*\*#2 · Queued\*\*/);
     assert.doesNotMatch(dispatchPaused, /Dispatch paused/);
     const pausedEmbeds = globalVideoQueueEmbeds([queued], 'guild-a', 700, false, true);
-    assert.deepEqual(pausedEmbeds[0].footer, { text: 'Dispatch paused' });
+    assert.deepEqual(pausedEmbeds[0].footer, { text: 'Video creation paused' });
 
     const fullPrompt = `A complete queue prompt ${'with every requested detail '.repeat(12)}`;
     const fullPromptChunks = globalVideoQueueChunks([{ ...queued, prompt: fullPrompt }], 'guild-a', 700);
@@ -696,9 +696,9 @@ test('active video status shows only rough progress and one completion ETA', () 
         gpu_queue_wait_seconds: 100,
     };
     const text = formatVideoJob(job);
-    assert.match(text, /roughly 43% complete/);
-    assert.match(text, /Segment \*\*4\/9\*\*/);
-    assert.match(text, /Estimated completion/);
+    assert.match(text, /about 43% done/);
+    assert.match(text, /Part \*\*4\/9\*\*/);
+    assert.match(text, /Should be ready/);
     assert.doesNotMatch(text, /Sampling|2m-5m|Expected start/);
 
     const waiting = formatVideoJob({
@@ -716,12 +716,11 @@ test('active video status shows only rough progress and one completion ETA', () 
         gpu_estimated_admission_low_at: 2_000_000_120,
         gpu_estimated_admission_high_at: 2_000_000_240,
     });
-    assert.match(waiting, /Waiting in the GPU queue/);
-    assert.match(waiting, /GPU queue position: \*\*3\*\*/);
-    assert.match(waiting, /\*\*2\*\* jobs ahead/);
-    assert.match(waiting, /Rough render ETA: \*\*2m–5m\*\*/);
-    assert.match(waiting, /includes the GPU work currently ahead/);
-    assert.match(waiting, /higher-priority submissions or external GPU pressure/);
+    assert.match(waiting, /Waiting for the video computer/);
+    assert.match(waiting, /\*\*2\*\* tasks ahead/);
+    assert.match(waiting, /Usually takes \*\*2m–5m\*\* once it starts/);
+    assert.match(waiting, /The wait may change/);
+    assert.doesNotMatch(waiting, /admission|GPU pressure|coordinator/);
     assert.doesNotMatch(waiting, /Estimated completion <t:/);
 });
 
@@ -772,13 +771,13 @@ test('GPU-blocked jobs tell the requester the desktop is holding the GPU', () =>
         gpu_queue_block_reason: 'external_gpu_busy',
         gpu_queue_block_detail: 'GPU admission requires 27952 MiB free; 26426 MiB available.',
     });
-    assert.match(blocked, /Waiting in the GPU queue/);
-    assert.match(blocked, /desktop GPU is currently held by other applications/);
-    assert.match(blocked, /Waiting since <t:1999990000:R>/);
+    assert.match(blocked, /Waiting for the video computer/);
+    assert.match(blocked, /Other apps are using the graphics card/);
+    assert.match(blocked, /will start when there’s room/);
     assert.doesNotMatch(blocked, /27952/);
 
     const other = formatVideoJob({ ...base, gpu_queue_block_reason: 'driver_reset_cooldown' });
-    assert.match(other, /holding this job \(driver_reset_cooldown\)/);
+    assert.match(other, /Your request is saved/);
 });
 
 test('drained queue messages retain a rough ETA and explain its assumption', () => {
@@ -816,9 +815,9 @@ test('drained queue messages retain a rough ETA and explain its assumption', () 
         paused_until: null,
         dispatch_paused: true,
     });
-    assert.match(text, /Dispatch is temporarily paused/);
-    assert.match(text, /Rough render ETA: \*\*10s–20s\*\*/);
-    assert.match(text, /assumes dispatch resumes now/);
+    assert.match(text, /Video creation is paused/);
+    assert.match(text, /Usually takes \*\*10s–20s\*\* once it starts/);
+    assert.doesNotMatch(text, /ready <t:|assumes dispatch/);
     assert.doesNotMatch(text, /Accepted and processing/);
 });
 
@@ -2062,11 +2061,11 @@ test('image-only jobs show the inferred direction instead of an internal fallbac
     assert.equal(videoJobDirection({
         prompt: VIDEO_IMAGE_ONLY_AUTO_PROMPT,
         planned_intent: null,
-    }), 'Auto-directing the attached image.');
+    }), 'Choosing a scene to bring this to life.');
     assert.equal(videoJobDirection({
         prompt: VIDEO_IMAGE_ONLY_AUTO_PROMPT,
         planned_intent: 'A meme remains readable while its pictured dog blinks.',
-    }), 'Auto-direction: A meme remains readable while its pictured dog blinks.');
+    }), 'A meme remains readable while its pictured dog blinks.');
     assert.equal(videoJobDirection({
         prompt: 'Make the dog run.',
         planned_intent: 'Ignored for explicit prompts.',
@@ -2159,7 +2158,7 @@ test('video commands accept exactly one supported attached start frame', () => {
             ['one', attachment],
             ['two', { ...attachment, url: `${attachment.url}?second=1` }],
         ]) }),
-        /one starting image/,
+        /just one image/,
     );
     assert.throws(
         () => videoSourceImageFromMessage({
@@ -2223,7 +2222,7 @@ test('video clip attachments are sent for broker frame extraction', () => {
     );
     assert.throws(
         () => videoClipSourceImageFromMessage({ attachments: new Map([['a', clip], ['b', clip]]) }),
-        /one image or video clip/,
+        /just one video clip/,
     );
     assert.deepEqual(
         videoSourceImageFromMessages({ attachments: new Map() }, { attachments: new Map([['clip', clip]]) }),
@@ -3212,4 +3211,40 @@ test('review-gated fast keyframes default globally and every override is reversi
     assert.equal(configuredVideoKeyframeStrategy('outside-old-canary', {
         VIDEO_KEYFRAME_CANARY_CHANNELS: 'canary-one, canary-two',
     }), 'fast-gated-v3');
+});
+
+
+test('source labels distinguish video edits, extracted frames, and built-in portraits', () => {
+    const base = { id: '096444e4-test', model: 'minimax', command_variant: 'oalgo',
+        prompt: 'meximutt', status: 'running', has_source_image: true, progress: null };
+    for (const [source_kind, label] of [
+        ['video_edit', 'Editing your video'],
+        ['video_frame', 'Using a frame from your video'],
+        ['image', 'Using your image'],
+        ['preset', 'Starring Meximutt'],
+        ['preset_image', 'Combining Meximutt with your image'],
+        ['preset_video_frame', 'Combining Meximutt with a frame from your video'],
+    ]) {
+        const job = { ...base, source_kind };
+        assert.ok(formatVideoJob(job).includes(label));
+        assert.ok(completedVideoPost(job).includes(label));
+        assert.match(formatVideoJob(job), /Oalgo/);
+        assert.doesNotMatch(formatVideoJob(job), /user start frame|auto-directed/);
+    }
+    assert.match(formatVideoJob({ ...base, has_source_video: true }), /Editing your video/);
+    assert.match(formatVideoJob(base), /Using a reference image/);
+    assert.doesNotMatch(formatVideoJob(base).split('\n')[0], /your image|your video/);
+    assert.match(formatVideoJob({ ...base, has_source_audio: true }), /Lip-syncing to your song/);
+    assert.doesNotMatch(formatVideoJob({ ...base, has_source_image: false }), /Using|Starring/);
+});
+
+test('cancellation, pausing, and upload messages describe the actual state', () => {
+    const base = { id: 'test-job', model: 'minimax', prompt: 'test',
+        gpu_queue_state: 'queued', gpu_queue_jobs_ahead: 2, progress: 0.5 };
+    assert.match(formatVideoJob({ ...base, status: 'cancelling' }), /Cancelling your video/);
+    assert.match(formatVideoJob({ ...base, status: 'pausing' }), /Pausing your video/);
+    assert.doesNotMatch(formatVideoJob({ ...base, status: 'cancelling' }), /Waiting|50%/);
+    assert.match(formatVideoJob({ ...base, status: 'uploading' }), /Sending your video/);
+    assert.match(formatVideoJob({ ...base, status: 'running', gpu_queue_state: 'admitted' }), /in total/);
+    assert.doesNotMatch(formatVideoJob({ ...base, status: 'running', gpu_queue_state: 'admitted' }), /once it starts/);
 });

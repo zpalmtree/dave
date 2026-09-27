@@ -781,7 +781,12 @@ test('video clip starting images accept Discord and resolved Twitter MP4s only',
         const clipUrl = 'https://cdn.discordapp.com/attachments/1/2/clip.mov?ex=1&is=2&hm=3&';
         const accepted = await submit('clip', { clip_url: clipUrl, name: 'clip.mov' });
         assert.equal(accepted.status, 201);
-        assert.equal((await accepted.json()).job.has_source_image, true);
+        const acceptedJob = (await accepted.json()).job;
+        assert.equal(acceptedJob.has_source_image, true);
+        assert.equal(acceptedJob.source_kind, 'video_frame');
+        const stored = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [acceptedJob.id]);
+        assert.equal(stored.source_kind, 'video_frame');
+        assert.equal((await broker.views([stored]))[0].source_kind, 'video_frame');
         assert.deepEqual(descriptors, [{ clip_url: clipUrl, name: 'clip.mov' }]);
 
         const rejected = await submit('foreign', { clip_url: 'https://example.com/clip.mp4', name: 'clip.mp4' });
@@ -844,6 +849,12 @@ test('replacement jobs retain the clip, target, and replacement image without pl
         const job = (await accepted.json()).job;
         assert.equal(job.has_source_image, true);
         const row = await broker.get('SELECT source_video_path, source_video_seconds, video_edit_target FROM video_jobs WHERE public_id=?', [job.id]);
+        assert.equal(job.source_kind, 'video_edit');
+        assert.equal(job.has_source_video, true);
+        // Jobs submitted before source provenance was added must still show video edits.
+        await broker.run('UPDATE video_jobs SET source_kind=NULL WHERE public_id=?', [job.id]);
+        const legacy = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [job.id]);
+        assert.equal((await broker.views([legacy]))[0].source_kind, 'video_edit');
         assert.equal(row.video_edit_target, 'the red car');
         assert.equal(row.source_video_seconds, 7.5);
         assert.equal(existsSync(row.source_video_path), true);
@@ -1138,6 +1149,8 @@ test('OALGO jobs composite attachments and queue local Qwen on composition failu
         const generated = await submit('generated', OALGO_VIDEO_PLANNER_GUIDANCE);
         assert.equal(generated.status, 201);
         assert.equal(generated.body.job.has_source_image, true);
+        assert.equal(generated.body.job.source_kind, 'preset_image');
+        assert.equal(generated.body.job.command_variant, 'oalgo');
         assert.equal(generated.body.source_image_composition, 'generated');
         const generatedPath = join(directory, 'results', generated.body.job.id, 'source.png');
         assert.deepEqual(readFileSync(generatedPath), compositedBytes);

@@ -203,18 +203,40 @@ function videoModelDisplayName(model: unknown): string {
         || 'Retired video model';
 }
 
+function videoJobDisplayName(job: Pick<VideoJobView, 'model' | 'command_variant'>): string {
+    if (job.command_variant === 'oalgo') return 'Oalgo';
+    if (job.command_variant === 'oalgofast') return 'Oalgo Fast';
+    return videoModelDisplayName(job.model);
+}
+
+export function videoSourceDescription(job: Pick<VideoJobView,
+    'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio'>): string {
+    const descriptions: Record<string, string> = {
+        video_edit: 'Editing your video',
+        video_frame: 'Using a frame from your video',
+        image: 'Using your image',
+        preset: 'Starring Meximutt',
+        preset_image: 'Combining Meximutt with your image',
+        preset_video_frame: 'Combining Meximutt with a frame from your video',
+    };
+    const source = job.has_source_video ? descriptions.video_edit
+        : descriptions[job.source_kind || ''] || (job.has_source_image ? 'Using a reference image' : '');
+    return [source, job.has_source_audio ? 'Lip-syncing to your song' : ''].filter(Boolean).join(' · ');
+}
+
 export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_intent'>): string {
     if (job.prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT) return displayedVideoPrompt(job.prompt);
     const intent = sanitizeVideoWorkerText(job.planned_intent, '', 1000).trim();
-    return intent ? `Auto-direction: ${intent}` : 'Auto-directing the attached image.';
+    return intent || 'Choosing a scene to bring this to life.';
 }
 
 export function completedVideoPost(job: VideoJobView): string {
     const runtime = formatVideoRuntime(job.runtime_seconds);
     const notice = sanitizeVideoWorkerText(job.generation_notice, '', 1000).trim();
-    const result = `${videoModelDisplayName(job.model)} video **${shortJobId(job.id)}** is ready${
-        runtime ? ` — completed in **${runtime}**` : ''
-    }.${notice ? `\n**Note:** ${notice}` : ''}`;
+    const source = videoSourceDescription(job);
+    const result = `${videoJobDisplayName(job)} video **${shortJobId(job.id)}** is ready${
+        runtime ? ` — took **${runtime}**` : ''
+    }.${source ? `\n${source}.` : ''}${notice ? `\n${notice}` : ''}`;
     return formatVideoReplyWithFullPrompt(result, job, true);
 }
 
@@ -226,16 +248,18 @@ export function completedVideoAttachmentName(job: VideoJobView): string {
 
 function videoFailureDetail(job: VideoJobView, maxLength: number): string {
     const error = sanitizeVideoWorkerText(job.error, 'Unknown worker error.', maxLength);
-    const generic = /^(?:(?:generator|local planner) exited with code \d+|worker failure|unknown worker error)\.?$/i;
-    if (!generic.test(error)) return error;
-    const stage = sanitizeVideoWorkerText(job.stage, '', 500).trim().replace(/[.!]+$/, '');
-    return stage ? `${error} Last reported stage: ${stage}.` : error;
+    if (/out of memory|CUDA.*(?:memory|alloc)|VRAM/i.test(error)) return 'There wasn’t enough graphics memory to finish. Please try again later.';
+    if (/timed? out|timeout/i.test(error)) return 'This took too long to finish. Please try again.';
+    if (/exited with code|worker failure|unknown worker error|traceback|\[local file\]/i.test(error)) {
+        return 'Something went wrong while making your video. Please try again.';
+    }
+    return error;
 }
 
 export function failedVideoPost(job: VideoJobView): string {
     const error = videoFailureDetail(job, 1500);
     return formatVideoReplyWithFullPrompt(
-        `${videoModelDisplayName(job.model)} video **${shortJobId(job.id)}** failed.\n${error}`,
+        `${videoJobDisplayName(job)} video **${shortJobId(job.id)}** failed.\n${error}`,
         job,
     );
 }
@@ -280,17 +304,17 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachm
         return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
     });
     if (candidates.length > 1) {
-        throw new Error('LTX and MiniMax accept one starting image. Attach exactly one image.');
+        throw new Error('Please attach just one image.');
     }
     if (!candidates.length) return null;
     const attachment = candidates[0];
     const mime = attachment.contentType?.split(';')[0].toLowerCase()
         || inferredImageMime(attachment.name);
     if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mime as any)) {
-        throw new Error('The starting image must be a PNG, JPEG, or WebP file.');
+        throw new Error('Your image must be a PNG, JPEG, or WebP file.');
     }
     if (!attachment.size || attachment.size > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
-        throw new Error(`The starting image must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.`);
+        throw new Error(`Your image must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.`);
     }
     return {
         url: attachment.url,
@@ -310,7 +334,7 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
         return Boolean(mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.includes(extension)));
     });
     if (clips.length > 1) {
-        throw new Error('LTX and MiniMax accept one starting image. Attach exactly one image or video clip.');
+        throw new Error('Please attach just one video clip.');
     }
     if (!clips.length) return null;
     return { clip_url: clips[0].url, name: clips[0].name || 'clip', bytes: clips[0].size };
@@ -483,87 +507,72 @@ function roughRuntimeRange(job: Pick<VideoJobView, 'estimate_low_seconds' | 'est
 
 function completionEstimate(job: VideoJobView, rough: boolean): string {
     if (job.expected_finish_at) {
-        const label = rough ? 'Rough estimated completion' : 'Estimated completion';
-        return ` ${label} ${formatDiscordDateAndRelative(job.expected_finish_at)}.`;
+        return ` ${rough ? 'Roughly ready' : 'Should be ready'} ${formatDiscordDateAndRelative(job.expected_finish_at)}.`;
     }
-    return ` Rough render ETA: **${roughRuntimeRange(job)}** after this job can start.`;
+    const waiting = job.status === 'queued' || job.status === 'leased'
+        || job.gpu_queue_state === 'queued' || job.gpu_queue_state === 'submitting';
+    return ` Usually takes **${roughRuntimeRange(job)}** ${waiting ? 'once it starts' : 'in total'}.`;
 }
 
-export function initialVideoRequestStatus(model: VideoModelId): string {
+export function initialVideoRequestStatus(model: VideoModelId, commandVariant?: string): string {
     const definition = VIDEO_MODELS[model];
     const fallback = roughRuntimeRange({
         estimate_low_seconds: definition.fallbackLowSeconds,
         estimate_high_seconds: definition.fallbackHighSeconds,
     });
-    return `**Video request received.** Preparing ${definition.displayName}. Rough ETA: **${fallback}** plus any work already queued; checking the current position now.`;
+    const name = videoJobDisplayName({ model, command_variant: commandVariant });
+    return `Got it! Getting your ${name} video ready. Usually takes **${fallback}**, plus any queue time.`;
 }
 
 export function formatVideoJob(job: VideoJobView): string {
-    const name = videoModelDisplayName(job.model);
-    const imageLabel = job.has_source_image
-        ? (job.prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT ? ' · auto-directed image' : ' · user start frame')
-        : '';
-    const head = `**${name} · ${shortJobId(job.id)}**${imageLabel}`;
+    const source = videoSourceDescription(job);
+    const head = `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**${source ? ` · ${source}` : ''}`;
     if (job.status === 'queued') {
-        const position = job.queue_position ? `Queue position: **${job.queue_position}**.` : 'Queued.';
-        const timing = completionEstimate(job, true);
-        if (job.paused_until) return `${head}\n**Accepted.** ${position}${timing}${pauseText(job.paused_until)}`;
-        if (job.dispatch_paused) {
-            return `${head}\n**Accepted.** ${position}${timing} Dispatch is temporarily paused, so this assumes dispatch resumes now.`;
-        }
-        if (!job.worker_online) {
-            return `${head}\n**Accepted.** ${position}${timing} Desktop worker is offline, so this assumes it reconnects now.`;
-        }
-        const basis = job.estimate_ready
-            ? ' GPU admission or new queue work can move it.'
-            : ' This uses current queue depth and historical render times and will refine after planning.';
-        return `${head}\n**Accepted.** ${position}${timing}${basis}`;
+        const position = job.queue_position ? `**#${job.queue_position} in line.**` : '**In line.**';
+        if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)} Usually takes **${roughRuntimeRange(job)}** once it starts.`;
+        if (job.dispatch_paused) return `${head}\n${position} Video creation is paused. Usually takes **${roughRuntimeRange(job)}** once it starts.`;
+        if (!job.worker_online) return `${head}\n${position} The video computer is offline. Your request is saved. Usually takes **${roughRuntimeRange(job)}** once it starts.`;
+        return `${head}\n${position}${completionEstimate(job, true)} Estimates may change.`;
     }
     if (job.status === 'running_disconnected') {
-        const timing = completionEstimate(job, true);
-        return `${head}\nThe desktop connection was lost during generation. The job is preserved and will resume or retry after reconnecting.${timing} This assumes it reconnects now.`;
+        return `${head}\nThe video computer lost its connection. Your request is saved and will resume or retry when it reconnects.`;
     }
-    if (['leased', 'planning', 'running', 'uploading', 'pausing', 'cancelling'].includes(job.status)) {
+    // Controls take precedence over an old queue position or progress update.
+    if (job.status === 'cancelling') return `${head}\nCancelling your video…`;
+    if (job.status === 'pausing') return `${head}\nPausing your video. Your request will stay in line.${pauseText(job.paused_until)}`;
+    if (job.status === 'uploading') return `${head}\n**Sending your video…**`;
+    if (['leased', 'planning', 'running'].includes(job.status)) {
         const rough = !job.estimate_ready || !job.worker_online || Boolean(job.paused_until)
             || job.gpu_queue_state === 'submitting' || job.gpu_queue_state === 'queued';
         const timing = completionEstimate(job, rough);
         if (job.gpu_queue_state === 'submitting') {
-            return `${head}\n**Reserving this video's GPU queue position.**${timing} Planning and rendering will run under the same reservation; admission can move the estimate later.`;
+            return `${head}\n**Getting in line to make your video.**${timing}`;
         }
         if (job.gpu_queue_state === 'queued') {
-            const position = job.gpu_queue_position && job.gpu_queue_position > 0
-                ? ` GPU queue position: **${job.gpu_queue_position}**.`
-                : '';
-            const ahead = job.gpu_queue_jobs_ahead !== null && job.gpu_queue_jobs_ahead !== undefined
-                ? ` **${job.gpu_queue_jobs_ahead}** job${job.gpu_queue_jobs_ahead === 1 ? '' : 's'} ahead.`
-                : '';
-            const basis = job.gpu_estimated_admission_low_at || job.gpu_estimated_admission_high_at
-                ? ' The completion estimate includes the GPU work currently ahead; higher-priority submissions or external GPU pressure can still delay it.'
-                : ' The GPU coordinator has not provided a work-ahead estimate yet, so this currently assumes admission now.';
-            return `${head}\n**Waiting in the GPU queue.**${position}${ahead}${timing}${basis}${gpuBlockText(job)}`;
+            const ahead = job.gpu_queue_jobs_ahead != null
+                ? ` **${job.gpu_queue_jobs_ahead}** ${job.gpu_queue_jobs_ahead === 1 ? 'task' : 'tasks'} ahead.`
+                : job.gpu_queue_position ? ` **#${job.gpu_queue_position} in line.**` : '';
+            return `${head}\n**Waiting for the video computer.**${ahead}${timing} The wait may change.${gpuBlockText(job)}`;
         }
+        if (job.status === 'planning') return `${head}\n**Planning your video.**${timing}`;
         const progress = percentage(job.progress);
-        const segment = job.segment_index && job.segment_count
-            ? ` Segment **${job.segment_index}/${job.segment_count}**.`
-            : '';
-        const processing = progress
-            ? `**Processing — roughly ${progress} complete.**${segment}`
-            : '**Processing your video.**';
-        return `${head}\n${processing}${timing}${pauseText(job.paused_until)}`;
+        const segment = job.segment_index && job.segment_count && job.segment_count > 1
+            ? ` Part **${job.segment_index}/${job.segment_count}**.` : '';
+        return `${head}\n**Making your video${progress ? ` — about ${progress} done` : ''}.**${segment}${timing}${pauseText(job.paused_until)}`;
     }
-    if (job.status === 'ready') return `${head}\nGeneration complete; delivering the video…`;
-    if (job.status === 'delivered') return `${head}\nDelivered.`;
-    if (job.status === 'cancelled') return `${head}\nCancelled.`;
-    return `${head}\nFailed: ${videoFailureDetail(job, 1800)}`;
+    if (job.status === 'ready') return `${head}\nYour video is ready. Sending it now…`;
+    if (job.status === 'delivered') return `${head}\nVideo sent.`;
+    if (job.status === 'cancelled') return `${head}\nVideo cancelled.`;
+    return `${head}\nCouldn't finish your video. ${videoFailureDetail(job, 1500)}`;
 }
 
 function gpuBlockText(job: VideoJobView): string {
     if (!job.gpu_queue_block_reason) return '';
-    const since = job.gpu_queue_submitted_at ? ` Waiting since <t:${job.gpu_queue_submitted_at}:R>.` : '';
     if (job.gpu_queue_block_reason === 'external_gpu_busy') {
-        return ` The desktop GPU is currently held by other applications; rendering starts once enough memory frees up.${since}`;
+        return ' Other apps are using the graphics card. Your video will start when there’s room.';
     }
-    return ` The GPU coordinator is holding this job (${job.gpu_queue_block_reason}).${since}`;
+    if (/gaming/i.test(job.gpu_queue_block_reason)) return ' Waiting for Gaming Mode to end.';
+    return ' The video computer isn’t ready yet. Your request is saved.';
 }
 
 export function formatVideoStatusPost(job: VideoJobView): string {
@@ -589,50 +598,53 @@ export function formatGlobalVideoQueueJob(
     let status: string;
     if (job.status === 'queued') {
         if (job.paused_until) status = `${position}Paused`;
-        else if (!job.worker_online) status = `${position}Worker offline`;
+        else if (!job.worker_online) status = `${position}Computer offline`;
         else status = `${position}Queued`;
     } else if (job.status === 'running_disconnected') {
         status = 'Reconnecting';
-    } else if (job.gpu_queue_state === 'submitting') {
-        status = 'Reserving GPU';
-    } else if (job.gpu_queue_state === 'queued') {
+    } else if (job.status === 'pausing') {
+        status = 'Pausing';
+    } else if (job.status === 'cancelling') {
+        status = 'Cancelling';
+    } else if (['leased', 'planning', 'running'].includes(job.status) && job.gpu_queue_state === 'submitting') {
+        status = 'Getting in line';
+    } else if (['leased', 'planning', 'running'].includes(job.status) && job.gpu_queue_state === 'queued') {
         const gpuPosition = job.gpu_queue_position && job.gpu_queue_position > 0
             ? ` #${job.gpu_queue_position}`
             : '';
         const ahead = job.gpu_queue_jobs_ahead !== null && job.gpu_queue_jobs_ahead !== undefined
             ? ` · ${job.gpu_queue_jobs_ahead} ahead`
             : '';
-        status = `GPU queue${gpuPosition}${ahead}`;
+        status = `Waiting for the video computer${gpuPosition}${ahead}`;
     } else if (job.status === 'planning') {
         status = 'Planning';
     } else if (job.status === 'uploading') {
-        status = 'Uploading';
-    } else if (job.status === 'pausing') {
-        status = 'Pausing';
-    } else if (job.status === 'cancelling') {
-        status = 'Cancelling';
+        status = 'Sending';
     } else if (['leased', 'running'].includes(job.status)) {
         const progress = percentage(job.progress);
         const segment = job.segment_index && job.segment_count
-            ? ` · segment ${job.segment_index}/${job.segment_count}`
+            ? ` · part ${job.segment_index}/${job.segment_count}`
             : '';
-        status = progress ? `Rendering · ${progress}${segment}` : `Rendering${segment}`;
+        status = progress ? `Making video · ${progress}${segment}` : `Making video${segment}`;
     } else if (job.status === 'ready') {
-        status = 'Delivering';
+        status = 'Sending';
     } else if (job.status === 'delivered') {
-        status = 'Delivered';
+        status = 'Sent';
     } else if (job.status === 'cancelled') {
         status = 'Cancelled';
     } else {
         status = 'Failed';
     }
-    const remaining = job.expected_finish_at
+    const waiting = Boolean(job.paused_until) || !job.worker_online
+        || job.status === 'running_disconnected' || (job.status === 'queued' && job.dispatch_paused);
+    const terminal = ['ready', 'delivered', 'cancelled', 'failed', 'cancelling'].includes(job.status);
+    const remaining = !waiting && !terminal && job.expected_finish_at
         ? Math.ceil(job.expected_finish_at - Date.now() / 1000) : null;
     const eta = remaining !== null
-        ? remaining > 0 ? `ETA ~${formatVideoRuntime(remaining)} from this check` : 'ETA being recalculated'
-        : ['ready', 'delivered', 'cancelled', 'failed'].includes(job.status)
+        ? remaining > 0 ? `About ${formatVideoRuntime(remaining)} left` : 'Updating finish time'
+        : terminal
             ? ''
-            : `ETA ${roughRuntimeRange(job)} after start`;
+            : `About ${roughRuntimeRange(job)} once started`;
     return `**${status}** · ${requester}${eta ? ` · ${eta}` : ''}\n> ${displayedDirection}`;
 }
 
@@ -685,8 +697,8 @@ export function globalVideoQueueEmbeds(
         description,
         color: 0x5865F2,
         timestamp: new Date().toISOString(),
-        footer: { text: dispatchPaused ? 'Dispatch paused'
-            : `Snapshot at command time · Estimates may change · Run ${config.prefix}videoqueue to refresh` },
+        footer: { text: dispatchPaused ? 'Video creation paused'
+            : `Estimates may change · Run ${config.prefix}videoqueue to refresh` },
     }));
 }
 
@@ -888,7 +900,7 @@ export class VideoGenerationService {
             const deliverySeconds = (Date.now() - deliveryStarted) / 1000;
             await this.acknowledge(job, 'delivered', deliverySeconds, delivery.id);
             await message.edit({
-                content: `**${videoModelDisplayName(job.model)} · ${shortJobId(job.id)}**\nDelivered in ${delivery.url}.`,
+                content: `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**\nYour video: ${delivery.url}`,
                 attachments: [],
             });
             await this.removeCancellationReaction(job.id, message);
@@ -898,7 +910,7 @@ export class VideoGenerationService {
         if (job.status === 'failed') {
             const failure = await this.postFailure(job, message);
             await message.edit({
-                content: `**${videoModelDisplayName(job.model)} · ${shortJobId(job.id)}**\nFailed. See ${failure.url}.`,
+                content: `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**\nCouldn’t finish your video. Details: ${failure.url}`,
                 attachments: [],
             });
             await this.acknowledge(job, 'notified');
@@ -1074,7 +1086,8 @@ export async function brokerRequest<T = any>(path: string, init: RequestInit = {
             },
         });
     } catch (error) {
-        throw new BrokerError(`Video queue service is unavailable: ${String(error)}`, 503);
+        console.warn(`[Video] Queue connection failed: ${String(error)}`);
+        throw new BrokerError('The video service is unavailable right now. Please try again shortly.', 503);
     } finally {
         clearTimeout(timeout);
     }
@@ -1160,11 +1173,11 @@ export async function handleVideoRequest(
             ? await videoSourcesFromMessages(msg, referencedMessage, Boolean(replacement))
             : { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null };
         sourceVideo = sources.clip;
-        if (replacement && !sourceVideo) throw new Error('Video replacement needs one attached video or Twitter/X video link, in your message or the message you reply to.');
+        if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X video link to edit. You can also reply to a message containing one.');
         attachedSourceImage = sources.image;
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
-        if (replacement && sourceAudio) throw new Error('Video replacement keeps the clip soundtrack; remove the separate song attachment.');
+        if (replacement && sourceAudio) throw new Error('This edit keeps your video’s soundtrack. Please remove the separate song attachment.');
         if (replacement && !attachedSourceImage && !options.presetSourceImage && !replacement.prompt) {
             throw new Error('Attach a replacement image or describe the replacement: replace the character with slugs.');
         }
@@ -1181,11 +1194,11 @@ export async function handleVideoRequest(
         ? attachedSourceImage
         : null;
     if (replacement && options.compositeProvider) {
-        await msg.reply('Image-provider selection is for scene composition, not video replacement.');
+        await msg.reply('Remove --image-provider to edit a video.');
         return;
     }
     if (options.compositeProvider && !compositeSourceImage) {
-        await msg.reply('An image provider can only be selected when Meximutt has an attached or replied-to image to combine.');
+        await msg.reply('Attach an image or video, or reply to one, to combine it with Meximutt using --image-provider.');
         return;
     }
     prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel);
@@ -1195,15 +1208,15 @@ export async function handleVideoRequest(
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
     }
     if (!prompt) {
-        await msg.reply(`Usage: \`${config.prefix}${VIDEO_MODELS[model].command} <prompt>\` (or reply to a message containing a prompt or image).`);
+        await msg.reply(`Usage: \`${config.prefix}${options.commandVariant || VIDEO_MODELS[model].command} <idea>\` — describe a video, attach an image or clip, or reply to a message.`);
         return;
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(replacementImagePrompt
-        ? 'Preparing your video edit: downloading the clip and generating a replacement reference from your description.'
-        : initialVideoRequestStatus(model));
+        ? 'Getting your video ready and creating the replacement from your description…'
+        : initialVideoRequestStatus(model, options.commandVariant));
     const plannerGuidance = [
         sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement ? '' : options.plannerGuidance,
         isVideoClipSourceImage(sourceImage) ? VIDEO_CLIP_FRAME_PLANNER_GUIDANCE : '',
@@ -1239,7 +1252,7 @@ export async function handleVideoRequest(
             }),
         }, (compositeSourceImage || sourceAudio || sourceVideo) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
     } catch (error) {
-        await pending.edit(`Could not add the video job: ${error instanceof Error ? error.message : String(error)}`);
+        await pending.edit(`Couldn’t queue your video: ${error instanceof Error ? error.message : String(error)}`);
         return;
     }
 
@@ -1337,14 +1350,14 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         }
         const matches = response.jobs.filter(job => job.id.toLowerCase().startsWith(requestedId.toLowerCase()));
         if (matches.length !== 1) {
-            await msg.reply(matches.length ? 'That job prefix is ambiguous.' : 'No matching recent video job was found.');
+            await msg.reply(matches.length ? 'More than one video matches that ID. Please use a longer ID.' : 'I couldn’t find a recent video with that ID.');
             return;
         }
         const result = await brokerRequest<{ ok: boolean; error?: string }>(`/v1/jobs/${matches[0].id}/cancel`, {
             method: 'POST',
             body: JSON.stringify({ requester_id: msg.author.id, is_admin: false }),
         });
-        await msg.reply(result.ok ? `Cancellation requested for **${shortJobId(matches[0].id)}**.` : result.error || 'Could not cancel the job.');
+        await msg.reply(result.ok ? `Cancelling video **${shortJobId(matches[0].id)}**.` : result.error || 'Couldn’t cancel that video.');
         return;
     }
     const unfinished = response.jobs.filter(job => !['delivered', 'failed', 'cancelled'].includes(job.status));
@@ -1396,7 +1409,7 @@ export async function handleVideoAdmin(msg: Message, args: string): Promise<void
             method: 'POST',
             body: JSON.stringify({ requester_id: msg.author.id, is_admin: true }),
         });
-        await msg.reply(result.ok ? `Cancellation requested for **${shortJobId(value)}**.` : result.error || 'Could not cancel the job.');
+        await msg.reply(result.ok ? `Cancelling video **${shortJobId(value)}**.` : result.error || 'Couldn’t cancel that video.');
         return;
     }
     if (action.toLowerCase() !== 'status') {

@@ -318,6 +318,7 @@ interface JobRow {
     planner_model: string | null;
     source_audio_path: string | null;
     source_audio_seconds: number | null;
+    source_kind: VideoJobView['source_kind'];
     source_video_path: string | null;
     source_video_seconds: number | null;
     video_edit_target: string | null;
@@ -1680,7 +1681,7 @@ export class VideoBroker {
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
-            ['video_edit_target', 'TEXT'],
+            ['video_edit_target', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -2712,6 +2713,10 @@ export class VideoBroker {
         }
         const sourceMode = videoDescriptor ? 'video_edit' : compositeDescriptor ? 'preset_composite'
             : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset' : 'attachment') : 'generated';
+        const sourceKind: VideoJobView['source_kind'] = videoDescriptor ? 'video_edit'
+            : compositeDescriptor ? (isClipSourceImage(compositeDescriptor) ? 'preset_video_frame' : 'preset_image')
+            : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset'
+                : isClipSourceImage(sourceDescriptor) ? 'video_frame' : 'image') : 'text';
         const publicId = randomUUID();
         const optimization = body.model === 'minimax' && !videoDescriptor
             ? configuredVideoOptimization(commandVariant, publicId) : null;
@@ -2894,8 +2899,8 @@ export class VideoBroker {
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
-                        experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                        experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2928,6 +2933,7 @@ export class VideoBroker {
                         optimization?.variantId || experimentLabel(process.env.VIDEO_PIPELINE_VARIANT, 'production-v1'),
                         commandVariant, sourceMode, requestedAt,
                         optimization ? JSON.stringify(optimization) : null,
+                        sourceKind,
                     ],
                 );
                 if (sourceImageDownloadSeconds !== null) {
@@ -4433,6 +4439,10 @@ export class VideoBroker {
                 prompt_tease: row.prompt_tease,
                 planned_intent: plannedIntent(row),
                 generation_notice: generationNotice(row),
+                command_variant: row.command_variant,
+                // Older jobs still identify full-video edits and the built-in portrait.
+                source_kind: row.source_kind || (row.source_video_path ? 'video_edit'
+                    : row.source_mode === 'preset' ? 'preset' : null),
                 delivery_message_id: row.delivery_message_id || null,
                 delivery_revision: row.delivery_revision || 0,
                 delivered_revision: row.delivered_revision || 0,

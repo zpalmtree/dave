@@ -162,7 +162,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxVideo,
-            description: 'Generate a MiniMax H3 video, or replace a subject in an attached or Twitter-linked clip using an image or description',
+            description: 'Make a video from your idea or image. Add “replace” to edit a subject in a video; otherwise a clip supplies one starting frame.',
             examples: [{ value: 'minimax an arcade kart race between historical figures' },
                 { value: 'minimax replace the red car with the blue car in the attached image' }],
         },
@@ -175,7 +175,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleOalgoVideo,
-            description: 'Generate a Meximutt video, or replace a subject in an attached or Twitter-linked clip using Meximutt, an image, or a description',
+            description: 'Make a video starring Meximutt. Attach an image or clip for the scene, or use “replace” to edit someone in a video.',
             examples: [{ value: 'oalgo celebrates a championship victory' },
                 { value: 'oalgo --image-provider grok reacts to the attached image' },
                 { value: 'oalgo replace the dancer with Meximutt, keeping the same moves' }],
@@ -189,7 +189,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleOalgoFastVideo,
-            description: 'Generate a Meximutt video with MiniMax FastH3 using the usual character and image-composition flow',
+            description: 'Make a faster Meximutt video from your idea, image, or a frame from a clip.',
             examples: [{ value: 'oalgofast celebrates a championship victory' },
                 { value: 'oalgofast --image-provider grok reacts to the attached image' }],
         },
@@ -202,7 +202,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxFastVideo,
-            description: 'Generate full-resolution MiniMax FastH3 with 4-step VSA acceleration; supports reply text/images',
+            description: 'Make a faster video from your idea, image, or a frame from a clip.',
             examples: [{ value: 'minimaxfast an arcade kart race between historical figures' }],
         },
         relatedCommands: ['minimax', 'oalgo', 'videoqueue'],

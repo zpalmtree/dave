@@ -150,12 +150,12 @@ test('broker repairs a live legacy job, preserves it across restart, and project
         assert.equal(view.segment_progress, 0.5);
         assert.ok(view.progress > 0.73 && view.progress < 0.74);
         const embed = globalVideoQueueEmbeds([view], null)[0];
-        assert.match(embed.description, /segment 5\/6/);
-        assert.match(embed.description, /ETA ~.+ from this check/);
+        assert.match(embed.description, /part 5\/6/);
+        assert.match(embed.description, /About .+ left/);
         assert.doesNotMatch(embed.description, /<t:/);
         assert.match(formatGlobalVideoQueueJob({ ...view, expected_finish_at: now - 60 }, null),
-            /ETA being recalculated/);
-        assert.match(embed.footer.text, /Snapshot at command time/);
+            /Updating finish time/);
+        assert.match(embed.footer.text, /Estimates may change/);
         assert.ok(Number.isFinite(Date.parse(embed.timestamp)));
     } finally {
         await broker.stop();
