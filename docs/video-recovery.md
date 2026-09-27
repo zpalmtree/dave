@@ -54,14 +54,15 @@ replacement keyframe is rejected.
 Each scene gets an opening image. When the approved plan calls for the original
 portrait at frame zero, the worker uses that image directly. Continuing scenes
 check the previous accepted clip's final frame before using it. New shots get their own opening
-composition, without inheriting a frame-zero crop restriction. Generated openings
-still pass through the image generator's own identity and composition repair.
+composition, without inheriting a frame-zero crop restriction. Cloud-generated openings
+pass through the image generator's own identity and composition repair. Local fallback
+openings with identity references use the bounded check described below.
 
 No model reviews complete rendered scenes. Model review rejected usable videos over
 minor issues and added Sol, Gemini, or local Qwen calls to every scene, so it
 was removed on 2026-09-21. A scene is accepted once its render produces a
 decodable clip. The worker still records each scene's file hash with the broker
-(the `review` call, which now makes no model request), so final approval can
+(the video `review` call makes no model request), so final approval can
 require the exact rendered scenes. The worker permits two image attempts per
 recovery pass. A render that produces no valid output is retried once with the
 requested renderer: two render attempts total per scene, across reconnects and
@@ -96,6 +97,42 @@ Install the desktop update with
 the same command without `--check`. The hash-checked patch preserves the installed
 source-audio and telemetry updates. Deploy the broker first, then reload an idle
 desktop worker. Older workers can finish their current leases.
+
+### Bounded identity check for local openings
+
+Recovery references now have explicit roles: Picture 1 defines the original
+identity; the optional attached scene supplies context and only the additional
+subjects assigned to it by the screenplay. A scene's stand-in protagonist cannot
+replace the original person. The local prompt preserves the requested recurring
+cast rather than every person in every reference, and preserves facial identity
+across requested stylization. Text-only jobs retain their first accepted opening
+as the identity reference on cuts as well as repaired continuations.
+
+Only a newly composed local opening with an identity reference adds a Gemini Flash
+check. Cloud-reviewed openings, original portraits, accepted continuations and
+finished clips add no new review call. The check examines clear identity/cast
+substitutions and tolerates ordinary expression, pose and rendering changes. It
+uses medium image resolution, the opening shot and bounded continuity text, with
+a 768-token output ceiling. It does not inspect audio or the full video.
+
+Decisions are cached by contract, scene, original references and candidate bytes.
+There is at most **one corrective local image attempt per video**, shared across
+scenes and reconnects. The correction reuses the saved local directive instead of
+retrying the cloud image providers. Each scene can spend at most two identity
+calls, including failed/unavailable calls; counts are persisted before requests.
+An unresolved identity failure stops the job before animating that opening. A
+restart cannot reset the correction budget, and completed clips are retained.
+
+Install with `python3 scripts/apply-video-opening-identity-desktop.py --check`,
+then without `--check`. Deploy both branches with `scripts/deploy-bots.sh
+--with-broker`, then reload the supervised desktop worker child while idle.
+
+Saved-frame replay on job `2a50451d` (2026-09-27): the check rejected the wrong
+cartoon opening and animal substitution and accepted the recognizable final
+opening. The three calls used 2,134–2,254 input tokens and 16–238 output tokens,
+took 7.5–12.5 seconds each, and cost an estimated $0.00174–$0.00249 each using
+the repository pricing table. This validates detection on those saved frames,
+not newly rendered video quality.
 
 Only actual generated video can pass final approval. Storyboards, slideshows,
 and caption cards are never substitutes for requested action. Exhausted render

@@ -1,0 +1,241 @@
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -190,6 +190,8 @@
+             value = await response.json(content_type=None)
+             if response.status != 200:
+                 detail = value.get('error') if isinstance(value, dict) else None
++                if response.status == 422 and isinstance(value, dict) and value.get('pending') is False:
++                    raise RecoveryLimitError(detail or 'Recovery stopped.')
+                 raise RuntimeError(detail or f'Recovery service returned {response.status}')
+             if not isinstance(value, dict):
+                 raise RuntimeError(f'Recovery service returned invalid {operation} data')
+@@ -227,6 +229,8 @@
+             scene_root = root / f'scene-{index}'
+             scene_root.mkdir(exist_ok=True)
+             scene = checkpoint['scenes'].setdefault(str(index), {})
++            if scene.get('opening_identity_stopped'):
++                raise RecoveryLimitError(scene['opening_identity_stopped'])
+             # Original references never get replaced by a generated continuation.
+             # A text-only job uses its first accepted opening as its permanent anchor.
+             identity_paths = source_paths or ([root / 'scene-0' / 'opening.png'] if index > 0 else [])
+@@ -237,13 +241,16 @@
+                 raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
+                                          + '; '.join(scene.get('video_issues', [])))
+             async def review(path: Path, kind: str):
+-                # Scene review was removed. A decodable artifact is recorded so final
+-                # approval can match the uploaded scenes.
++                # Only unreviewed local openings get the bounded identity check.
++                # Cloud-reviewed frames, continuations and video do not add a model call.
+                 try:
+                     await asyncio.to_thread(duration, path) if kind == 'video' else data_image(path)
+                 except Exception:
+                     return {'acceptable': False, 'issues': ['The output could not be fully decoded.']}
+-                return await request('review', {'segment_index': index, 'kind': kind, 'artifact_sha256': digest(path)})
++                identity = ({'frame': data_image(path), **identity_payload}
++                            if kind == 'image' and scene.get('local_opening', {}).get('opening_identity_required') else {})
++                return await request('review', {'segment_index': index, 'kind': kind,
++                                               'artifact_sha256': digest(path), **identity})
+             async def compose_locally(directive: dict) -> Path:
+                 attempt = scene.get('image_attempts', 0)
+                 spec = scene_root / f'local-opening-{attempt}.json'
+@@ -314,18 +321,32 @@
+                         scene['image_attempts'] = scene.get('image_attempts', 0) + 1
+                         await save()
+                         try:
+-                            value = await request('image', {'segment_index': index,
+-                                'correction': scene.get('image_issues', []), **identity_payload})
++                            if scene.get('opening_identity_repair'):
++                                # Reuse the local directive: no repeat cloud provider cascade.
++                                value = copy.deepcopy(scene['local_opening'])
++                                value['keyframe']['prompt'] += ' Identity correction: ' + '; '.join(scene.get('image_issues', []))
++                            else:
++                                value = await request('image', {'segment_index': index,
++                                    'correction': scene.get('image_issues', []), **identity_payload})
+                             if value.get('local_image_required'):
++                                scene['local_opening'] = value
++                                await save()
+                                 await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'], 'progress': None,
+                                                    'stage': f'Composing scene {index + 1} opening locally'})
+                                 shutil.copy2(await compose_locally(value), image)
+                             else:
++                                scene.pop('local_opening', None)
+                                 save_image(value['image'], image)
+                             scene['image_source'] = 'generated'
+                             scene['pending_image'] = digest(image)
+                             await save()
++                        except RecoveryLimitError:
++                            raise
+                         except Exception as error:
++                            if scene.get('opening_identity_repair'):
++                                scene['opening_identity_stopped'] = 'The single corrective opening attempt failed: ' + str(error)
++                                await save()
++                                raise RecoveryLimitError(scene['opening_identity_stopped']) from error
+                             scene['image_issues'] = [str(error)]
+                             traceback.print_exc()
+                             await save()
+@@ -340,8 +361,19 @@
+                         await save()
+                         break
+                     scene['image_issues'] = verdict.get('issues', [])
++                    if scene.get('local_opening', {}).get('opening_identity_required'):
++                        if (not verdict.get('repair_allowed') or scene.get('opening_identity_repair')
++                                or scene.get('image_attempts', 0) >= 2):
++                            scene['opening_identity_stopped'] = 'Opening identity could not be preserved within the retry budget: ' + '; '.join(scene['image_issues'])
++                            await save()
++                            raise RecoveryLimitError(scene['opening_identity_stopped'])
++                        scene['opening_identity_repair'] = True
+                     await save()
+             if not scene.get('image_accepted'):
++                if scene.get('opening_identity_repair'):
++                    scene['opening_identity_stopped'] = 'The single corrective opening attempt was exhausted or interrupted.'
++                    await save()
++                    raise RecoveryLimitError(scene['opening_identity_stopped'])
+                 scene['image_attempts'] = 0
+                 await save()
+                 raise RuntimeError('Waiting to recover the opening image: ' + '; '.join(scene.get('image_issues', [])))
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -6860,8 +6860,10 @@
+ 
+ def keyframe_prompt(prompt: str, motion_contract: dict[str, Any], has_references: bool) -> str:
+     identity = (
+-        "Keep every person or character shown in the reference images recognizable, with the same "
+-        "face, anatomy, body proportions, hair, and clothing. "
++        "Keep the requested recurring characters recognizable, preserving their reference face, "
++        "anatomy, body proportions and hair silhouette except for explicitly requested changes. "
++        "Follow each reference image's assigned role; scene and style references do not add cast "
++        "or replace the identity reference. Stylization changes rendering, not facial identity. "
+         if has_references else ""
+     )
+     return (
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -150,7 +150,26 @@
+         self.assertEqual(len(scopes), len(set(scopes)), 'Every local step needs its own reservation.')
+         self.assertTrue(any(scope.startswith('local-plan-') for scope in scopes))
+ 
+-    def exercise_local(self):
++    def test_local_opening_identity_repairs_once_without_repeating_cloud_generation(self):
++        calls, commands, _ = self.exercise_local(identity=True, reject_count=1)
++        self.assertEqual(sum(operation == 'image' for operation, _ in calls), 1)
++        self.assertEqual(sum('--recovery-keyframe-input' in command for command in commands), 2)
++        checked = [body for operation, body in calls if operation == 'review' and body['kind'] == 'image']
++        self.assertEqual(len(checked), 2)
++        self.assertTrue(all('frame' in body for body in checked))
++
++    def test_local_opening_identity_stops_after_failed_repair_even_on_restart(self):
++        self.exercise_local(identity=True, reject_count=2)
++
++    def test_local_opening_check_outage_reuses_pending_image(self):
++        calls, commands, _ = self.exercise_local(identity=True, review_outage=True)
++        self.assertEqual(sum(operation == 'image' for operation, _ in calls), 1)
++        self.assertEqual(sum('--recovery-keyframe-input' in command for command in commands), 1)
++
++    def test_interrupted_correction_cannot_reset_the_image_budget(self):
++        self.exercise_local(identity=True, reject_count=1, repair_checkpoint_outage=True)
++
++    def exercise_local(self, identity=False, reject_count=0, review_outage=False, repair_checkpoint_outage=False):
+         from PIL import Image
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+@@ -162,8 +181,12 @@
+                 'shots': [{'visual': 'A duck turns toward the camera.', 'camera': 'Wide',
+                            'audio': 'Wind', 'duration_seconds': 5, 'dialogue': []}]}
+             local_plan = {'intent': 'local plan', 'keyframe': {'recommended': True}, 'segments': [segment]}
++            source = root / 'source.png'
++            Image.new('RGB', (256, 144), 'blue').save(source)
++            sources = [recovery.data_image(source)] if identity else []
+             analysis = {'dialogue_contract': {'mode': 'none', 'lines': []}}
+             state, calls, commands, scopes = {}, [], [], []
++            remaining = {'reject': reject_count, 'outage': review_outage, 'checkpoint': repair_checkpoint_outage}
+ 
+             class Response:
+                 status = 200
+@@ -177,24 +200,46 @@
+                     calls.append((operation, copy.deepcopy(json)))
+                     result = Response()
+                     prepared = {'contract_hash': 'a' * 64, 'notice': 'Planned locally.', 'plan': local_plan,
+-                                'sources': [], 'checkpoint': copy.deepcopy(state)}
++                                'sources': sources, 'checkpoint': copy.deepcopy(state)}
+                     if operation == 'plan':
+                         result.value = prepared if any(name == 'local-plan' for name, _ in calls[:-1]) else {
+                             'local_plan_required': True, 'reason_code': 'provider_policy',
+                             'prompt_analysis': analysis, 'sources': [], 'checkpoint': {}}
+                     elif operation == 'local-plan': result.value = prepared
+-                    elif operation == 'checkpoint': state.update(copy.deepcopy(json['checkpoint'])); result.value = {'ok': True}
++                    elif operation == 'checkpoint':
++                        state.update(copy.deepcopy(json['checkpoint']))
++                        result.value = {'ok': True}
++                        scene = state['scenes'].get('0', {})
++                        if remaining['checkpoint'] and scene.get('opening_identity_repair') and scene.get('image_attempts') == 2:
++                            remaining['checkpoint'] = False
++                            result.status = 503
++                            result.value = {'error': 'checkpoint response lost'}
+                     elif operation == 'image':
+-                        result.value = {'local_image_required': True, 'use_references': False,
++                        result.value = {'local_image_required': True, 'use_references': identity,
++                                        'opening_identity_required': identity,
+                                         'keyframe': {'prompt': 'A duck on a table.', 'motion_contract': {}}}
+-                    elif operation == 'review': result.value = {'acceptable': True, 'permitted': True, 'issues': []}
++                    elif operation == 'review':
++                        result.value = {'acceptable': True, 'permitted': True, 'issues': []}
++                        if 'frame' in json:
++                            if remaining['outage']:
++                                remaining['outage'] = False
++                                result.status = 503
++                                result.value = {'error': 'identity temporarily unavailable'}
++                            elif remaining['reject']:
++                                remaining['reject'] -= 1
++                                result.value = {'acceptable': False, 'issues': ['Restore the original duck face.'],
++                                                'repair_allowed': remaining['reject'] == reject_count - 1}
+                     else: result.value = {'ok': True}
+                     return result
+ 
+             async def run(command):
+                 commands.append(command)
+                 if '--recovery-keyframe-output' in command:
+-                    Image.new('RGB', (256, 144), 'green').save(command[command.index('--recovery-keyframe-output') + 1])
++                    spec = json.loads(Path(command[command.index('--recovery-keyframe-input') + 1]).read_text())
++                    openings = sum('--recovery-keyframe-input' in item for item in commands)
++                    if openings == 2:
++                        self.assertIn('Identity correction: Restore the original duck face.', spec['prompt'])
++                    Image.new('RGB', (256, 144), 'green' if openings == 1 else 'red').save(command[command.index('--recovery-keyframe-output') + 1])
+                 return 0
+             async def create_local_plan(job, log, source, frontier_analysis):
+                 self.assertEqual(frontier_analysis, analysis)
+@@ -222,6 +267,24 @@
+             with mock.patch.dict(sys.modules, {'video_worker': fake}):
+                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
+                 asyncio.run(recovery.run_recovery_job(worker, job))
++                if repair_checkpoint_outage:
++                    self.assertTrue(worker.fail_current.await_args.args[1])
++                    asyncio.run(recovery.run_recovery_job(worker, job))
++                    self.assertFalse(worker.fail_current.await_args.args[1])
++                    self.assertEqual(len(commands), 1, 'A reserved corrective attempt cannot start again after interruption.')
++                    worker.upload.assert_not_awaited()
++                    return calls, commands, scopes
++                if review_outage:
++                    worker.fail_current.assert_awaited_once()
++                    self.assertTrue(worker.fail_current.await_args.args[1])
++                    asyncio.run(recovery.run_recovery_job(worker, job))
++                if reject_count >= 2:
++                    self.assertFalse(worker.fail_current.await_args.args[1])
++                    self.assertEqual(len(commands), 2, 'Only the two openings, no video render.')
++                    asyncio.run(recovery.run_recovery_job(worker, job))
++                    self.assertEqual(len(commands), 2, 'Restart cannot reset the identity repair budget.')
++                    worker.upload.assert_not_awaited()
++                    return calls, commands, scopes
+                 worker.wait_and_send_terminal.assert_awaited_once()
+                 self.assertEqual(worker.wait_and_send_terminal.await_args.args[0]['generation_notice'], 'Planned locally.')
+                 worker.upload.assert_awaited_once()
+@@ -241,7 +304,9 @@
+                 video_gen.generate_recovery_keyframe('http://server', {'prompt': 'A duck.', 'references': [str(portrait)],
+                     'motion_contract': {'gaze_direction': 'left'}, 'aspect_image': str(portrait)}, 7, 60, 25)
+             server, prompt, aspect, seed, _root, _timeout, references = generate.call_args.args
+-            self.assertIn('Keep every person or character shown in the reference images recognizable', prompt)
++            self.assertIn('Keep the requested recurring characters recognizable', prompt)
++            self.assertIn("Follow each reference image's assigned role", prompt)
++            self.assertNotIn('Keep every person', prompt)
+             self.assertIn('A duck.', prompt)
+             self.assertNotIn('left', prompt, 'An incomplete motion contract is dropped instead of crashing.')
+             self.assertEqual((aspect, seed, references), ('2:3', 7, [portrait]))

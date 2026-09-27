@@ -1,5 +1,15 @@
 # Desktop video optimization changes
 
+## Bounded opening identity checks
+
+`video-opening-identity.patch` assigns identity and scene references separate
+roles, checks unreviewed local openings before animation, and allows at most one
+corrective local image per video. Cached decisions and persisted limits prevent
+reconnects from resetting the budget; cloud-reviewed openings and rendered clips
+add no review calls. See [video recovery](../docs/video-recovery.md#bounded-identity-check-for-local-openings).
+Install with `python3 scripts/apply-video-opening-identity-desktop.py --check`,
+then without `--check`; deploy the broker and reload the idle desktop worker.
+
 ## H3 VAE speed update
 
 See [H3 VAE speed](../docs/h3-vae-speed.md). ComfyUI v0.37.1 already includes

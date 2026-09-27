@@ -3,7 +3,8 @@ import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDE
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
-import { checkVideoCharacterContinuity, decodeContinuityImage, validateContinuityDecision } from './VideoCharacterContinuity.js';
+import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole,
+    validateContinuityDecision, validateOpeningIdentityDecision } from './VideoCharacterContinuity.js';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { execFile } from 'child_process';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
@@ -137,6 +138,7 @@ interface BrokerOptions {
     recoveryEnabled?: boolean;
     recoveryPlanner?: typeof prepareRecoveryPlan;
     characterContinuityChecker?: typeof checkVideoCharacterContinuity;
+    openingIdentityChecker?: typeof checkVideoOpeningIdentity;
     host: string;
     port: number;
     dbPath: string;
@@ -5608,12 +5610,17 @@ export class VideoBroker {
                             + ' The original background and pose are not this new scene. Do not invent a replacement face.';
                     }
                     const identitySources = prepared.contract.use_source_images && sources.length ? sources
-                        : index > 0 && continuity?.action === 'reanchor' && body.identity_anchor
+                        : index > 0 && body.identity_anchor
                             ? [decodeContinuityImage(body.identity_anchor)] : [];
+                    const referenceRoles = identitySources.map((_, position) => recoveryReferenceRole(position));
+                    if (referenceRoles.length) {
+                        keyframe.prompt += ` Reference roles: ${referenceRoles.join(' ')} Current cast and permitted changes: `
+                            + String(prepared.plan.continuity_bible || '').slice(0, 3000);
+                    }
                     const references: VideoKeyframeReference[] = identitySources.map((source, sourceIndex) => ({
-                        label: sourceIndex ? 'Attached scene and all its subjects' : 'Original identity',
+                        label: sourceIndex ? 'Attached scene context' : 'Original identity',
                         kind: sourceIndex ? 'object' : 'identity',
-                        visualFactsToPreserve: 'Preserve each recurring character’s original face and distinguishing appearance. Apply only the appearance changes explicitly requested for this scene; do not import absent cast or the original staging.',
+                        visualFactsToPreserve: referenceRoles[sourceIndex],
                         bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                     }));
                     // The frontier providers draw far better frames, and a single scene of a
@@ -5631,9 +5638,14 @@ export class VideoBroker {
                             : isModerationFailure(error);
                         if (!declined) throw error;
                         console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);
-                        writeJson(res, 200, { local_image_required: true,
+                        const directive = { local_image_required: true,
                             keyframe: { prompt: keyframe.prompt, motion_contract: keyframe.motion_contract || {} },
-                            use_references: references.length > 0 });
+                            use_references: references.length > 0,
+                            opening_identity_required: references.length > 0 };
+                        state.local_openings ||= {};
+                        state.local_openings[index] = directive;
+                        await persist();
+                        writeJson(res, 200, directive);
                         return;
                     }
                     writeJson(res, 200, { image: `data:${frame.mimeType};base64,${frame.bytes.toString('base64')}` });
@@ -5641,6 +5653,47 @@ export class VideoBroker {
                 }
                 if (!['image', 'video'].includes(body.kind)
                     || !/^[a-f0-9]{64}$/.test(String(body.artifact_sha256 || ''))) throw new Error('Invalid artifact.');
+                if (body.kind === 'image' && body.frame !== undefined) {
+                    if (!state.local_openings?.[index]?.opening_identity_required) {
+                        throw new Error('No local opening identity check was requested.');
+                    }
+                    const anchors = prepared.contract.use_source_images && sources.length ? sources
+                        : [decodeContinuityImage(body.identity_anchor)];
+                    const frame = decodeContinuityImage(body.frame);
+                    const key = recoveryHash({ version: 1, contract: prepared.contract_hash, index,
+                        artifact: body.artifact_sha256,
+                        anchors: anchors.map(anchor => createHash('sha256').update(anchor.data).digest('hex')),
+                        frame: createHash('sha256').update(frame.data).digest('hex') });
+                    state.opening_identity ||= {};
+                    state.opening_identity_calls ||= {};
+                    if (!state.opening_identity[key]) {
+                        // Reserve before calling: reconnects and outages cannot create an unbounded bill.
+                        if ((state.opening_identity_calls[index] || 0) >= 2) {
+                            throw new RecoveryStoppedError(`Scene ${index + 1} exhausted its two opening identity checks.`);
+                        }
+                        state.opening_identity_calls[index] = (state.opening_identity_calls[index] || 0) + 1;
+                        await persist();
+                        const stage = `opening_identity_${index + 1}`;
+                        const attempt = state.opening_identity_calls[index];
+                        const decision = validateOpeningIdentityDecision(await (this.options.openingIdentityChecker
+                            || checkVideoOpeningIdentity)(prepared.plan, index, anchors, frame, {
+                                ...options,
+                                onUsage: usage => options.onUsage?.({ ...usage, stage, attempt }),
+                                onAttempt: result => options.onAttempt?.({ ...result, stage, attempt }),
+                            }));
+                        const repairAllowed = !decision.acceptable && !state.opening_identity_repair;
+                        // One corrective local image for the entire video, not one retry tree per scene.
+                        if (repairAllowed) state.opening_identity_repair = key;
+                        state.opening_identity[key] = { acceptable: decision.acceptable, permitted: true,
+                            issues: decision.acceptable ? [] : [decision.correction], repair_allowed: repairAllowed };
+                    }
+                    const verdict = state.opening_identity[key];
+                    state.reviews ||= {};
+                    state.reviews[`image:${index}:${body.artifact_sha256}`] = verdict;
+                    await persist();
+                    writeJson(res, 200, verdict);
+                    return;
+                }
                 // Scene review was removed: it rejected usable videos over minor issues
                 // and added model calls to every scene. Recording the rendered artifact
                 // still lets final approval match the uploaded scenes exactly.
