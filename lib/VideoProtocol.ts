@@ -188,6 +188,8 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
     },
 };
 
+export type VideoSourceKind = 'image' | 'video_frame' | 'preset' | 'preset_image' | 'preset_video_frame' | 'video_edit' | 'text';
+
 export interface VideoJobView {
     delivery_message_id?: string | null;
     delivery_revision?: number;
@@ -226,6 +228,9 @@ export interface VideoJobView {
     result_path: string | null;
     result_bytes: number | null;
     has_source_image: boolean;
+    has_source_video?: boolean;
+    command_variant?: string | null;
+    source_kind?: VideoSourceKind | null;
     has_source_audio?: boolean;
     source_audio_seconds?: number | null;
     source_image_composition?: 'generated' | 'local_qwen' | null;

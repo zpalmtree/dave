@@ -24,10 +24,23 @@ continues to refresh normally.
 
 The broker also normalizes progress from older connected desktop workers and
 existing database rows, including the erroneous 98% / segment 1/1 state. This
-change needs no desktop worker restart or database schema migration. Deploy both
+progress normalization needs no desktop worker restart or database schema migration. Deploy both
 branches with `scripts/deploy-bots.sh --with-broker`; the deployment preserves the
 active render and reconciles its worker lease.
 
 `tests/video-progress.test.mjs` covers six-scene progress, unequal durations,
 scene and retry boundaries, stale heartbeats, delivery reserve, persisted broker
 restart, per-scene estimate scaling, and the waiting job's projection.
+
+
+User-facing messages identify the original input separately from the image used
+internally. “Editing your video” means the full clip is used for replacement;
+“Using a frame from your video” means a new video starts from one extracted frame.
+Oalgo identifies its built-in Meximutt portrait and combinations with user media.
+The broker adds a nullable `source_kind` database column automatically and stores
+it at submission so queue refreshes and restarts keep that distinction. Older full-video edits and preset-only requests remain
+identifiable; older images with unknown origins use “Using a reference image.”
+Progress messages use everyday wording, retain rough timing and queue position,
+and explicitly show planning, cancellation, pausing, and sending. Paused or
+offline requests do not promise a finish time. Internal error details remain in
+the job record while common failures give the requester a short next step.
