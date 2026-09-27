@@ -165,7 +165,11 @@ test('derived segment identity references apply only to recurring source cast', 
     assert.equal(videoSegmentUsesFrameZeroIdentity(plan, 2), false);
 });
 
-test('broker canonicalizes the meximutt alias as oalgo and resolves the character preset', async () => {
+for (const [model, variant, canonical] of [
+    ['minimax', 'meximutt', 'oalgo'],
+    ['minimaxfast', 'oalgofast', 'oalgofast'],
+    ['minimaxfast', undefined, 'oalgofast'],
+]) test(`broker resolves the character preset for ${model}/${variant}`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-oalgo-preset-'));
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
@@ -178,7 +182,7 @@ test('broker canonicalizes the meximutt alias as oalgo and resolves the characte
             method: 'POST',
             headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
             body: JSON.stringify({
-                model: 'minimax', command_variant: 'meximutt', prompt: 'Animate the preset', requester_id: 'preset-user',
+                model, command_variant: variant, prompt: 'Animate the preset', requester_id: 'preset-user',
                 origin_bot_id: 'bot-1', channel_id: 'channel-1',
                 command_message_id: 'preset-message', status_message_id: 'preset-status',
                 source_image: { preset: 'oalgo' },
@@ -187,7 +191,8 @@ test('broker canonicalizes the meximutt alias as oalgo and resolves the characte
         const body = await response.json();
         assert.equal(response.status, 201);
         assert.equal(body.job.has_source_image, true);
-        assert.equal((await broker.get('SELECT command_variant FROM video_submission_metrics')).command_variant, 'oalgo');
+        assert.equal(body.job.model, model);
+        assert.equal((await broker.get('SELECT command_variant FROM video_submission_metrics')).command_variant, canonical);
         assert.deepEqual(
             readFileSync(join(directory, 'results', body.job.id, 'source.png')),
             readFileSync(new URL('../images/oalgo.png', import.meta.url)),

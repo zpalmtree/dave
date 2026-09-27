@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeOalgoSourceImages, VideoBroker } from '../dist/VideoBroker.js';
 import { createFrontierVideoKeyframe } from '../dist/VideoKeyframeProvider.js';
-import { parseOalgoImageProvider, handleOalgoVideo } from '../dist/VideoGeneration.js';
+import { parseOalgoImageProvider, handleOalgoVideo, handleOalgoFastVideo } from '../dist/VideoGeneration.js';
 import { VideoUsagePersistenceError, videoUsageCost } from '../dist/VideoUsage.js';
 import { config } from '../dist/Config.js';
 
@@ -37,9 +37,10 @@ test('OALGO provider option is explicit, leading-only and removed from the creat
     for(const bad of ['--image-provider','--image-provider=','--image-provider other','--image-provider grok --image-provider sunburst'])assert.throws(()=>parseOalgoImageProvider(bad));
 });
 
-test('explicit provider without an attachment gives an actionable error before starting a job',async()=>{
+for (const handler of [handleOalgoVideo, handleOalgoFastVideo])
+test(`${handler.name}: explicit provider without an attachment gives an actionable error`,async()=>{
     const replies=[];
-    await handleOalgoVideo({attachments:new Map(),reply:async text=>replies.push(text)},'--image-provider grok hello');
+    await handler({attachments:new Map(),reply:async text=>replies.push(text)},'--image-provider grok hello');
     assert.equal(replies.length,1);assert.match(replies[0],/attached or replied-to image/);
 });
 
@@ -132,6 +133,10 @@ test('broker validates provider before downloads and passes the selection to com
         const job=await broker.get('SELECT source_image_path,source_image_mime FROM video_jobs WHERE public_id=?',[chosen.body.job.id]);
         assert.equal(job.source_image_mime,'image/jpeg');assert.deepEqual(readFileSync(job.source_image_path),JPEG);
         assert.equal((await submit({})).status,201);assert.deepEqual(providers,['grok','sunburst']);
+        const fast=await submit({model:'minimaxfast',command_variant:'oalgofast',source_image_provider:'grok'});
+        assert.equal(fast.status,201);assert.equal(fast.body.job.model,'minimaxfast');assert.deepEqual(providers,['grok','sunburst','grok']);
+        const fastUsage=await broker.get('SELECT command FROM video_usage_events WHERE job_public_id=?',[fast.body.job.id]);
+        assert.equal(fastUsage.command,'oalgofast');
         const usage=await broker.get('SELECT provider,model,cost FROM video_usage_events LIMIT 1');assert.equal(usage.provider,'xai');assert.equal(usage.cost,.08);
     }finally{await broker.stop();rmSync(directory,{recursive:true,force:true});}
 });
