@@ -751,7 +751,7 @@ test('source-image download does not hold the enqueue write lock', async () => {
     }
 });
 
-test('video clip starting images reach the source downloader only from Discord', async () => {
+test('video clip starting images accept Discord and resolved Twitter MP4s only', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-clip-source-'));
     const descriptors = [];
     const broker = new VideoBroker({
@@ -788,6 +788,12 @@ test('video clip starting images reach the source downloader only from Discord',
         assert.equal(rejected.status, 400);
         assert.match((await rejected.json()).error, /not a Discord attachment/);
         assert.equal(descriptors.length, 1);
+        const twitter = await submit('twitter-clip', {
+            clip_url: 'https://video.twimg.com/amplify_video/123/vid/clip.mp4', name: 'twitter.mp4',
+        });
+        assert.equal(twitter.status, 201);
+        assert.equal((await twitter.json()).job.has_source_image, true);
+        assert.equal(descriptors.length, 2);
     } finally {
         await broker.stop();
         rmSync(directory, { recursive: true, force: true });
@@ -887,6 +893,76 @@ test('replacement jobs retain the clip, target, and replacement image without pl
     }
     assert.throws(() => sourceClipDescriptor({ ...clip, clip_url: 'https://example.com/clip.mp4' }),
         /Discord attachment/);
+});
+
+test('text replacements generate and retain an image for both commands; failed generation never queues an edit', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-twitter-replacement-'));
+    const generations = [];
+    let failGeneration = true;
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        sourceVideoDownloader: async (source, target) => {
+            assert.match(source.clip_url, /^https:\/\/video\.twimg\.com\//);
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'twitter video');
+            return { path, bytes: 13, duration: 19.042 };
+        },
+        keyframeGenerator: async (plan, references, options) => {
+            generations.push(plan);
+            assert.match(plan.keyframe.prompt, /slugs/);
+            assert.match(plan.keyframe.prompt, /entire subject/);
+            assert.deepEqual(references, []);
+            assert.equal(options.aspectRatio, '1:1');
+            assert.ok(options.abortSignal);
+            assert.equal(typeof options.onUsage, 'function');
+            if (failGeneration) throw new Error('image service unavailable');
+            return { bytes: Buffer.from('generated slug reference'), mimeType: 'image/png', provider: 'test', model: 'test' };
+        },
+    });
+    await broker.start();
+    const submit = (id, extra = {}) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+        method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'minimax', prompt: 'slugs',
+            source_video: { clip_url: 'https://video.twimg.com/amplify_video/123/vid/clip.mp4', name: 'twitter.mp4' },
+            video_edit_target: 'the character', video_replacement_prompt: 'slugs',
+            requester_id: id, origin_bot_id: 'bot', channel_id: 'channel',
+            command_message_id: id, status_message_id: 'status', ...extra }),
+    });
+    try {
+        const failed = await submit('failed');
+        assert.equal(failed.status, 400);
+        assert.match((await failed.json()).error, /image service unavailable/);
+        assert.equal((await broker.get('SELECT COUNT(*) AS count FROM video_jobs')).count, 0);
+        const rejected = await broker.get("SELECT public_id FROM video_submission_metrics WHERE outcome='rejected'");
+        assert.equal(existsSync(join(directory, 'results', rejected.public_id)), false);
+        failGeneration = false;
+        for (const command of ['minimax', 'oalgo']) {
+            const accepted = await submit(command, { command_variant: command });
+            assert.equal(accepted.status, 201);
+            const job = (await accepted.json()).job;
+            assert.equal(job.has_source_image, true);
+            const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [job.id]);
+            assert.equal(row.video_edit_target, 'the character');
+            assert.equal(row.source_video_seconds, 19.042);
+            assert.equal(row.command_variant, command);
+            assert.equal(readFileSync(row.source_image_path, 'utf8'), 'generated slug reference');
+            assert.equal(readFileSync(row.source_video_path, 'utf8'), 'twitter video');
+            assert.equal((await submit(command, { command_variant: command })).status, 200);
+        }
+        assert.equal(generations.length, 3); // Failed attempt plus two successful references; no duplicate charge.
+        for (const extra of [
+            { source_video: null },
+            { video_replacement_prompt: 's'.repeat(2001) },
+            { source_image: { preset: 'meximutt' } },
+        ]) assert.equal((await submit('invalid', extra)).status, 400);
+        assert.equal(generations.length, 3);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
 });
 
 test('short and long replacement clips wait for the updated edit worker', async () => {

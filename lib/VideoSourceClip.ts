@@ -5,6 +5,7 @@ import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import fetch from 'node-fetch';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
+import { isTwitterVideoUrl } from './TwitterVideo.js';
 
 export const VIDEO_EDIT_MIN_SECONDS = 0.5;
 export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
@@ -25,18 +26,19 @@ export interface StoredVideoSourceClip {
     duration: number;
 }
 
-function discordAttachmentUrl(value: string): boolean {
+export function isVideoSourceClipUrl(value: string): boolean {
+    if (isTwitterVideoUrl(value)) return true;
     try {
         const url = new URL(value);
-        return url.protocol === 'https:' &&
+        return url.protocol === 'https:' && !url.port && !url.username && !url.password &&
             ['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname);
     } catch { return false; }
 }
 
 export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | null {
     if (value === null || value === undefined) return null;
-    if (!value || typeof value !== 'object' || !discordAttachmentUrl(String(value.clip_url || ''))) {
-        throw new Error('The source video must be a Discord attachment.');
+    if (!value || typeof value !== 'object' || !isVideoSourceClipUrl(String(value.clip_url || ''))) {
+        throw new Error('The source video must be a Discord attachment or a resolved Twitter/X MP4.');
     }
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();
@@ -66,6 +68,7 @@ async function probeDuration(path: string): Promise<number> {
 }
 
 export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, directory: string): Promise<StoredVideoSourceClip> {
+    source = sourceClipDescriptor(source)!;
     const extension = source.name.split('.').pop()!.toLowerCase();
     mkdirSync(directory, { recursive: true });
     const temporary = join(directory, 'source-video.part');
@@ -75,8 +78,8 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
     rmSync(temporary, { force: true });
     try {
         const response = await fetch(source.clip_url, { signal: controller.signal, redirect: 'manual' });
-        if (!response.ok || !response.body || !discordAttachmentUrl(response.url)) {
-            throw new Error(`Discord could not provide the source video (HTTP ${response.status}).`);
+        if (!response.ok || !response.body || !isVideoSourceClipUrl(response.url)) {
+            throw new Error(`Could not download the source video (HTTP ${response.status}).`);
         }
         if (Number(response.headers.get('content-length') || 0) > VIDEO_EDIT_MAX_BYTES) {
             throw new Error('The source video exceeds 100 MiB.');
