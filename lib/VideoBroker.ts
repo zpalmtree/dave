@@ -1,4 +1,5 @@
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
+import { groundVideoEditTarget, validateVideoEditDecision, videoEditSampleTimes } from './VideoEditIntent.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
@@ -134,6 +135,7 @@ interface StoredVideoSourceImage {
 }
 
 interface BrokerOptions {
+    videoEditGrounder?: typeof groundVideoEditTarget;
     sourceVideoDownloader?: typeof storeVideoSourceClip;
     recoveryEnabled?: boolean;
     recoveryPlanner?: typeof prepareRecoveryPlan;
@@ -2647,7 +2649,9 @@ export class VideoBroker {
         } catch (error) {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
         }
-        const videoEditTarget = String(body.video_edit_target || '').trim();
+        let videoEditTarget = String(body.video_edit_target || '').trim();
+        const videoEditContext = typeof body.video_edit_context === 'string' ? body.video_edit_context.slice(0, 6000)
+            : JSON.stringify({ target: videoEditTarget, replacement: prompt });
         const replacementPrompt = String(body.video_replacement_prompt || '').trim();
         if (replacementPrompt && (!videoDescriptor || sourceDescriptor || replacementPrompt.length > 2000)) {
             return { status: 400, body: { error: 'A generated replacement needs a source video, a description up to 2000 characters, and no replacement image.' } };
@@ -2740,6 +2744,14 @@ export class VideoBroker {
             try {
                 sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory);
                 requestedDuration = sourceVideo.duration;
+                const grounding = validateVideoEditDecision(await (this.options.videoEditGrounder || groundVideoEditTarget)(
+                    sourceVideo, videoEditTarget, videoEditContext, submissionHooks), false);
+                if (grounding.action === 'clarify') throw new Error(grounding.clarification);
+                writeFileSync(join(directory, 'video-edit-grounding.json'), JSON.stringify({
+                    requested_target: videoEditTarget, context: videoEditContext,
+                    sample_times: videoEditSampleTimes(sourceVideo.duration), ...grounding,
+                }, null, 2));
+                videoEditTarget = grounding.target;
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
                 await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);

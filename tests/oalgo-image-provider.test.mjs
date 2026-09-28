@@ -40,7 +40,7 @@ test('OALGO provider option is explicit, leading-only and removed from the creat
 for (const handler of [handleOalgoVideo, handleOalgoFastVideo])
 test(`${handler.name}: explicit provider without an attachment gives an actionable error`,async()=>{
     const replies=[];
-    await handler({attachments:new Map(),reply:async text=>replies.push(text)},'--image-provider grok hello');
+    await handler({attachments:new Map(),channel:{send:async()=>{},sendTyping:async()=>{}},reply:async text=>replies.push(text)},'--image-provider grok hello');
     assert.equal(replies.length,1);assert.match(replies[0],/Attach an image or video, or reply to one/);
 });
 
