@@ -2,8 +2,9 @@
 
 The September 7 campaign compares cost, service time and prompt adherence while
 keeping Sol low / single-pass / standard as the production planning control
-and standard H3 as the renderer for both arms. FastH3 stays opt-in through
-`$minimaxfast`; its known speed/quality tradeoff is outside this campaign.
+and standard H3 as the renderer for both arms. Historical FastH3 measurements are
+outside this campaign; the desktop CLI retains `--fast --fast-profile fasth3_vsa`.
+The public fast commands now use [TaoMate](video-taomate.md).
 No candidate is enabled by running a benchmark. The authorized API budget is
 $50 across all phases, retries, image generation and judges.
 

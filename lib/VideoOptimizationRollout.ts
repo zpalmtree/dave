@@ -18,7 +18,7 @@ export function selectVideoOptimization(
     if (command === 'meximutt' && !release.commands?.meximutt) command = 'oalgo';
     const arm = release.commands?.[command];
     if (!['minimax', 'oalgo', 'meximutt'].includes(command) || !arm || ![10, 50, 100].includes(arm.percentage)) return null;
-    // FastH3 belongs to the explicit fast command. Reject old renderer releases,
+    // Fast renderer selection is separate from planner rollout. Reject old renderer releases,
     // including mixed cloud/renderer arms, instead of silently changing them.
     if (arm.renderer != null) return null;
     const proof = arm.evidence;

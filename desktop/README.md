@@ -1,5 +1,14 @@
 # Desktop video optimization changes
 
+## TaoMate fast renderer
+
+`video-taomate.patch` adds the tested three-step TaoMate SLA 25% profile and selects
+it for `minimaxfast` (including `oalgofast`). Install with
+`python3 scripts/apply-video-taomate-desktop.py --check`, then without `--check`.
+Reload the worker child while idle and deploy both server tracks with
+`scripts/deploy-bots.sh --with-broker`. Saved FastH3 jobs retain their original
+renderer on resume. See [validation and rollback](../docs/video-taomate.md).
+
 ## Bounded opening identity checks
 
 `video-opening-identity.patch` assigns identity and scene references separate

@@ -485,7 +485,7 @@ test('failed video post is a standalone sanitized reply', () => {
         prompt: 'baboons at a zoo',
         error: 'Failed at D:\\AI\\private\\video.plan.json',
     });
-    assert.match(text, /MiniMax FastH3 video \*\*09cfe948\*\* failed/);
+    assert.match(text, /MiniMax TaoMate video \*\*09cfe948\*\* failed/);
     assert.match(text, /> baboons at a zoo/);
     assert.doesNotMatch(text, /D:\\|private|video\.plan/);
 });
@@ -532,7 +532,7 @@ test('fast video commands map to explicit quality tradeoffs', () => {
     );
     assert.deepEqual(
         VIDEO_MODELS.minimaxfast.generatorArgs,
-        ['--model', 'h3', '--quality', 'final', '--fast'],
+        ['--model', 'h3', '--quality', 'final', '--fast', '--fast-profile', 'taomate'],
     );
     assert.equal(isVideoModel('ltxfast'), true);
     assert.equal(isVideoModel('minimaxfast'), true);
