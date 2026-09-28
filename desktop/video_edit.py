@@ -12,7 +12,6 @@ import copy
 import json
 import math
 import numpy as np
-import re
 import subprocess
 import sys
 import tempfile
@@ -30,6 +29,9 @@ TEMPLATE = ROOT / "templates" / "h3_i2v.json"
 REF_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
 FUN_PATCH = "minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors"
 SAM_MODEL = "sam3.1_multiplex_fp16.safetensors"
+MAX_SOURCE_SECONDS = 120
+MIN_SOURCE_SECONDS = 0.5
+MAX_SEGMENT_FRAMES = 15 * 24
 
 
 def required_models() -> None:
@@ -53,8 +55,8 @@ def clip_details(path: Path) -> tuple[float, int, int]:
     if not stream:
         raise RuntimeError("Source clip has no video stream")
     duration = float(info["format"]["duration"])
-    if not 5 <= duration <= 15:
-        raise RuntimeError("Video replacement supports 5–15 second clips")
+    if not MIN_SOURCE_SECONDS <= duration <= MAX_SOURCE_SECONDS:
+        raise RuntimeError(f"Video replacement supports {MIN_SOURCE_SECONDS}–{MAX_SOURCE_SECONDS} second clips")
     width, height = int(stream["width"]), int(stream["height"])
     if width < 32 or height < 32:
         raise RuntimeError("Source clip must be at least 32×32 pixels")
@@ -86,11 +88,64 @@ def legal_frames(duration: float) -> int:
     return max(124, 5 + math.ceil((needed - 5) / 17) * 17)
 
 
+def segment_plan(duration: float) -> list[tuple[int, int, int]]:
+    """Partition the 24 fps timeline without dropping or duplicating source frames."""
+    total_frames = math.ceil(duration * 24)
+    count = math.ceil(total_frames / MAX_SEGMENT_FRAMES)
+    common, extra = divmod(total_frames, count)
+    lengths = [common + (index < extra) for index in range(count)]
+    result = []
+    start = 0
+    for length in lengths:
+        result.append((start, length, legal_frames(length / 24)))
+        start += length
+    return result
+
+
 def normalized_clip(source: Path, destination: Path, width: int, height: int, frames: int) -> None:
     command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
             "-vf", f"fps=24,scale={width}:{height}:flags=lanczos,setsar=1,tpad=stop_mode=clone:stop_duration=1",
             "-frames:v", str(frames), "-an", "-c:v", "libx264", "-crf", "18",
             "-pix_fmt", "yuv420p", str(destination))
+
+
+def segment_clip(source: Path, destination: Path, start: int, length: int,
+                 model_frames: int) -> None:
+    pad_seconds = max(1, math.ceil((model_frames - length) / 24) + 1)
+    command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+            "-vf", (f"trim=start_frame={start}:end_frame={start + length},"
+                    f"setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={pad_seconds}"),
+            "-frames:v", str(model_frames), "-an", "-c:v", "libx264", "-crf", "18",
+            "-pix_fmt", "yuv420p", str(destination))
+
+
+def composite_segment(source: Path, rendered: Path, mask: Path,
+                      destination: Path, source_frames: int) -> None:
+    # The H3 result may drift outside the tracked subject. Keep every source
+    # pixel beyond the expanded mask and emit only this segment's source frames.
+    filter_graph = ("[2:v]format=gray," + ",".join(["dilation"] * 6) +
+                    ",gblur=sigma=2[mask];[1:v][mask]alphamerge[edited];" +
+                    "[0:v][edited]overlay=shortest=1:format=auto[v]")
+    command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+            "-i", str(rendered), "-i", str(mask), "-filter_complex", filter_graph,
+            "-map", "[v]", "-frames:v", str(source_frames), "-an", "-c:v", "libx264",
+            "-crf", "18", "-pix_fmt", "yuv420p", str(destination))
+
+
+def join_segments(segments: list[Path], source: Path, destination: Path,
+                  duration: float, directory: Path) -> None:
+    listing = directory / "segments.txt"
+    entries = []
+    for path in segments:
+        escaped = path.as_posix().replace("'", "'\\''")
+        entries.append(f"file '{escaped}'\n")
+    listing.write_text("".join(entries), encoding="utf-8")
+    source_audio = audio_codec(source)
+    command("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "concat", "-safe", "0",
+            "-i", str(listing), "-i", str(source), "-map", "0:v:0", "-map", "1:a:0?",
+            "-t", f"{duration:.3f}", "-c:v", "copy",
+            "-c:a", "copy" if source_audio == "aac" else "aac", "-b:a", "192k",
+            "-movflags", "+faststart", str(destination))
 
 
 def node(kind: str, **inputs):
@@ -185,14 +240,49 @@ def run_graph(server: str, graph: dict, output_node: str, timeout: float) -> Pat
     raise TimeoutError("ComfyUI video replacement timed out")
 
 
-def mask_coverage(path: Path) -> float:
-    values = command("ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
-                     "-vf", "signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=-",
-                     "-f", "null", "-")
-    samples = [float(value) for value in re.findall(r"lavfi\.signalstats\.YAVG=([\d.]+)", values)]
+def mask_frame_coverages(path: Path) -> list[float]:
+    """Count selected pixels, not encoded luma (limited-range black is 16)."""
+    info = json.loads(command("ffprobe", "-v", "error", "-select_streams", "v:0",
+                              "-show_entries", "stream=width,height", "-of", "json", str(path)))
+    stream = info["streams"][0]
+    frame_bytes = int(stream["width"]) * int(stream["height"])
+    samples = []
+    # Stream one grayscale frame at a time, keeping memory bounded for long clips.
+    with tempfile.TemporaryFile() as errors:
+        with subprocess.Popen(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
+             "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+            stdout=subprocess.PIPE, stderr=errors,
+        ) as process:
+            while data := process.stdout.read(frame_bytes):
+                if len(data) != frame_bytes:
+                    raise RuntimeError("Tracked replacement mask ended mid-frame")
+                samples.append(float(np.mean(np.frombuffer(data, dtype=np.uint8) > 127)))
+            code = process.wait()
+        if code:
+            errors.seek(0)
+            raise RuntimeError(f"Could not decode replacement mask: {errors.read()[-1000:].decode(errors='replace')}")
     if not samples:
         raise RuntimeError("Could not inspect the tracked replacement mask")
-    return sum(samples) / len(samples) / 255
+    return samples
+
+
+def validate_tracking_mask(path: Path, target: str, source_frames: int) -> float:
+    samples = mask_frame_coverages(path)
+    if len(samples) < source_frames:
+        raise RuntimeError("Tracked replacement mask is shorter than the source segment")
+    # Model padding must not make a brief detection look like a stable track.
+    samples = samples[:source_frames]
+    coverage = float(np.mean(samples))
+    tracked_fraction = sum(0.003 <= value <= 0.85 for value in samples) / len(samples)
+    if not 0.003 <= coverage <= 0.85 or tracked_fraction < 0.5:
+        raise RuntimeError(
+            f"Could not reliably isolate '{target}' in the source clip "
+            f"(selected pixels {coverage:.2%}; usable tracking in {tracked_fraction:.0%} of frames). "
+            "Describe the subject's visible appearance and position instead of only a name. "
+            "No replacement was rendered for this segment."
+        )
+    return coverage
 
 
 def tracked_edit_mask(source: Path, destination: Path, width: int, height: int) -> None:
@@ -268,50 +358,52 @@ def main() -> None:
     required_models()
     duration, source_w, source_h = clip_details(args.clip)
     width, height = canvas(source_w, source_h)
-    frames = legal_frames(duration)
+    segments = segment_plan(duration)
     run_id = uuid.uuid4().hex
     INPUT.mkdir(parents=True, exist_ok=True)
     normalized = INPUT / f"video-edit-{run_id}.mp4"
     replacement = INPUT / f"video-edit-{run_id}{args.image.suffix.lower()}"
-    mask_input = INPUT / f"video-edit-mask-{run_id}.mp4"
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     try:
         print("Normalizing source clip", flush=True)
-        normalized_clip(args.clip, normalized, width, height, frames)
+        normalized_clip(args.clip, normalized, width, height, math.ceil(duration * 24))
         replacement.write_bytes(args.image.read_bytes())
-        print("Tracking replacement target with SAM3", flush=True)
-        mask_file = run_graph(args.server, segmentation_graph(normalized.name, args.target,
-                               f"video/edits/{run_id}-mask"), "save_mask", 1800)
-        coverage = mask_coverage(mask_file)
-        if coverage < 0.003 or coverage > 0.85:
-            raise RuntimeError(f"Could not isolate '{args.target}' in the source clip (mask coverage {coverage:.1%}).")
-        tracked_edit_mask(mask_file, mask_input, width, height)
-        print("Rendering masked replacement with MiniMax H3", flush=True)
-        rendered = run_graph(args.server, render_graph(normalized.name, replacement.name,
-                             mask_input.name, args.prompt, width, height,
-                             frames, f"video/edits/{run_id}-render"), "92", 7200)
-        reject_blank_edit(rendered, mask_input, normalized, args.image, duration, width, height)
-        print("Restoring original soundtrack", flush=True)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        source_audio = audio_codec(args.clip)
-        # The diffusion output can drift outside the tracked object. Composite
-        # through the tracked mask so every other source pixel remains intact.
-        filter_graph = ("[2:v]format=gray," + ",".join(["dilation"] * 6) +
-                        ",gblur=sigma=2[mask];[1:v][mask]alphamerge[edited];" +
-                        "[0:v][edited]overlay=shortest=1:format=auto[v]")
-        command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(normalized),
-                "-i", str(rendered), "-i", str(mask_input), "-i", str(args.clip),
-                "-filter_complex", filter_graph, "-map", "[v]", "-map", "3:a:0?",
-                "-t", f"{duration:.3f}", "-c:v", "libx264", "-crf", "18",
-                "-pix_fmt", "yuv420p", "-c:a", "copy" if source_audio == "aac" else "aac",
-                "-b:a", "192k",
-                "-movflags", "+faststart", str(args.output))
+        with tempfile.TemporaryDirectory(prefix="video-edit-", dir=args.output.parent) as temporary:
+            directory = Path(temporary)
+            edited_segments = []
+            for index, (start, source_frames, model_frames) in enumerate(segments, start=1):
+                clip = INPUT / f"video-edit-{run_id}-{index}.mp4"
+                mask_input = INPUT / f"video-edit-mask-{run_id}-{index}.mp4"
+                try:
+                    print(f"Generating replacement segment {index}/{len(segments)}", flush=True)
+                    segment_clip(normalized, clip, start, source_frames, model_frames)
+                    print("Tracking replacement target with SAM3", flush=True)
+                    mask_file = run_graph(args.server, segmentation_graph(clip.name, args.target,
+                                           f"video/edits/{run_id}-{index}-mask"), "save_mask", 1800)
+                    coverage = validate_tracking_mask(mask_file, args.target, source_frames)
+                    print(f"Validated tracked subject: {coverage:.2%} selected pixels", flush=True)
+                    tracked_edit_mask(mask_file, mask_input, width, height)
+                    print("Rendering masked replacement with MiniMax H3", flush=True)
+                    rendered = run_graph(args.server, render_graph(clip.name, replacement.name,
+                                         mask_input.name, args.prompt, width, height,
+                                         model_frames, f"video/edits/{run_id}-{index}-render"), "92", 7200)
+                    reject_blank_edit(rendered, mask_input, clip, args.image,
+                                      source_frames / 24, width, height)
+                    edited = directory / f"segment-{index:02d}.mp4"
+                    composite_segment(clip, rendered, mask_input, edited, source_frames)
+                    edited_segments.append(edited)
+                    print(f"Completed segment {index}/{len(segments)}", flush=True)
+                finally:
+                    clip.unlink(missing_ok=True)
+                    mask_input.unlink(missing_ok=True)
+            print("Joining edited segments and restoring original soundtrack", flush=True)
+            join_segments(edited_segments, args.clip, args.output, duration, directory)
         if not args.output.is_file() or args.output.stat().st_size == 0:
             raise RuntimeError("Video replacement produced no output")
         print(f"Video replacement ready: {args.output}", flush=True)
     finally:
         normalized.unlink(missing_ok=True)
         replacement.unlink(missing_ok=True)
-        mask_input.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

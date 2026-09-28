@@ -41,6 +41,12 @@ into frame-aligned segments, edited in order, and joined with the original audio
 The clip is downloaded to the broker before queueing so its media URL
 cannot expire while it waits. The desktop normalizes it to 24 fps, tracks the
 named subject with SAM3.1, and rejects an empty or nearly full-frame mask.
+Tracking validation counts selected pixels after decoding the mask, excluding
+padding frames. The subject must occupy at least 0.3% and no more than 85% of
+the frame on average, with a usable selection in at least half the source frames
+of each segment. Empty or mostly lost tracks stop before diffusion and return an
+error instead of delivering an effectively unchanged clip. Describe the target's
+visible appearance and position; a proper name alone may not identify it to SAM3.
 MiniMax H3 Ref2VA receives the replacement image. Fun ControlNet receives the
 source video and inpaints an expanded box that follows the tracked subject. This
 gives a differently shaped replacement room to form. The final video composites
