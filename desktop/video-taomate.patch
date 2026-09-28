@@ -1,3 +1,24 @@
+--- a/README.md
++++ b/README.md
+@@ -62,7 +62,8 @@
+ --duration auto|SECONDS    Auto-fit or request the total finished duration
+ --seed 12345               Reproduce a run; saved for deterministic resume
+ --aspect 16:9              auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, or 21:9
+---fast                     Enable H3's installed 8-step Turbo LoRA
++--fast                     Enable the legacy four-step FastH3 renderer
++--fast-profile taomate     With --fast, use three-step TaoMate and SLA 25% attention
+ --literal                  Send the prompt unchanged; disables screenplay splitting
+ --image D:\path\frame.png  Use image-to-video and preserve the first-frame continuity
+ --last-frame D:\path\end.png Benchmark H3 against an exact final-frame image
+@@ -143,7 +144,7 @@
+ 
+ ComfyUI uses DynamicVRAM and retains the most recent pipeline in VRAM/system RAM. The complete LTX and H3 stacks cannot remain resident together in 32 GB VRAM and 64 GB RAM, so a model switch can still evict weights. Full renders remain serialized; two simultaneous generations would overcommit VRAM.
+ 
+-Use normal `final` mode for maximum quality. H3 `--fast` uses the installed 8-step Turbo LoRA and trades some quality/motion stability for speed. LTX is already the official distilled 8+3-step pipeline; its `draft` mode gains speed by reducing resolution, so the quality loss is more visible.
++Use normal `final` mode for maximum quality. H3 `--fast` retains the legacy four-step FastH3 renderer. The bot fast commands use `--fast --fast-profile taomate`: the tested three-step TaoMate LoRA, Euler/simple and SLA 25% attention. Saved jobs preserve their renderer profile on resume. LTX is already the official distilled 8+3-step pipeline; its `draft` mode gains speed by reducing resolution, so the quality loss is more visible.
+ 
+ ## Worker supervision and stall recovery
+ 
 --- a/video_gen.py
 +++ b/video_gen.py
 @@ -74,6 +74,8 @@
@@ -352,24 +373,3 @@
  
      def test_lost_terminal_ack_retries_without_clearing_a_healthy_websocket(self):
          worker = DesktopVideoWorker.__new__(DesktopVideoWorker)
---- a/README.md
-+++ b/README.md
-@@ -62,7 +62,8 @@
- --duration auto|SECONDS    Auto-fit or request the total finished duration
- --seed 12345               Reproduce a run; saved for deterministic resume
- --aspect 16:9              auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, or 21:9
----fast                     Enable H3's installed 8-step Turbo LoRA
-+--fast                     Enable the legacy four-step FastH3 renderer
-+--fast-profile taomate     With --fast, use three-step TaoMate and SLA 25% attention
- --literal                  Send the prompt unchanged; disables screenplay splitting
- --image D:\path\frame.png  Use image-to-video and preserve the first-frame continuity
- --last-frame D:\path\end.png Benchmark H3 against an exact final-frame image
-@@ -143,7 +144,7 @@
- 
- ComfyUI uses DynamicVRAM and retains the most recent pipeline in VRAM/system RAM. The complete LTX and H3 stacks cannot remain resident together in 32 GB VRAM and 64 GB RAM, so a model switch can still evict weights. Full renders remain serialized; two simultaneous generations would overcommit VRAM.
- 
--Use normal `final` mode for maximum quality. H3 `--fast` uses the installed 8-step Turbo LoRA and trades some quality/motion stability for speed. LTX is already the official distilled 8+3-step pipeline; its `draft` mode gains speed by reducing resolution, so the quality loss is more visible.
-+Use normal `final` mode for maximum quality. H3 `--fast` retains the legacy four-step FastH3 renderer. The bot fast commands use `--fast --fast-profile taomate`: the tested three-step TaoMate LoRA, Euler/simple and SLA 25% attention. Saved jobs preserve their renderer profile on resume. LTX is already the official distilled 8+3-step pipeline; its `draft` mode gains speed by reducing resolution, so the quality loss is more visible.
- 
- ## Worker supervision and stall recovery
- 
