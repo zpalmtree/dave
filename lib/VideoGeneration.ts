@@ -1,4 +1,6 @@
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
+import { classifyVideoEditIntent } from './VideoEditIntent.js';
+import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
 import fetch, { RequestInit, Response } from 'node-fetch';
@@ -21,7 +23,7 @@ import {
 import { loadVideoSettings, VideoSettings } from './VideoSettings.js';
 import { VideoStallAlert, VideoStallMonitor } from './VideoStallAlerts.js';
 import { config } from './Config.js';
-import { recordExternalTokenSpend } from './TokenSpend.js';
+import { recordExternalTokenSpend, recordTokenSpend } from './TokenSpend.js';
 import { VideoUsageEvent } from './VideoUsage.js';
 import { classifyPromptTease } from './PromptTease.js';
 import { tryDeleteReaction, tryReactMessage } from './Utilities.js';
@@ -1134,6 +1136,33 @@ export function parseVideoReplacement(prompt: string): { target: string; prompt:
     return natural ? { target: (natural[1] || natural[2] || natural[3]).trim(), prompt: natural[4].trim() } : null;
 }
 
+/** Keep exact edit syntax cheap; interpret conversational requests only when a clip is present. */
+export async function resolveVideoEditRequest(
+    prompt: string, commandMessage: Message, referencedMessage: Message | null,
+    context: string, hasPreset: boolean, classify = classifyVideoEditIntent,
+    resolveSources = videoSourcesFromMessages,
+): Promise<{ replacement: ReturnType<typeof parseVideoReplacement>;
+    sources: Awaited<ReturnType<typeof videoSourcesFromMessages>> }> {
+    let replacement = parseVideoReplacement(prompt);
+    const links = new Map<Parameters<typeof twitterVideoFromMessage>[0], ReturnType<typeof twitterVideoFromMessage>>();
+    const resolveLink: typeof twitterVideoFromMessage = message => {
+        if (!links.has(message)) links.set(message, twitterVideoFromMessage(message));
+        return links.get(message)!;
+    };
+    const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink);
+    if (!replacement && candidates.clip) {
+        const intent = await classify({ request: prompt, context,
+            hasReplacementImage: Boolean(candidates.image), hasPreset }, {
+            onUsage: usage => { recordTokenSpend(usage); },
+        });
+        if (intent.action === 'clarify') throw new Error(intent.clarification);
+        if (intent.action === 'replace') replacement = { target: intent.target, prompt: intent.replacement };
+    }
+    if (replacement) return { replacement, sources: candidates };
+    // Retain established attachment precedence for requests to make a new video.
+    return { replacement: null, sources: await resolveSources(commandMessage, referencedMessage, false, resolveLink) };
+}
+
 // Preferred in the blinded Stargate accent comparison; keep this wording as
 // the default delivery while allowing a scene's explicitly requested emotion.
 export const OALGO_DIALOGUE_DELIVERY = 'boastful and conversational adult male, with a low, chest-resonant voice and a strong Mexican Spanish accent on every English phrase, using full vowels, a lightly tapped r, crisp consonants, and animated rise-and-fall intonation';
@@ -1169,11 +1198,15 @@ export async function handleVideoRequest(
     let replacement: ReturnType<typeof parseVideoReplacement>;
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
     prompt = stripTwitterPostLinks(prompt);
+    const editContext = JSON.stringify({ request: videoPromptPlainText(prompt, msg.channel),
+        reply: referencedMessage ? videoPromptPlainText(referencedMessage.content, referencedMessage.channel).slice(0, 1500) : '',
+        earlier: videoReplyChainGuidance(await earlierReplyChain) }).slice(0, 6000);
     try {
-        replacement = model === 'minimax' ? parseVideoReplacement(prompt) : null;
-        const sources = model === 'minimax'
-            ? await videoSourcesFromMessages(msg, referencedMessage, Boolean(replacement))
-            : { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null };
+        const resolved = model === 'minimax'
+            ? await withTyping(msg.channel, () => resolveVideoEditRequest(prompt, msg, referencedMessage, editContext, Boolean(options.presetSourceImage)))
+            : { replacement: null, sources: { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null } };
+        replacement = resolved.replacement;
+        const sources = resolved.sources;
         sourceVideo = sources.clip;
         if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X video link to edit. You can also reply to a message containing one.');
         attachedSourceImage = sources.image;
@@ -1246,6 +1279,7 @@ export async function handleVideoRequest(
                 source_image: sourceImage,
                 source_video: sourceVideo,
                 video_edit_target: replacement?.target,
+                video_edit_context: replacement ? editContext : undefined,
                 video_replacement_prompt: replacementImagePrompt,
                 source_audio: sourceAudio,
                 source_image_composite: compositeSourceImage,

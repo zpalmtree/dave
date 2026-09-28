@@ -820,6 +820,7 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
         botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
         recoveryEnabled: recoveryMode !== 'disabled',
+        videoEditGrounder: async (_source, target) => ({ action: 'replace', target, clarification: '' }),
         sourceVideoDownloader: async (_source, targetDirectory) => {
             mkdirSync(targetDirectory, { recursive: true });
             const path = join(targetDirectory, 'source-video.mp4');
@@ -956,6 +957,7 @@ test('text replacements generate and retain an image for both commands; failed g
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
         botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        videoEditGrounder: async (_source, target) => ({ action: 'replace', target, clarification: '' }),
         sourceVideoDownloader: async (source, target) => {
             assert.match(source.clip_url, /^https:\/\/video\.twimg\.com\//);
             mkdirSync(target, { recursive: true });
@@ -1018,6 +1020,73 @@ test('text replacements generate and retain an image for both commands; failed g
     }
 });
 
+test('visual grounding rejects ambiguity before reference generation and leases a visible description', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-edit-grounding-'));
+    let action = 'clarify';
+    let groundingCalls = 0;
+    let generationCalls = 0;
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        sourceVideoDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 7 };
+        },
+        videoEditGrounder: async (source, target, context, hooks) => {
+            groundingCalls++;
+            assert.equal(existsSync(source.path), true);
+            assert.equal(target, 'Captain');
+            assert.match(context, /red coat/);
+            assert.equal(typeof hooks.onUsage, 'function');
+            if (action === 'error') throw new Error('vision unavailable');
+            return { action, target: action === 'replace' ? 'person wearing a red coat' : '',
+                clarification: action === 'clarify' ? 'The person in red or the person in blue?' : '' };
+        },
+        keyframeGenerator: async () => {
+            generationCalls++;
+            return { bytes: Buffer.from('reference'), mimeType: 'image/png', provider: 'test', model: 'test' };
+        },
+    });
+    await broker.start();
+    const submit = id => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+        method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'minimax', prompt: 'a robot',
+            source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4' },
+            video_edit_target: 'Captain', video_edit_context: 'Captain is the one in a red coat',
+            video_replacement_prompt: 'a robot', requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+            command_message_id: id, status_message_id: 'status' }),
+    });
+    try {
+        const ambiguous = await submit('ambiguous');
+        assert.equal(ambiguous.status, 400);
+        assert.match((await ambiguous.json()).error, /red or.*blue/);
+        action = 'error';
+        assert.equal((await submit('unavailable')).status, 400);
+        assert.equal(generationCalls, 0);
+        assert.equal((await broker.get('SELECT COUNT(*) AS count FROM video_jobs')).count, 0);
+        for (const row of await broker.all("SELECT public_id FROM video_submission_metrics WHERE outcome='rejected'")) {
+            assert.equal(existsSync(join(directory, 'results', row.public_id)), false);
+        }
+        action = 'replace';
+        const accepted = await submit('grounded');
+        assert.equal(accepted.status, 201);
+        const job = (await accepted.json()).job;
+        const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [job.id]);
+        assert.equal(row.video_edit_target, 'person wearing a red coat');
+        const audit = JSON.parse(readFileSync(join(directory, 'results', job.id, 'video-edit-grounding.json'), 'utf8'));
+        assert.equal(audit.requested_target, 'Captain');
+        assert.equal(audit.target, row.video_edit_target);
+        assert.equal((await submit('grounded')).status, 200);
+        assert.equal(groundingCalls, 3);
+        assert.equal(generationCalls, 1);
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('short and long replacement clips wait for the updated edit worker', async () => {
     for (const duration of [2.2, 31]) {
         const directory = mkdtempSync(join(tmpdir(), 'dave-long-video-edit-'));
@@ -1025,6 +1094,7 @@ test('short and long replacement clips wait for the updated edit worker', async 
             host: '127.0.0.1', port: 0,
             dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
             botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+            videoEditGrounder: async (_source, target) => ({ action: 'replace', target, clarification: '' }),
             sourceVideoDownloader: async (_source, target) => {
                 mkdirSync(target, { recursive: true });
                 const path = join(target, 'source-video.mp4');

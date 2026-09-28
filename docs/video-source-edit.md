@@ -6,7 +6,36 @@ Use either video command with a source clip and a replacement image or descripti
 $minimax replace the red car with the blue car in the attached image
 $oalgo replace the dancer with Meximutt, keeping the same moves
 $minimax replace the character with slugs
+$oalgo make him a robot lol
+$oalgo swap that dude
 ```
+
+Discord wording does not need to match a command grammar. For a source clip,
+a Gemini Flash interpretation pass separates subject replacement from requests
+for a new video, continuation, or reaction. It uses the current message and reply
+context, tolerates pronouns and nicknames, and keeps the source target separate
+from the replacement. A bare `$oalgo` on a clip defaults to replacing its main
+subject with Meximutt; an attached replacement image takes precedence. A bare
+`$minimax` clip retains the starting-frame generation behavior. Requests for
+unsupported edits, such as whole-video restyling, ask for clarification.
+
+Every replacement, including explicit `replace ... with ...` commands, is
+visually grounded before queueing. The broker samples five frames across the
+downloaded source and converts the intended target into a concrete visible
+description for SAM3. An obvious main subject can resolve “him” or “the
+character”; names are linked using visible appearance and supplied context,
+not passed straight to the tracker. If several subjects fit, the bot asks a
+short question using visible alternatives. Reissue the command on the source
+video with that distinction. Provider failures do not fall back to the original
+ungrounded target. No replacement reference or diffusion render is started for
+an unresolved target.
+
+The broker retains the original target, context, sample times, and resolved
+description in `video-edit-grounding.json` beside the downloaded clip. Visual
+grounding usage is recorded with the job's provider metrics. Each interpretation
+call is bounded to 45 seconds; source sampling adds a small amount of CPU work.
+This resolves user wording, but does not guarantee that the segmentation or
+replacement model will succeed; tracking validation remains mandatory.
 
 The clip and image may be attached to the command or to the message it replies
 to. The command message's attachment wins when both messages have the same kind
@@ -28,9 +57,9 @@ Link resolution uses the public [FxTwitter API](https://docs.fxembed.com/api/twi
 and downloads an MP4 from Twitter's media CDN; no Twitter API key is needed.
 Use one post per message; for posts with multiple videos, select the desired
 media using `/video/1`, `/video/2`, etc. Private/deleted posts and API failures
-return an error asking you to retry or attach the video. Without a `replace`
-instruction, a linked video supplies a representative starting frame, just like
-an attached clip.
+return an error asking you to retry or attach the video. For requests classified
+as new-video generation, a linked video supplies a representative starting frame,
+just like an attached clip.
 Quote the subject if its name includes “with,” for example
 `replace "the woman with a red coat" with the attached image`.
 
@@ -45,8 +74,9 @@ Tracking validation counts selected pixels after decoding the mask, excluding
 padding frames. The subject must occupy at least 0.3% and no more than 85% of
 the frame on average, with a usable selection in at least half the source frames
 of each segment. Empty or mostly lost tracks stop before diffusion and return an
-error instead of delivering an effectively unchanged clip. Describe the target's
-visible appearance and position; a proper name alone may not identify it to SAM3.
+error instead of delivering an effectively unchanged clip. The visual grounding
+pass describes the target's appearance and position for SAM3; a failed track
+still requires a clearer target or a more suitable source clip.
 MiniMax H3 Ref2VA receives the replacement image. Fun ControlNet receives the
 source video and inpaints an expanded box that follows the tracked subject. This
 gives a differently shaped replacement room to form. The final video composites
