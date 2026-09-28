@@ -180,9 +180,9 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
     minimaxfast: {
         id: 'minimaxfast',
         command: 'minimaxfast',
-        displayName: 'MiniMax FastH3',
+        displayName: 'MiniMax TaoMate',
         generatorModel: 'h3',
-        generatorArgs: ['--model', 'h3', '--quality', 'final', '--fast'],
+        generatorArgs: ['--model', 'h3', '--quality', 'final', '--fast', '--fast-profile', 'taomate'],
         fallbackLowSeconds: 360,
         fallbackHighSeconds: 1200,
     },

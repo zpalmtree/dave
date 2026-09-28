@@ -1,0 +1,375 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -74,6 +74,8 @@
+ )
+ FAST_H3_VSA_KEEP_PERCENT = 10.0
+ FAST_H3_VSA_MIN_TOKENS = 12_288
++TAOMATE_LORA = "minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors"
++TAOMATE_BASE_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+ LTX_DIFFUSION_MODEL = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+ LTX_TEXT_ENCODER = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
+ LTX_DURATION_HEAD = "ltx-2.5-duration-head-bf16.safetensors"
+@@ -1489,7 +1491,11 @@
+     speed.add_argument(
+         "--fast",
+         action="store_true",
+-        help="Use the 4-step FastH3 checkpoint with 90%-sparse VSA attention",
++        help="Use the selected accelerated H3 renderer (default: legacy FastH3)",
++    )
++    parser.add_argument(
++        "--fast-profile", choices=("fasth3_vsa", "taomate"), default="fasth3_vsa",
++        help="H3 fast renderer: legacy FastH3 or three-step TaoMate with SLA 25% attention",
+     )
+     speed.add_argument(
+         "--turbo4",
+@@ -1661,6 +1667,8 @@
+     args = parser.parse_args()
+     if not hasattr(args, "keep_server"):
+         args.keep_server = True
++    if args.fast_profile != "fasth3_vsa" and (args.model != "h3" or not args.fast):
++        parser.error("--fast-profile taomate requires --model h3 --fast")
+     if args.fast_duration_aware is None:
+         args.fast_duration_aware = bool(args.model == "h3" and args.fast)
+     args.prompt = " ".join(args.prompt).strip()
+@@ -6123,6 +6131,7 @@
+         bool(sample.get("turbo4", False)),
+         bool(sample.get("ltx_one_stage", False)),
+         sample.get("attention", "pytorch"),
++        sample.get("h3_profile"),
+         round(float(sample.get("duration", 0)), 3),
+         round(float(sample.get("runtime", 0)), 3),
+     )
+@@ -6170,6 +6179,7 @@
+                         "quality": manifest.get("quality", "final"),
+                         "fast": bool(manifest.get("fast", False)),
+                         "turbo4": bool(manifest.get("turbo4", False)),
++                        "h3_profile": manifest.get("h3_profile"),
+                         "ltx_one_stage": bool(manifest.get("ltx_one_stage", False)),
+                         "attention": manifest.get("attention", "pytorch"),
+                         "duration": duration,
+@@ -6207,8 +6217,9 @@
+     attention: str,
+     ltx_one_stage: bool,
+     duration: float,
++    fast_profile: str = "fasth3_vsa",
+ ) -> tuple[float, float, int]:
+-    expected_h3_profile = "fasth3_vsa" if fast else "turbo4" if turbo4 else "base"
++    expected_h3_profile = "turbo4" if turbo4 else fast_profile if fast else "base"
+ 
+     def recorded_h3_profile(sample: dict[str, Any]) -> str:
+         explicit = sample.get("h3_profile")
+@@ -6271,6 +6282,7 @@
+     turbo4: bool,
+     attention: str,
+     ltx_one_stage: bool,
++    fast_profile: str = "fasth3_vsa",
+ ) -> tuple[float, float, int]:
+     """Conservatively project total GPU occupancy before any model work starts."""
+     low_total = 0.0
+@@ -6299,6 +6311,7 @@
+                 attention,
+                 ltx_one_stage,
+                 effective,
++                fast_profile=fast_profile,
+             )
+             low_total += low
+             high_total += high
+@@ -6319,6 +6332,7 @@
+     turbo4: bool,
+     attention: str,
+     ltx_one_stage: bool,
++    fast_profile: str = "fasth3_vsa",
+     budget_seconds: float = GPU_RUNTIME_BUDGET_SECONDS,
+     reserve_seconds: float = GPU_RUNTIME_RESERVE_SECONDS,
+ ) -> tuple[dict[str, Any], float, float, int, bool]:
+@@ -6330,6 +6344,7 @@
+         "automatic": automatic,
+         "quality": quality,
+         "fast": fast,
++        "fast_profile": fast_profile,
+         "turbo4": turbo4,
+         "attention": attention,
+         "ltx_one_stage": ltx_one_stage,
+@@ -6428,7 +6443,11 @@
+     h3_scheduler: str | None = None,
+     h3_shift_video: float | None = None,
+     h3_shift_audio: float | None = None,
++    fast_profile: str = "fasth3_vsa",
+ ) -> dict[str, Any]:
++    if fast_profile not in {"fasth3_vsa", "taomate"}:
++        raise VideoGenError(f"Unknown fast renderer profile: {fast_profile}")
++    taomate = model == "h3" and fast and fast_profile == "taomate"
+     config = WORKFLOWS[(model, mode)]
+     with (TEMPLATE_DIR / config["template"]).open("r", encoding="utf-8") as handle:
+         prompt = copy.deepcopy(json.load(handle))
+@@ -6453,10 +6472,10 @@
+     for index, node_id in enumerate(config["seeds"]):
+         prompt[node_id]["inputs"]["noise_seed"] = (seed + index) % (2**63 - 1)
+     if "fast" in config:
+-        # --fast now selects the standalone FastH3 checkpoint. Only the retained
+-        # --turbo4 experiment should enable the template's Turbo LoRA branch.
+-        prompt[config["fast"]]["inputs"]["value"] = bool(turbo4)
+-    if model == "h3" and fast:
++        # FastH3 uses the standalone checkpoint; TaoMate and Turbo4 use
++        # the template's switchable LoRA and step-count branches.
++        prompt[config["fast"]]["inputs"]["value"] = bool(turbo4 or taomate)
++    if model == "h3" and fast and not taomate:
+         prompt[config["model_loader"]]["inputs"]["unet_name"] = FAST_H3_DIFFUSION_MODEL
+         prompt[config["base_steps"]]["inputs"]["value"] = 4
+     if model == "h3" and turbo4:
+@@ -6464,6 +6483,12 @@
+             "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+         )
+         prompt[config["turbo_steps"]]["inputs"]["value"] = 4
++    if taomate:
++        prompt[config["model_loader"]]["inputs"]["unet_name"] = TAOMATE_BASE_MODEL
++        prompt[config["turbo_lora"]]["inputs"].update(lora_name=TAOMATE_LORA, strength_model=1.0)
++        prompt[config["turbo_steps"]]["inputs"]["value"] = 3
++        prompt[config["sampler"]]["inputs"]["sampler_name"] = "euler"
++        prompt[config["scheduler"]]["inputs"]["scheduler"] = "simple"
+     if model == "h3" and h3_steps is not None:
+         prompt[config["base_steps"]]["inputs"]["value"] = int(h3_steps)
+     if model == "h3" and h3_sampler is not None:
+@@ -6494,12 +6519,14 @@
+                         inputs[name] = [shift_node, 0]
+             model_output = shift_node
+     if model == "h3" and fast:
+-        vsa_node = "video:fasth3_vsa"
++        vsa_node = "video:taomate_sla" if taomate else "video:fasth3_vsa"
+         prompt[vsa_node] = {
+             "inputs": {
+                 "model": [model_output, 0],
+-                "selection": "VSA (FastVideo)",
+-                "selection.vsa_keep_percent": FAST_H3_VSA_KEEP_PERCENT,
++                "selection": "top-k (SLA)" if taomate else "VSA (FastVideo)",
++                **({"selection.keep_percent": 25.0} if taomate else {
++                    "selection.vsa_keep_percent": FAST_H3_VSA_KEEP_PERCENT,
++                }),
+                 "start_percent": 0.0,
+                 "end_percent": 1.0,
+                 "min_tokens": FAST_H3_VSA_MIN_TOKENS,
+@@ -6507,7 +6534,7 @@
+                 "verbose": True,
+             },
+             "class_type": "SolAttnMiniMax",
+-            "_meta": {"title": "FastH3 VSA 90% sparse"},
++            "_meta": {"title": "TaoMate SLA 25%, dense audio rows" if taomate else "FastH3 VSA 90% sparse"},
+         }
+         for node_id, node in prompt.items():
+             if node_id == vsa_node or not isinstance(node, dict):
+@@ -8083,6 +8110,7 @@
+         seed=seed,
+         aspect=aspect,
+         fast=args.fast,
++        fast_profile=getattr(args, "fast_profile", "fasth3_vsa"),
+         turbo4=args.turbo4,
+         attention=args.attention,
+         ltx_one_stage=args.ltx_one_stage,
+@@ -8187,12 +8215,13 @@
+         "fast": bool((args.fast or args.turbo4) and model == "h3"),
+         "turbo4": bool(args.turbo4 and model == "h3"),
+         "h3_profile": (
+-            "fasth3_vsa" if args.fast else "turbo4" if args.turbo4 else "base"
++            getattr(args, "fast_profile", "fasth3_vsa") if args.fast else "turbo4" if args.turbo4 else "base"
+         ) if model == "h3" else None,
+         "ltx_one_stage": bool(args.ltx_one_stage and model == "ltx"),
+         "attention": args.attention if model == "h3" else None,
+         "attention_backend": (
+-            "fastvideo_vsa_10pct" if model == "h3" and args.fast
++            "taomate_sla_25pct" if model == "h3" and args.fast and getattr(args, "fast_profile", "fasth3_vsa") == "taomate"
++            else "fastvideo_vsa_10pct" if model == "h3" and args.fast
+             else "comfy_kitchen_int8" if model == "h3" and args.attention == "kitchen"
+             else "pytorch" if model == "h3"
+             else None
+@@ -8206,9 +8235,10 @@
+         "last_frame_input": last_input_name if model == "h3" else None,
+         "h3_steps": (
+             args.h3_steps if args.h3_steps is not None
++            else 3 if args.fast and getattr(args, "fast_profile", "fasth3_vsa") == "taomate"
+             else 4 if args.turbo4 or args.fast else 20
+         ) if model == "h3" else None,
+-        "h3_sampler": (args.h3_sampler or "res_multistep") if model == "h3" else None,
++        "h3_sampler": (args.h3_sampler or ("euler" if args.fast and getattr(args, "fast_profile", "fasth3_vsa") == "taomate" else "res_multistep")) if model == "h3" else None,
+         "h3_scheduler": (args.h3_scheduler or "simple") if model == "h3" else None,
+         "h3_shift_video": (args.h3_shift_video or 12.0) if model == "h3" else None,
+         "h3_shift_audio": (args.h3_shift_audio or 3.0) if model == "h3" else None,
+@@ -8238,7 +8268,7 @@
+                 "fast": bool((args.fast or args.turbo4) and model == "h3"),
+                 "turbo4": bool(args.turbo4 and model == "h3"),
+                 "h3_profile": (
+-                    "fasth3_vsa" if args.fast else "turbo4" if args.turbo4 else "base"
++                    getattr(args, "fast_profile", "fasth3_vsa") if args.fast else "turbo4" if args.turbo4 else "base"
+                 ) if model == "h3" else None,
+                 "ltx_one_stage": bool(args.ltx_one_stage and model == "ltx"),
+                 "attention": args.attention if model == "h3" else "pytorch",
+@@ -8455,6 +8485,7 @@
+             args.model = str(settings["model"])
+             args.quality = str(settings["quality"])
+             args.fast = bool(settings["fast"])
++            args.fast_profile = str(settings.get("fast_profile", "fasth3_vsa"))
+             args.turbo4 = bool(settings.get("turbo4", False))
+             args.fast_duration_aware = bool(
+                 settings.get("fast_duration_aware", args.fast and not args.turbo4)
+@@ -8621,6 +8652,7 @@
+                     automatic=args.duration is None,
+                     quality=args.quality,
+                     fast=bool(args.fast),
++                    fast_profile=args.fast_profile,
+                     turbo4=bool(args.turbo4),
+                     attention=args.attention,
+                     ltx_one_stage=bool(args.ltx_one_stage),
+@@ -8740,6 +8772,7 @@
+                     "mode": args.mode,
+                     "quality": args.quality,
+                     "fast": bool(args.fast or args.turbo4),
++                    "fast_profile": args.fast_profile,
+                     "turbo4": bool(args.turbo4),
+                     "fast_duration_aware": bool(args.fast_duration_aware),
+                     "ltx_one_stage": bool(args.ltx_one_stage),
+@@ -8827,6 +8860,7 @@
+                     args.attention,
+                     args.ltx_one_stage,
+                     float(segment["effective_seconds"]),
++                    fast_profile=args.fast_profile,
+                 )
+                 low_total += low
+                 high_total += high
+@@ -9060,6 +9094,7 @@
+                     args.attention,
+                     args.ltx_one_stage,
+                     float(segment["effective_seconds"]),
++                    fast_profile=args.fast_profile,
+                 )
+                 print(
+                     f"  Local ETA: {format_span(low)}-{format_span(high)} "
+@@ -9261,11 +9296,12 @@
+                 ),
+                 "h3_config": ({
+                     "steps": args.h3_steps if args.h3_steps is not None
++                    else 3 if args.fast and getattr(args, "fast_profile", "fasth3_vsa") == "taomate"
+                     else 4 if args.turbo4 or args.fast else 20,
+                     "profile": (
+-                        "fasth3_vsa" if args.fast else "turbo4" if args.turbo4 else "base"
++                        getattr(args, "fast_profile", "fasth3_vsa") if args.fast else "turbo4" if args.turbo4 else "base"
+                     ),
+-                    "sampler": args.h3_sampler or "res_multistep",
++                    "sampler": args.h3_sampler or ("euler" if args.fast and getattr(args, "fast_profile", "fasth3_vsa") == "taomate" else "res_multistep"),
+                     "scheduler": args.h3_scheduler or "simple",
+                     "shift_video": args.h3_shift_video or 12.0,
+                     "shift_audio": args.h3_shift_audio or 3.0,
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -60,7 +60,7 @@
+     "ltx": ["--model", "ltx", "--quality", "final", "--keyframe", "auto"],
+     "ltxfast": ["--model", "ltx", "--quality", "draft", "--ltx-one-stage", "--keyframe", "auto"],
+     "minimax": ["--model", "h3", "--quality", "final", "--keyframe", "auto"],
+-    "minimaxfast": ["--model", "h3", "--quality", "final", "--fast", "--keyframe", "auto"],
++    "minimaxfast": ["--model", "h3", "--quality", "final", "--fast", "--fast-profile", "taomate", "--keyframe", "auto"],
+ }
+ GENERATOR_MODELS = {
+     "ltx": "ltx",
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -569,7 +569,7 @@
+         config = video_gen.WORKFLOWS[("ltx", "t2v")]
+         self.assertEqual(prompt[config["save"]]["inputs"]["filename_prefix"], "test/ltx")
+ 
+-    def test_minimaxfast_compiles_to_fasth3_vsa_for_t2v_and_i2v(self):
++    def test_legacy_fast_compiles_to_fasth3_vsa_for_t2v_and_i2v(self):
+         for mode in ("t2v", "i2v"):
+             with self.subTest(mode=mode):
+                 prompt = video_gen.build_prompt(
+@@ -4005,5 +4005,61 @@
+                                    capture_output=True, check=True)
+ 
+ 
++
++class TaoMateTests(unittest.TestCase):
++    def test_taomate_compiles_both_modes_with_reachable_lora_and_three_steps(self):
++        for mode in ("t2v", "i2v"):
++            with self.subTest(mode=mode):
++                graph = video_gen.build_prompt(
++                    model="h3", mode=mode, text_prompt="A fox speaks.", quality="final",
++                    duration=8.0, frame_count=192, seed=7, aspect="16:9", fast=True,
++                    fast_profile="taomate", turbo4=False, attention="kitchen",
++                    ltx_one_stage=False, enhance=False,
++                    input_name="portrait.png" if mode == "i2v" else None, prefix="test/taomate")
++                c = video_gen.WORKFLOWS[("h3", mode)]
++                self.assertEqual(graph[c["model_loader"]]["inputs"]["unet_name"], video_gen.TAOMATE_BASE_MODEL)
++                self.assertTrue(graph[c["fast"]]["inputs"]["value"])
++                self.assertEqual(graph[c["turbo_lora"]]["inputs"], {
++                    "model": [c["model_loader"], 0], "lora_name": video_gen.TAOMATE_LORA, "strength_model": 1.0})
++                self.assertEqual(graph[c["model"]]["inputs"]["on_true"], [c["turbo_lora"], 0])
++                scheduler = graph[c["scheduler"]]["inputs"]
++                step_switch = graph[scheduler["steps"][0]]["inputs"]
++                self.assertEqual(step_switch["on_true"], [c["turbo_steps"], 0])
++                self.assertEqual(graph[c["turbo_steps"]]["inputs"]["value"], 3)
++                self.assertEqual(graph[c["sampler"]]["inputs"]["sampler_name"], "euler")
++                self.assertEqual(scheduler["scheduler"], "simple")
++                self.assertEqual(scheduler["model"], ["video:taomate_sla", 0])
++                self.assertNotIn("video:fasth3_vsa", graph)
++                self.assertEqual(graph["video:taomate_sla"]["inputs"], {
++                    "model": [c["model"], 0], "selection": "top-k (SLA)",
++                    "selection.keep_percent": 25.0, "start_percent": 0.0, "end_percent": 1.0,
++                    "min_tokens": 12288, "sink_conditioning": "exact_kv_and_rows", "verbose": True})
++                if mode == "i2v":
++                    self.assertEqual(graph[c["prompt"]]["inputs"]["first_frame"], [c["load_image"], 0])
++                    self.assertEqual(graph[c["load_image"]]["inputs"]["image"], "portrait.png")
++
++    def test_worker_profile_arguments_select_taomate_and_keep_legacy_fast_explicit(self):
++        for extra, expected in ((["--fast", "--fast-profile", "taomate"], "taomate"), (["--fast"], "fasth3_vsa")):
++            with mock.patch.object(sys, "argv", ["video_gen.py", "--model", "h3", *extra, "A fox speaks."]):
++                args = video_gen.parse_args()
++            self.assertEqual(args.fast_profile, expected)
++            self.assertTrue(args.fast_duration_aware)
++        with mock.patch.object(sys, "argv", ["video_gen.py", "--fast-profile", "taomate", "A fox speaks."]), mock.patch("sys.stderr"):
++            with self.assertRaises(SystemExit):
++                video_gen.parse_args()
++
++    def test_taomate_eta_does_not_use_fasth3_or_turbo_observations(self):
++        common = dict(model="h3", mode="i2v", quality="final", fast=True, turbo4=False,
++                      attention="kitchen", ltx_one_stage=False, duration=8.0)
++        samples = [{**common, "h3_profile": "fasth3_vsa", "runtime": 400.0},
++                   {**common, "runtime": 900.0},
++                   {**common, "h3_profile": "taomate", "runtime": 40.0}]
++        with mock.patch.object(video_gen, "legacy_timing_samples", return_value=samples):
++            low, high, count = video_gen.estimate_runtime("h3", "i2v", "final", True, False, "kitchen", False, 8.0, fast_profile="taomate")
++        self.assertEqual(count, 1)
++        self.assertAlmostEqual(low, 28.8)
++        self.assertAlmostEqual(high, 60.0)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -180,6 +180,8 @@
+         self.assertEqual(set(MODEL_ARGS), expected)
+         self.assertEqual(set(GENERATOR_MODELS), expected)
+         self.assertNotIn("minimaxdraft", MODEL_ARGS)
++        self.assertEqual(MODEL_ARGS["minimaxfast"], ["--model", "h3", "--quality", "final", "--fast", "--fast-profile", "taomate", "--keyframe", "auto"])
++        self.assertNotIn("--fast-profile", MODEL_ARGS["minimax"])
+ 
+     def test_lost_terminal_ack_retries_without_clearing_a_healthy_websocket(self):
+         worker = DesktopVideoWorker.__new__(DesktopVideoWorker)
+--- a/README.md
++++ b/README.md
+@@ -62,7 +62,8 @@
+ --duration auto|SECONDS    Auto-fit or request the total finished duration
+ --seed 12345               Reproduce a run; saved for deterministic resume
+ --aspect 16:9              auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, or 21:9
+---fast                     Enable H3's installed 8-step Turbo LoRA
++--fast                     Enable the legacy four-step FastH3 renderer
++--fast-profile taomate     With --fast, use three-step TaoMate and SLA 25% attention
+ --literal                  Send the prompt unchanged; disables screenplay splitting
+ --image D:\path\frame.png  Use image-to-video and preserve the first-frame continuity
+ --last-frame D:\path\end.png Benchmark H3 against an exact final-frame image
+@@ -143,7 +144,7 @@
+ 
+ ComfyUI uses DynamicVRAM and retains the most recent pipeline in VRAM/system RAM. The complete LTX and H3 stacks cannot remain resident together in 32 GB VRAM and 64 GB RAM, so a model switch can still evict weights. Full renders remain serialized; two simultaneous generations would overcommit VRAM.
+ 
+-Use normal `final` mode for maximum quality. H3 `--fast` uses the installed 8-step Turbo LoRA and trades some quality/motion stability for speed. LTX is already the official distilled 8+3-step pipeline; its `draft` mode gains speed by reducing resolution, so the quality loss is more visible.
++Use normal `final` mode for maximum quality. H3 `--fast` retains the legacy four-step FastH3 renderer. The bot fast commands use `--fast --fast-profile taomate`: the tested three-step TaoMate LoRA, Euler/simple and SLA 25% attention. Saved jobs preserve their renderer profile on resume. LTX is already the official distilled 8+3-step pipeline; its `draft` mode gains speed by reducing resolution, so the quality loss is more visible.
+ 
+ ## Worker supervision and stall recovery
+ 
