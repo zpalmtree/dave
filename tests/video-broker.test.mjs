@@ -812,12 +812,14 @@ test('the clip fallback frame comes from the Discord media proxy, not the CDN', 
     );
 });
 
-test('replacement jobs retain the clip, target, and replacement image without planning a start frame', async () => {
+for (const recoveryMode of ['disabled', 'enabled', 'legacy-edit-lease']) {
+test(`replacement jobs retain their inputs and complete without screenplay recovery (${recoveryMode})`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-'));
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
         botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        recoveryEnabled: recoveryMode !== 'disabled',
         sourceVideoDownloader: async (_source, targetDirectory) => {
             mkdirSync(targetDirectory, { recursive: true });
             const path = join(targetDirectory, 'source-video.mp4');
@@ -862,7 +864,7 @@ test('replacement jobs retain the clip, target, and replacement image without pl
             video_edit_target: 'the red car' });
         assert.equal(rejected.status, 400);
         assert.match((await rejected.json()).error, /replacement image/);
-        const connect = async version => {
+        const connect = async (version, currentJob = null, currentLease = null) => {
             const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
                 headers: { authorization: 'Bearer worker-secret' },
             });
@@ -872,19 +874,24 @@ test('replacement jobs retain the clip, target, and replacement image without pl
                 socket.once('error', reject);
             });
             socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
-                capabilities: ['minimax'], current_job: null, video_edit_version: version }));
-            await take(value => value.type === 'hello_ack');
+                capabilities: ['minimax'], current_job: currentJob, current_lease: currentLease,
+                recovery_version: 3, video_edit_version: version }));
+            const ack = await take(value => value.type === 'hello_ack');
+            if (currentJob) assert.equal(ack.resume_current_job, true);
             return { socket, take };
         };
         const oldWorker = await connect(0);
         await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
         oldWorker.socket.close();
         await new Promise(resolve => oldWorker.socket.once('close', resolve));
-        const editWorker = await connect(1);
+        let editWorker = await connect(1);
         try {
             const lease = await editWorker.take(value => value.type === 'job');
             assert.equal(lease.job.id, job.id);
             assert.equal(lease.job.has_source_video, true);
+            assert.equal(lease.job.recovery_version, 0);
+            assert.equal((await broker.get('SELECT recovery_version FROM video_jobs WHERE public_id=?',
+                [job.id])).recovery_version, 0);
             assert.equal(lease.job.video_edit_target, 'the red car');
             for (const [path, expected] of [['source-video', 'clip'], ['source-image?role=base', 'image']]) {
                 const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/${path}`, {
@@ -895,6 +902,40 @@ test('replacement jobs retain the clip, target, and replacement image without pl
                 assert.equal(response.status, 200);
                 assert.equal(await response.text(), expected);
             }
+            if (recoveryMode === 'legacy-edit-lease') {
+                // Reproduce a source-clip edit leased by the old broker.
+                await broker.run('UPDATE video_jobs SET recovery_version=3 WHERE public_id=?', [job.id]);
+            }
+            const bytes = Buffer.from('edited-video-result');
+            const uploaded = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/result`, {
+                method: 'PUT', headers: { authorization: 'Bearer worker-secret',
+                    'x-video-lease-id': lease.job.lease_id, 'content-type': 'video/mp4',
+                    'x-content-sha256': createHash('sha256').update(bytes).digest('hex') },
+                body: bytes,
+            });
+            assert.equal(uploaded.status, 200);
+            if (recoveryMode === 'legacy-edit-lease') {
+                editWorker.socket.close();
+                await new Promise(resolve => editWorker.socket.once('close', resolve));
+                editWorker = await connect(1, job.id, lease.job.lease_id);
+            }
+            const completion = { type: 'event', event: 'complete', event_id: 'edit-complete',
+                job_id: job.id, lease_id: lease.job.lease_id, runtime_seconds: 30 };
+            for (let attempt = 0; attempt < 2; attempt++) {
+                editWorker.socket.send(JSON.stringify(completion));
+                const ack = await editWorker.take(value => value.type === 'event_ack');
+                assert.equal(ack.event_id, completion.event_id);
+            }
+            const finished = await broker.get('SELECT status,recovery_json FROM video_jobs WHERE public_id=?', [job.id]);
+            assert.equal(finished.status, 'ready');
+            assert.equal(JSON.parse(finished.recovery_json || '{}').quality, undefined);
+            const nextResponse = await submit({ command_message_id: 'next-replacement', source_video: clip,
+                source_image: image, video_edit_target: 'the red car' });
+            assert.equal(nextResponse.status, 201);
+            const next = (await nextResponse.json()).job;
+            editWorker.socket.send(JSON.stringify({ type: 'ready' }));
+            assert.equal((await editWorker.take(value => value.type === 'job')).job.id, next.id,
+                'Completion must release the worker to process the next queued video.');
         } finally {
             editWorker.socket.close();
         }
@@ -905,6 +946,7 @@ test('replacement jobs retain the clip, target, and replacement image without pl
     assert.throws(() => sourceClipDescriptor({ ...clip, clip_url: 'https://example.com/clip.mp4' }),
         /Discord attachment/);
 });
+}
 
 test('text replacements generate and retain an image for both commands; failed generation never queues an edit', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-twitter-replacement-'));

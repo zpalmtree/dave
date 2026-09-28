@@ -5090,7 +5090,9 @@ export class VideoBroker {
                     return;
                 }
                 if (!row?.result_path) throw new Error('Worker completed before uploading a result.');
-                if (row.recovery_version) {
+                // Source-clip edits use the replacement pipeline, not screenplay
+                // recovery. Older leases incorrectly assigned them a recovery version.
+                if (row.recovery_version && !row.source_video_path) {
                     const recovery = row.recovery_json ? JSON.parse(row.recovery_json) : {};
                     const quality = recovery.quality;
                     if (!quality?.accepted || quality.format !== 'generated' || quality.result_sha256 !== row.result_sha256
@@ -5194,8 +5196,10 @@ export class VideoBroker {
             return;
         }
         const leaseId = randomUUID();
+        const recoveryVersion = this.options.recoveryEnabled && !row.source_video_path
+            ? VIDEO_RECOVERY_VERSION : 0;
         const result = await this.run(
-            `UPDATE video_jobs SET recovery_version = ${this.options.recoveryEnabled ? VIDEO_RECOVERY_VERSION : 0}, status = 'leased', worker_id = ?, lease_expires_at = ?,
+            `UPDATE video_jobs SET recovery_version = ${recoveryVersion}, status = 'leased', worker_id = ?, lease_expires_at = ?,
              lease_token = ?, gpu_queue_state = 'submitting', gpu_queue_submitted_at = NULL,
              gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
              gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
@@ -5220,7 +5224,7 @@ export class VideoBroker {
                 prompt: row.prompt,
                 requested_duration_seconds: row.requested_duration_seconds,
                 delivery_limit_bytes: row.delivery_limit_bytes,
-                recovery_version: this.options.recoveryEnabled ? VIDEO_RECOVERY_VERSION : 0,
+                recovery_version: recoveryVersion,
                 recovery_revision: row.delivery_revision || 0,
                 profile: 'maximum',
                 planner_guidance: row.planner_guidance,
