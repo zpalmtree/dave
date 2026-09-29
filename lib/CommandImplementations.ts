@@ -475,8 +475,15 @@ export async function handlePrice(msg: Message) {
 
     const lookupMap = new Map(currencies.map(({ id, label }) => [id, label]));
 
+    /* CoinGecko's firewall rejects keyless requests with a CloudFront 403, so
+     * send the free demo key when one is configured. */
+    const { coingeckoApiKey } = config as typeof config & { coingeckoApiKey?: string };
+    const headers: Record<string, string> = coingeckoApiKey
+        ? { 'x-cg-demo-api-key': coingeckoApiKey }
+        : {};
+
     try {
-        const data = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${toFetch}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`)
+        const data = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${toFetch}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true`, { headers });
         if (data.status === 200) {
             const values = await data.json();
             const prices = Object.keys(values).map((key) => {
@@ -509,12 +516,24 @@ export async function handlePrice(msg: Message) {
 
             await pages.sendMessage();
         } else {
+            const body = await data.text().catch(() => '');
+            console.log(`CoinGecko price request failed: ${data.status} ${body.slice(0, 500)}`);
+
+            /* Error bodies are often a full CloudFront HTML page, so only relay a JSON error message. */
+            let detail = '';
+
             try {
-                const err = await data.text();
-                await msg.reply(`Failed to fetch data from coingecko: ${data.status}, ${err}`);
-            } catch (err) {
-                await msg.reply(`Failed to fetch data from coingecko: ${data.status}`);
+                const parsed = JSON.parse(body);
+                detail = parsed?.status?.error_message ?? parsed?.error ?? '';
+            } catch {
+                /* Not JSON */
             }
+
+            const hint = data.status === 403 && !coingeckoApiKey
+                ? ' (coingecko now blocks requests without an API key; set coingeckoApiKey in the config)'
+                : '';
+
+            await msg.reply(`Failed to fetch data from coingecko: ${data.status}${detail ? `, ${String(detail).slice(0, 200)}` : ''}${hint}`);
         }
     } catch(err) {
         await msg.reply(`Failed to get data: ${(err as any).toString()}`);
