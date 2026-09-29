@@ -48,33 +48,131 @@ export function parseQwenImageArgs(args: string): { prompt: string; aspect?: Qwe
     return { prompt: rest.trim(), ...(aspect ? { aspect } : {}), ...(fast ? { fast } : {}) };
 }
 
-/** Image attachments on the command message, then on the replied-to message. */
-export function qwenImageReferencesFromMessages(
-    messages: Array<Pick<Message, 'attachments'> | null | undefined>,
-): SubmittedVideoAttachmentSourceImage[] {
+type QwenImageSourceMessage = Pick<Message, 'attachments'> & Partial<Pick<Message, 'content' | 'embeds'>>;
+
+const DISCORD_IMAGE_HOSTS = ['cdn.discordapp.com', 'media.discordapp.net'];
+
+function attachmentReferences(message: QwenImageSourceMessage): SubmittedVideoAttachmentSourceImage[] {
     const references: SubmittedVideoAttachmentSourceImage[] = [];
+    for (const attachment of message.attachments.values()) {
+        const mime = attachment.contentType?.split(';')[0].toLowerCase() || inferredImageMime(attachment.name);
+        if (!mime?.startsWith('image/')) continue;
+        if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mime as any)) {
+            throw new Error('Reference images must be PNG, JPEG, or WebP files.');
+        }
+        if (!attachment.size || attachment.size > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+            throw new Error(`Reference images must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.`);
+        }
+        references.push({
+            url: attachment.url,
+            mime_type: mime as SubmittedVideoAttachmentSourceImage['mime_type'],
+            bytes: attachment.size,
+            name: attachment.name || 'reference',
+        });
+    }
+    return references;
+}
+
+/**
+ * Discord CDN links in a message's text or unfurled previews, such as `$avatar` output. The broker
+ * only downloads from Discord's CDN, so other hosts are ignored.
+ */
+export function qwenImageLinksFromMessage(message: QwenImageSourceMessage): string[] {
+    const links = new Set<string>(message.content?.match(/https:\/\/[^\s<>]+/g) || []);
+    for (const embed of message.embeds || []) {
+        if (embed.image?.url) links.add(embed.image.url);
+        // A bare image link unfurls as an `image` embed that carries the picture as its thumbnail.
+        if (embed.data?.type === 'image' && embed.thumbnail?.url) links.add(embed.thumbnail.url);
+    }
+    return [...links].filter(link => {
+        try {
+            return DISCORD_IMAGE_HOSTS.includes(new URL(link).hostname);
+        } catch {
+            return false;
+        }
+    });
+}
+
+/** Animated avatars and icons link to a GIF; the CDN serves the same path as a static PNG. */
+function staticDiscordImageUrl(link: string): string {
+    const url = new URL(link);
+    if (!url.pathname.startsWith('/attachments/') && url.pathname.toLowerCase().endsWith('.gif')) {
+        url.pathname = url.pathname.slice(0, -'.gif'.length) + '.png';
+    }
+    return url.toString();
+}
+
+export type QwenImageLinkProbe = (url: string) => Promise<{ mime: string; bytes: number } | null>;
+
+/** A HEAD request, since only the type and size are needed before the broker downloads it. */
+async function probeImageLink(url: string): Promise<{ mime: string; bytes: number } | null> {
+    try {
+        const response = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(10_000) });
+        if (!response.ok) return null;
+        return {
+            mime: String(response.headers.get('content-type') || '').split(';')[0].toLowerCase(),
+            bytes: Number(response.headers.get('content-length') || 0),
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function linkedReference(
+    link: string,
+    probe: QwenImageLinkProbe,
+): Promise<SubmittedVideoAttachmentSourceImage | null> {
+    const url = staticDiscordImageUrl(link);
+    const found = await probe(url);
+    if (!found?.mime.startsWith('image/')) return null;
+    if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(found.mime as any)) {
+        throw new Error('Reference images must be PNG, JPEG, or WebP files.');
+    }
+    if (!found.bytes || found.bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+        throw new Error(`Reference images must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.`);
+    }
+    return {
+        url,
+        mime_type: found.mime as SubmittedVideoAttachmentSourceImage['mime_type'],
+        bytes: found.bytes,
+        name: new URL(url).pathname.split('/').pop() || 'reference',
+    };
+}
+
+/**
+ * Images on the command message, then on the replied-to message. A message without image
+ * attachments contributes its linked Discord images instead; `links` lists the ones used, so
+ * callers can keep those URLs out of the prompt.
+ */
+export async function qwenImageReferencesFromMessages(
+    messages: Array<QwenImageSourceMessage | null | undefined>,
+    probe: QwenImageLinkProbe = probeImageLink,
+): Promise<{ references: SubmittedVideoAttachmentSourceImage[]; links: string[] }> {
+    const references: SubmittedVideoAttachmentSourceImage[] = [];
+    const links: string[] = [];
     for (const message of messages) {
-        for (const attachment of message?.attachments.values() || []) {
-            const mime = attachment.contentType?.split(';')[0].toLowerCase() || inferredImageMime(attachment.name);
-            if (!mime?.startsWith('image/')) continue;
-            if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mime as any)) {
-                throw new Error('Reference images must be PNG, JPEG, or WebP files.');
-            }
-            if (!attachment.size || attachment.size > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
-                throw new Error(`Reference images must be no larger than ${VIDEO_SOURCE_IMAGE_MAX_BYTES / 1024 / 1024} MiB.`);
-            }
-            references.push({
-                url: attachment.url,
-                mime_type: mime as SubmittedVideoAttachmentSourceImage['mime_type'],
-                bytes: attachment.size,
-                name: attachment.name || 'reference',
-            });
+        if (!message) continue;
+        const attached = attachmentReferences(message);
+        if (attached.length) {
+            references.push(...attached);
+            continue;
+        }
+        for (const link of qwenImageLinksFromMessage(message)) {
+            if (references.length > QWEN_IMAGE_MAX_REFERENCES) break;
+            const reference = await linkedReference(link, probe);
+            if (!reference || references.some(existing => existing.url === reference.url)) continue;
+            references.push(reference);
+            links.push(link);
         }
     }
     if (references.length > QWEN_IMAGE_MAX_REFERENCES) {
         throw new Error(`Attach at most ${QWEN_IMAGE_MAX_REFERENCES} images.`);
     }
-    return references;
+    return { references, links };
+}
+
+function withoutLinks(text: string, links: string[]): string {
+    return links.reduce((rest, link) => rest.split(`<${link}>`).join('').split(link).join(''), text).trim();
 }
 
 export function formatQwenImageStatus(job: QwenImageJobView): string {
@@ -212,15 +310,18 @@ async function handleQwenImageRequest(msg: Message, args: string, model: QwenIma
     let aspect: QwenImageAspect | undefined;
     let fast: boolean | undefined;
     let references: SubmittedVideoAttachmentSourceImage[];
+    let links: string[];
     try {
         ({ prompt, aspect, fast } = parseQwenImageArgs(args));
         if (fast && model !== 'qwenedit') throw new Error('`--fast` only applies to `$qwenedit`.');
-        references = qwenImageReferencesFromMessages([msg, referenced]);
+        ({ references, links } = await qwenImageReferencesFromMessages([msg, referenced]));
     } catch (error) {
         await msg.reply(error instanceof Error ? error.message : String(error));
         return;
     }
-    const repliedText = referenced?.content?.trim() || '';
+    // A linked image is the reference, not part of the prompt.
+    prompt = withoutLinks(prompt, links);
+    const repliedText = withoutLinks(referenced?.content || '', links);
     const effectivePrompt = repliedText ? (prompt ? `${repliedText}\n${prompt}` : repliedText) : prompt;
     if (!effectivePrompt) {
         await msg.reply(`Please describe the image you want ${definition.displayName} to ${references.length ? 'make from the attachment' : 'create'}.`);
