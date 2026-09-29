@@ -1139,7 +1139,7 @@ const sharedCommands: Command[] = [
         },
     },
     {
-        aliases: ['naggers'],
+        aliases: ['naggers', 'niggers'],
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handleNaggers,
