@@ -245,7 +245,7 @@ test('a reconnecting worker keeps its in-flight image job only with the current 
     await stale.take(value => value.type === 'image_cancel' && value.job_id === lease.job.id);
 });
 
-test('qwen image arguments and attachments are parsed like the other image commands', () => {
+test('qwen image arguments and attachments are parsed like the other image commands', async () => {
     assert.deepEqual(parseQwenImageArgs('  a duck  '), { prompt: 'a duck' });
     assert.deepEqual(parseQwenImageArgs('--aspect 9:16 a tall duck'), { prompt: 'a tall duck', aspect: '9:16' });
     assert.deepEqual(parseQwenImageArgs('--ar=16:9 a wide duck'), { prompt: 'a wide duck', aspect: '16:9' });
@@ -257,14 +257,47 @@ test('qwen image arguments and attachments are parsed like the other image comma
     const attachment = (name, contentType, size = 100) => [name, { url: `https://cdn.discordapp.com/${name}`, name, contentType, size }];
     const command = { attachments: new Map([attachment('a.png', 'image/png'), attachment('notes.txt', 'text/plain')]) };
     const reply = { attachments: new Map([attachment('b.jpg', null)]) };
-    assert.deepEqual(qwenImageReferencesFromMessages([command, reply]).map(value => [value.name, value.mime_type]), [
+    const noProbe = async () => assert.fail('attachments need no probe');
+    assert.deepEqual((await qwenImageReferencesFromMessages([command, reply], noProbe)).references.map(value => [value.name, value.mime_type]), [
         ['a.png', 'image/png'],
         ['b.jpg', 'image/jpeg'],
     ]);
-    assert.deepEqual(qwenImageReferencesFromMessages([{ attachments: new Map() }, null]), []);
-    assert.throws(() => qwenImageReferencesFromMessages([{ attachments: new Map([attachment('a.gif', 'image/gif')]) }]), /PNG, JPEG, or WebP/);
+    assert.deepEqual(await qwenImageReferencesFromMessages([{ attachments: new Map() }, null], noProbe), { references: [], links: [] });
+    await assert.rejects(qwenImageReferencesFromMessages([{ attachments: new Map([attachment('a.gif', 'image/gif')]) }], noProbe), /PNG, JPEG, or WebP/);
     const four = { attachments: new Map(['a', 'b', 'c', 'd'].map(name => attachment(`${name}.png`, 'image/png'))) };
-    assert.throws(() => qwenImageReferencesFromMessages([four]), /at most 3/);
+    await assert.rejects(qwenImageReferencesFromMessages([four], noProbe), /at most 3/);
+
+    // `$avatar` posts a bare CDN link, which Discord unfurls as an `image` embed.
+    const avatar = 'https://cdn.discordapp.com/avatars/1/abc.png?size=4096';
+    const avatarReply = {
+        attachments: new Map(),
+        content: avatar,
+        embeds: [{ data: { type: 'image' }, thumbnail: { url: avatar } }],
+    };
+    const probed = [];
+    const probe = async url => {
+        probed.push(url);
+        return url.includes('/avatars/') ? { mime: 'image/png', bytes: 74135 } : { mime: 'text/html', bytes: 10 };
+    };
+    assert.deepEqual(await qwenImageReferencesFromMessages([{ attachments: new Map(), content: '$qwenedit give him a hat' }, avatarReply], probe), {
+        references: [{ url: avatar, mime_type: 'image/png', bytes: 74135, name: 'abc.png' }],
+        links: [avatar],
+    });
+    assert.deepEqual(probed, [avatar]);
+    const linked = await qwenImageReferencesFromMessages([command, avatarReply], probe);
+    assert.deepEqual(linked.references.map(value => value.name), ['a.png', 'abc.png']);
+    // Attachments win over links on the same message; other hosts and non-images are ignored.
+    const mixed = {
+        attachments: new Map([attachment('c.png', 'image/png')]),
+        content: `${avatar} https://example.com/x.png https://cdn.discordapp.com/attachments/1/2/page.html`,
+    };
+    assert.deepEqual((await qwenImageReferencesFromMessages([mixed], probe)).links, []);
+    assert.deepEqual((await qwenImageReferencesFromMessages([{ ...mixed, attachments: new Map() }], probe)).links, [avatar]);
+    // Animated avatars link to a GIF; the static PNG of the same path is used.
+    const animated = await qwenImageReferencesFromMessages(
+        [{ attachments: new Map(), content: 'https://cdn.discordapp.com/avatars/1/a_abc.gif?size=4096' }], probe);
+    assert.equal(animated.references[0].url, 'https://cdn.discordapp.com/avatars/1/a_abc.png?size=4096');
+    assert.deepEqual(animated.links, ['https://cdn.discordapp.com/avatars/1/a_abc.gif?size=4096']);
 
     const queued = { model: 'qwenimage', status: 'queued', queue_position: 2, video_rendering: true, worker_online: true };
     assert.equal(formatQwenImageStatus(queued), '**Qwen Image 2.1** · Queued behind 1 image; waiting for the current video render to finish.');
