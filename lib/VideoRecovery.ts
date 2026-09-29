@@ -74,7 +74,21 @@ function speechSeconds(lines: any[]): number {
         + 0.3, lines.length ? 1.25 : 0);
 }
 
-/** Allocate legal render windows without deleting dialogue or story beats. */
+/** A shot's physical place, or '' when the planner gave none (older and fallback plans). */
+function shotLocation(shot: any): string {
+    return String(shot?.location || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function locationChanges(shots: any[]): boolean {
+    const places = shots.map(shotLocation).filter(Boolean);
+    return places.some(place => place !== places[0]);
+}
+
+/**
+ * Allocate legal render windows without deleting dialogue or story beats. A change of
+ * shot location also starts a new scene: H3 invents an unanchored in-clip location from
+ * text alone and drifts toward cartoon rendering, while a new scene gets its own opening.
+ */
 export function repairVideoTiming(plan: any, maximum: number, minimum: number): void {
     if (!Array.isArray(plan?.segments)) return;
     const repaired: any[] = [];
@@ -83,7 +97,8 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
         if (!Array.isArray(original?.shots) || !original.shots.length) continue;
         oldIndexes[originalIndex] = repaired.length + 1;
         const lines = original.shots.flatMap((shot: any) => shot.dialogue || []);
-        if (original.shots.length <= 4 && Number(original.target_seconds) >= minimum
+        const relocated = locationChanges(original.shots);
+        if (!relocated && original.shots.length <= 4 && Number(original.target_seconds) >= minimum
             && Number(original.target_seconds) <= maximum && speechSeconds(lines) <= Number(original.target_seconds)
             && original.shots.every((shot: any) => speechSeconds(shot.dialogue || []) <= Number(shot.duration_seconds))) {
             repaired.push(original);
@@ -130,17 +145,26 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
         let shots: any[] = [];
         const flush = () => {
             if (!shots.length) return;
-            const target = Math.max(minimum, shots.reduce((sum, shot) => sum + shot.duration_seconds, 0));
+            const authored = shots.reduce((sum, shot) => sum + shot.duration_seconds, 0);
+            const target = Math.max(minimum, authored);
             const result = { ...original, shots, target_seconds: target };
             delete result.output_seconds;
+            const first = repaired.length + 1 === oldIndexes[originalIndex];
+            if (relocated) {
+                // Render at least the minimum, but keep a short relocated beat short in the cut.
+                if (authored < target) result.output_seconds = Math.max(0.5, authored);
+                if (!first) result.overlay_label = 'N/A';
+            }
             result.transition = repaired.length === 0 ? 'start'
-                : repaired.length + 1 === oldIndexes[originalIndex] ? original.transition
+                : first ? original.transition
                     : authoredCuts.has(shots[0]) ? 'cut' : 'continue';
             repaired.push(result);
             shots = [];
         };
         for (const piece of pieces) {
             if (shots.length && (shots.length >= 4
+                || (relocated && shotLocation(piece)
+                    && shotLocation(piece) !== (shots.map(shotLocation).find(Boolean) || shotLocation(piece)))
                 || shots.reduce((sum, shot) => sum + shot.duration_seconds, 0) + piece.duration_seconds > maximum)) flush();
             shots.push(piece);
         }

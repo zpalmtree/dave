@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
 import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, repairVideoTiming, recoveryLimitReached,
     VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
-import { requestPlannerResponse, stageFrontierDialogueVisually } from '../dist/VideoFrontierPlanner.js';
+import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
@@ -84,6 +84,54 @@ test('timing repair reserves speech time within a shot even when the whole segme
     assert.ok(repaired.duration_seconds > 6);
     assert.equal(repaired.dialogue[0].text, speaking.dialogue[0].text);
     assert.equal(value.segments[1].transition, 'cut');
+});
+
+test('timing repair starts a new scene at each change of shot location', () => {
+    // Job b6ac4d55 rendered bedroom, hallway, and doorway in one H3 clip; the two
+    // unanchored locations drifted into cartoon rendering.
+    const value = plan('No mames wey, that is not mine!');
+    const speaking = value.segments[0].shots[0];
+    Object.assign(value.segments[0], { title: 'The delivery', overlay_label: 'Later', transition: 'cut',
+        audio_transition: 'auto', target_seconds: 14.3, output_seconds: 14 });
+    value.segments[0].shots = [
+        { ...speaking, location: 'Bedroom desk', duration_seconds: 3, dialogue: [] },
+        { ...speaking, location: 'apartment front doorway', duration_seconds: 4, dialogue: [] },
+        { ...speaking, location: 'Apartment front-doorway.', duration_seconds: 7.3 },
+    ];
+    value.segments.unshift({ ...structuredClone(value.segments[0]), title: 'Opening', transition: 'start',
+        overlay_label: 'N/A', target_seconds: 5, output_seconds: 5,
+        shots: [{ ...speaking, location: 'bedroom desk', duration_seconds: 5, dialogue: [] }] });
+    repairVideoTiming(value, 15, 5);
+    assert.deepEqual(value.segments.map(s => [s.title, s.transition, s.shots.length]),
+        [['Opening', 'start', 1], ['The delivery', 'cut', 1], ['The delivery', 'cut', 2]]);
+    assert.equal(value.segments[1].target_seconds, 5);
+    assert.equal(value.segments[1].output_seconds, 3);
+    assert.equal(value.segments[1].overlay_label, 'Later');
+    assert.equal(value.segments[2].target_seconds, 11.3);
+    assert.equal(value.segments[2].output_seconds, undefined);
+    assert.equal(value.segments[2].overlay_label, 'N/A');
+    assert.equal(value.segments[2].shots[1].dialogue[0].text, 'No mames wey, that is not mine!');
+    const before = structuredClone(value);
+    repairVideoTiming(value, 15, 5);
+    assert.deepEqual(value, before);
+});
+
+test('timing repair keeps unlabeled or same-location shots in one scene', () => {
+    for (const locations of [[undefined, undefined], ['kitchen', ''], ['Kitchen', 'kitchen.']]) {
+        const value = plan();
+        const shot = value.segments[0].shots[0];
+        value.segments[0].target_seconds = 8;
+        value.segments[0].shots = locations.map(location => ({ ...shot, location, duration_seconds: 4 }));
+        const before = structuredClone(value);
+        repairVideoTiming(value, 15, 5);
+        assert.deepEqual(value, before);
+    }
+});
+
+test('the screenplay schema requires every shot to name its location', () => {
+    const shot = VIDEO_PLAN_SCHEMA.properties.segments.items.properties.shots.items;
+    assert.ok(shot.required.includes('location'));
+    assert.equal(shot.properties.location.type, 'string');
 });
 
 test('timing repair counts an ellipsis as one pause', () => {
