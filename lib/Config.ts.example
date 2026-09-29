@@ -55,6 +55,10 @@ class Config {
     /* coingecko coin ids to monitor e.g. [{id: 'bitcoin', label: 'bitcoin' }], see coingecko api docs for details */
     public coins: string[] = [];
 
+    /* CoinGecko demo API key, used by $price. Free from https://www.coingecko.com/en/developers/dashboard.
+     * CoinGecko blocks keyless price requests. */
+    public coingeckoApiKey: string = 'enter coingecko demo api key here';
+
     /* Uproar (uproar.chat) integration. Leave the id/token blank to disable it;
      * the bot then runs on Discord only. Get the id + token from Uproar when you
      * create the bot (Settings > Bots). */
