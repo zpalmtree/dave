@@ -869,7 +869,7 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
     }
 }
 
-function formatCurrentDiscordTimestamp(style: 't' | 'D'): string {
+function formatCurrentDiscordTimestamp(style: 't' | 'F'): string {
     const timestamp = Math.floor(Date.now() / 1000);
 
     return `<t:${timestamp}:${style}>`;
@@ -880,7 +880,7 @@ export async function handleTime(msg: Message) {
 }
 
 export async function handleDate(msg: Message) {
-    await msg.reply(`The current date is ${formatCurrentDiscordTimestamp('D')}`);
+    await msg.reply(`The current date is ${formatCurrentDiscordTimestamp('F')}`);
 }
 
 export async function handleCountdown(
