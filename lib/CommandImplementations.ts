@@ -2388,6 +2388,15 @@ export async function handleGooning(msg: Message): Promise<void> {
     });
 }
 
+export async function handleNaggers(msg: Message): Promise<void> {
+    await (msg.channel as TextChannel).send({
+        files: [
+            new AttachmentBuilder('./images/naggers.png')
+                .setName('naggers.png'),
+        ],
+    });
+}
+
 export async function handleDot(msg: Message, arg: string): Promise<void> {
     await initDot();
 
