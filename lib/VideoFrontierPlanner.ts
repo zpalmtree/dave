@@ -214,9 +214,13 @@ export const VIDEO_PLAN_SCHEMA = {
                         items: {
                             type: 'object',
                             additionalProperties: false,
-                            required: ['duration_seconds', 'visual', 'camera', 'audio', 'dialogue'],
+                            required: ['duration_seconds', 'location', 'visual', 'camera', 'audio', 'dialogue'],
                             properties: {
                                 duration_seconds: { type: 'number', minimum: 0.5, maximum: 20 },
+                                location: {
+                                    type: 'string',
+                                    description: 'Short name of the physical place visible in this shot, such as "bedroom desk" or "apartment front doorway". Repeat the identical name for every shot in the same place; a different room, doorway, exterior, or other place gets a different name and must begin a new segment.',
+                                },
                                 visual: { type: 'string' },
                                 camera: { type: 'string' },
                                 audio: { type: 'string' },
@@ -495,7 +499,7 @@ export const VIDEO_PLANNER_INSTRUCTIONS = `You are the quality-first screenplay 
 
 Treat every content-bearing word in the request as material. Preserve every explicitly named game, franchise, work, person, place, product, style, count, time range, modifier, and quoted line. A request shaped like "X, but replace Y with Z" preserves X's name, defining presentation, camera language, world, rules, props, and actions, and replaces only Y. Do not generalize a named reference into a generic scene. Infer enough visible participants for a group concept to read clearly, but do not infer an exhaustive roster unless explicitly requested.
 
-Choose the shortest natural finished duration that makes the idea legible, capped by the supplied total and per-segment limits. A segment is one independently generated clip, while shots inside a segment are directions that one generative pass must perform itself. Keep ordinary camera-angle, framing, or lens changes within the same continuous location, cast, lighting, and action as shots in one segment. Every hard scene change involving a different location, time, cast, environment, independent action, or deliberately discontinuous visual state must begin a new segment even when the total duration fits one model generation. Use transition=continue only when the next segment should inherit the preceding final frame and can physically continue from it; use cut for a fresh scene and dissolve only for an intentional soft transition. Do not split a continuous action merely to add another camera angle. The sum of shot durations within each segment should equal target_seconds.
+Choose the shortest natural finished duration that makes the idea legible, capped by the supplied total and per-segment limits. A segment is one independently generated clip, while shots inside a segment are directions that one generative pass must perform itself. Keep ordinary camera-angle, framing, or lens changes within the same continuous location, cast, lighting, and action as shots in one segment. Every hard scene change involving a different location, time, cast, environment, independent action, or deliberately discontinuous visual state must begin a new segment even when the total duration fits one model generation. Name each shot's physical place in shot.location and keep one identical location within a segment: moving to another room, a doorway, an exterior, or any place the segment's opening frame does not show begins a new segment with transition=cut, because only a segment start receives its own rendered opening image. The pipeline splits a segment that mixes locations, padding each piece to the per-segment minimum. Use transition=continue only when the next segment should inherit the preceding final frame and can physically continue from it; use cut for a fresh scene and dissolve only for an intentional soft transition. Do not split a continuous action merely to add another camera angle. The sum of shot durations within each segment should equal target_seconds.
 
 ${VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS}
 
