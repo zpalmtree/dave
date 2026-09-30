@@ -107,7 +107,7 @@ const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', imp
 // Generated scene openings for fantastical premises drift into a glossy CG look,
 // and H3 then keeps that medium and gives Meximutt cartoon eyes. State the
 // photographic medium positively; the image models draw negated styles too.
-export const OALGO_PHOTOREAL_KEYFRAME = 'Render this as a photorealistic live-action photograph matching the original Meximutt portrait: a real man with natural skin texture and pores, real fabric, natural lens optics and lighting, and his own narrow eyes at their true size, even in a fantastical setting, unless the request itself asks for a different art style.';
+export const OALGO_PHOTOREAL_KEYFRAME = 'Render this as a photorealistic live-action photograph with the camera realism of the original Meximutt portrait: real people with natural skin texture and pores, real fabric, natural lens optics and lighting, and Meximutt, wherever he appears, with his own narrow eyes at their true size, even in a fantastical setting, unless the request itself asks for a different art style.';
 
 interface VideoAttachmentSourceImageDescriptor {
     url: string;

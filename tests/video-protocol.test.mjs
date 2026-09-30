@@ -94,6 +94,8 @@ import {
     VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL,
     videoSegmentKeyframeTargetIndexes,
 } from '../dist/VideoSegmentKeyframePlanner.js';
+import { OALGO_PHOTOREAL_KEYFRAME } from '../dist/VideoBroker.js';
+import { recoveryReferenceRole } from '../dist/VideoCharacterContinuity.js';
 
 test('video pause durations default to six hours and enforce safe limits', () => {
     assert.equal(parsePauseDuration(undefined), 6 * 60 * 60);
@@ -2454,6 +2456,27 @@ test('frontier keyframe prompt binds frame-zero motion geometry', () => {
     assert.match(referenceReview, /not starting frames or instructions/);
     assert.match(referenceReview, /Evaluate identity_preserved independently/);
     assert.match(referenceReview, /Do not infer the reference haircut or anatomy from screenplay adjectives/);
+});
+
+test('a recovery scene without the recurring character keeps the attached subject separate', () => {
+    // 91e60136: a cut to the attached rapper alone was drawn with Meximutt's
+    // face and body, because every scene had to contain Picture 1's identity.
+    const scene = {
+        recovery_request: 'show him shooting up a gas station',
+        continuity_bible: 'Meximutt reads the article. The video cuts to a man resembling the pictured rapper.',
+        keyframe: { prompt: 'The pictured rapper in a gas station aisle.' },
+        segments: [{ shots: [{ visual: 'A man resembling the pictured rapper fires a handgun.' }] }],
+    };
+    const options = { reviewPurpose: 'recovery-scene', requireIdentityPreservation: true };
+    const review = buildVideoKeyframeReviewPrompt(scene, [], options);
+    assert.match(review, /Story cast: Meximutt reads the article/);
+    assert.match(review, /Require only the reference characters this scene includes/);
+    assert.match(review, /blends the recurring character's face or body with another subject's fails identity/);
+    assert.match(buildVideoKeyframePrompt(scene, options), /each as a distinct person/);
+    assert.match(recoveryReferenceRole(0), /wherever the screenplay places that character/);
+    assert.match(recoveryReferenceRole(1), /keeps their own identity from Picture 2 as a separate person/);
+    assert.doesNotMatch(OALGO_PHOTOREAL_KEYFRAME, /a real man/,
+        'The medium line must not cast Meximutt as every person in the frame.');
 });
 
 test('keyframe rejection telemetry retains bounded visible issues', () => {
