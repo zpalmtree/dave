@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { VideoBroker } from '../dist/VideoBroker.js';
+import { OALGO_PHOTOREAL_KEYFRAME, VideoBroker } from '../dist/VideoBroker.js';
 import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, repairVideoTiming, recoveryLimitReached,
     VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
@@ -310,6 +310,7 @@ test('broker persists recovery and requires every recorded scene for the matchin
         keyframeGenerator: async (scenePlan, _references, options) => {
             assert.equal(options.reviewPurpose, 'recovery-scene');
             assert.equal(scenePlan.recovery_request, contract.prompt);
+            assert.equal(scenePlan.keyframe.prompt.includes(OALGO_PHOTOREAL_KEYFRAME), false);
             return { bytes: Buffer.from('fixture'), mimeType: 'image/png', provider: 'test', model: 'test' };
         },
         frontierPlanner: async () => { throw new Error('Legacy planning must not run before approval.'); } });
@@ -447,9 +448,12 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
     const portrait = join(directory, 'portrait.png');
     writeFileSync(portrait, Buffer.from('portrait'));
     const value = plan(); value.keyframe.recommended = false;
+    value.segments.push({ ...structuredClone(value.segments[0]), title: 'Aboard', transition: 'cut' });
+    value.segments[1].shots[0].dialogue = [];
     const contract = approvedRecoveryContract(value, 'The original request');
     const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
     let refusal = false, planningCalls = 0;
+    const scenePrompts = [];
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false,
@@ -464,7 +468,10 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
             } });
             return structuredClone(prepared);
         },
-        keyframeGenerator: async () => { assert.fail('The original portrait cannot be regenerated.'); },
+        keyframeGenerator: async scenePlan => {
+            scenePrompts.push(scenePlan.keyframe.prompt);
+            return { bytes: Buffer.from('fixture'), mimeType: 'image/png', provider: 'test', model: 'test' };
+        },
     });
     await broker.start();
     try {
@@ -494,6 +501,7 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
         await reset();
         assert.equal((await request('plan')).status, 200);
         assert.equal((await request('image', { segment_index: 0 })).status, 422);
+        assert.equal(scenePrompts.length, 0, 'The original portrait cannot be regenerated.');
         const failed = async () => {
             await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
                 error: 'Recovery request failed', retryable: true });
@@ -529,6 +537,11 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
         assert.equal((await request('checkpoint', { checkpoint: { scenes: { 0: {
             video_attempts: 3, render_interrupted: true,
         } } } })).status, 200, 'A render already active before deployment can finish.');
+        await reset({ prepared });
+        assert.equal((await request('image', { segment_index: 1 })).status, 200);
+        assert.ok(scenePrompts.at(-1).includes(OALGO_PHOTOREAL_KEYFRAME), 'Later Meximutt openings stay photographic.');
+        assert.doesNotMatch(OALGO_PHOTOREAL_KEYFRAME, /cartoon|anim|3D|CG|Pixar|not |never/i,
+            'The image models draw styles they are told to avoid.');
         await reset(); refusal = true;
         const routed = await request('plan');
         assert.equal(routed.status, 200);

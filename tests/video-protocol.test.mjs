@@ -308,6 +308,7 @@ test('local video commands are declared as Discord-only', () => {
         assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, new RegExp(phrase));
     }
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /explicitly requested verbatim/);
+    assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /real man in photorealistic live-action footage/);
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /Season nearly every new Meximutt line with slang/);
     assert.match(OALGO_VIDEO_PLANNER_GUIDANCE, /instead of describing the premise/);
     for (const retired of ['minimaxdraft', 'ltx', 'ltxfast']) {
