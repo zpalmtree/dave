@@ -894,6 +894,7 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
             assert.equal((await broker.get('SELECT recovery_version FROM video_jobs WHERE public_id=?',
                 [job.id])).recovery_version, 0);
             assert.equal(lease.job.video_edit_target, 'the red car');
+            assert.equal(lease.job.video_edit_mode, 'replace');
             for (const [path, expected] of [['source-video', 'clip'], ['source-image?role=base', 'image']]) {
                 const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/${path}`, {
                     method: 'POST', headers: { authorization: 'Bearer worker-secret',
@@ -1081,6 +1082,89 @@ test('a refused replacement description queues a local Qwen reference for the up
             assert.match(lease.job.video_replacement_reference_prompt, /a black axe.*entire subject/);
         } finally {
             newWorker.socket.close();
+        }
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('add edits ground the anchor, draw only the additions, and lease only to add-capable workers', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-add-edit-'));
+    const groundingModes = [];
+    const referencePrompts = [];
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        videoEditGrounder: async (_source, target, _context, _hooks, mode) => {
+            groundingModes.push(mode);
+            return { action: 'replace', target: `${target} parked in the plaza`, clarification: '' };
+        },
+        sourceVideoDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 7 };
+        },
+        keyframeGenerator: async plan => {
+            referencePrompts.push(plan.keyframe.prompt);
+            return { bytes: Buffer.from('squid girl reference'), mimeType: 'image/png', provider: 'test', model: 'test' };
+        },
+    });
+    await broker.start();
+    const submit = (id, extra = {}) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+        method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'minimax', prompt: 'more squid girls',
+            source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4' },
+            video_edit_target: 'the purple truck', video_edit_mode: 'add', video_replacement_prompt: 'more squid girls',
+            requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+            command_message_id: id, status_message_id: 'status', ...extra }),
+    });
+    try {
+        for (const extra of [{ video_edit_mode: 'remove' }, { video_edit_target: '' }]) {
+            const rejected = await submit('invalid', extra);
+            assert.equal(rejected.status, 400);
+        }
+        const accepted = await submit('add');
+        assert.equal(accepted.status, 201);
+        const job = (await accepted.json()).job;
+        assert.deepEqual(groundingModes, ['add']);
+        assert.equal(referencePrompts.length, 1);
+        assert.match(referencePrompts[0], /new additions requested by the user: more squid girls/);
+        assert.match(referencePrompts[0], /existing subject they join/);
+        const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [job.id]);
+        assert.equal(row.video_edit_mode, 'add');
+        assert.equal(row.video_edit_target, 'the purple truck parked in the plaza');
+        const audit = JSON.parse(readFileSync(join(directory, 'results', job.id, 'video-edit-grounding.json'), 'utf8'));
+        assert.equal(audit.mode, 'add');
+        const connect = async version => {
+            const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+                headers: { authorization: 'Bearer worker-secret' },
+            });
+            const take = socketInbox(socket);
+            await new Promise((resolve, reject) => {
+                socket.once('open', resolve);
+                socket.once('error', reject);
+            });
+            socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
+                capabilities: ['minimax'], current_job: null, video_edit_version: version }));
+            await take(value => value.type === 'hello_ack');
+            return { socket, take };
+        };
+        const replaceOnlyWorker = await connect(3);
+        await assert.rejects(replaceOnlyWorker.take(value => value.type === 'job', 250), /Timed out/);
+        replaceOnlyWorker.socket.close();
+        await new Promise(resolve => replaceOnlyWorker.socket.once('close', resolve));
+        const addWorker = await connect(4);
+        try {
+            const lease = await addWorker.take(value => value.type === 'job');
+            assert.equal(lease.job.id, job.id);
+            assert.equal(lease.job.video_edit_mode, 'add');
+            assert.equal(lease.job.video_edit_target, 'the purple truck parked in the plaza');
+            assert.equal(lease.job.has_source_image, true);
+        } finally {
+            addWorker.socket.close();
         }
     } finally {
         await broker.stop();

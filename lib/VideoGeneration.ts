@@ -1,5 +1,5 @@
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
-import { classifyVideoEditIntent } from './VideoEditIntent.js';
+import { classifyVideoEditIntent, VideoEditMode } from './VideoEditIntent.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
@@ -1126,14 +1126,14 @@ interface VideoRequestOptions {
     plannerGuidance?: string;
 }
 
-export function parseVideoReplacement(prompt: string): { target: string; prompt: string } | null {
+export function parseVideoReplacement(prompt: string): { target: string; prompt: string; mode: VideoEditMode } | null {
     const option = /^--replace\s+(["'])(.{1,120}?)\1(?:\s+([\s\S]*))?$/i.exec(prompt.trim());
-    if (option) return { target: option[2].trim(), prompt: (option[3] || '').trim() };
+    if (option) return { target: option[2].trim(), prompt: (option[3] || '').trim(), mode: 'replace' };
     if (/^--replace(?:\s|$)/i.test(prompt.trim())) {
         throw new Error('Use --replace "subject to replace" before the prompt.');
     }
     const natural = /^replace\s+(?:"([^"]{1,120})"|'([^']{1,120})'|(.{1,120}?))\s+with\s+([\s\S]+)$/i.exec(prompt.trim());
-    return natural ? { target: (natural[1] || natural[2] || natural[3]).trim(), prompt: natural[4].trim() } : null;
+    return natural ? { target: (natural[1] || natural[2] || natural[3]).trim(), prompt: natural[4].trim(), mode: 'replace' } : null;
 }
 
 /** Keep exact edit syntax cheap; interpret conversational requests only when a clip is present. */
@@ -1156,7 +1156,9 @@ export async function resolveVideoEditRequest(
             onUsage: usage => { recordTokenSpend(usage); },
         });
         if (intent.action === 'clarify') throw new Error(intent.clarification);
-        if (intent.action === 'replace') replacement = { target: intent.target, prompt: intent.replacement };
+        if (intent.action === 'replace' || intent.action === 'add') {
+            replacement = { target: intent.target, prompt: intent.replacement, mode: intent.action };
+        }
     }
     if (replacement) return { replacement, sources: candidates };
     // Retain established attachment precedence for requests to make a new video.
@@ -1251,7 +1253,7 @@ export async function handleVideoRequest(
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(replacementImagePrompt
-        ? 'Getting your video ready and creating the replacement from your description…'
+        ? `Getting your video ready and creating ${replacement?.mode === 'add' ? 'what to add' : 'the replacement'} from your description…`
         : initialVideoRequestStatus(model, options.commandVariant));
     const plannerGuidance = [
         sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement ? '' : options.plannerGuidance,
@@ -1280,6 +1282,7 @@ export async function handleVideoRequest(
                 source_image: sourceImage,
                 source_video: sourceVideo,
                 video_edit_target: replacement?.target,
+                video_edit_mode: replacement?.mode,
                 video_edit_context: replacement ? editContext : undefined,
                 video_replacement_prompt: replacementImagePrompt,
                 source_audio: sourceAudio,

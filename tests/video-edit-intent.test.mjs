@@ -21,7 +21,15 @@ test('conversational requests keep source target, replacement, image and reply c
             assert.equal(input.hasPreset, false);
             return { action: 'replace', target: 'the dancer', replacement: 'a robot', clarification: '' };
         }, sources);
-    assert.deepEqual(result, { replacement: { target: 'the dancer', prompt: 'a robot' }, sources: { image, clip } });
+    assert.deepEqual(result, { replacement: { target: 'the dancer', prompt: 'a robot', mode: 'replace' }, sources: { image, clip } });
+});
+
+test('additions keep the source clip and name the anchor subject they join', async () => {
+    const result = await resolveVideoEditRequest('needs more squid girls', message, null, 'reply: Splatoon Tahoe', false,
+        async () => ({ action: 'add', target: 'the purple truck', replacement: 'more Splatoon squid girls', clarification: '' }),
+        sources);
+    assert.deepEqual(result, { replacement: { target: 'the purple truck', prompt: 'more Splatoon squid girls', mode: 'add' },
+        sources: { image, clip } });
 });
 
 test('explicit replacement syntax bypasses intent classification, still retaining clip for visual grounding', async () => {
@@ -84,6 +92,13 @@ test('structured decisions reject empty or invalid grounding instead of using th
     }
     assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: ' red car ', clarification: '' }, false),
         { action: 'replace', target: 'red car', clarification: '' });
+    for (const value of [{ action: 'add', target: '', replacement: 'a hat', clarification: '' },
+        { action: 'add', target: 'the man', replacement: '', clarification: '' }]) {
+        assert.throws(() => validateVideoEditDecision(value, true), /interpret/);
+    }
+    assert.throws(() => validateVideoEditDecision({ action: 'add', target: 'the man', clarification: '' }, false), /interpret/);
+    assert.deepEqual(validateVideoEditDecision({ action: 'add', target: ' the man ', replacement: ' a hat ', clarification: '' }, true),
+        { action: 'add', target: 'the man', replacement: 'a hat', clarification: '' });
 });
 
 test('samples contain actual source frames across the timeline, including short clips', async () => {
