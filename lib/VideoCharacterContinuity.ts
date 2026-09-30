@@ -14,8 +14,8 @@ export interface ContinuityImage { mimeType: 'image/png' | 'image/jpeg' | 'image
 /** The recovery API supplies the original identity first, then optional scene context. */
 export function recoveryReferenceRole(position: number): string {
     return position === 0
-        ? 'Picture 1 defines the original recurring character identity: face proportions, eyes, nose, lips, cheeks, hair silhouette and body. Preserve these across style changes, except for explicit screenplay transformations.'
-        : `Picture ${position + 1} supplies scene context and only the additional subjects explicitly assigned to it by the screenplay. Its stand-in protagonist must not replace the identity from Picture 1. Import neither unrequested cast nor an unrequested rendering style.`;
+        ? 'Picture 1 defines the original recurring character identity: face proportions, eyes, nose, lips, cheeks, hair silhouette and body. Preserve these wherever the screenplay places that character, across style changes, except for explicit screenplay transformations. A scene the screenplay stages without him needs no Picture 1 character, and every other person keeps a face and body of their own.'
+        : `Picture ${position + 1} supplies scene context and only the additional subjects explicitly assigned to it by the screenplay. A subject the screenplay names from it keeps their own identity from Picture ${position + 1} as a separate person from the Picture 1 character. When the screenplay casts the Picture 1 character in its protagonist's role, he plays that role with the Picture 1 identity. Import neither unrequested cast nor an unrequested rendering style.`;
 }
 
 export interface OpeningIdentityDecision {
