@@ -106,6 +106,10 @@ const LEASED_SQL = ['leased', 'planning', 'running', 'uploading'].map(status => 
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', import.meta.url));
+// Generated scene openings for fantastical premises drift into a glossy CG look,
+// and H3 then keeps that medium and gives Meximutt cartoon eyes. State the
+// photographic medium positively; the image models draw negated styles too.
+export const OALGO_PHOTOREAL_KEYFRAME = 'Render this as a photorealistic live-action photograph matching the original Meximutt portrait: a real man with natural skin texture and pores, real fabric, natural lens optics and lighting, and his own narrow eyes at their true size, even in a fantastical setting, unless the request itself asks for a different art style.';
 
 interface VideoAttachmentSourceImageDescriptor {
     url: string;
@@ -4103,6 +4107,9 @@ export class VideoBroker {
         plan = await this.enrichedSegmentKeyframePlan(job, plan);
         const derivedPlan = derivedSegmentKeyframePlan(plan, segmentIndex);
         if (!derivedPlan) return;
+        if (job.command_variant === 'oalgo' || job.command_variant === 'oalgofast') {
+            derivedPlan.keyframe.prompt += ` ${OALGO_PHOTOREAL_KEYFRAME}`;
+        }
         const existing = await this.get<SegmentKeyframeRow>(
             'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
             [job.public_id, segmentIndex],
@@ -5655,6 +5662,7 @@ export class VideoBroker {
                     const continuity = state.continuity?.[index];
                     const keyframe = { ...scenePlan.keyframe, recommended: true,
                         prompt: `${scenePlan.keyframe?.prompt || segment.shots[0].visual} Create only this scene's opening instant; later actions and camera reveals need not already be visible. ${Array.isArray(body.correction) ? body.correction.slice(0, 5).map(String).join('; ').slice(0, 1000) : ''}` };
+                    if (sourceRequired) keyframe.prompt += ` ${OALGO_PHOTOREAL_KEYFRAME}`;
                     if (continuity?.action === 'reanchor') {
                         keyframe.prompt += ` Restore the recurring cast from the permanent original references: ${continuity.identity_description}.`
                             + ' Stage the earliest recognizable instant of their return in this scene, preserving the planned setting and requested transformations.'
