@@ -1,5 +1,5 @@
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
-import { groundVideoEditTarget, validateVideoEditDecision, videoEditSampleTimes } from './VideoEditIntent.js';
+import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes } from './VideoEditIntent.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
@@ -334,6 +334,7 @@ interface JobRow {
     source_video_path: string | null;
     source_video_seconds: number | null;
     video_edit_target: string | null;
+    video_edit_mode: VideoEditMode | null;
     video_replacement_prompt: string | null;
     source_image_path: string | null;
     source_image_mime: string | null;
@@ -1301,22 +1302,25 @@ function frontierKeyframeDeclined(error: unknown): boolean {
         : isModerationFailure(error);
 }
 
-export function videoReplacementReferencePrompt(prompt: string): string {
+export function videoReplacementReferencePrompt(prompt: string, mode: VideoEditMode = 'replace'): string {
     return [
-        `Depict the replacement requested by the user: ${prompt}`,
+        mode === 'add' ? `Depict the new additions requested by the user: ${prompt}`
+            : `Depict the replacement requested by the user: ${prompt}`,
         'Create a clear appearance reference for inserting this subject into an existing video.',
         'Show the entire subject, including its full body or complete shape, at a useful scale against a simple neutral background.',
         'Honor the requested species, number, colors, clothing, proportions, and visual style. For plural subjects, show the requested group together.',
-        'Only depict the new replacement; do not include the original subject being removed, captions, diagrams, or multiple views.',
+        mode === 'add'
+            ? 'Only depict the new additions; do not include the existing subject they join, captions, diagrams, or multiple views.'
+            : 'Only depict the new replacement; do not include the original subject being removed, captions, diagrams, or multiple views.',
     ].join(' ');
 }
 
-export function videoReplacementReferencePlan(prompt: string): Record<string, unknown> {
+export function videoReplacementReferencePlan(prompt: string, mode: VideoEditMode = 'replace'): Record<string, unknown> {
     return {
-        intent: `Create a visual reference for this replacement subject: ${prompt}`,
+        intent: `Create a visual reference for this ${mode === 'add' ? 'added' : 'replacement'} subject: ${prompt}`,
         keyframe: {
             recommended: true,
-            prompt: videoReplacementReferencePrompt(prompt),
+            prompt: videoReplacementReferencePrompt(prompt, mode),
             reference_requirements: [],
         },
         segments: [],
@@ -1603,6 +1607,7 @@ export class VideoBroker {
             source_video_path TEXT,
             source_video_seconds REAL,
             video_edit_target TEXT,
+            video_edit_mode TEXT,
             video_replacement_prompt TEXT,
             source_image_mime TEXT,
             source_image_bytes INTEGER,
@@ -1707,7 +1712,7 @@ export class VideoBroker {
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
-            ['video_edit_target', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
+            ['video_edit_target', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -2667,6 +2672,11 @@ export class VideoBroker {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
         }
         let videoEditTarget = String(body.video_edit_target || '').trim();
+        if (body.video_edit_mode !== undefined && body.video_edit_mode !== null
+            && (!['replace', 'add'].includes(body.video_edit_mode) || !videoEditTarget)) {
+            return { status: 400, body: { error: 'Video edit mode must be replace or add, with a subject.' } };
+        }
+        const videoEditMode: VideoEditMode = body.video_edit_mode === 'add' ? 'add' : 'replace';
         const videoEditContext = typeof body.video_edit_context === 'string' ? body.video_edit_context.slice(0, 6000)
             : JSON.stringify({ target: videoEditTarget, replacement: prompt });
         const replacementPrompt = String(body.video_replacement_prompt || '').trim();
@@ -2762,10 +2772,10 @@ export class VideoBroker {
                 sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory);
                 requestedDuration = sourceVideo.duration;
                 const grounding = validateVideoEditDecision(await (this.options.videoEditGrounder || groundVideoEditTarget)(
-                    sourceVideo, videoEditTarget, videoEditContext, submissionHooks), false);
+                    sourceVideo, videoEditTarget, videoEditContext, submissionHooks, videoEditMode), false);
                 if (grounding.action === 'clarify') throw new Error(grounding.clarification);
                 writeFileSync(join(directory, 'video-edit-grounding.json'), JSON.stringify({
-                    requested_target: videoEditTarget, context: videoEditContext,
+                    mode: videoEditMode, requested_target: videoEditTarget, context: videoEditContext,
                     sample_times: videoEditSampleTimes(sourceVideo.duration), ...grounding,
                 }, null, 2));
                 videoEditTarget = grounding.target;
@@ -2801,7 +2811,7 @@ export class VideoBroker {
                     const timeout = setTimeout(() => controller.abort(), VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS);
                     try {
                         const generated = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
-                            videoReplacementReferencePlan(replacementPrompt), [], {
+                            videoReplacementReferencePlan(replacementPrompt, videoEditMode), [], {
                                 ...submissionHooks,
                                 aspectRatio: '1:1', abortSignal: controller.signal,
                                 onAttempt: attempt => submissionHooks.onAttempt?.({ ...attempt, stage: `replacement_reference_${attempt.stage}` }),
@@ -2939,12 +2949,12 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_audio_path, source_audio_seconds,
-                        source_video_path, source_video_seconds, video_edit_target, video_replacement_prompt,
+                        source_video_path, source_video_seconds, video_edit_target, video_edit_mode, video_replacement_prompt,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2965,7 +2975,8 @@ export class VideoBroker {
                         now,
                         now,
                         sourceAudio?.path || null, sourceAudio?.duration || null,
-                        sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null, replacementPrompt || null,
+                        sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
+                        sourceVideo ? videoEditMode : null, replacementPrompt || null,
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
@@ -4351,6 +4362,7 @@ export class VideoBroker {
              AND (source_video_path IS NULL OR (source_video_seconds BETWEEN ${VIDEO_EDIT_LEGACY_MIN_SECONDS} AND ${VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS} AND ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
                   OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
              AND (source_video_path IS NULL OR source_image_path IS NOT NULL OR ${this.worker.videoEditVersion >= 3 ? 1 : 0} = 1)
+             AND (COALESCE(video_edit_mode, 'replace') <> 'add' OR ${this.worker.videoEditVersion >= 4 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -5245,6 +5257,7 @@ export class VideoBroker {
              AND (source_video_path IS NULL OR (source_video_seconds BETWEEN ${VIDEO_EDIT_LEGACY_MIN_SECONDS} AND ${VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS} AND ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
                   OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
              AND (source_video_path IS NULL OR source_image_path IS NOT NULL OR ${this.worker.videoEditVersion >= 3 ? 1 : 0} = 1)
+             AND (COALESCE(video_edit_mode, 'replace') <> 'add' OR ${this.worker.videoEditVersion >= 4 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -5306,8 +5319,9 @@ export class VideoBroker {
                 has_source_video: Boolean(row.source_video_path),
                 source_video_seconds: row.source_video_seconds,
                 video_edit_target: row.video_edit_target,
+                video_edit_mode: row.video_edit_mode || 'replace',
                 video_replacement_reference_prompt: row.source_video_path && !row.source_image_path && row.video_replacement_prompt
-                    ? videoReplacementReferencePrompt(row.video_replacement_prompt) : null,
+                    ? videoReplacementReferencePrompt(row.video_replacement_prompt, row.video_edit_mode || 'replace') : null,
                 has_source_image: Boolean(row.source_image_path),
                 source_image_composition: row.source_image_composition || null,
                 lease_id: leaseId,

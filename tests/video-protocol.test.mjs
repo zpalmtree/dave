@@ -2349,11 +2349,11 @@ test('video clip attachments are sent for broker frame extraction', () => {
 
 test('replacement target parsing supports quoted subjects and natural replacement prompts', () => {
     assert.deepEqual(parseVideoReplacement('--replace "the woman in red" keep the soundtrack'),
-        { target: 'the woman in red', prompt: 'keep the soundtrack' });
+        { target: 'the woman in red', prompt: 'keep the soundtrack', mode: 'replace' });
     assert.deepEqual(parseVideoReplacement('replace the blue car with the attached image'),
-        { target: 'the blue car', prompt: 'the attached image' });
+        { target: 'the blue car', prompt: 'the attached image', mode: 'replace' });
     assert.deepEqual(parseVideoReplacement('replace "the woman with a red coat" with the attached image'),
-        { target: 'the woman with a red coat', prompt: 'the attached image' });
+        { target: 'the woman with a red coat', prompt: 'the attached image', mode: 'replace' });
     assert.throws(() => parseVideoReplacement('--replace person'), /Use --replace/);
 });
 
