@@ -1020,6 +1020,74 @@ test('text replacements generate and retain an image for both commands; failed g
     }
 });
 
+test('a refused replacement description queues a local Qwen reference for the updated edit worker', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-refused-replacement-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        videoEditGrounder: async (_source, target) => ({ action: 'replace', target, clarification: '' }),
+        sourceVideoDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 7 };
+        },
+        keyframeGenerator: async () => {
+            throw new Error('Your request was rejected by the safety system.');
+        },
+    });
+    await broker.start();
+    try {
+        const accepted = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'a black axe',
+                source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4' },
+                video_edit_target: 'his axe', video_replacement_prompt: 'a black axe',
+                requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+                command_message_id: 'refused', status_message_id: 'status' }),
+        });
+        assert.equal(accepted.status, 201);
+        const body = await accepted.json();
+        assert.equal(body.source_image_composition, 'local_qwen');
+        assert.equal(body.job.has_source_image, false);
+        const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [body.job.id]);
+        assert.equal(row.source_image_path, null);
+        assert.equal(row.video_replacement_prompt, 'a black axe');
+        const connect = async version => {
+            const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+                headers: { authorization: 'Bearer worker-secret' },
+            });
+            const take = socketInbox(socket);
+            await new Promise((resolve, reject) => {
+                socket.once('open', resolve);
+                socket.once('error', reject);
+            });
+            socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
+                capabilities: ['minimax'], current_job: null, video_edit_version: version }));
+            await take(value => value.type === 'hello_ack');
+            return { socket, take };
+        };
+        const oldWorker = await connect(2);
+        await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
+        oldWorker.socket.close();
+        await new Promise(resolve => oldWorker.socket.once('close', resolve));
+        const newWorker = await connect(3);
+        try {
+            const lease = await newWorker.take(value => value.type === 'job');
+            assert.equal(lease.job.id, body.job.id);
+            assert.equal(lease.job.source_image_composition, 'local_qwen');
+            assert.equal(lease.job.has_source_image, false);
+            assert.match(lease.job.video_replacement_reference_prompt, /a black axe.*entire subject/);
+        } finally {
+            newWorker.socket.close();
+        }
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test('visual grounding rejects ambiguity before reference generation and leases a visible description', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-edit-grounding-'));
     let action = 'clarify';
