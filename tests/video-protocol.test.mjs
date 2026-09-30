@@ -881,6 +881,10 @@ test('frontier video planning uses Sol and a strict recursive screenplay schema'
     assert.doesNotMatch(VIDEO_PLANNER_INSTRUCTIONS, /make it begin immediately/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /non-dialogue audio as a chronological production contract/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /physical source, material or timbre/);
+    // 3cad1e9b: a gust whipped a sign back, but nothing else moved and the
+    // whoosh was buried, so the sign appeared to swing by itself.
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /stage the force itself so nothing appears to move by itself/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /swells before the target reacts and peaks as it moves/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /segment\.music exactly to N\/A/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Budget action density for reliable generation/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /a spoken turn also consumes beat time/);
