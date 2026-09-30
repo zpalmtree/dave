@@ -324,6 +324,7 @@ interface JobRow {
     source_video_path: string | null;
     source_video_seconds: number | null;
     video_edit_target: string | null;
+    video_replacement_prompt: string | null;
     source_image_path: string | null;
     source_image_mime: string | null;
     source_image_bytes: number | null;
@@ -1283,18 +1284,29 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
     };
 }
 
+/** Whether the image providers refused a frame, rather than failing to reach one. */
+function frontierKeyframeDeclined(error: unknown): boolean {
+    return error instanceof VideoKeyframeError
+        ? ['moderation', 'review_unavailable', 'identity_review', 'composition_review'].includes(error.code)
+        : isModerationFailure(error);
+}
+
+export function videoReplacementReferencePrompt(prompt: string): string {
+    return [
+        `Depict the replacement requested by the user: ${prompt}`,
+        'Create a clear appearance reference for inserting this subject into an existing video.',
+        'Show the entire subject, including its full body or complete shape, at a useful scale against a simple neutral background.',
+        'Honor the requested species, number, colors, clothing, proportions, and visual style. For plural subjects, show the requested group together.',
+        'Only depict the new replacement; do not include the original subject being removed, captions, diagrams, or multiple views.',
+    ].join(' ');
+}
+
 export function videoReplacementReferencePlan(prompt: string): Record<string, unknown> {
     return {
         intent: `Create a visual reference for this replacement subject: ${prompt}`,
         keyframe: {
             recommended: true,
-            prompt: [
-                `Depict the replacement requested by the user: ${prompt}`,
-                'Create a clear appearance reference for inserting this subject into an existing video.',
-                'Show the entire subject, including its full body or complete shape, at a useful scale against a simple neutral background.',
-                'Honor the requested species, number, colors, clothing, proportions, and visual style. For plural subjects, show the requested group together.',
-                'Only depict the new replacement; do not include the original subject being removed, captions, diagrams, or multiple views.',
-            ].join(' '),
+            prompt: videoReplacementReferencePrompt(prompt),
             reference_requirements: [],
         },
         segments: [],
@@ -1580,6 +1592,7 @@ export class VideoBroker {
             source_video_path TEXT,
             source_video_seconds REAL,
             video_edit_target TEXT,
+            video_replacement_prompt TEXT,
             source_image_mime TEXT,
             source_image_bytes INTEGER,
             source_image_composite_path TEXT,
@@ -1683,7 +1696,7 @@ export class VideoBroker {
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
-            ['video_edit_target', 'TEXT'], ['source_kind', 'TEXT'],
+            ['video_edit_target', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -2785,8 +2798,16 @@ export class VideoBroker {
                             },
                         );
                         sourceImage = storeCompositedSourceImage(generated, directory);
+                    } catch (error) {
+                        // A refused description has the desktop draw the reference with
+                        // local Qwen Image before the edit; an outage still rejects.
+                        if (!frontierKeyframeDeclined(error)) throw error;
+                        console.log(`[Video] Image providers declined the replacement reference for ${publicId}; drawing it locally.`);
+                        sourceImageComposition = 'local_qwen';
+                    } finally {
+                        clearTimeout(timeout);
                         sourceImageCompositionSeconds = (Date.now() - sourceImageStarted) / 1000;
-                    } finally { clearTimeout(timeout); }
+                    }
                 } else if (compositeDescriptor && sourceDescriptor) {
                     const base = await sourceImageDownloader(
                         sourceDescriptor,
@@ -2907,12 +2928,12 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_audio_path, source_audio_seconds,
-                        source_video_path, source_video_seconds, video_edit_target,
+                        source_video_path, source_video_seconds, video_edit_target, video_replacement_prompt,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2933,7 +2954,7 @@ export class VideoBroker {
                         now,
                         now,
                         sourceAudio?.path || null, sourceAudio?.duration || null,
-                        sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
+                        sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null, replacementPrompt || null,
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
@@ -4315,6 +4336,7 @@ export class VideoBroker {
              AND (source_audio_path IS NULL OR ${this.worker.sourceAudioVersion >= 1 ? 1 : 0} = 1)
              AND (source_video_path IS NULL OR (source_video_seconds BETWEEN ${VIDEO_EDIT_LEGACY_MIN_SECONDS} AND ${VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS} AND ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
                   OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR source_image_path IS NOT NULL OR ${this.worker.videoEditVersion >= 3 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -5185,6 +5207,7 @@ export class VideoBroker {
              AND (source_audio_path IS NULL OR ${this.worker.sourceAudioVersion >= 1 ? 1 : 0} = 1)
              AND (source_video_path IS NULL OR (source_video_seconds BETWEEN ${VIDEO_EDIT_LEGACY_MIN_SECONDS} AND ${VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS} AND ${this.worker.videoEditVersion >= 1 ? 1 : 0} = 1)
                   OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR source_image_path IS NOT NULL OR ${this.worker.videoEditVersion >= 3 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -5246,6 +5269,8 @@ export class VideoBroker {
                 has_source_video: Boolean(row.source_video_path),
                 source_video_seconds: row.source_video_seconds,
                 video_edit_target: row.video_edit_target,
+                video_replacement_reference_prompt: row.source_video_path && !row.source_image_path && row.video_replacement_prompt
+                    ? videoReplacementReferencePrompt(row.video_replacement_prompt) : null,
                 has_source_image: Boolean(row.source_image_path),
                 source_image_composition: row.source_image_composition || null,
                 lease_id: leaseId,
@@ -5580,10 +5605,7 @@ export class VideoBroker {
                             { ...scenePlan, keyframe, segments: [segment], recovery_request: prepared.contract.prompt }, references,
                             { ...options, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
                     } catch (error) {
-                        const declined = error instanceof VideoKeyframeError
-                            ? ['moderation', 'review_unavailable', 'identity_review', 'composition_review'].includes(error.code)
-                            : isModerationFailure(error);
-                        if (!declined) throw error;
+                        if (!frontierKeyframeDeclined(error)) throw error;
                         console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);
                         const directive = { local_image_required: true,
                             keyframe: { prompt: keyframe.prompt, motion_contract: keyframe.motion_contract || {} },
