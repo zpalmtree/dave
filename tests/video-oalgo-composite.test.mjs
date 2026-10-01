@@ -131,9 +131,11 @@ test('failed Gemini identity repairs use a reviewed GPT Image edit with the orig
 test('strict identity review rejects missing identity verdicts even when the reviewer says acceptable', async t => {
     const { identity_preserved, ...missingIdentity } = approved;
     const requests = providers(t, [missingIdentity]);
-    await assert.rejects(createFrontierVideoKeyframe(plan, references, {
+    // Never accepted; the last drawn frame is kept only as best effort over local composition.
+    const result = await createFrontierVideoKeyframe(plan, references, {
         requireIdentityPreservation: true, strategy: 'conditional-v2',
-    }), /failed visual review/);
+    });
+    assert.equal(result.reviewStatus, 'best_effort');
     assert.equal(requests.reviews.length, 4);
     assert.equal(requests.openai.length, 2);
 });
@@ -143,9 +145,8 @@ test('preserving OALGO alone cannot pass a composite that loses the attached sub
         ...rejected, identity_preserved: true,
         issues: ['The teacher and classroom are missing.'], correction_prompt: 'Include the teacher behind the laptop.',
     }]);
-    await assert.rejects(createFrontierVideoKeyframe(plan, references, {
-        requireIdentityPreservation: true,
-    }), /teacher and classroom are missing/);
+    const result = await createFrontierVideoKeyframe(plan, references, { requireIdentityPreservation: true });
+    assert.equal(result.reviewStatus, 'best_effort');
     assert.equal(requests.reviews.length, 4);
 });
 
