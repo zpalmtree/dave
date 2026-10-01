@@ -109,6 +109,15 @@ const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', imp
 // photographic medium positively; the image models draw negated styles too.
 export const OALGO_PHOTOREAL_KEYFRAME = 'Render this as a photorealistic live-action photograph with the camera realism of the original Meximutt portrait: real people with natural skin texture and pores, real fabric, natural lens optics and lighting, and Meximutt, wherever he appears, with his own narrow eyes at their true size, even in a fantastical setting, unless the request itself asks for a different art style.';
 
+// Local Qwen Image Edit has never heard of Meximutt. Read as a creature's name,
+// it drew a mascot in his flag shirt and gave his face to another cast member
+// (61af9651). Name him only through his reference picture.
+export function bindLocalPresetIdentity(text: string): string {
+    return text.replace(/\bthe original Meximutt portrait\b/g, 'Picture 1')
+        .replace(/\bMeximutt's\b/g, "the Picture 1 man's")
+        .replace(/\bMeximutt\b/g, 'the man in Picture 1');
+}
+
 interface VideoAttachmentSourceImageDescriptor {
     url: string;
     mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
@@ -5629,8 +5638,10 @@ export class VideoBroker {
                     } catch (error) {
                         if (!frontierKeyframeDeclined(error)) throw error;
                         console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);
+                        const local = (text: string) => sourceRequired ? bindLocalPresetIdentity(text) : text;
                         const directive = { local_image_required: true,
-                            keyframe: { prompt: keyframe.prompt, motion_contract: keyframe.motion_contract || {} },
+                            keyframe: { prompt: local(keyframe.prompt), motion_contract: Object.fromEntries(
+                                Object.entries(keyframe.motion_contract || {}).map(([key, value]) => [key, local(String(value))])) },
                             use_references: references.length > 0,
                             opening_identity_required: references.length > 0 };
                         state.local_openings ||= {};
@@ -5676,7 +5687,9 @@ export class VideoBroker {
                         // One corrective local image for the entire video, not one retry tree per scene.
                         if (repairAllowed) state.opening_identity_repair = key;
                         state.opening_identity[key] = { acceptable: decision.acceptable, permitted: true,
-                            issues: decision.acceptable ? [] : [decision.correction], repair_allowed: repairAllowed };
+                            // The correction is appended to the local repair prompt.
+                            issues: decision.acceptable ? [] : [sourceRequired ? bindLocalPresetIdentity(decision.correction)
+                                : decision.correction], repair_allowed: repairAllowed };
                     }
                     const verdict = state.opening_identity[key];
                     state.reviews ||= {};
