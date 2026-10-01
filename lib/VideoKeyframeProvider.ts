@@ -50,6 +50,11 @@ export interface VideoKeyframeReview {
     correction_prompt: string;
 }
 
+interface RejectedVideoKeyframe {
+    image: VideoKeyframeResult;
+    review: VideoKeyframeReview;
+}
+
 export type VideoKeyframeFailureCode = 'moderation' | 'identity_review' | 'composition_review'
     | 'review_unavailable' | 'timeout' | 'provider_error';
 
@@ -113,6 +118,8 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     reviewModel?: string;
     reviewReasoningEffort?: 'low' | 'medium' | 'high';
     reviewImageDetail?: 'low' | 'high';
+    /** Collects every frame the reviewer rejected, so a refusal can still use the best one. */
+    rejectedCandidates?: RejectedVideoKeyframe[];
     reviewMaxOutputTokens?: number;
     initialCandidate?: Promise<VideoKeyframeResult>;
 }
@@ -810,7 +817,9 @@ async function optionalReview(
     let lastError: unknown;
     for (let retry = 0; retry < 2; retry += 1) {
         try {
-            return await reviewVideoKeyframe(plan, image, references, options, nextAttempt());
+            const review = await reviewVideoKeyframe(plan, image, references, options, nextAttempt());
+            if (!review.acceptable) options.rejectedCandidates?.push({ image, review });
+            return review;
         } catch (error) {
             if (error instanceof VideoUsagePersistenceError) throw error;
             lastError = error;
@@ -1063,6 +1072,33 @@ async function createSerialKeyframe(
     references: VideoKeyframeReference[],
     options: VideoKeyframeOptions,
     initialReviewAttempt = 0,
+    initialCandidate?: Promise<VideoKeyframeResult>,
+): Promise<VideoKeyframeResult> {
+    // Callers compose a declined frame with local Qwen Image, a much weaker model.
+    // That is for content the frontier models will not draw at all: once one has
+    // drawn the scene, its best rejected frame beats a local one (61af9651 lost
+    // two Gemini frames to identity review, then GPT Image refused).
+    const rejected: RejectedVideoKeyframe[] = [];
+    try {
+        return await createSerialKeyframeAttempts(plan, references, { ...options, rejectedCandidates: rejected },
+            initialReviewAttempt, initialCandidate);
+    } catch (error) {
+        const declined = error instanceof VideoKeyframeError
+            ? ['moderation', 'identity_review', 'composition_review'].includes(error.code)
+            : isModerationFailure(error);
+        const best = rejected.find(candidate => candidate.review.identity_preserved) || rejected.at(-1);
+        if (!declined || !best) throw error;
+        console.log(`[Video keyframe] Keeping the best rejected frontier frame instead of local composition: ${
+            error instanceof Error ? error.message : String(error)}`);
+        return bestEffort(best.image);
+    }
+}
+
+async function createSerialKeyframeAttempts(
+    plan: Record<string, any>,
+    references: VideoKeyframeReference[],
+    options: VideoKeyframeOptions,
+    initialReviewAttempt: number,
     initialCandidate?: Promise<VideoKeyframeResult>,
 ): Promise<VideoKeyframeResult> {
     let reviewAttempt = initialReviewAttempt;

@@ -2834,7 +2834,10 @@ for (const repairAccepted of [true, false]) {
             assert.equal(image.bytes.toString(), 'openai-2');
             assert.equal(image.reviewStatus, 'accepted');
         } else {
-            await assert.rejects(result, /Fallback first frames failed visual review: Hair shape changed/);
+            // A drawn frontier frame still beats handing the scene to local Qwen Image.
+            const image = await result;
+            assert.equal(image.bytes.toString(), 'openai-2');
+            assert.equal(image.reviewStatus, 'best_effort');
         }
         assert.equal(geminiCalls, 2);
         assert.equal(openaiCalls, 2);
@@ -2843,6 +2846,56 @@ for (const repairAccepted of [true, false]) {
             .map(value => value.attempt), [1, 3]);
     });
 }
+
+test('a refusal after rejected frontier frames keeps the best one instead of local composition', async t => {
+    // 61af9651: Gemini drew the scene twice, review rejected both, then GPT Image refused.
+    let geminiCalls = 0;
+    let reviewCalls = 0;
+    t.mock.method(console, 'log', () => {});
+    t.mock.method(console, 'warn', () => {});
+    t.mock.method(globalThis, 'fetch', async input => {
+        const url = String(input);
+        let body;
+        let status = 200;
+        if (url.includes('generativelanguage.googleapis.com')) {
+            geminiCalls += 1;
+            body = { candidates: [{ content: { parts: [{ inlineData: {
+                mimeType: 'image/png', data: Buffer.from(`gemini-${geminiCalls}`).toString('base64'),
+            } }] } }], usageMetadata: { promptTokenCount: 10 } };
+        } else if (url.includes('/v1/images/')) {
+            status = 400;
+            body = { error: { code: 'moderation_blocked', message: 'Your request was rejected by the safety system.' } };
+        } else if (url.endsWith('/v1/responses')) {
+            reviewCalls += 1;
+            body = { model: VIDEO_KEYFRAME_REVIEW_MODEL, output_text: JSON.stringify({
+                acceptable: false, best_effort_worthy: false, identity_preserved: reviewCalls === 1,
+                issues: ['The pizza box is empty.'], correction_prompt: 'Fill the pizza box.',
+            }), usage: { input_tokens: 10, output_tokens: 5 } };
+        } else {
+            throw new Error(`Unexpected provider request: ${url}`);
+        }
+        return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    });
+    const plan = {
+        intent: 'Six roommates argue over one pizza.',
+        keyframe: { prompt: 'The recurring man by the door.', motion_contract: {} },
+        segments: [{ shots: [{ visual: 'The roommates argue.', camera: 'Wide.' }] }],
+    };
+    const image = await createFrontierVideoKeyframe(plan, [{
+        label: 'Original identity', kind: 'identity', visualFactsToPreserve: 'Face and mohawk.',
+        bytes: Buffer.from('identity'), mimeType: 'image/png', sourceUrl: 'source:approved', contextUrl: 'source:approved',
+    }], { requireIdentityPreservation: true, reviewPurpose: 'recovery-scene' });
+    assert.equal(image.bytes.toString(), 'gemini-1', 'The frame that kept his identity wins over the later one.');
+    assert.equal(image.reviewStatus, 'best_effort');
+    assert.equal(geminiCalls, 2);
+
+    // With nothing drawn, the refusal still reaches the caller's local fallback.
+    geminiCalls = 0;
+    t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(
+        { error: { code: 'moderation_blocked', message: 'Your request was rejected by the safety system.' } }),
+    { status: 400, headers: { 'content-type': 'application/json' } }));
+    await assert.rejects(createFrontierVideoKeyframe(plan, [], {}), error => error.code === 'moderation');
+});
 
 test('keyframe review timeout retries the quality gate before accepting a candidate', async t => {
     const attempts = [];

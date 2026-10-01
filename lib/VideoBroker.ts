@@ -5627,9 +5627,9 @@ export class VideoBroker {
                         bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                     }));
                     // The frontier providers draw far better frames, and a single scene of a
-                    // rejected story is often unobjectionable, so they always go first. A
-                    // refusal or review veto has the desktop compose the opening with local
-                    // Qwen Image instead; an outage still waits and retries.
+                    // rejected story is often unobjectionable, so they always go first. Only
+                    // when none of them would draw the scene does the desktop compose the
+                    // opening with local Qwen Image; an outage still waits and retries.
                     let frame: VideoKeyframeResult;
                     try {
                         frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
