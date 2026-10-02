@@ -950,6 +950,103 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
 });
 }
 
+for (const version of [4, 5]) {
+test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not to'} animate a broker-repainted frame`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-still-'));
+    const repaints = [];
+    let refuse = false;
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        videoEditGrounder: async (_source, target) => ({ action: 'replace', target, clarification: '' }),
+        sourceVideoDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 7.5 };
+        },
+        sourceImageDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'replacement.png');
+            writeFileSync(path, 'replacement');
+            return { path, bytes: 11, mimeType: 'image/png' };
+        },
+        videoEditStillGenerator: async (frame, replacement, target, request, options) => {
+            repaints.push({ frame: frame.bytes.toString(), replacement: replacement.bytes.toString(), target, request });
+            await options.onUsage({ stage: 'video_edit_still', attempt: 1, outcome: refuse ? 'error' : 'success',
+                provider: 'openai', model: 'gpt-image-test', inputTokens: 10, outputTokens: 20, images: refuse ? 0 : 1 });
+            if (refuse) {
+                const error = new Error('Your request was rejected by the safety system.');
+                error.code = 'moderation';
+                throw error;
+            }
+            return { bytes: Buffer.from('repainted'), mimeType: 'image/png', provider: 'openai', model: 'gpt-image-test' };
+        },
+    });
+    await broker.start();
+    try {
+        const accepted = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'Meximutt',
+                source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4' },
+                source_image: { url: 'https://cdn.discordapp.com/attachments/1/2/replacement.png',
+                    mime_type: 'image/png', bytes: 11, name: 'replacement.png' },
+                video_edit_target: 'the man', requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+                command_message_id: 'repaint', status_message_id: 'status' }),
+        });
+        assert.equal(accepted.status, 201);
+        const job = (await accepted.json()).job;
+        const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        try {
+            socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
+                capabilities: ['minimax'], current_job: null, video_edit_version: version }));
+            const lease = await take(value => value.type === 'job');
+            assert.equal(lease.job.id, job.id);
+            assert.equal(lease.job.video_edit_repaint, version >= 5);
+            const still = (body, headers = {}) => fetch(
+                `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-still`, {
+                    method: 'POST', body,
+                    headers: { authorization: 'Bearer worker-secret', 'x-video-lease': lease.job.lease_id,
+                        'content-type': 'image/png', ...headers },
+                });
+            if (version < 5) return;
+            assert.equal((await still('frame', { 'x-video-lease': 'stale' })).status, 409);
+            assert.equal((await still('frame', { 'content-type': 'application/json' })).status, 400);
+            const repainted = await still('frame');
+            assert.equal(repainted.status, 200);
+            assert.equal(repainted.headers.get('content-type'), 'image/png');
+            assert.equal(await repainted.text(), 'repainted');
+            assert.deepEqual(repaints[0], { frame: 'frame', replacement: 'replacement', target: 'the man', request: 'Meximutt' });
+            assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-frame.png'), 'utf8'), 'frame');
+            assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-still.png'), 'utf8'), 'repainted');
+            refuse = true;
+            const refused = await still('frame');
+            assert.equal(refused.status, 422);
+            assert.equal((await refused.json()).reason_code, 'moderation');
+            const usage = await broker.get(
+                "SELECT COUNT(*) AS count FROM video_usage_events WHERE job_public_id=? AND stage='video_edit_still'", [job.id]);
+            assert.equal(usage.count, 1, 'Usage events are keyed by stage and attempt, so the retry replaces nothing.');
+            const spans = await broker.get(
+                "SELECT COUNT(*) AS count FROM video_job_spans WHERE job_public_id=? AND name='video_edit_still'", [job.id]);
+            assert.equal(spans.count, 1);
+        } finally {
+            socket.close();
+        }
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+}
+
 test('text replacements generate and retain an image for both commands; failed generation never queues an edit', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-twitter-replacement-'));
     const generations = [];

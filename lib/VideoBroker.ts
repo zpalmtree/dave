@@ -76,6 +76,7 @@ import {
     configuredVideoKeyframeStrategy,
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
+    createVideoEditStill,
     isModerationFailure,
     generateFrontierVideoKeyframeCandidate,
 } from './VideoKeyframeProvider.js';
@@ -170,6 +171,7 @@ interface BrokerOptions {
         options?: VideoKeyframeOptions,
     ) => Promise<VideoKeyframeResult>;
     keyframeCandidateGenerator?: typeof generateFrontierVideoKeyframeCandidate;
+    videoEditStillGenerator?: typeof createVideoEditStill;
     keyframeReferenceResolver?: (
         plan: Record<string, any>,
         jobDirectory: string,
@@ -1430,6 +1432,23 @@ function storeCompositedSourceImage(
     writeFileSync(temporary, result.bytes, { flag: 'wx' });
     renameSync(temporary, destination);
     return { path: destination, mimeType: result.mimeType, bytes: result.bytes.length };
+}
+
+/** VIDEO_EDIT_REPAINT=0 keeps every replace edit on the H3 path. */
+function videoEditRepaintEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+    return environment.VIDEO_EDIT_REPAINT !== '0';
+}
+
+async function readImageBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    let length = 0;
+    for await (const chunk of req) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        length += buffer.length;
+        if (length > maxBytes) throw new Error('The frame is too large.');
+        chunks.push(buffer);
+    }
+    return Buffer.concat(chunks);
 }
 
 function writeImage(res: ServerResponse, path: string, mimeType: string, headers: Record<string, string>): void {
@@ -5331,6 +5350,10 @@ export class VideoBroker {
                 video_edit_mode: row.video_edit_mode || 'replace',
                 video_replacement_reference_prompt: row.source_video_path && !row.source_image_path && row.video_replacement_prompt
                     ? videoReplacementReferencePrompt(row.video_replacement_prompt, row.video_edit_mode || 'replace') : null,
+                // Version 5 workers animate a repainted frame with Viggle-Animate and fall back to H3.
+                video_edit_repaint: videoEditRepaintEnabled() && this.worker.videoEditVersion >= 5
+                    && Boolean(row.source_video_path && row.source_image_path)
+                    && (row.video_edit_mode || 'replace') === 'replace',
                 has_source_image: Boolean(row.source_image_path),
                 source_image_composition: row.source_image_composition || null,
                 lease_id: leaseId,
@@ -5815,6 +5838,71 @@ export class VideoBroker {
         }
     }
 
+    /** Repaint the worker's chosen source-video frame with the replacement for Viggle-Animate. */
+    private async handleVideoEditStill(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
+        const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+        if (!job || job.worker_id !== this.worker?.id || publicId !== this.worker.currentJob
+            || !this.workerLeaseMatches(req, job)) {
+            writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+            return;
+        }
+        if (!job.source_video_path || (job.video_edit_mode || 'replace') !== 'replace'
+            || !job.source_image_path || !job.source_image_mime || !existsSync(job.source_image_path)) {
+            writeJson(res, 409, { error: 'This job has no replacement image to repaint into its clip.' });
+            return;
+        }
+        const mimeType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
+            writeJson(res, 400, { error: 'The frame must be a PNG, JPEG, or WebP image.' });
+            return;
+        }
+        let frame: Buffer;
+        try {
+            frame = await readImageBody(req, VIDEO_KEYFRAME_MAX_BYTES);
+        } catch (error) {
+            writeJson(res, 413, { error: error instanceof Error ? error.message : String(error) });
+            return;
+        }
+        if (!frame.length) {
+            writeJson(res, 400, { error: 'The frame is empty.' });
+            return;
+        }
+        const directory = resolve(this.options.resultsDir, job.public_id);
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, 'video-edit-frame.png'), frame);
+        const started = Date.now();
+        try {
+            const still = await (this.options.videoEditStillGenerator || createVideoEditStill)(
+                { bytes: frame, mimeType },
+                { bytes: readFileSync(job.source_image_path), mimeType: job.source_image_mime },
+                job.video_edit_target || 'the subject',
+                job.video_replacement_prompt || job.prompt,
+                { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job) },
+            );
+            const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
+            const path = join(directory, `video-edit-still.${extension}`);
+            writeFileSync(path, still.bytes);
+            await this.recordMetricSpan(job.public_id, {
+                source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
+                metadata: { status: 'ok' },
+            });
+            writeImage(res, path, still.mimeType, { 'x-video-edit-still-model': still.model });
+        } catch (error) {
+            const moderation = isModerationFailure(error)
+                || (error instanceof VideoKeyframeError && error.code === 'moderation');
+            console.warn(`[Video] Repainting the edit frame for ${job.public_id} failed; the worker falls back to H3.`, error);
+            await this.recordMetricSpan(job.public_id, {
+                source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
+                metadata: { status: 'error' },
+            });
+            writeJson(res, moderation ? 422 : 502, {
+                error: sanitizeVideoWorkerText(String(error instanceof Error ? error.message : error),
+                    'The repaint service failed.', 500),
+                reason_code: moderation ? 'moderation' : 'provider_error',
+            });
+        }
+    }
+
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
         if (await this.handleImageWorkerHttp(req, res, url)) return;
         const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
@@ -5962,6 +6050,11 @@ export class VideoBroker {
             } else {
                 writeImage(res, job.source_audio_path, 'audio/wav', {});
             }
+            return;
+        }
+        const editStill = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-still$/.exec(url.pathname);
+        if (editStill && req.method === 'POST') {
+            await this.handleVideoEditStill(req, res, editStill[1]);
             return;
         }
         const sourceImage = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/source-image$/.exec(url.pathname);
