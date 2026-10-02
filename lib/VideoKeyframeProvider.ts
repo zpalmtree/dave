@@ -642,6 +642,112 @@ async function generateOpenAIKeyframe(
     }
 }
 
+export interface VideoEditStillImage {
+    bytes: Buffer;
+    mimeType: string;
+}
+
+/**
+ * Viggle-Animate animates one repainted frame of the source clip, so the repaint must keep that
+ * frame's exact composition. gpt-image holds the pose, head size and crop; Gemini pulled the camera
+ * back in testing, and the animation then froze or broke apart.
+ */
+export function videoEditStillPrompt(target: string, request: string): string {
+    const named = /^(the|a|an) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
+    return [
+        `Edit Image 1, a frame from a video. Replace ${named} with the subject shown in Image 2.`,
+        `The replacement takes exactly the place of ${named}: the same position in the frame, the same size,`,
+        'the same head angle, gaze, expression, eye openness and mouth shape where they apply, and the same pose',
+        'and crop.',
+        'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
+        'keeping its distinctive look instead of redesigning it.',
+        'Keep everything else in Image 1 exactly as it is: the background, other subjects, lighting, colors,',
+        'camera angle and framing.',
+        'Output a single photographic frame with the same composition as Image 1, never a collage or side-by-side.',
+        request.trim() ? `The user asked for this replacement: ${request.trim().slice(0, 600)}` : '',
+    ].filter(Boolean).join(' ');
+}
+
+export async function createVideoEditStill(
+    frame: VideoEditStillImage,
+    replacement: VideoEditStillImage,
+    target: string,
+    request: string,
+    options: VideoFrontierCallOptions & { abortSignal?: AbortSignal } = {},
+): Promise<VideoKeyframeResult> {
+    const stage = 'video_edit_still';
+    const model = VIDEO_KEYFRAME_FALLBACK_MODEL;
+    const prompt = videoEditStillPrompt(target, request);
+    const started = Date.now();
+    let outcome: 'success' | 'error' = 'error';
+    let detail: string | undefined;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    options.abortSignal?.addEventListener('abort', cancel, { once: true });
+    if (options.abortSignal?.aborted) controller.abort();
+    const timeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
+    try {
+        await options.beforeRequest?.({ stage, attempt: 1, provider: 'openai', model,
+            maxInputTokens: videoRequestInputTokenBound({ prompt, references: [{ type: 'input_image' }, { type: 'input_image' }] }),
+            maxOutputTokens: 32768, maxImages: 1 });
+        const form = new FormData();
+        form.append('model', model);
+        form.append('prompt', prompt);
+        // auto keeps the frame's own aspect ratio, which the animation is framed on.
+        form.append('size', 'auto');
+        form.append('quality', 'high');
+        form.append('output_format', 'png');
+        form.append('moderation', 'low');
+        form.append('n', '1');
+        [frame, replacement].forEach((image, index) => {
+            const extension = image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.split('/')[1];
+            form.append('image[]', new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }),
+                `image_${index + 1}.${extension}`);
+        });
+        const response = await fetch('https://api.openai.com/v1/images/edits', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { authorization: `Bearer ${config.openaiApiKey}` },
+            body: form,
+        });
+        const body: any = await response.json();
+        const usage = body?.usage;
+        const encoded = body?.data?.[0]?.b64_json;
+        if (usage || encoded) {
+            const cached = Number(usage?.input_tokens_details?.cached_tokens || 0);
+            await options.onUsage?.({
+                stage, attempt: 1, outcome: response.ok && encoded ? 'success' : 'error',
+                provider: 'openai', model: String(body?.model || model), serviceTier: 'default',
+                inputTokens: Math.max(0, Number(usage?.input_tokens || 0) - cached),
+                outputTokens: Number(usage?.output_tokens || 0),
+                cacheReadTokens: cached,
+                images: encoded ? 1 : 0,
+                imageInputTokens: Number(usage?.input_tokens_details?.image_tokens || 0),
+                imageOutputTokens: Number(usage?.output_tokens || 0) || (encoded ? 5500 : 0),
+                rawUsage: usage, usageMissing: !usage,
+            });
+        }
+        if (!response.ok) {
+            const message = body?.error?.message || `OpenAI returned HTTP ${response.status}.`;
+            const moderation = isModerationFailure(new Error(`${body?.error?.code || ''} ${message}`));
+            throw new VideoKeyframeError(moderation ? 'moderation' : 'provider_error', message);
+        }
+        if (!encoded) throw new Error('OpenAI returned no repainted frame.');
+        outcome = 'success';
+        return checkedImageResult(Buffer.from(encoded, 'base64'), 'image/png', 'openai', model);
+    } catch (error) {
+        detail = error instanceof Error ? error.message : String(error);
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+        options.abortSignal?.removeEventListener('abort', cancel);
+        await options.onAttempt?.({
+            stage, attempt: 1, outcome, provider: 'openai', model, serviceTier: 'default',
+            durationSeconds: (Date.now() - started) / 1000, detail,
+        });
+    }
+}
+
 function responseOutputText(response: any): string {
     if (typeof response?.output_text === 'string' && response.output_text.trim()) {
         return response.output_text.trim();

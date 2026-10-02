@@ -84,6 +84,26 @@ that region over the source frames and muxes the original soundtrack. AAC source
 audio is copied; other codecs are converted to AAC for Discord delivery.
 Delivery may compress the result to meet the channel's upload limit.
 
+Replace edits with a replacement image use Viggle-Animate when the desktop worker
+reports `video_edit_version` 5. Viggle-Animate is a finetune of the Ref2VA
+transformer that animates one repainted frame of the clip through the source
+motion. The worker tracks the target in every segment and sends the broker the
+frame where it is largest. The broker repaints the target in that frame with
+the replacement image using gpt-image. The repaint keeps the frame's pose, size,
+crop and expression, which the animation depends on. Gemini pulled the camera
+back in testing, and the animation then froze or broke apart. Each segment then
+renders in 124-frame windows that carry 22 frames forward, sampled against the
+frozen source soundtrack. The result is composited over the tracked region like
+the H3 path. Both the frame and the repaint are kept beside the clip as
+`video-edit-frame.png` and `video-edit-still.png`, and the repaint's usage is
+recorded with the job. A refused or failed repaint, or a failed Viggle render,
+falls back to the H3 replacement. A tracking failure is final, since H3 would
+fail the same way. Add edits and replacements drawn locally by Qwen Image
+always use H3. Set `VIDEO_EDIT_REPAINT=0` on the broker to keep every replace
+edit on H3. The worker needs `minimax_h3_ref2va_viggle_pruned_int8_convrot`,
+`viggle_animate_dmd_lora_r64`, `models/text_cond/fixed_embed_fwd_anyframe`, and
+the `viggle_animate_h3` custom node pack in ComfyUI.
+
 Cuts, a target hidden for much of the clip, or large differences in body shape
 can confuse automatic tracking and replacement. Each segment tracks the target
 independently, so a visible seam can occur where two renders meet. A portrait
