@@ -12,7 +12,8 @@ export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/
 // Allow two three-minute image attempts and their 75-second visual reviews.
 export const VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS = 9 * 60 * 1000;
 // Include both source downloads and time to return the broker's result.
-export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS + 2 * 60 * 1000;
+// Long songs add transcription and excerpt selection before any image composition.
+export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS + 6 * 60 * 1000;
 
 export type VideoModelId = 'ltx' | 'ltxfast' | 'minimax' | 'minimaxfast';
 export type VideoGeneratorModelId = 'ltx' | 'h3';
@@ -233,6 +234,11 @@ export interface VideoJobView {
     source_kind?: VideoSourceKind | null;
     has_source_audio?: boolean;
     source_audio_seconds?: number | null;
+    /** The part of a longer song or source video that was used. */
+    source_excerpt?: {
+        start_seconds: number; end_seconds: number; source_seconds: number;
+        label: string; chosen: 'range' | 'auto' | 'start';
+    } | null;
     source_image_composition?: 'generated' | 'local_qwen' | null;
     created_at: number;
     updated_at: number;

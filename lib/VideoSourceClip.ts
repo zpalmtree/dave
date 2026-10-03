@@ -1,11 +1,12 @@
 import { execFile } from 'child_process';
-import { createWriteStream, mkdirSync, renameSync, rmSync } from 'fs';
+import { createWriteStream, mkdirSync, renameSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import fetch from 'node-fetch';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
 import { isTwitterVideoUrl } from './TwitterVideo.js';
+import { rangeVideoSourceExcerpt, VIDEO_SOURCE_INPUT_MAX_SECONDS, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 
 export const VIDEO_EDIT_MIN_SECONDS = 0.5;
 export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
@@ -24,6 +25,8 @@ export interface StoredVideoSourceClip {
     path: string;
     bytes: number;
     duration: number;
+    /** Set when only part of a longer or ranged source is kept. */
+    excerpt?: VideoSourceExcerpt | null;
 }
 
 export function isVideoSourceClipUrl(value: string): boolean {
@@ -61,13 +64,41 @@ async function probeDuration(path: string): Promise<number> {
     const value = JSON.parse(output);
     if (!value.streams?.length) throw new Error('The source clip has no video stream.');
     const duration = Number(value.format?.duration);
-    if (!Number.isFinite(duration) || duration < VIDEO_EDIT_MIN_SECONDS || duration > VIDEO_EDIT_MAX_SECONDS) {
-        throw new Error(`Video replacement supports clips from ${VIDEO_EDIT_MIN_SECONDS} to ${VIDEO_EDIT_MAX_SECONDS} seconds.`);
+    if (!Number.isFinite(duration) || duration < VIDEO_EDIT_MIN_SECONDS || duration > VIDEO_SOURCE_INPUT_MAX_SECONDS) {
+        throw new Error(`Video replacement supports clips from ${VIDEO_EDIT_MIN_SECONDS} seconds to 10 minutes.`);
     }
     return duration;
 }
 
-export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, directory: string): Promise<StoredVideoSourceClip> {
+/**
+ * Keeps the requested range of a source video, or its first two minutes when it is longer
+ * and no range was given. Returns null when the whole clip is used.
+ */
+export function videoSourceClipExcerpt(duration: number, range: VideoSourceRange | null): VideoSourceExcerpt | null {
+    if (range) {
+        const excerpt = rangeVideoSourceExcerpt(range, duration, VIDEO_EDIT_MAX_SECONDS, 'video');
+        if (excerpt.end_seconds - excerpt.start_seconds < VIDEO_EDIT_MIN_SECONDS) throw new Error('Pick a video range of at least half a second.');
+        return excerpt.start_seconds <= 0 && excerpt.end_seconds >= duration ? null : excerpt;
+    }
+    if (duration <= VIDEO_EDIT_MAX_SECONDS) return null;
+    return { start_seconds: 0, end_seconds: VIDEO_EDIT_MAX_SECONDS, source_seconds: duration, label: '', chosen: 'start' };
+}
+
+export async function cutVideoSourceClip(input: string, output: string, excerpt: VideoSourceExcerpt): Promise<number> {
+    const length = excerpt.end_seconds - excerpt.start_seconds;
+    // Re-encoding keeps the cut frame-accurate; a stream copy would snap to keyframes.
+    await new Promise<void>((resolve, reject) => execFile('ffmpeg', ['-nostdin', '-v', 'error', '-y',
+        '-ss', excerpt.start_seconds.toFixed(3), '-i', input, '-t', length.toFixed(3),
+        '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', output,
+    ], { timeout: 600_000, maxBuffer: 1024 * 1024 }, error => error ? reject(new Error('Could not cut the source video.')) : resolve()));
+    const duration = await probeDuration(output);
+    if (duration > VIDEO_EDIT_MAX_SECONDS + 0.1) throw new Error('Could not cut the source video.');
+    return duration;
+}
+
+export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, directory: string,
+    range: VideoSourceRange | null = null): Promise<StoredVideoSourceClip> {
     source = sourceClipDescriptor(source)!;
     const extension = source.name.split('.').pop()!.toLowerCase();
     mkdirSync(directory, { recursive: true });
@@ -92,6 +123,12 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
         await pipeline(response.body, meter, createWriteStream(temporary, { flags: 'wx' }));
         if (!bytes) throw new Error('The source video is empty.');
         const duration = await probeDuration(temporary);
+        const excerpt = videoSourceClipExcerpt(duration, range);
+        if (excerpt) {
+            const cut = join(directory, 'source-video.mp4');
+            const cutDuration = await cutVideoSourceClip(temporary, cut, excerpt);
+            return { path: cut, bytes: statSync(cut).size, duration: cutDuration, excerpt };
+        }
         renameSync(temporary, destination);
         return { path: destination, bytes, duration };
     } finally {

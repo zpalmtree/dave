@@ -63,8 +63,11 @@ just like an attached clip.
 Quote the subject if its name includes “with,” for example
 `replace "the woman with a red coat" with the attached image`.
 
-The source clip must be MP4, MOV, M4V, WebM, or MKV, 0.5–120 seconds, and no larger
-than 100 MiB. MiniMax H3 generates 5–15 seconds per run. Shorter clips are padded
+The source clip must be MP4, MOV, M4V, WebM, or MKV, 0.5 seconds to 10 minutes,
+and no larger than 100 MiB. A clip longer than two minutes keeps its first two
+minutes, and a range in the prompt such as `0:40-1:10` or `from 1:05` keeps that
+part instead (an open range runs up to two minutes). The broker re-encodes the
+excerpt so it starts on the requested frame. MiniMax H3 generates 5–15 seconds per run. Shorter clips are padded
 for generation and trimmed back to the source length. Longer clips are split
 into frame-aligned segments, edited in order, and joined with the original audio.
 The clip is downloaded to the broker before queueing so its media URL

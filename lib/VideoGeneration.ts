@@ -1,4 +1,5 @@
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
+import { describeVideoSourceExcerpt, extractVideoSourceRange, videoSourceRange, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { classifyVideoEditIntent, VideoEditMode } from './VideoEditIntent.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
@@ -214,7 +215,7 @@ function videoJobDisplayName(job: Pick<VideoJobView, 'model' | 'command_variant'
 }
 
 export function videoSourceDescription(job: Pick<VideoJobView,
-    'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio'>): string {
+    'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio' | 'source_excerpt'>, rangeHint = false): string {
     const descriptions: Record<string, string> = {
         video_edit: 'Editing your video',
         video_frame: 'Using a frame from your video',
@@ -223,9 +224,14 @@ export function videoSourceDescription(job: Pick<VideoJobView,
         preset_image: 'Combining Meximutt with your image',
         preset_video_frame: 'Combining Meximutt with a frame from your video',
     };
-    const source = job.has_source_video ? descriptions.video_edit
+    const excerpt = job.source_excerpt;
+    const source = job.has_source_video
+        ? (excerpt ? `Editing ${describeVideoSourceExcerpt(excerpt, 'video')}` : descriptions.video_edit)
         : descriptions[job.source_kind || ''] || (job.has_source_image ? 'Using a reference image' : '');
-    return [source, job.has_source_audio ? 'Lip-syncing to your song' : ''].filter(Boolean).join(' · ');
+    const song = !job.has_source_audio ? ''
+        : excerpt ? `Lip-syncing to ${describeVideoSourceExcerpt(excerpt, 'song')}` : 'Lip-syncing to your song';
+    const hint = rangeHint && excerpt && excerpt.chosen !== 'range' ? ' (add a range like 1:05-1:35 to pick another part)' : '';
+    return [source, song].filter(Boolean).join(' · ') + hint;
 }
 
 export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_intent'>): string {
@@ -529,7 +535,7 @@ export function initialVideoRequestStatus(model: VideoModelId, commandVariant?: 
 }
 
 export function formatVideoJob(job: VideoJobView): string {
-    const source = videoSourceDescription(job);
+    const source = videoSourceDescription(job, true);
     const head = `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**${source ? ` · ${source}` : ''}`;
     if (job.status === 'queued') {
         const position = job.queue_position ? `**#${job.queue_position} in line.**` : '**In line.**';
@@ -1201,6 +1207,11 @@ export async function handleVideoRequest(
     let replacement: ReturnType<typeof parseVideoReplacement>;
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
     prompt = stripTwitterPostLinks(prompt);
+    // A time range such as "1:05-1:50" picks the part of a long song or source video to use.
+    const promptWithRange = prompt;
+    const extracted = extractVideoSourceRange(prompt);
+    prompt = extracted.prompt;
+    let sourceRange: VideoSourceRange | null = null;
     const editContext = JSON.stringify({ request: videoPromptPlainText(prompt, msg.channel),
         reply: referencedMessage ? videoPromptPlainText(referencedMessage.content, referencedMessage.channel).slice(0, 1500) : '',
         earlier: videoReplyChainGuidance(await earlierReplyChain) }).slice(0, 6000);
@@ -1216,6 +1227,7 @@ export async function handleVideoRequest(
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
         if (replacement && sourceAudio) throw new Error('This edit keeps your video’s soundtrack. Please remove the separate song attachment.');
+        sourceRange = sourceAudio || replacement ? videoSourceRange(extracted.range) : null;
         if (replacement && !attachedSourceImage && !options.presetSourceImage && !replacement.prompt) {
             throw new Error('Attach a replacement image or describe the replacement: replace the character with slugs.');
         }
@@ -1223,6 +1235,8 @@ export async function handleVideoRequest(
         await msg.reply(error instanceof Error ? error.message : String(error));
         return;
     }
+    // Without a song or edited clip, the times belong to the user's idea.
+    if (!sourceRange) prompt = promptWithRange;
     const sourceImage: SubmittedVideoSourceImage | null = options.presetSourceImage && !replacement
         ? { preset: options.presetSourceImage }
         : attachedSourceImage || (replacement && options.presetSourceImage && videoReplacementUsesPreset(replacement.prompt)
@@ -1286,6 +1300,7 @@ export async function handleVideoRequest(
                 video_edit_context: replacement ? editContext : undefined,
                 video_replacement_prompt: replacementImagePrompt,
                 source_audio: sourceAudio,
+                source_range: sourceRange || undefined,
                 source_image_composite: compositeSourceImage,
                 source_image_provider: options.compositeProvider,
                 planner_guidance: plannerGuidance || undefined,

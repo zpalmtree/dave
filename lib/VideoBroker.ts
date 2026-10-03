@@ -1,7 +1,9 @@
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes } from './VideoEditIntent.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
-    transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics } from './VideoSourceAudio.js';
+    transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
+    cutVideoSourceAudio, excerptVideoSourceAudioLyrics } from './VideoSourceAudio.js';
+import { selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
@@ -178,6 +180,8 @@ interface BrokerOptions {
     ) => Promise<VideoKeyframeReference[]>;
     sourceAudioDownloader?: typeof storeVideoSourceAudio;
     sourceAudioTranscriber?: typeof transcribeVideoSourceAudio;
+    sourceAudioExcerptSelector?: typeof selectVideoSourceAudioExcerpt;
+    sourceAudioCutter?: typeof cutVideoSourceAudio;
     sourceImageDownloader?: (
         descriptor: VideoSourceImageDescriptor,
         directory: string,
@@ -338,6 +342,7 @@ interface JobRow {
     source_audio_path: string | null;
     source_audio_seconds: number | null;
     source_audio_lyrics_json: string | null;
+    source_excerpt_json: string | null;
     source_kind: VideoJobView['source_kind'];
     source_video_path: string | null;
     source_video_seconds: number | null;
@@ -1734,7 +1739,7 @@ export class VideoBroker {
             ['recovery_json', 'TEXT'], ['recovery_version', 'INTEGER NOT NULL DEFAULT 0'],
             ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
-            ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'],
+            ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_excerpt_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
             ['video_edit_target', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'],
@@ -2686,7 +2691,9 @@ export class VideoBroker {
         let videoDescriptor: SubmittedVideoSourceClip | null;
         let audioDescriptor: SubmittedVideoSourceAudio | null;
         let compositeDescriptor: VideoSourceImageDescriptor | null;
+        let sourceRange: VideoSourceRange | null;
         try {
+            sourceRange = videoSourceRange(body.source_range);
             audioDescriptor = sourceAudioDescriptor(body.source_audio);
             if (audioDescriptor && body.model !== 'minimax') throw new Error('Song lip-sync is supported by MiniMax and OALGO.');
             sourceDescriptor = sourceImageDescriptor(body.source_image);
@@ -2791,9 +2798,11 @@ export class VideoBroker {
         });
         const directory = resolve(this.options.resultsDir, publicId);
         let sourceVideo: StoredVideoSourceClip | null = null;
+        let sourceExcerpt: VideoSourceExcerpt | null = null;
         if (videoDescriptor) {
             try {
-                sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory);
+                sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory, sourceRange);
+                sourceExcerpt = sourceVideo.excerpt || null;
                 requestedDuration = sourceVideo.duration;
                 const grounding = validateVideoEditDecision(await (this.options.videoEditGrounder || groundVideoEditTarget)(
                     sourceVideo, videoEditTarget, videoEditContext, submissionHooks, videoEditMode), false);
@@ -2813,14 +2822,19 @@ export class VideoBroker {
         let sourceAudioLyrics: VideoSourceAudioLyrics | null = null;
         if (audioDescriptor) {
             try {
-                sourceAudio = await (this.options.sourceAudioDownloader || storeVideoSourceAudio)(audioDescriptor, directory);
-                requestedDuration = sourceAudio.duration;
+                const song = await (this.options.sourceAudioDownloader || storeVideoSourceAudio)(audioDescriptor, directory);
                 // Lyric timing improves the plan, but a song without it still renders.
-                sourceAudioLyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(sourceAudio, submissionHooks)
+                const songLyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, submissionHooks)
                     .catch(error => {
                         console.warn(`Could not transcribe the song for ${publicId}; planning without lyric timing.`, error);
                         return null;
                     });
+                // Rendering costs over a minute of GPU per second, so a long song becomes a short excerpt.
+                sourceExcerpt = await (this.options.sourceAudioExcerptSelector || selectVideoSourceAudioExcerpt)(
+                    { prompt, lyrics: songLyrics, seconds: song.duration, range: sourceRange }, submissionHooks);
+                sourceAudio = await (this.options.sourceAudioCutter || cutVideoSourceAudio)(song, sourceExcerpt, directory);
+                sourceAudioLyrics = excerptVideoSourceAudioLyrics(songLyrics, sourceExcerpt);
+                requestedDuration = sourceAudio.duration;
                 plannerGuidance = videoSourceAudioPlannerGuidance(sourceAudioLyrics, sourceAudio.duration);
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
@@ -2979,13 +2993,13 @@ export class VideoBroker {
                         requester_id, origin_bot_id,
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
-                        source_audio_path, source_audio_seconds, source_audio_lyrics_json,
+                        source_audio_path, source_audio_seconds, source_audio_lyrics_json, source_excerpt_json,
                         source_video_path, source_video_seconds, video_edit_target, video_edit_mode, video_replacement_prompt,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -3007,6 +3021,7 @@ export class VideoBroker {
                         now,
                         sourceAudio?.path || null, sourceAudio?.duration || null,
                         sourceAudioLyrics ? JSON.stringify(sourceAudioLyrics) : null,
+                        sourceExcerpt ? JSON.stringify(sourceExcerpt) : null,
                         sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
                         sourceVideo ? videoEditMode : null, replacementPrompt || null,
                         sourceImage?.path || null,
@@ -4565,6 +4580,7 @@ export class VideoBroker {
                 result_bytes: row.result_bytes,
                 has_source_audio: Boolean(row.source_audio_path),
                 source_audio_seconds: row.source_audio_seconds,
+                source_excerpt: row.source_excerpt_json ? JSON.parse(row.source_excerpt_json) : null,
                 has_source_video: Boolean(row.source_video_path),
                 source_video_seconds: row.source_video_seconds,
                 video_edit_target: row.video_edit_target,
