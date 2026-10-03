@@ -1,6 +1,7 @@
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes } from './VideoEditIntent.js';
-import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, VIDEO_SOURCE_AUDIO_GUIDANCE, StoredVideoSourceAudio, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
+import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
+    transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics } from './VideoSourceAudio.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
@@ -176,6 +177,7 @@ interface BrokerOptions {
         hooks?: VideoProviderHooks,
     ) => Promise<VideoKeyframeReference[]>;
     sourceAudioDownloader?: typeof storeVideoSourceAudio;
+    sourceAudioTranscriber?: typeof transcribeVideoSourceAudio;
     sourceImageDownloader?: (
         descriptor: VideoSourceImageDescriptor,
         directory: string,
@@ -335,6 +337,7 @@ interface JobRow {
     planner_model: string | null;
     source_audio_path: string | null;
     source_audio_seconds: number | null;
+    source_audio_lyrics_json: string | null;
     source_kind: VideoJobView['source_kind'];
     source_video_path: string | null;
     source_video_seconds: number | null;
@@ -1731,7 +1734,7 @@ export class VideoBroker {
             ['recovery_json', 'TEXT'], ['recovery_version', 'INTEGER NOT NULL DEFAULT 0'],
             ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
-            ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'],
+            ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
             ['video_edit_target', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'],
@@ -2807,11 +2810,18 @@ export class VideoBroker {
             }
         }
         let sourceAudio: StoredVideoSourceAudio | null = null;
+        let sourceAudioLyrics: VideoSourceAudioLyrics | null = null;
         if (audioDescriptor) {
             try {
                 sourceAudio = await (this.options.sourceAudioDownloader || storeVideoSourceAudio)(audioDescriptor, directory);
                 requestedDuration = sourceAudio.duration;
-                plannerGuidance = VIDEO_SOURCE_AUDIO_GUIDANCE;
+                // Lyric timing improves the plan, but a song without it still renders.
+                sourceAudioLyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(sourceAudio, submissionHooks)
+                    .catch(error => {
+                        console.warn(`Could not transcribe the song for ${publicId}; planning without lyric timing.`, error);
+                        return null;
+                    });
+                plannerGuidance = videoSourceAudioPlannerGuidance(sourceAudioLyrics, sourceAudio.duration);
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
                 await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
@@ -2969,13 +2979,13 @@ export class VideoBroker {
                         requester_id, origin_bot_id,
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
-                        source_audio_path, source_audio_seconds,
+                        source_audio_path, source_audio_seconds, source_audio_lyrics_json,
                         source_video_path, source_video_seconds, video_edit_target, video_edit_mode, video_replacement_prompt,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2996,6 +3006,7 @@ export class VideoBroker {
                         now,
                         now,
                         sourceAudio?.path || null, sourceAudio?.duration || null,
+                        sourceAudioLyrics ? JSON.stringify(sourceAudioLyrics) : null,
                         sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
                         sourceVideo ? videoEditMode : null, replacementPrompt || null,
                         sourceImage?.path || null,
@@ -3820,7 +3831,7 @@ export class VideoBroker {
                         plannerSourceImage,
                         plannerOptions,
                     );
-                    if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds);
+                    if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds, parseVideoSourceAudioLyrics(job.source_audio_lyrics_json));
                     const provisional = this.provisionalKeyframePrefetch.get(job.public_id);
                     if (provisional && provisional.identity !== keyframePlanIdentity(plan)) {
                         this.discardProvisionalKeyframe(job.public_id);
@@ -5492,6 +5503,7 @@ export class VideoBroker {
                             prompt: job.prompt, model: job.model, requester: job.requester_id,
                             sources, options, planner: this.options.frontierPlanner,
                             sourceAudioSeconds: job.source_audio_seconds || undefined,
+                            sourceAudioLyrics: parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
                             requireSourceIdentity: sourceRequired,
                             requireOriginalFirstFrame: originalFrameRequired,
                         });
@@ -5534,7 +5546,7 @@ export class VideoBroker {
                     if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Invalid local screenplay.');
                     continueUnbrokenLocalSegments(plan);
                     repairVideoTiming(plan, 15, 5);
-                    if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds);
+                    if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds, parseVideoSourceAudioLyrics(job.source_audio_lyrics_json));
                     if (originalFrameRequired) plan.keyframe = { ...(plan.keyframe || {}), recommended: false };
                     const notice = sanitizeVideoWorkerText(String(plan.generation_notice || ''), '', 1000).trim();
                     let contract;
@@ -5902,7 +5914,7 @@ export class VideoBroker {
                     job.prompt,
                     job.requested_duration_seconds,
                 );
-                if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds);
+                if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds, parseVideoSourceAudioLyrics(job.source_audio_lyrics_json));
                 const estimate = await this.plannedRuntimeEstimate(job, plan);
                 const now = nowSeconds();
                 await this.run(

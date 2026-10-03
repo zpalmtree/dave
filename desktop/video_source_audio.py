@@ -51,6 +51,43 @@ def condition_h3_on_song(workflow, input_name):
     return workflow
 
 
+SONG_CONDITIONING = '\nThe original song is supplied as immutable audio conditioning. '
+
+
+def song_shot_performance(shot, elapsed=0.0):
+    """H3 wording for one shot: lip-sync only while the broker's lyric timing says vocals play."""
+    vocals = shot.get('source_audio_vocals')
+    if vocals == 'instrumental':
+        return (' This shot plays an instrumental passage of the supplied original song: the performers move to '
+                'its rhythm with relaxed closed mouths, without generating new speech.')
+    start, end = shot.get('source_audio_vocals_from_seconds'), shot.get('source_audio_vocals_until_seconds')
+    if vocals == 'vocals' and (start is not None or end is not None):
+        span = f'from 00:{elapsed + float(start or 0):06.3f}'
+        if end is not None:
+            span += f' until 00:{elapsed + float(end):06.3f}'
+        return (f' The performer lip-syncs to the supplied original vocals {span} and moves to the music with a '
+                'relaxed closed mouth while only music plays, without generating new speech.')
+    return ' The performer lip-syncs to the supplied original vocals from the first frame, without generating new speech.'
+
+
+def song_segment_performance(shots):
+    elapsed, onset = 0.0, None
+    for shot in shots:
+        if onset is None and shot.get('source_audio_vocals') != 'instrumental':
+            onset = elapsed + float(shot.get('source_audio_vocals_from_seconds') or 0)
+        elapsed += float(shot['duration_seconds'])
+    if onset is None:
+        return SONG_CONDITIONING + ('This passage is instrumental: the performers move with its rhythm, mouths relaxed '
+                                    'and closed. No new speech, invented lyrics, or slow motion.')
+    if onset > 0:
+        return SONG_CONDITIONING + (f'The visible performer moves with the music and starts lip-syncing precisely to its '
+                                    f'vocals at 00:{onset:06.3f}, when they begin, with natural performance gestures '
+                                    'following its rhythm. No new speech, invented lyrics, or slow motion.')
+    return SONG_CONDITIONING + ('The visible performer lip-syncs precisely to its vocals, with natural performance gestures '
+                                'following its rhythm. Begin performing immediately at time zero. No silent lead-in, new '
+                                'speech, invented lyrics, or slow motion.')
+
+
 def prepare_song_segments(prepared, plan):
     if len(prepared) != len(plan['segments']):
         raise ValueError('Song scene count changed after planning')
@@ -64,9 +101,7 @@ def prepare_song_segments(prepared, plan):
                     source_audio_frames=frames, frame_count=generated, effective_seconds=generated / 24,
                     target_seconds=frames / 24, output_seconds=frames / 24,
                     transition=authored['transition'], audio_transition='cut', shots=authored['shots'])
-        item['prompt'] += ('\nThe original song is supplied as immutable audio conditioning. The visible performer '
-            'lip-syncs precisely to its vocals, with natural performance gestures following its rhythm. '
-            'Begin performing immediately at time zero. No silent lead-in, new speech, invented lyrics, or slow motion.')
+        item['prompt'] += song_segment_performance(authored['shots'])
     return prepared
 
 

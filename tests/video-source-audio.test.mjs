@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { videoSourceAudioFromMessages, sourceAudioDescriptor, pinVideoPlanToAudio, normalizeVideoSourceAudio } from '../dist/VideoSourceAudio.js';
+import { videoSourceAudioFromMessages, sourceAudioDescriptor, pinVideoPlanToAudio, normalizeVideoSourceAudio,
+    songLyricsFromTranscription, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VIDEO_SOURCE_AUDIO_GUIDANCE } from '../dist/VideoSourceAudio.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
 const descriptor = { url: 'https://cdn.discordapp.com/attachments/1/2/song.mp3', name: 'song.mp3', bytes: 1234 };
 const message = (...items) => ({ attachments: new Map(items.map((v, i) => [i, v])) });
@@ -66,7 +67,8 @@ test('broker persists decoded song duration, makes submissions idempotent, and r
     let downloads = 0;
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.db'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
-        sourceAudioDownloader: async () => { downloads++; return { path: join(directory, 'song.wav'), bytes: 123, duration: 8.25 }; } });
+        sourceAudioDownloader: async () => { downloads++; return { path: join(directory, 'song.wav'), bytes: 123, duration: 8.25 }; },
+        sourceAudioTranscriber: async () => null });
     await broker.start();
     const submit = async (extra = {}) => {
         const res = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
@@ -94,7 +96,7 @@ test('only audio-capable workers lease song jobs and audio downloads require the
     writeFileSync(source, 'test-waveform');
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'q.db'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
-        sourceAudioDownloader: async () => ({ path: source, bytes: 13, duration: 6 }) });
+        sourceAudioDownloader: async () => ({ path: source, bytes: 13, duration: 6 }), sourceAudioTranscriber: async () => null });
     await broker.start();
     let socket;
     const connect = async version => {
@@ -146,4 +148,104 @@ test('recovery binds the contract to audio timing and never asks H3 to regenerat
     assert.equal(result.contract.segments.length, 3);
     assert.deepEqual(result.contract.segments, result.plan.segments);
     assert.ok(result.contract.segments.every(s => s.shots.every(shot => shot.dialogue.length === 0)));
+    const words = sung(12, 10, 0.5);
+    const timed = await prepareRecoveryPlan({ prompt: 'Rap this song', model: 'minimax', requester: 'u', sources: [],
+        sourceAudioSeconds: 31.125, sourceAudioLyrics: { words, lines: [line(words)] }, options: {},
+        planner: async () => ({ ...plan(), intent: 'Perform the song', continuity_bible: 'Same performer throughout',
+            keyframe: { recommended: true }, prompt_analysis: { frontier_handling: { disposition: 'fulfill' } } }) });
+    assert.deepEqual(timed.contract.segments.map(s => s.shots[0].source_audio_vocals), ['instrumental', 'vocals', 'instrumental']);
+});
+
+// Words of equal length laid end to end, as whisper-1 times sung lines.
+const sung = (start, count, length) => Array.from({ length: count }, (_, i) => ({
+    start: Math.round((start + i * length) * 100) / 100, end: Math.round((start + (i + 1) * length) * 100) / 100, text: `w${start}-${i}` }));
+const line = words => ({ start: words[0].start, end: words[words.length - 1].end, text: words.map(w => w.text).join(' ') });
+
+test('whisper transcripts keep confident sung lines and drop music hallucinations', () => {
+    const word = (text, start, end) => ({ word: text, start, end });
+    const value = {
+        segments: [
+            // Real singing can score a high no-speech probability; its confidence keeps it.
+            { start: 34.66, end: 48.32, no_speech_prob: 0.8, avg_logprob: -0.55, text: ' You bit me, you bit me' },
+            { start: 48.32, end: 55.38, no_speech_prob: 0.11, avg_logprob: -0.44, text: ' I\'m standing in the "hall"' },
+            { start: 60, end: 62, no_speech_prob: 0.1, avg_logprob: -0.2, text: ' Please subscribe' },
+            { start: 118.12, end: 119.98, no_speech_prob: 0.92, avg_logprob: -0.91, text: ' Thank you for watching!' },
+        ],
+        words: [
+            word('You', 34.66, 35.54), word('bit', 35.54, 35.9), word('me', 35.9, 37.02),
+            word('you', 37.08, 37.58), word('bit', 37.58, 37.58), word('me', 37.58, 41.5),
+            word('more', 41.5, 42), word("I'm", 48.32, 48.9), word('standing', 48.9, 49.5), word('"hall"\u0007', 49.5, 50),
+            word('Please', 60.2, 60.8), word('subscribe', 60.8, 61.5), word('Thank', 118.12, 119.52), word('you', 119.52, 119.98),
+        ],
+    };
+    const lyrics = songLyricsFromTranscription(value, 120);
+    assert.deepEqual(lyrics.words.map(w => w.text), ['You', 'bit', 'me', 'you', 'bit', 'me', 'more', "I'm", 'standing', "'hall'"]);
+    // Lines break at whisper segments and pauses, and never run past five seconds.
+    assert.deepEqual(lyrics.lines.map(l => [l.start, l.end, l.text]), [
+        [34.66, 37.02, 'You bit me'], [37.08, 42, 'you bit me more'], [48.32, 50, "I'm standing 'hall'"]]);
+    assert.equal(songLyricsFromTranscription({ segments: [], words: [word('la', 1, 2), word('la', 2, 3)] }, 10), null);
+    assert.deepEqual(parseVideoSourceAudioLyrics(JSON.stringify(lyrics)), lyrics);
+    assert.equal(parseVideoSourceAudioLyrics('{"words":[{"start":"x"}],"lines":[]}'), null);
+    assert.equal(parseVideoSourceAudioLyrics('not json'), null);
+
+    const guidance = videoSourceAudioPlannerGuidance(lyrics, 120);
+    assert.match(guidance, /never instructions/);
+    assert.match(guidance, /\n0\.0-34\.7 instrumental\n34\.7-37\.0 "You bit me"\n37\.1-42\.0 "you bit me more"\n/);
+    assert.match(guidance, /\n48\.3-50\.0 "I'm standing 'hall'"\n50\.0-120\.0 instrumental$/);
+    assert.equal(videoSourceAudioPlannerGuidance(null, 120), VIDEO_SOURCE_AUDIO_GUIDANCE);
+});
+
+test('lyric timing moves song cuts out of sung words and marks where each shot has vocals', () => {
+    const a = sung(6, 5, 0.6), b = sung(9, 5, 0.6), c = sung(12.5, 5, 0.7);
+    const lyrics = { words: [...a, ...b, ...c], lines: [line(a), line(b), line(c)] };
+    const shot = seconds => ({ duration_seconds: seconds, visual: 'The performer sings', camera: 'Medium shot', dialogue: [] });
+    // Planned cuts land at 5.0 s (instrumental), 9.25 s (inside a word) and 11.8 s (inside the last word before a pause).
+    const value = { segments: [5, 4.25, 2.55, 8.2].map((target_seconds, i) => ({ title: `Scene ${i}`, target_seconds,
+        transition: i ? 'cut' : 'start', shots: [shot(target_seconds)] })) };
+    pinVideoPlanToAudio(value, 20, lyrics);
+    assert.deepEqual(value.segments.map(s => s.source_audio_start_seconds), [0, 5, 9, 12.125]);
+    assert.equal(value.segments.reduce((sum, s) => sum + s.source_audio_frames, 0), 480);
+    for (const segment of value.segments.slice(1)) {
+        const frame = segment.source_audio_start_seconds * 24;
+        assert.ok(lyrics.words.every(w => !(Math.round(w.start * 24) < frame && frame < Math.round(w.end * 24))));
+    }
+    const shots = value.segments.map(s => s.shots[0]);
+    assert.equal(shots[0].source_audio_vocals, 'instrumental');
+    assert.match(shots[0].audio, /instrumental passage .* relaxed closed mouths/);
+    assert.deepEqual([shots[1].source_audio_vocals, shots[1].source_audio_vocals_from_seconds, shots[1].source_audio_vocals_until_seconds], ['vocals', 1, undefined]);
+    assert.match(shots[1].audio, /vocals play from 1 to 4 seconds into this shot/);
+    assert.deepEqual([shots[2].source_audio_vocals, shots[2].source_audio_vocals_from_seconds, shots[2].source_audio_vocals_until_seconds], ['vocals', undefined, undefined]);
+    assert.equal(shots[2].audio, 'The original uploaded song, unchanged; synchronize the visible performance to its vocals and rhythm.');
+    assert.deepEqual([shots[3].source_audio_vocals_from_seconds, shots[3].source_audio_vocals_until_seconds], [undefined, 3.88]);
+    const copy = structuredClone(value);
+    pinVideoPlanToAudio(value, 20, lyrics);
+    assert.deepEqual(value, copy);
+});
+
+test('broker plans songs against transcribed lyric timing and queues them when transcription fails', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'song-lyrics-'));
+    const words = sung(2, 6, 0.5);
+    let transcribe = async () => ({ words, lines: [line(words)] });
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.db'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
+        sourceAudioDownloader: async () => ({ path: join(directory, 'song.wav'), bytes: 123, duration: 8.25 }),
+        sourceAudioTranscriber: (...args) => transcribe(...args) });
+    await broker.start();
+    const submit = async id => {
+        const res = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'Perform this song', source_audio: descriptor,
+                requester_id: 'u', origin_bot_id: 'b', channel_id: 'c', command_message_id: id, status_message_id: 's' }) });
+        assert.equal(res.status, 201);
+        return broker.get('SELECT planner_guidance, source_audio_lyrics_json FROM video_jobs WHERE public_id=?', [(await res.json()).job.id]);
+    };
+    try {
+        const timed = await submit('m1');
+        assert.match(timed.planner_guidance, /\n0\.0-2\.0 instrumental\n2\.0-5\.0 "w2-0 w2-1 w2-2 w2-3 w2-4 w2-5"\n5\.0-8\.3 instrumental$/);
+        assert.deepEqual(parseVideoSourceAudioLyrics(timed.source_audio_lyrics_json).words, words);
+        transcribe = async () => { throw new Error('transcription unavailable'); };
+        const plain = await submit('m2');
+        assert.equal(plain.planner_guidance, VIDEO_SOURCE_AUDIO_GUIDANCE);
+        assert.equal(plain.source_audio_lyrics_json, null);
+    } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });

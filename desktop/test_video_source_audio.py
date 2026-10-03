@@ -55,6 +55,49 @@ class SongTests(unittest.TestCase):
                     self.assertNotIn('lips remain closed', prepared[0]['prompt'])
                     self.assertNotIn('no human voice or mouth movement', prepared[0]['prompt'])
 
+    def test_lyric_timing_limits_lip_sync_to_shots_with_vocals(self):
+        sys.path.insert(0, str(LIVE))
+        import video_gen as gen
+        from test_video_gen import sample_plan
+
+        def compiled(shots):
+            plan = sample_plan()
+            segment = plan['segments'][0]
+            template = segment['shots'][0]
+            segment['shots'] = [{**template, 'duration_seconds': seconds, **marks} for seconds, marks in shots]
+            frames = round(sum(seconds for seconds, _ in shots) * 24)
+            segment.update(source_audio_frames=frames, source_audio_start_seconds=0,
+                           target_seconds=frames / 24, output_seconds=frames / 24)
+            plan['source_audio'] = {'duration_seconds': frames / 24, 'output_frames': frames}
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'plan.json'
+                path.write_text(json.dumps(plan))
+                loaded = gen.load_frontier_video_plan(path, 'Perform the approved scene', None, ('h3',))
+                prepared = gen.prepare_model_segments('', loaded, 'h3', 'portrait.png', {}, True, 1)
+                return audio.prepare_song_segments(prepared, loaded)[0]['prompt']
+
+        instrumental = {'source_audio_vocals': 'instrumental'}
+        prompt = compiled([(2.5, instrumental), (3.0, instrumental)])
+        self.assertIn('instrumental passage of the supplied original song', prompt)
+        self.assertIn('lips remain closed', prompt)
+        self.assertIn('This passage is instrumental', prompt)
+        self.assertNotIn('lip-syncs', prompt)
+
+        prompt = compiled([(2.5, instrumental), (3.0, {'source_audio_vocals': 'vocals',
+                                                       'source_audio_vocals_until_seconds': 1.5})])
+        self.assertIn('lip-syncs to the supplied original vocals from 00:02.500 until 00:04.000', prompt)
+        self.assertIn('starts lip-syncing precisely to its vocals at 00:02.500', prompt)
+        self.assertNotIn('lips remain closed', prompt)
+        self.assertNotIn('Begin performing immediately at time zero', prompt)
+
+        prompt = compiled([(4.0, {'source_audio_vocals': 'vocals', 'source_audio_vocals_from_seconds': 1.25})])
+        self.assertIn('vocals from 00:01.250 and moves to the music', prompt)
+        self.assertIn('vocals at 00:01.250, when they begin', prompt)
+
+        prompt = compiled([(4.0, {})])
+        self.assertIn('lip-syncs to the supplied original vocals from the first frame', prompt)
+        self.assertIn('Begin performing immediately at time zero', prompt)
+
     def test_windows_are_sample_aligned_and_pad_only_after_song_end(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
