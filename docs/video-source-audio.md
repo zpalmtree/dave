@@ -18,11 +18,42 @@ replied-to song. Image and audio selection are independent. Multiple songs on
 the selected message are rejected.
 
 The original vocals and backing track remain the soundtrack. This feature does
-not convert the singer's voice to the character's voice, transcribe lyrics for
-storyboarding, or assign different singers to different pictured characters.
-Describe the performer and visual action in the prompt. Clear faces and visible
-mouths are preferable; fast rap, occluded mouths and complex groups can still
-produce imperfect synchronization.
+not convert the singer's voice to the character's voice or assign different
+singers to different pictured characters. Describe the performer and visual
+action in the prompt. Clear faces and visible mouths are preferable; fast rap,
+occluded mouths and complex groups can still produce imperfect synchronization.
+
+## Lyric timing
+
+The broker transcribes the song with OpenAI `whisper-1` word timestamps when
+the job is submitted (about five seconds and $0.006 per audio minute), so the
+user supplies nothing extra. The planner receives a vocal timeline of timed
+lyric lines and instrumental passages (wordless stretches of two seconds or
+more). It is told to start segments where lines or instrumental passages start,
+to let the shots act out or literalize the lyrics when the request leaves the
+action open, and to show singing only where there are vocals. The transcript is
+labelled as approximate song content, never instructions.
+
+Pinning the plan to the song then moves each cut out of any sung word, by up to
+two seconds. It prefers a pause of at least a quarter second, then the start of
+a transcribed line, then any gap between words. Each shot records
+`source_audio_vocals` (`vocals` or `instrumental`). A shot whose singing starts
+or stops at least a second inside it, next to an instrumental passage, also
+records `source_audio_vocals_from_seconds` or
+`source_audio_vocals_until_seconds`. The desktop compiler turns these into H3
+wording: lip-sync only over the vocal span, and closed relaxed mouths that move
+to the rhythm elsewhere. A segment that is instrumental throughout uses
+closed-mouth face identity wording.
+
+Whisper captions music with stock phrases such as "Thank you for watching!".
+Those phrases are dropped, as is any segment that combines a no-speech
+probability above 0.6 with an average log probability below -0.8. Sung lyrics
+often score a high no-speech probability with good confidence, so that score
+alone is not used. A song with fewer than three remaining words, a transcription
+failure, or a missing OpenAI key leaves the job on the previous behavior: no
+timeline, proportional cuts, and lip-sync throughout. The filtered words and
+lines are stored in `source_audio_lyrics_json` and reused when a recovery or
+local plan is pinned.
 
 ## Pipeline
 
