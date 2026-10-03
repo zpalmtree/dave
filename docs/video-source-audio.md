@@ -10,10 +10,9 @@ Examples:
 - Attach `song.wav` and `character.png`: `$minimax perform this song in a recording studio`
 - Reply to a song attachment: `$oalgo`
 
-Supported files: MP3, WAV, FLAC, OGG, Opus, M4A and AAC, up to 25 MiB and
-1–120 seconds. Trim longer songs to the excerpt you want before uploading.
-The audio attachment's duration determines the finished video duration, rounded
-up to the next video frame. The command's own song takes precedence over a
+Supported files: MP3, WAV, FLAC, OGG, Opus, M4A and AAC, up to 100 MiB and
+1 second to 10 minutes. The excerpt's duration determines the finished video
+duration, rounded up to the next video frame. The command's own song takes precedence over a
 replied-to song. Image and audio selection are independent. Multiple songs on
 the selected message are rejected.
 
@@ -22,6 +21,31 @@ not convert the singer's voice to the character's voice or assign different
 singers to different pictured characters. Describe the performer and visual
 action in the prompt. Clear faces and visible mouths are preferable; fast rap,
 occluded mouths and complex groups can still produce imperfect synchronization.
+
+## Excerpts of long songs
+
+H3 renders take about 80–110 seconds of GPU per finished second, so a whole song
+would hold the desktop for hours. A song of up to 35 seconds is used whole.
+A longer song is cut to an excerpt of about 30 seconds (15–45), roughly 40–55
+minutes of rendering:
+
+- A range in the prompt wins: `$oalgo 1:05-1:50 rap this at a gas station`, or
+  `from 2:10` for about 30 seconds ending on the line nearest that length.
+  Ranges use `m:ss`, accept `-`, `–`, `to` or `until`, and may span at most two
+  minutes. The range text is removed from the prompt. Without a song or a source
+  video, the times stay in the prompt as part of the idea.
+- Otherwise Gemini Flash reads the request and the timed lyric lines and
+  chooses the part the request names ("the chorus", "the part about the cops"),
+  or else the best-known part or the first full chorus. It returns line numbers,
+  which are padded into the pauses around them. An answer that cannot be used
+  falls back to the run of lines with the most repeated lyrics. A song without
+  usable lyrics starts from 0:00.
+
+The broker decodes the whole song, transcribes it once, chooses the excerpt,
+cuts it with a short fade at each cut edge, and moves the lyric timing onto the
+excerpt. Discord status shows what was used, for example "Lip-syncing to the
+chorus, 0:47–1:07 of your 1:38 song". A choice the user didn't make also shows
+how to pick another part with a range.
 
 ## Lyric timing
 

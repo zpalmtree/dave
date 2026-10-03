@@ -19,7 +19,7 @@ test('song selection supports replies and independent image attachments, rejecti
     assert.equal(videoSourceAudioFromMessages(own, reply).name, 'own.MP3');
     assert.equal(videoSourceAudioFromMessages(message(attachment('face.png', 'image/png')), reply).name, 'reply.wav');
     assert.throws(() => videoSourceAudioFromMessages(message(attachment('a.mp3'), attachment('b.wav'))), /exactly one/);
-    assert.throws(() => sourceAudioDescriptor({ ...descriptor, bytes: 26 * 1024 * 1024 }), /25 MiB/);
+    assert.throws(() => sourceAudioDescriptor({ ...descriptor, bytes: 101 * 1024 * 1024 }), /100 MiB/);
     for (const url of ['http://cdn.discordapp.com/attachments/x', 'https://example.com/attachments/x', 'https://cdn.discordapp.com/elsewhere', 'https://cdn.discordapp.com:9000/attachments/x']) {
         assert.throws(() => sourceAudioDescriptor({ ...descriptor, url }), /Discord attachment/);
     }
@@ -54,11 +54,14 @@ test('audio decoding accepts short clips and rejects invalid or overlong uploads
         const value = await normalizeVideoSourceAudio(input, output);
         assert.ok(Math.abs(value.duration - 2.5) <= 1 / 48000 + 1e-6);
         execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.75', input]);
-        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 1 and 120/);
+        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 1 second and 10 minutes/);
         writeFileSync(input, 'not audio');
         await assert.rejects(normalizeVideoSourceAudio(input, output), /Could not decode/);
-        execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=8000:cl=mono', '-t', '121.5', input]);
-        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 1 and 120/);
+        // Whole songs are accepted so an excerpt can be cut from them.
+        execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=8000:cl=mono', '-t', '200', input]);
+        assert.ok(Math.abs((await normalizeVideoSourceAudio(input, output)).duration - 200) < 0.01);
+        execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=8000:cl=mono', '-t', '601.5', input]);
+        await assert.rejects(normalizeVideoSourceAudio(input, output), /between 1 second and 10 minutes/);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -68,7 +71,7 @@ test('broker persists decoded song duration, makes submissions idempotent, and r
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.db'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
         sourceAudioDownloader: async () => { downloads++; return { path: join(directory, 'song.wav'), bytes: 123, duration: 8.25 }; },
-        sourceAudioTranscriber: async () => null });
+        sourceAudioTranscriber: async () => null, sourceAudioCutter: async song => song });
     await broker.start();
     const submit = async (extra = {}) => {
         const res = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
@@ -96,7 +99,8 @@ test('only audio-capable workers lease song jobs and audio downloads require the
     writeFileSync(source, 'test-waveform');
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'q.db'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
-        sourceAudioDownloader: async () => ({ path: source, bytes: 13, duration: 6 }), sourceAudioTranscriber: async () => null });
+        sourceAudioDownloader: async () => ({ path: source, bytes: 13, duration: 6 }), sourceAudioTranscriber: async () => null,
+        sourceAudioCutter: async song => song });
     await broker.start();
     let socket;
     const connect = async version => {
@@ -229,7 +233,7 @@ test('broker plans songs against transcribed lyric timing and queues them when t
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.db'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
         sourceAudioDownloader: async () => ({ path: join(directory, 'song.wav'), bytes: 123, duration: 8.25 }),
-        sourceAudioTranscriber: (...args) => transcribe(...args) });
+        sourceAudioTranscriber: (...args) => transcribe(...args), sourceAudioCutter: async song => song });
     await broker.start();
     const submit = async id => {
         const res = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
