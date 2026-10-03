@@ -27,6 +27,10 @@ export function isMessageAllowed(msg: Message): boolean {
         return false;
     }
 
+    if (config.ignoredChannels.includes(msg.channel.id)) {
+        return false;
+    }
+
     const userChannelRestriction = userChannelRestrictions.find(
         ({ userId }) => userId === msg.author.id
     );

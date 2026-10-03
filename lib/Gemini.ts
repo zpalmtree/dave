@@ -414,11 +414,6 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             imageOnly = false // When true, prioritize image output with minimal text
         } = options;
 
-        // Don't process in dev channels unless in dev environment
-        if (config.devChannels && config.devChannels.includes(msg.channel.id) && !config.devEnv) {
-            return;
-        }
-
         // Check for banned users using hardcoded list
         if (BANNED_USERS.includes(msg.author.id)) {
             await msg.reply("Sorry, this function has been disabled for your user.");

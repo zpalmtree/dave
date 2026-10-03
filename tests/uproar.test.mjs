@@ -201,9 +201,10 @@ test('Uproar member lookup retries after a transient read failure', async () => 
     assert.equal(member.displayAvatarURL(), 'https://uproar.chat/avatars/user-1.png');
 });
 
-test('shared message policy applies development and user restrictions', () => {
+test('shared message policy applies development, ignored-channel, and user restrictions', () => {
     const originalDevEnv = config.devEnv;
     const originalDevChannels = config.devChannels;
+    const originalIgnoredChannels = config.ignoredChannels;
 
     try {
         config.devEnv = true;
@@ -226,9 +227,17 @@ test('shared message policy applies development and user restrictions', () => {
             ...baseMessage,
             author: { id: '1307359331724824744' },
         }), false);
+
+        config.ignoredChannels = ['blocked-channel'];
+        assert.equal(isMessageAllowed(baseMessage), false);
+        assert.equal(isMessageAllowed({
+            ...baseMessage,
+            channel: { id: 'allowed-channel' },
+        }), true);
     } finally {
         config.devEnv = originalDevEnv;
         config.devChannels = originalDevChannels;
+        config.ignoredChannels = originalIgnoredChannels;
     }
 });
 

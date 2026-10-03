@@ -146,10 +146,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         includeFiles = true,
     } = options;
 
-    if (config.devChannels.includes(msg.channel.id) && !config.devEnv) {
-        return {};
-    }
-
     if (DEFAULT_SETTINGS.bannedUsers.includes(msg.author.id)) {
         return { error: 'Sorry, this function has been disabled for your user.' };
     }
