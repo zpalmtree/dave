@@ -354,6 +354,7 @@ interface JobRow {
     source_video_path: string | null;
     source_video_seconds: number | null;
     video_edit_target: string | null;
+    video_edit_effects: string | null;
     video_edit_mode: VideoEditMode | null;
     video_replacement_prompt: string | null;
     source_image_path: string | null;
@@ -1645,6 +1646,7 @@ export class VideoBroker {
             source_video_path TEXT,
             source_video_seconds REAL,
             video_edit_target TEXT,
+            video_edit_effects TEXT,
             video_edit_mode TEXT,
             video_replacement_prompt TEXT,
             source_image_mime TEXT,
@@ -1750,7 +1752,7 @@ export class VideoBroker {
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_excerpt_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
-            ['video_edit_target', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
+            ['video_edit_target', 'TEXT'], ['video_edit_effects', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'], ['render_seconds', 'REAL'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -2712,6 +2714,7 @@ export class VideoBroker {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
         }
         let videoEditTarget = String(body.video_edit_target || '').trim();
+        let videoEditEffects = '';
         if (body.video_edit_mode !== undefined && body.video_edit_mode !== null
             && (!['replace', 'add'].includes(body.video_edit_mode) || !videoEditTarget)) {
             return { status: 400, body: { error: 'Video edit mode must be replace or add, with a subject.' } };
@@ -2821,6 +2824,7 @@ export class VideoBroker {
                     sample_times: videoEditSampleTimes(sourceVideo.duration), ...grounding,
                 }, null, 2));
                 videoEditTarget = grounding.target;
+                videoEditEffects = grounding.effects;
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
                 await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
@@ -3003,12 +3007,12 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_audio_path, source_audio_seconds, source_audio_lyrics_json, source_excerpt_json,
-                        source_video_path, source_video_seconds, video_edit_target, video_edit_mode, video_replacement_prompt,
+                        source_video_path, source_video_seconds, video_edit_target, video_edit_effects, video_edit_mode, video_replacement_prompt,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -3032,7 +3036,7 @@ export class VideoBroker {
                         sourceAudioLyrics ? JSON.stringify(sourceAudioLyrics) : null,
                         sourceExcerpt ? JSON.stringify(sourceExcerpt) : null,
                         sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
-                        sourceVideo ? videoEditMode : null, replacementPrompt || null,
+                        videoEditEffects || null, sourceVideo ? videoEditMode : null, replacementPrompt || null,
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
                         sourceImage?.bytes || null,
@@ -5925,6 +5929,7 @@ export class VideoBroker {
                 { bytes: readFileSync(job.source_image_path), mimeType: job.source_image_mime },
                 job.video_edit_target || 'the subject',
                 job.video_replacement_prompt || job.prompt,
+                job.video_edit_effects || '',
                 { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job) },
             );
             const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];

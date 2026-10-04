@@ -650,9 +650,12 @@ export interface VideoEditStillImage {
 /**
  * Viggle-Animate animates one repainted frame of the source clip, so the repaint must keep that
  * frame's exact composition. gpt-image holds the pose, head size and crop; Gemini pulled the camera
- * back in testing, and the animation then froze or broke apart.
+ * back in testing, and the animation then froze or broke apart. Viggle only animates what the still
+ * shows, so effects coming from the subject (beams from its eyes) are kept when grounding saw them;
+ * gpt-image otherwise erases them with it. They are named only then, because effect wording makes
+ * repaints of real people far more likely to be refused.
  */
-export function videoEditStillPrompt(target: string, request: string): string {
+export function videoEditStillPrompt(target: string, request: string, effects = ''): string {
     const named = /^(the|a|an) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
     return [
         `Edit Image 1, a frame from a video. Replace ${named} with the subject shown in Image 2.`,
@@ -661,6 +664,8 @@ export function videoEditStillPrompt(target: string, request: string): string {
         'and crop.',
         'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
         'keeping its distinctive look instead of redesigning it.',
+        effects.trim() ? `Image 1 also shows ${effects.trim().slice(0, 160)}; keep them exactly as they look, now coming`
+            + ' from the same place on the replacement.' : '',
         'Keep everything else in Image 1 exactly as it is: the background, other subjects, lighting, colors,',
         'camera angle and framing.',
         'Output a single photographic frame with the same composition as Image 1, never a collage or side-by-side.',
@@ -668,16 +673,49 @@ export function videoEditStillPrompt(target: string, request: string): string {
     ].filter(Boolean).join(' ');
 }
 
+type VideoEditStillOptions = VideoFrontierCallOptions & { abortSignal?: AbortSignal };
+
+/**
+ * gpt-image's refusals of real people are not deterministic (one frame passed 4 of 7 identical
+ * requests), and an input-stage refusal returns in seconds. Each prompt is tried twice, and a
+ * refused effects prompt falls back to the plain one before the worker falls back to H3.
+ */
 export async function createVideoEditStill(
     frame: VideoEditStillImage,
     replacement: VideoEditStillImage,
     target: string,
     request: string,
-    options: VideoFrontierCallOptions & { abortSignal?: AbortSignal } = {},
+    effects = '',
+    options: VideoEditStillOptions = {},
+): Promise<VideoKeyframeResult> {
+    const plain = videoEditStillPrompt(target, request);
+    const prompts = effects.trim()
+        ? [videoEditStillPrompt(target, request, effects), videoEditStillPrompt(target, request, effects), plain, plain]
+        : [plain, plain];
+    const started = Date.now();
+    let refusal: unknown;
+    for (const [index, prompt] of prompts.entries()) {
+        // The worker waits six minutes for the still; leave room for one full attempt.
+        if (index > 0 && Date.now() - started > 90_000) break;
+        try {
+            return await requestVideoEditStill(frame, replacement, prompt, index + 1, options);
+        } catch (error) {
+            if (!(error instanceof VideoKeyframeError && error.code === 'moderation')) throw error;
+            refusal = error;
+        }
+    }
+    throw refusal;
+}
+
+async function requestVideoEditStill(
+    frame: VideoEditStillImage,
+    replacement: VideoEditStillImage,
+    prompt: string,
+    attempt: number,
+    options: VideoEditStillOptions,
 ): Promise<VideoKeyframeResult> {
     const stage = 'video_edit_still';
     const model = VIDEO_KEYFRAME_FALLBACK_MODEL;
-    const prompt = videoEditStillPrompt(target, request);
     const started = Date.now();
     let outcome: 'success' | 'error' = 'error';
     let detail: string | undefined;
@@ -687,7 +725,7 @@ export async function createVideoEditStill(
     if (options.abortSignal?.aborted) controller.abort();
     const timeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
     try {
-        await options.beforeRequest?.({ stage, attempt: 1, provider: 'openai', model,
+        await options.beforeRequest?.({ stage, attempt, provider: 'openai', model,
             maxInputTokens: videoRequestInputTokenBound({ prompt, references: [{ type: 'input_image' }, { type: 'input_image' }] }),
             maxOutputTokens: 32768, maxImages: 1 });
         const form = new FormData();
@@ -716,7 +754,7 @@ export async function createVideoEditStill(
         if (usage || encoded) {
             const cached = Number(usage?.input_tokens_details?.cached_tokens || 0);
             await options.onUsage?.({
-                stage, attempt: 1, outcome: response.ok && encoded ? 'success' : 'error',
+                stage, attempt, outcome: response.ok && encoded ? 'success' : 'error',
                 provider: 'openai', model: String(body?.model || model), serviceTier: 'default',
                 inputTokens: Math.max(0, Number(usage?.input_tokens || 0) - cached),
                 outputTokens: Number(usage?.output_tokens || 0),
@@ -742,7 +780,7 @@ export async function createVideoEditStill(
         clearTimeout(timeout);
         options.abortSignal?.removeEventListener('abort', cancel);
         await options.onAttempt?.({
-            stage, attempt: 1, outcome, provider: 'openai', model, serviceTier: 'default',
+            stage, attempt, outcome, provider: 'openai', model, serviceTier: 'default',
             durationSeconds: (Date.now() - started) / 1000, detail,
         });
     }
