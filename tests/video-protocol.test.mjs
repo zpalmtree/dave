@@ -382,8 +382,8 @@ test('video runtime is formatted for the delivered post', () => {
         runtime_seconds: 446.2,
         created_at: 1_791_075_632,
         completed_at: 1_791_083_060,
-        prompt: 'Queued behind other jobs',
-    }), /bb931e7c.*took \*\*2h 3m 48s\*\* \(7m 26s generating\)\./);
+        prompt: 'Recovered across several leases',
+    }), /bb931e7c.*took \*\*2h 3m 48s\*\*\./);
     assert.match(completedVideoPost({
         id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
         model: 'minimax',
