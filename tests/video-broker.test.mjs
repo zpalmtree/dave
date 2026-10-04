@@ -518,6 +518,7 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             value => value.body.jobs[0].status === 'ready',
         );
         assert.equal(completed.body.jobs[0].runtime_seconds, 65.625);
+        assert.equal(completed.body.jobs[0].render_seconds, 55, 'A single-lease job sums its uploaded render spans.');
         assert.match(completed.body.jobs[0].generation_notice, /completed using the original identity anchor/);
         const delivered = await botFetch(`/v1/jobs/${lease.job.id}/delivered`, {
             method: 'POST',

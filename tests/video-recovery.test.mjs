@@ -373,9 +373,12 @@ test('broker persists recovery and requires every recorded scene for the matchin
             lease_id: 'lease', runtime_seconds: 5 }), /exact output/);
         await broker.run("UPDATE video_jobs SET result_path='result.mp4', result_sha256=?, error='old error' WHERE public_id=?", [resultHash, id]);
         const notice = 'An alternate video renderer recovered the scene.';
-        await broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id, lease_id: 'lease', runtime_seconds: 5, generation_notice: notice });
-        const row = await broker.get('SELECT status,error FROM video_jobs WHERE public_id=?', [id]);
-        assert.deepEqual(row, { status: 'ready', error: null });
+        await broker.handleWorkerMessage({ type: 'event', event: 'complete', job_id: id, lease_id: 'lease', runtime_seconds: 5,
+            render_seconds: 120, active_seconds: 300, generation_notice: notice });
+        const row = await broker.get('SELECT status,error,render_seconds FROM video_jobs WHERE public_id=?', [id]);
+        assert.deepEqual(row, { status: 'ready', error: null, render_seconds: 120 });
+        const sample = await broker.get('SELECT runtime_seconds FROM video_runtime_samples ORDER BY id DESC LIMIT 1');
+        assert.equal(sample.runtime_seconds, 300, 'The ETA sample covers every lease, not just the final one.');
         const stored = await broker.get('SELECT planner_json FROM video_jobs WHERE public_id=?', [id]);
         assert.equal(JSON.parse(stored.planner_json).generation_notice, notice);
         // A temporary service failure retains the same approved plan/checkpoint

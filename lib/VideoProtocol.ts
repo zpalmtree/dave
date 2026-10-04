@@ -245,6 +245,8 @@ export interface VideoJobView {
     started_at: number | null;
     completed_at: number | null;
     runtime_seconds: number | null;
+    /** GPU render time summed across every lease and attempt. */
+    render_seconds?: number | null;
     delivered_at: number | null;
     worker_online: boolean;
     worker_busy: boolean;

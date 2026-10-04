@@ -242,11 +242,16 @@ export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_in
 
 // The worker's runtime restarts with each lease, so a recovery job that is
 // re-leased between scenes reports only its final pass. Report the wall time
-// since the request instead.
-function completedVideoTiming(job: Pick<VideoJobView, 'runtime_seconds' | 'created_at' | 'completed_at'>): string | null {
-    const runtime = formatVideoRuntime(Number(job.completed_at) - Number(job.created_at))
+// since the request (or since a regenerate restarted it) and the GPU render
+// time summed across every lease.
+function completedVideoTiming(job: Pick<VideoJobView,
+    'runtime_seconds' | 'render_seconds' | 'created_at' | 'started_at' | 'completed_at' | 'delivery_revision'>): string | null {
+    const since = job.delivery_revision ? job.started_at ?? job.created_at : job.created_at;
+    const wall = formatVideoRuntime(Number(job.completed_at) - Number(since))
         || formatVideoRuntime(job.runtime_seconds);
-    return runtime ? `took **${runtime}**` : null;
+    if (!wall) return null;
+    const rendering = formatVideoRuntime(job.render_seconds);
+    return `took **${wall}**${rendering ? ` (${rendering} rendering)` : ''}`;
 }
 
 export function completedVideoPost(job: VideoJobView): string {

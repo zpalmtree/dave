@@ -340,6 +340,7 @@ interface JobRow {
     started_at: number | null;
     completed_at: number | null;
     runtime_seconds: number | null;
+    render_seconds: number | null;
     delivered_at: number | null;
     notified_at: number | null;
     planner_json: string | null;
@@ -1635,6 +1636,7 @@ export class VideoBroker {
             started_at INTEGER,
             completed_at INTEGER,
             runtime_seconds REAL,
+            render_seconds REAL,
             delivered_at INTEGER,
             notified_at INTEGER,
             planner_json TEXT,
@@ -1749,7 +1751,7 @@ export class VideoBroker {
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_excerpt_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
             ['video_edit_target', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
-            ['source_image_path', 'TEXT'],
+            ['source_image_path', 'TEXT'], ['render_seconds', 'REAL'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
             ['source_image_composite_path', 'TEXT'],
@@ -2260,7 +2262,7 @@ export class VideoBroker {
                 planner_json=NULL, frontier_analysis_json=NULL, planner_guidance=?, error=NULL,
                 result_path=NULL, result_sha256=NULL, result_bytes=NULL, notified_at=NULL, delivered_at=NULL,
                 completed_at=NULL, started_at=NULL, worker_id=NULL, lease_token=NULL, lease_expires_at=NULL,
-                progress=NULL, progress_scope=NULL, segment_index=NULL, runtime_seconds=NULL,
+                progress=NULL, progress_scope=NULL, segment_index=NULL, runtime_seconds=NULL, render_seconds=NULL,
                 delivery_revision=delivery_revision+1, stage='Regenerating the actual video', updated_at=? WHERE public_id=?`,
                 [guidance, nowSeconds(), row.public_id]);
             await this.dispatchNext();
@@ -3224,6 +3226,16 @@ export class VideoBroker {
              WHERE model = ? AND status = 'queued' AND estimate_ready = 0`,
             [estimate.low, estimate.high, nowSeconds(), model],
         );
+    }
+
+    private async singleLeaseRenderSeconds(jobId: string): Promise<number | null> {
+        const row = await this.get<{ seconds: number | null }>(
+            `SELECT SUM(duration_seconds) AS seconds FROM video_job_spans
+             WHERE job_public_id = ? AND source = 'worker'
+             AND name IN ('generator_process', 'video_edit_local_reference', 'video_edit_render')`,
+            [jobId],
+        );
+        return Number(row?.seconds) > 0 ? Number(row?.seconds) : null;
     }
 
     private async recordMetricSpan(jobId: string, span: VideoMetricSpan): Promise<void> {
@@ -4598,6 +4610,7 @@ export class VideoBroker {
                 started_at: row.started_at,
                 completed_at: row.completed_at,
                 runtime_seconds: row.runtime_seconds,
+                render_seconds: row.render_seconds,
                 delivered_at: row.delivered_at,
                 worker_online: online,
                 worker_busy: busy,
@@ -5234,6 +5247,13 @@ export class VideoBroker {
                 const runtimeSeconds = Number(message.runtime_seconds) > 0
                     ? Number(message.runtime_seconds)
                     : null;
+                // runtime_seconds restarts with each lease. Recovery workers carry the
+                // job's render and active time across leases; a single-lease job's
+                // render spans were uploaded just before this event.
+                const renderSeconds = Number(message.render_seconds) > 0
+                    ? Number(message.render_seconds)
+                    : row.recovery_version ? null : await this.singleLeaseRenderSeconds(jobId);
+                const activeSeconds = Number(message.active_seconds) > 0 ? Number(message.active_seconds) : null;
                 const deliveryNotice = sanitizeVideoWorkerText(message.generation_notice, '', 1000).trim();
                 let plannerJson = row.planner_json;
                 if (deliveryNotice) {
@@ -5245,11 +5265,11 @@ export class VideoBroker {
                 }
                 await this.run(
                     `UPDATE video_jobs SET status = 'ready', error = NULL, stage = 'Ready for Discord delivery', progress = 1,
-                     runtime_seconds = ?, planner_json = ?, completed_at = ?, updated_at = ? WHERE public_id = ?`,
-                    [runtimeSeconds, plannerJson, nowSeconds(), nowSeconds(), jobId],
+                     runtime_seconds = ?, render_seconds = ?, planner_json = ?, completed_at = ?, updated_at = ? WHERE public_id = ?`,
+                    [runtimeSeconds, renderSeconds, plannerJson, nowSeconds(), nowSeconds(), jobId],
                 );
                 if (runtimeSeconds !== null) {
-                    const processingRuntime = Math.max(
+                    const processingRuntime = activeSeconds ?? Math.max(
                         0.01,
                         runtimeSeconds - Math.max(0, Number(row.gpu_queue_wait_seconds) || 0),
                     );
