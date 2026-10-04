@@ -671,6 +671,36 @@ export function videoEditStillPrompt(target: string, request: string): string {
     ].filter(Boolean).join(' ');
 }
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const CRC_TABLE = Array.from({ length: 256 }, (_, value) => {
+    for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    return value >>> 0;
+});
+
+function crc32(bytes: Buffer): number {
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * The repaint leaves the subject's effects out, and the worker moves them from the source onto the
+ * replacement after Viggle. It learns what they are from the still it already receives, as a PNG
+ * text chunk, so the worker needs no new lease field.
+ */
+export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: string): VideoKeyframeResult {
+    const text = effects.replace(/[^\x20-\x7e]/g, '').trim().slice(0, 160);
+    const end = still.bytes.length - 12;
+    if (!text || still.mimeType !== 'image/png' || !still.bytes.subarray(0, 8).equals(PNG_SIGNATURE)
+        || still.bytes.toString('latin1', end + 4, end + 8) !== 'IEND') return still;
+    const chunk = Buffer.from(`tEXtvideo_edit_effects\0${text}`, 'latin1');
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(chunk.length - 4);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(chunk));
+    return { ...still, bytes: Buffer.concat([still.bytes.subarray(0, end), length, chunk, checksum, still.bytes.subarray(end)]) };
+}
+
 type VideoEditStillOptions = VideoFrontierCallOptions & { abortSignal?: AbortSignal };
 
 /**
