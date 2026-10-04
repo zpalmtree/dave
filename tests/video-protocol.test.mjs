@@ -384,6 +384,27 @@ test('video runtime is formatted for the delivered post', () => {
         prompt: 'Recovered across several leases',
     }), /bb931e7c.*took \*\*2h 3m 48s\*\*\./);
     assert.match(completedVideoPost({
+        id: 'bb931e7c-0000-4000-8000-000000000000',
+        model: 'h3',
+        command_variant: 'oalgo',
+        runtime_seconds: 446.2,
+        render_seconds: 3044.6,
+        created_at: 1_791_075_632,
+        completed_at: 1_791_083_060,
+        prompt: 'Recovered across several leases',
+    }), /bb931e7c.*took \*\*2h 3m 48s\*\* \(50m 45s rendering\)\./);
+    assert.match(completedVideoPost({
+        id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
+        model: 'minimax',
+        runtime_seconds: 400,
+        render_seconds: 300,
+        created_at: 1_000,
+        started_at: 90_000,
+        completed_at: 90_600,
+        delivery_revision: 1,
+        prompt: 'Regenerated a day later',
+    }), /a1869ead.*took \*\*10m\*\* \(5m rendering\)\./);
+    assert.match(completedVideoPost({
         id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
         model: 'minimax',
         runtime_seconds: 65.6,
