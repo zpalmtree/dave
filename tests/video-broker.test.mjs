@@ -974,8 +974,8 @@ test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not 
             writeFileSync(path, 'replacement');
             return { path, bytes: 11, mimeType: 'image/png' };
         },
-        videoEditStillGenerator: async (frame, replacement, target, request, effects, options) => {
-            repaints.push({ frame: frame.bytes.toString(), replacement: replacement.bytes.toString(), target, request, effects });
+        videoEditStillGenerator: async (frame, replacement, target, request, options) => {
+            repaints.push({ frame: frame.bytes.toString(), replacement: replacement.bytes.toString(), target, request });
             await options.onUsage({ stage: 'video_edit_still', attempt: 1, outcome: refuse ? 'error' : 'success',
                 provider: 'openai', model: 'gpt-image-test', inputTokens: 10, outputTokens: 20, images: refuse ? 0 : 1 });
             if (refuse) {
@@ -1026,8 +1026,9 @@ test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not 
             assert.equal(repainted.status, 200);
             assert.equal(repainted.headers.get('content-type'), 'image/png');
             assert.equal(await repainted.text(), 'repainted');
-            assert.deepEqual(repaints[0], { frame: 'frame', replacement: 'replacement', target: 'the man', request: 'Meximutt',
-                effects: 'two light beams from its eyes' });
+            assert.deepEqual(repaints[0], { frame: 'frame', replacement: 'replacement', target: 'the man', request: 'Meximutt' });
+            assert.equal((await broker.get('SELECT video_edit_effects FROM video_jobs WHERE public_id=?', [job.id]))
+                .video_edit_effects, 'two light beams from its eyes');
             assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-frame.png'), 'utf8'), 'frame');
             assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-still.png'), 'utf8'), 'repainted');
             refuse = true;
