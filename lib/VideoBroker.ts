@@ -5850,7 +5850,6 @@ export class VideoBroker {
                 { bytes: readFileSync(job.source_image_path), mimeType: job.source_image_mime },
                 job.video_edit_target || 'the subject',
                 job.video_replacement_prompt || job.prompt,
-                job.video_edit_effects || '',
                 { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job) },
             );
             const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];

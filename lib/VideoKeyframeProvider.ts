@@ -650,12 +650,12 @@ export interface VideoEditStillImage {
 /**
  * Viggle-Animate animates one repainted frame of the source clip, so the repaint must keep that
  * frame's exact composition. gpt-image holds the pose, head size and crop; Gemini pulled the camera
- * back in testing, and the animation then froze or broke apart. Viggle only animates what the still
- * shows, so effects coming from the subject (beams from its eyes) are kept when grounding saw them;
- * gpt-image otherwise erases them with it. They are named only then, because effect wording makes
- * repaints of real people far more likely to be refused.
+ * back in testing, and the animation then froze or broke apart. Effects coming from the subject
+ * (beams from its eyes) are left out: a still that kept them gave the replacement a strained face
+ * whose mouth Viggle then held shut, and effect wording made repaints of real people far more likely
+ * to be refused.
  */
-export function videoEditStillPrompt(target: string, request: string, effects = ''): string {
+export function videoEditStillPrompt(target: string, request: string): string {
     const named = /^(the|a|an) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
     return [
         `Edit Image 1, a frame from a video. Replace ${named} with the subject shown in Image 2.`,
@@ -664,8 +664,6 @@ export function videoEditStillPrompt(target: string, request: string, effects = 
         'and crop.',
         'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
         'keeping its distinctive look instead of redesigning it.',
-        effects.trim() ? `Image 1 also shows ${effects.trim().slice(0, 160)}; keep them exactly as they look, now coming`
-            + ' from the same place on the replacement.' : '',
         'Keep everything else in Image 1 exactly as it is: the background, other subjects, lighting, colors,',
         'camera angle and framing.',
         'Output a single photographic frame with the same composition as Image 1, never a collage or side-by-side.',
@@ -677,28 +675,24 @@ type VideoEditStillOptions = VideoFrontierCallOptions & { abortSignal?: AbortSig
 
 /**
  * gpt-image's refusals of real people are not deterministic (one frame passed 4 of 7 identical
- * requests), and an input-stage refusal returns in seconds. Each prompt is tried twice, and a
- * refused effects prompt falls back to the plain one before the worker falls back to H3.
+ * requests), and an input-stage refusal returns in seconds, so a refused repaint is tried once more
+ * before the worker falls back to H3.
  */
 export async function createVideoEditStill(
     frame: VideoEditStillImage,
     replacement: VideoEditStillImage,
     target: string,
     request: string,
-    effects = '',
     options: VideoEditStillOptions = {},
 ): Promise<VideoKeyframeResult> {
-    const plain = videoEditStillPrompt(target, request);
-    const prompts = effects.trim()
-        ? [videoEditStillPrompt(target, request, effects), videoEditStillPrompt(target, request, effects), plain, plain]
-        : [plain, plain];
+    const prompt = videoEditStillPrompt(target, request);
     const started = Date.now();
     let refusal: unknown;
-    for (const [index, prompt] of prompts.entries()) {
+    for (const attempt of [1, 2]) {
         // The worker waits six minutes for the still; leave room for one full attempt.
-        if (index > 0 && Date.now() - started > 90_000) break;
+        if (attempt > 1 && Date.now() - started > 90_000) break;
         try {
-            return await requestVideoEditStill(frame, replacement, prompt, index + 1, options);
+            return await requestVideoEditStill(frame, replacement, prompt, attempt, options);
         } catch (error) {
             if (!(error instanceof VideoKeyframeError && error.code === 'moderation')) throw error;
             refusal = error;
