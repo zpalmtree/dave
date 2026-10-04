@@ -240,16 +240,13 @@ export function videoJobDirection(job: Pick<VideoJobView, 'prompt' | 'planned_in
     return intent || 'Choosing a scene to bring this to life.';
 }
 
-// The worker's runtime starts when it leases the job, so it leaves out the
-// time spent waiting in the queue. Report the wall time since the request.
+// The worker's runtime restarts with each lease, so a recovery job that is
+// re-leased between scenes reports only its final pass. Report the wall time
+// since the request instead.
 function completedVideoTiming(job: Pick<VideoJobView, 'runtime_seconds' | 'created_at' | 'completed_at'>): string | null {
-    const generating = formatVideoRuntime(job.runtime_seconds);
-    const total = formatVideoRuntime(Number(job.completed_at) - Number(job.created_at));
-    if (!total) return generating ? `took **${generating}**` : null;
-    const waited = Number(job.completed_at) - Number(job.created_at) - (Number(job.runtime_seconds) || 0);
-    return generating && waited >= 60
-        ? `took **${total}** (${generating} generating)`
-        : `took **${total}**`;
+    const runtime = formatVideoRuntime(Number(job.completed_at) - Number(job.created_at))
+        || formatVideoRuntime(job.runtime_seconds);
+    return runtime ? `took **${runtime}**` : null;
 }
 
 export function completedVideoPost(job: VideoJobView): string {
