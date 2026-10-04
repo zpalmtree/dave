@@ -80,6 +80,7 @@ import {
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
     createVideoEditStill,
+    videoEditStillWithEffects,
     isModerationFailure,
     generateFrontierVideoKeyframeCandidate,
 } from './VideoKeyframeProvider.js';
@@ -5924,13 +5925,13 @@ export class VideoBroker {
         writeFileSync(join(directory, 'video-edit-frame.png'), frame);
         const started = Date.now();
         try {
-            const still = await (this.options.videoEditStillGenerator || createVideoEditStill)(
+            const still = videoEditStillWithEffects(await (this.options.videoEditStillGenerator || createVideoEditStill)(
                 { bytes: frame, mimeType },
                 { bytes: readFileSync(job.source_image_path), mimeType: job.source_image_mime },
                 job.video_edit_target || 'the subject',
                 job.video_replacement_prompt || job.prompt,
                 { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job) },
-            );
+            ), job.video_edit_effects || '');
             const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
             const path = join(directory, `video-edit-still.${extension}`);
             writeFileSync(path, still.bytes);
