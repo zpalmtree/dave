@@ -976,7 +976,7 @@ test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not 
         },
         videoEditStillGenerator: async (frame, replacement, target, request, options) => {
             repaints.push({ frame: frame.bytes.toString(), replacement: replacement.bytes.toString(), target, request });
-            await options.onUsage({ stage: 'video_edit_still', attempt: 1, outcome: refuse ? 'error' : 'success',
+            await options.onUsage({ stage: 'video_edit_still', attempt: 1 + (options.attemptOffset || 0), outcome: refuse ? 'error' : 'success',
                 provider: 'openai', model: 'gpt-image-test', inputTokens: 10, outputTokens: 20, images: refuse ? 0 : 1 });
             if (refuse) {
                 const error = new Error('Your request was rejected by the safety system.');
@@ -1013,6 +1013,7 @@ test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not 
             const lease = await take(value => value.type === 'job');
             assert.equal(lease.job.id, job.id);
             assert.equal(lease.job.video_edit_repaint, version >= 5);
+            assert.equal(lease.job.video_edit_subjects, 'primary');
             const still = (body, headers = {}) => fetch(
                 `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-still`, {
                     method: 'POST', body,
@@ -1041,6 +1042,17 @@ test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not 
             const spans = await broker.get(
                 "SELECT COUNT(*) AS count FROM video_job_spans WHERE job_public_id=? AND name='video_edit_still'", [job.id]);
             assert.equal(spans.count, 1);
+            // Each shot of a clip with cuts is repainted separately and billed under its own attempts.
+            refuse = false;
+            assert.equal((await still('frame', { 'x-video-edit-shot': '0' })).status, 400);
+            const second = await still('second frame', { 'x-video-edit-shot': '2' });
+            assert.equal(second.status, 200);
+            assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-frame-2.png'), 'utf8'), 'second frame');
+            assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-still-2.png'), 'utf8'), 'repainted');
+            assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-frame.png'), 'utf8'), 'frame');
+            const attempts = await broker.all(
+                "SELECT attempt FROM video_usage_events WHERE job_public_id=? AND stage='video_edit_still' ORDER BY attempt", [job.id]);
+            assert.deepEqual(attempts.map(row => row.attempt), [1, 3]);
         } finally {
             socket.close();
         }
@@ -1294,7 +1306,7 @@ test('visual grounding rejects ambiguity before reference generation and leases 
             assert.match(context, /red coat/);
             assert.equal(typeof hooks.onUsage, 'function');
             if (action === 'error') throw new Error('vision unavailable');
-            return { action, target: action === 'replace' ? 'person wearing a red coat' : '',
+            return { action, target: action === 'replace' ? 'person wearing a red coat' : '', subjects: 'group',
                 clarification: action === 'clarify' ? 'The person in red or the person in blue?' : '' };
         },
         keyframeGenerator: async () => {
@@ -1328,9 +1340,11 @@ test('visual grounding rejects ambiguity before reference generation and leases 
         const job = (await accepted.json()).job;
         const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [job.id]);
         assert.equal(row.video_edit_target, 'person wearing a red coat');
+        assert.equal(row.video_edit_subjects, 'group');
         const audit = JSON.parse(readFileSync(join(directory, 'results', job.id, 'video-edit-grounding.json'), 'utf8'));
         assert.equal(audit.requested_target, 'Captain');
         assert.equal(audit.target, row.video_edit_target);
+        assert.equal(audit.subjects, 'group');
         assert.equal((await submit('grounded')).status, 200);
         assert.equal(groundingCalls, 3);
         assert.equal(generationCalls, 1);

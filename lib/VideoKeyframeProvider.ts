@@ -653,7 +653,10 @@ export interface VideoEditStillImage {
  * back in testing, and the animation then froze or broke apart. Effects coming from the subject
  * (beams from its eyes) are left out: a still that kept them gave the replacement a strained face
  * whose mouth Viggle then held shut, and effect wording made repaints of real people far more likely
- * to be refused.
+ * to be refused. Headwear stays: a clip can hinge on it, such as a compilation cutting to each
+ * subject in a hijab, and the replacement's own clothing otherwise took its place. The rule names no
+ * garment: listing hijabs and veils got a bareheaded politician's frame refused 4 of 4 times, while
+ * this wording passed 4 of 4 and still kept the hijab in 4 of 4.
  */
 export function videoEditStillPrompt(target: string, request: string): string {
     const named = /^(the|a|an) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
@@ -664,6 +667,8 @@ export function videoEditStillPrompt(target: string, request: string): string {
         'and crop.',
         'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
         'keeping its distinctive look instead of redesigning it.',
+        `If ${named} wears anything on its head in Image 1, the replacement wears the same thing in the same way,`,
+        'over its own hair and clothing.',
         'Keep everything else in Image 1 exactly as it is: the background, other subjects, lighting, colors,',
         'camera angle and framing.',
         'Output a single photographic frame with the same composition as Image 1, never a collage or side-by-side.',
@@ -701,7 +706,14 @@ export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: s
     return { ...still, bytes: Buffer.concat([still.bytes.subarray(0, end), length, chunk, checksum, still.bytes.subarray(end)]) };
 }
 
-type VideoEditStillOptions = VideoFrontierCallOptions & { abortSignal?: AbortSignal };
+/** Attempts per repainted frame: one retry after a refusal. */
+export const VIDEO_EDIT_STILL_ATTEMPTS = 2;
+
+type VideoEditStillOptions = VideoFrontierCallOptions & {
+    abortSignal?: AbortSignal;
+    /** Added to the attempt numbers, so repaints of several shots of one job record separately. */
+    attemptOffset?: number;
+};
 
 /**
  * gpt-image's refusals of real people are not deterministic (one frame passed 4 of 7 identical
@@ -718,11 +730,11 @@ export async function createVideoEditStill(
     const prompt = videoEditStillPrompt(target, request);
     const started = Date.now();
     let refusal: unknown;
-    for (const attempt of [1, 2]) {
+    for (let attempt = 1; attempt <= VIDEO_EDIT_STILL_ATTEMPTS; attempt++) {
         // The worker waits six minutes for the still; leave room for one full attempt.
         if (attempt > 1 && Date.now() - started > 90_000) break;
         try {
-            return await requestVideoEditStill(frame, replacement, prompt, attempt, options);
+            return await requestVideoEditStill(frame, replacement, prompt, attempt + (options.attemptOffset || 0), options);
         } catch (error) {
             if (!(error instanceof VideoKeyframeError && error.code === 'moderation')) throw error;
             refusal = error;
