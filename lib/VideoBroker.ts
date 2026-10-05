@@ -2,7 +2,8 @@ import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressCont
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
-    cutVideoSourceAudio, excerptVideoSourceAudioLyrics } from './VideoSourceAudio.js';
+    cutVideoSourceAudio, excerptVideoSourceAudioLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
+import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
@@ -182,6 +183,7 @@ interface BrokerOptions {
     ) => Promise<VideoKeyframeReference[]>;
     sourceAudioDownloader?: typeof storeVideoSourceAudio;
     sourceAudioTranscriber?: typeof transcribeVideoSourceAudio;
+    songWriter?: typeof writeVideoSong;
     sourceAudioExcerptSelector?: typeof selectVideoSourceAudioExcerpt;
     sourceAudioCutter?: typeof cutVideoSourceAudio;
     sourceImageDownloader?: (
@@ -200,6 +202,8 @@ interface BrokerOptions {
 interface WorkerConnection {
     recoveryVersion: number;
     sourceAudioVersion: number;
+    /** 1: composes a song request's soundtrack with MiniMax Music 3 before planning. */
+    songComposeVersion: number;
     videoEditVersion: number;
     socket: WebSocket;
     id: string;
@@ -345,6 +349,8 @@ interface JobRow {
     source_audio_path: string | null;
     source_audio_seconds: number | null;
     source_audio_lyrics_json: string | null;
+    /** 'composed' when the worker composed the song; null for a user's upload. */
+    source_audio_origin: 'composed' | null;
     source_excerpt_json: string | null;
     source_kind: VideoJobView['source_kind'];
     source_video_path: string | null;
@@ -1747,7 +1753,7 @@ export class VideoBroker {
             ['recovery_json', 'TEXT'], ['recovery_version', 'INTEGER NOT NULL DEFAULT 0'],
             ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
-            ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_excerpt_json', 'TEXT'],
+            ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_audio_origin', 'TEXT'], ['source_excerpt_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
             ['video_edit_target', 'TEXT'], ['video_edit_effects', 'TEXT'], ['video_edit_subjects', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'], ['render_seconds', 'REAL'],
@@ -2259,6 +2265,10 @@ export class VideoBroker {
             const guidance = typeof body.planner_guidance === 'string' ? body.planner_guidance.slice(0, 8000) : row.planner_guidance;
             await this.run(`UPDATE video_jobs SET status='queued', recovery_json=NULL, recovery_next_at=NULL,
                 planner_json=NULL, frontier_analysis_json=NULL, planner_guidance=?, error=NULL,
+                source_audio_path=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_path END,
+                source_audio_seconds=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_seconds END,
+                source_audio_lyrics_json=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_lyrics_json END,
+                source_audio_origin=NULL,
                 result_path=NULL, result_sha256=NULL, result_bytes=NULL, notified_at=NULL, delivered_at=NULL,
                 completed_at=NULL, started_at=NULL, worker_id=NULL, lease_token=NULL, lease_expires_at=NULL,
                 progress=NULL, progress_scope=NULL, segment_index=NULL, runtime_seconds=NULL, render_seconds=NULL,
@@ -3615,7 +3625,12 @@ export class VideoBroker {
 
     private frontierOptions(job: JobRow, _criticalPath: boolean): VideoKeyframeOptions {
         const configured = configuredPrimaryVideoPlannerOptions(job.channel_id);
-        const plannerGuidance = [job.planner_guidance]
+        // An uploaded song replaces the persona guidance at submission. A composed song keeps it
+        // and adds the song rules, which override its voice and dialogue lead-in instructions.
+        const songGuidance = job.source_audio_origin === 'composed' && job.source_audio_seconds
+            ? videoSourceAudioPlannerGuidance(parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
+                job.source_audio_seconds, 'composed') : '';
+        const plannerGuidance = [job.planner_guidance, songGuidance]
             .map(value => String(value || '').trim())
             .filter(Boolean)
             .join('\n');
@@ -4602,6 +4617,7 @@ export class VideoBroker {
                 result_path: row.result_path,
                 result_bytes: row.result_bytes,
                 has_source_audio: Boolean(row.source_audio_path),
+                composed_song: row.source_audio_origin === 'composed' && Boolean(row.source_audio_path),
                 source_audio_seconds: row.source_audio_seconds,
                 source_excerpt: row.source_excerpt_json ? JSON.parse(row.source_excerpt_json) : null,
                 has_source_video: Boolean(row.source_video_path),
@@ -4670,6 +4686,7 @@ export class VideoBroker {
                         capabilities: hello.capabilities,
                         recoveryVersion: Number(hello.recovery_version) || 0,
                         sourceAudioVersion: Number(hello.source_audio_version) || 0,
+                        songComposeVersion: Number(hello.song_compose_version) || 0,
                         videoEditVersion: Number(hello.video_edit_version) || 0,
                         lastHeartbeat: Date.now(),
                         currentJob: hello.current_job,
@@ -5492,6 +5509,73 @@ export class VideoBroker {
             .map(([path, mime]) => ({ data: readFileSync(path!), mimeType: mime as VideoPlanSourceImage['mimeType'] }));
     }
 
+    /**
+     * The song a recovery job's worker must compose before planning, or null. A song request
+     * without an uploaded song gets one songwriter call; its decision is kept for the job.
+     */
+    private async composedSongDirective(job: JobRow, state: any, sources: VideoPlanSourceImage[],
+        options: VideoKeyframeOptions, persist: () => Promise<void>): Promise<Pick<VideoSongDecision, 'caption' | 'lyrics' | 'seconds'> | null> {
+        // A worker that cannot compose plans the job with per-scene audio, as before.
+        if (job.source_audio_path || state.prepared || state.local_plan || (this.worker?.songComposeVersion || 0) < 1) return null;
+        if (!state.song) {
+            if (!videoComposedSongEnabled() || job.model !== 'minimax' || job.source_video_path
+                || !mayWantComposedSong(job.prompt)) return null;
+            try {
+                state.song = await (this.options.songWriter || writeVideoSong)({ prompt: job.prompt, sources,
+                    requestedDurationSeconds: job.requested_duration_seconds }, options);
+            } catch (error) {
+                console.warn(`Could not write a song for ${job.public_id}; planning with per-scene audio.`, error);
+                state.song = { mode: 'none', reason: 'The songwriter failed.', seconds: 0, caption: '', lyrics: '' };
+            }
+            await persist();
+            if (state.song.mode === 'compose') console.log(`Composing a ${state.song.seconds} s song for ${job.public_id}.`);
+        }
+        if (state.song.mode !== 'compose' || state.song.failed) return null;
+        return { caption: state.song.caption, lyrics: state.song.lyrics, seconds: state.song.seconds };
+    }
+
+    /** Stores the worker's composed song as the job's soundtrack, exactly as an uploaded song is stored. */
+    private async storeComposedSong(job: JobRow, state: any, body: any, persist: () => Promise<void>): Promise<Record<string, unknown> | null> {
+        if (state.song?.mode !== 'compose' || state.song.failed || job.source_audio_path || state.prepared) return null;
+        const fail = async (reason: string) => {
+            // The job still renders, with each scene's own generated audio.
+            state.song.failed = sanitizeVideoWorkerText(reason, 'Song composition failed.', 500);
+            await persist();
+            console.warn(`Composed song for ${job.public_id} was not used: ${state.song.failed}`);
+            return { ok: true, composed: false };
+        };
+        if (body.failed) return fail(String(body.failed));
+        const audio = Buffer.from(String(body.audio || ''), 'base64');
+        if (audio.length < 1024 || audio.length > 12 * 1024 * 1024) return fail('The composed song upload was invalid.');
+        const directory = resolve(this.options.resultsDir, job.public_id);
+        mkdirSync(directory, { recursive: true });
+        const upload = join(directory, 'composed-song.flac');
+        let song: StoredVideoSourceAudio;
+        try {
+            writeFileSync(upload, audio);
+            song = await normalizeVideoSourceAudio(upload, join(directory, 'source-audio.wav'));
+        } catch (error) {
+            return fail(error instanceof Error ? error.message : String(error));
+        } finally {
+            rmSync(upload, { force: true });
+        }
+        if (song.duration < 8 || song.duration > 75) {
+            rmSync(song.path, { force: true });
+            return fail(`The composed song lasted ${song.duration.toFixed(1)} seconds.`);
+        }
+        const lyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, this.providerHooks(job))
+            .catch(error => {
+                console.warn(`Could not transcribe the composed song for ${job.public_id}; planning without lyric timing.`, error);
+                return null;
+            });
+        await this.run(`UPDATE video_jobs SET source_audio_path=?, source_audio_seconds=?, source_audio_lyrics_json=?,
+            source_audio_origin='composed', updated_at=? WHERE public_id=?`,
+            [song.path, song.duration, lyrics ? JSON.stringify(lyrics) : null, nowSeconds(), job.public_id]);
+        state.song.composed_seconds = song.duration;
+        await persist();
+        return { ok: true, composed: true, seconds: song.duration, lyric_lines: lyrics?.lines.length || 0 };
+    }
+
     private async handleRecovery(req: IncomingMessage, res: ServerResponse, id: string, operation: string): Promise<void> {
         const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [id]);
         if (!job || !job.recovery_version || job.worker_id !== this.worker?.id
@@ -5546,6 +5630,11 @@ export class VideoBroker {
         try {
             validateReferences();
             if (operation === 'plan') {
+                const song = await this.composedSongDirective(job, state, sources, options, persist);
+                if (song) {
+                    writeJson(res, 200, { compose_song: song, checkpoint: state.checkpoint || {} });
+                    return;
+                }
                 if (!state.prepared && !state.local_plan) {
                     try {
                         state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
@@ -5619,6 +5708,12 @@ export class VideoBroker {
                 }
                 validateReferences();
                 writePrepared();
+                return;
+            }
+            if (operation === 'soundtrack') {
+                const stored = await this.storeComposedSong(job, state, body, persist);
+                if (stored) writeJson(res, 200, stored);
+                else writeJson(res, 409, { error: 'This job is not waiting for a composed song.' });
                 return;
             }
             const prepared = state.prepared;
@@ -5896,7 +5991,7 @@ export class VideoBroker {
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
         if (await this.handleImageWorkerHttp(req, res, url)) return;
-        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
+        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|soundtrack|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);
             return;

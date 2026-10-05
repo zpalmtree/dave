@@ -233,6 +233,8 @@ export interface VideoJobView {
     command_variant?: string | null;
     source_kind?: VideoSourceKind | null;
     has_source_audio?: boolean;
+    /** The soundtrack is a song the worker composed for the request, not the user's upload. */
+    composed_song?: boolean;
     source_audio_seconds?: number | null;
     /** The part of a longer song or source video that was used. */
     source_excerpt?: {
@@ -304,6 +306,7 @@ export function isQwenImageModel(value: unknown): value is QwenImageModelId {
 
 export interface VideoWorkerHello {
     source_audio_version?: number;
+    song_compose_version?: number;
     video_edit_version?: number;
     recovery_version?: number;
     type: 'hello';

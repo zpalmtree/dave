@@ -200,8 +200,20 @@ export function parseVideoSourceAudioLyrics(json: string | null | undefined): Vi
     }
 }
 
-/** Planner guidance for a song job, with its vocal timeline when the song was transcribed. */
-export function videoSourceAudioPlannerGuidance(lyrics: VideoSourceAudioLyrics | null, seconds: number): string {
+const UPLOADED_SONG_OPENING = 'The user supplied the original song as the fixed soundtrack.';
+const COMPOSED_SONG_OPENING = 'An original song composed for this request is the fixed soundtrack.';
+
+/**
+ * Planner guidance for a song job, with its vocal timeline when the song was transcribed.
+ * A composed song gets the same rules; only who supplied it differs.
+ */
+export function videoSourceAudioPlannerGuidance(lyrics: VideoSourceAudioLyrics | null, seconds: number,
+    origin: 'upload' | 'composed' = 'upload'): string {
+    const guidance = videoSourceAudioTimelineGuidance(lyrics, seconds);
+    return origin === 'composed' ? guidance.replace(UPLOADED_SONG_OPENING, COMPOSED_SONG_OPENING) : guidance;
+}
+
+function videoSourceAudioTimelineGuidance(lyrics: VideoSourceAudioLyrics | null, seconds: number): string {
     if (!lyrics?.lines.length) return VIDEO_SOURCE_AUDIO_GUIDANCE;
     const span = (start: number, end: number) => `${start.toFixed(1)}-${end.toFixed(1)}`;
     const entries: string[] = [];
