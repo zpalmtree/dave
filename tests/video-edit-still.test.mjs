@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createVideoEditStill, videoEditStillWithEffects } from '../dist/VideoKeyframeProvider.js';
+import { createVideoEditStill, videoEditStillPrompt, videoEditStillWithEffects } from '../dist/VideoKeyframeProvider.js';
 import { inflateSync } from 'node:zlib';
 
 const frame = { bytes: Buffer.from('frame'), mimeType: 'image/png' };
@@ -38,6 +38,21 @@ test('a refused repaint is retried once before the worker falls back to H3', asy
         () => createVideoEditStill(frame, replacement, 'the woman', 'meximutt'));
     assert.equal(exhausted.error?.code, 'moderation');
     assert.equal(exhausted.requests, 2);
+});
+
+test('each shot of a clip numbers its own repaint attempts', async () => {
+    const attempts = [];
+    await withImageEdits(count => (count === 1 ? refused : repainted),
+        () => createVideoEditStill(frame, replacement, 'the woman', 'meximutt',
+            { attemptOffset: 4, onAttempt: value => attempts.push(value.attempt) }));
+    assert.deepEqual(attempts, [5, 6]);
+});
+
+test('the repaint keeps the subject\'s headwear without naming any garment', () => {
+    const prompt = videoEditStillPrompt('the woman in the foreground', 'Meximutt');
+    assert.match(prompt, /wears anything on its head in Image 1, the replacement wears the same thing/);
+    // Listing religious garments got frames of bareheaded real people refused.
+    assert.doesNotMatch(prompt, /hijab|veil|turban|headscarf/i);
 });
 
 test('provider errors other than refusals are not retried', async () => {

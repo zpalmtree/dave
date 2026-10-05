@@ -22,11 +22,17 @@ unsupported edits, such as whole-video restyling, ask for clarification.
 Every replacement, including explicit `replace ... with ...` commands, is
 visually grounded before queueing. The broker samples five frames across the
 downloaded source and converts the intended target into a concrete visible
-description for SAM3. An obvious main subject can resolve “him” or “the
-character”; names are linked using visible appearance and supplied context,
-not passed straight to the tracker. If several subjects fit, the bot asks a
-short question using visible alternatives. Reissue the command on the source
-video with that distinction. Provider failures do not fall back to the original
+description for SAM3. A vague target such as a bare `$oalgo`, “him” or “the
+character” never asks: grounding picks the most prominent fitting subject, and
+in a compilation that cuts between people it describes each shot's main subject
+by what they share, such as “the woman in the foreground”. Grounding also
+records whether the edit covers one subject or an explicit group (“the dancers”,
+“everyone”); for one subject the worker replaces only the most prominent tracked
+match in each shot, not every person fitting the description. Names are linked
+using visible appearance and supplied context, not passed straight to the
+tracker. If several subjects fit an explicit description, or a named subject is
+absent, the bot asks a short question using visible alternatives. Reissue the
+command on the source video with that distinction. Provider failures do not fall back to the original
 ungrounded target. No replacement reference or diffusion render is started for
 an unresolved target.
 
@@ -99,7 +105,16 @@ renders in 124-frame windows that carry 22 frames forward, sampled against the
 frozen source soundtrack. The result is composited over the tracked region like
 the H3 path. Both the frame and the repaint are kept beside the clip as
 `video-edit-frame.png` and `video-edit-still.png`, and the repaint's usage is
-recorded with the job. A refused or failed repaint, or a failed Viggle render,
+recorded with the job. A clip that cuts between shots is edited shot by shot:
+segments never span a cut, each shot is tracked afresh, and each is animated
+from a repaint of its own clearest frame (`video-edit-frame-2.png`,
+`video-edit-still-2.png` and so on), since a still framed for one shot breaks the
+animation of another. Each repaint costs about $0.07. A shot without the subject,
+or one whose repaint is refused, stays source footage; the edit falls back to
+H3 only when every repaint fails. The repaint keeps anything the subject wears
+on its head, so a clip that cuts to its subjects in hijabs still shows the
+replacement in one. Naming garments in that rule got frames of bareheaded real
+people refused, so it names none. The desktop README describes the cut detection. A refused or failed repaint, or a failed Viggle render,
 falls back to the H3 replacement. A tracking failure is final, since H3 would
 fail the same way. Add edits and replacements drawn locally by Qwen Image
 always use H3. Set `VIDEO_EDIT_REPAINT=0` on the broker to keep every replace
@@ -107,9 +122,10 @@ edit on H3. The worker needs `minimax_h3_ref2va_viggle_pruned_int8_convrot`,
 `viggle_animate_dmd_lora_r64`, `models/text_cond/fixed_embed_fwd_anyframe`, and
 the `viggle_animate_h3` custom node pack in ComfyUI.
 
-Cuts, a target hidden for much of the clip, or large differences in body shape
-can confuse automatic tracking and replacement. Each segment tracks the target
-independently, so a visible seam can occur where two renders meet. A portrait
+Gradual transitions, a target hidden for much of the clip, or large differences
+in body shape can confuse automatic tracking and replacement. Each segment tracks
+the target independently, so a visible seam can occur where two renders meet
+within one shot. A portrait
 reference may produce a cropped body in a full-body
 shot. The original video is retained outside the replacement region. The
 underlying H3 workflow uses the separate Ref2VA diffusion checkpoint, the Fun

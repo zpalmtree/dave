@@ -91,13 +91,19 @@ test('structured decisions reject empty or invalid grounding instead of using th
         assert.throws(() => validateVideoEditDecision(value, false), /interpret/);
     }
     assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: ' red car ', clarification: '' }, false),
-        { action: 'replace', target: 'red car', effects: '', clarification: '' });
+        { action: 'replace', target: 'red car', effects: '', subjects: 'primary', clarification: '' });
     assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: 'bull-headed man',
         effects: ' two light beams from its eyes ', clarification: '' }, false),
-        { action: 'replace', target: 'bull-headed man', effects: 'two light beams from its eyes', clarification: '' });
-    assert.deepEqual(validateVideoEditDecision({ action: 'clarify', target: '', effects: 'beams',
-        clarification: 'Which person?' }, false), { action: 'clarify', target: '', effects: '', clarification: 'Which person?' });
+        { action: 'replace', target: 'bull-headed man', effects: 'two light beams from its eyes', subjects: 'primary',
+            clarification: '' });
+    assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: 'the dancers', effects: '', subjects: 'group',
+        clarification: '' }, false), { action: 'replace', target: 'the dancers', effects: '', subjects: 'group', clarification: '' });
+    assert.deepEqual(validateVideoEditDecision({ action: 'clarify', target: '', effects: 'beams', subjects: 'group',
+        clarification: 'Which person?' }, false),
+        { action: 'clarify', target: '', effects: '', subjects: 'primary', clarification: 'Which person?' });
     assert.throws(() => validateVideoEditDecision({ action: 'replace', target: 'man', effects: 'x'.repeat(161),
+        clarification: '' }, false), /interpret/);
+    assert.throws(() => validateVideoEditDecision({ action: 'replace', target: 'man', effects: '', subjects: 'everyone',
         clarification: '' }, false), /interpret/);
     for (const value of [{ action: 'add', target: '', replacement: 'a hat', clarification: '' },
         { action: 'add', target: 'the man', replacement: '', clarification: '' }]) {
