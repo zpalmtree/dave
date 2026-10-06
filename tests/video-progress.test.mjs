@@ -3,7 +3,8 @@ import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { VideoBroker, projectedVideoFinishAt } from '../dist/VideoBroker.js';
+import { VideoBroker } from '../dist/VideoBroker.js';
+import { projectedVideoFinishAt } from '../dist/VideoRuntimeStats.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress } from '../dist/VideoProgress.js';
 import { formatGlobalVideoQueueJob, globalVideoQueueEmbeds } from '../dist/VideoGeneration.js';
 
