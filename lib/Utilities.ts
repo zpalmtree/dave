@@ -13,7 +13,6 @@ export { trySendTyping, withTyping } from './Typing.js';
 import moment from 'moment';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
-import { PublicKey } from '@solana/web3.js'
 
 import { RGB } from './Types.js';
 import { config } from './Config.js';
@@ -111,15 +110,6 @@ export function formatUsdCost(value: number): string {
     }
 
     return `$${value.toFixed(2)}`;
-}
-
-export function isValidSolAddress(address: string) {
-    try {
-        const pubkey = new PublicKey(address);
-        return PublicKey.isOnCurve(pubkey.toBuffer());
-    } catch (error) {
-        return false;
-    }
 }
 
 export function chunk(arr: string, len: number) {
@@ -309,6 +299,17 @@ export async function tryReactMessage(msg: Message, reaction: string) {
         await msg.react(reaction);
     } catch (err) {
         console.log(`Failed to react with ${reaction} to message ${msg.id}, ${(err as any).toString()}, ${(err as any).stack}`);
+    }
+}
+
+/* Replies to the users mentioned in msg, or posts in the channel if nobody
+ * was mentioned. */
+export async function replyWithMention(msg: Message, reply: string): Promise<void> {
+    if (msg.mentions.users.size > 0) {
+        const usersMentioned = [...msg.mentions.users.keys()].map((id) => `<@${id}>`).join(' ');
+        await msg.reply(`${usersMentioned} ${reply}`);
+    } else {
+        await (msg.channel as TextChannel).send(reply);
     }
 }
 
