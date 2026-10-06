@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import sqlite3 from 'sqlite3';
 
-import { handleUsersTokens } from '../dist/CommandImplementations.js';
+import { handleUsersTokens } from '../dist/StatsCommands.js';
 import { createTablesIfNeeded, executeQuery } from '../dist/Database.js';
 
 for (const [global, hasGlobalUsers] of [[true, true], [false, true], [true, false]]) {
