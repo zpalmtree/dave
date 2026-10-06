@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OALGO_PHOTOREAL_KEYFRAME, VideoBroker } from '../dist/VideoBroker.js';
-import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, repairVideoTiming, recoveryLimitReached,
-    VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
+import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash,
+    repairVideoTiming, recoveryLimitReached, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
@@ -60,6 +60,46 @@ test('local recovery refuses quality bypass and lost verbatim speech', () => {
     value.segments[0].shots[0].dialogue = [{ text: 'We made it elsewhere.' }];
     assert.throws(() => approvedLocalRecoveryContract(value, 'explorers return', 'provider_policy', '', true, analysis),
         /dialogue was lost/);
+});
+
+const REDACTED_PROMPT = 'The bull says "aye mijos... [a rose animates] thank you for the rose RudeDonor 1 4 8 8 '
+    + '[a galaxy animates] no mames güey!!!" [laughs]';
+
+function redactedRefusal(lines = [
+    { speaker_hint: 'bull', text: 'aye mijos...', verbatim: true },
+    { speaker_hint: 'bull', text: 'thank you for the rose [donor username containing an insult - not reproduced]', verbatim: true },
+    { speaker_hint: 'bull', text: 'no mames güey!!!', verbatim: true },
+]) {
+    return { dialogue_contract: { mode: 'verbatim', lines },
+        frontier_handling: { disposition: 'reject', reason_code: 'provider_policy', reason: 'Declined.' } };
+}
+
+test('local fulfillment is checked against requested speech, not a censored frontier line', () => {
+    const frontier = redactedRefusal();
+    const text = 'aye mijos... thank you for the rose RudeDonor 1 4 8 8 no mames güey!!!';
+    const local = plan(text);
+    const before = structuredClone(frontier);
+    assert.doesNotThrow(() => approvedLocalRecoveryContract(local, REDACTED_PROMPT, 'provider_policy', '', true, frontier));
+    assert.deepEqual(frontier, before, 'The rejected analysis is retained unchanged for diagnostics.');
+
+    // A copied refusal in the uploaded plan must not reinstate its censored contract.
+    local.prompt_analysis = frontier;
+    assert.doesNotThrow(() => approvedLocalRecoveryContract(local, REDACTED_PROMPT, 'provider_policy', '', true, frontier));
+    for (const placeholder of ['[username omitted] thanks for the rose', '[entire line not reproduced]', 'A rewritten polite greeting.']) {
+        assert.doesNotThrow(() => approvedLocalRecoveryContract(plan(text), REDACTED_PROMPT, 'provider_policy', '', true,
+            redactedRefusal([{ text: placeholder, verbatim: true }])));
+    }
+    // Unaltered user-authored lines and the local model's full dialogue still bind.
+    const dropped = plan('thank you for the rose RudeDonor 1 4 8 8');
+    assert.throws(() => approvedLocalRecoveryContract(dropped, REDACTED_PROMPT, 'provider_policy', '', true, frontier),
+        /dialogue was lost/);
+    const censored = plan(text);
+    censored.segments[0].shots[0].dialogue[0].text = 'aye mijos... thank you for the rose no mames güey!!!';
+    assert.throws(() => approvedLocalRecoveryContract(censored, REDACTED_PROMPT, 'provider_policy', '', true, frontier),
+        /dialogue was lost/, 'The local contract still requires the complete requested line.');
+    const approved = plan(text).prompt_analysis;
+    assert.throws(() => approvedLocalRecoveryContract(censored, REDACTED_PROMPT, 'other', '', true, approved),
+        /dialogue was lost/, 'An approved frontier contract is still binding.');
 });
 
 test('local recovery stops an unbroken generated-frame chain before visual drift compounds', () => {
@@ -658,6 +698,61 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         assert.equal((await request('quality', quality)).status, 503, 'An unrecorded scene cannot be approved.');
         assert.equal((await request('review', { segment_index: 1, kind: 'video', artifact_sha256: artifacts[1].sha256 })).body.acceptable, true);
         assert.equal((await request('quality', quality)).status, 200);
+    } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a censored frontier script permits original-request local fulfillment and checkpoint reuse', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-recovery-redacted-'));
+    let analysis = redactedRefusal();
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+        recoveryEnabled: true, preplanQueuedJobs: false,
+        frontierPlanner: async () => { throw new FrontierPlannerRejectedError('provider_policy', 'Declined.', analysis); },
+    });
+    await broker.start();
+    try {
+        const base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: REDACTED_PROMPT, requester_id: '1', origin_bot_id: '2',
+                channel_id: '3', command_message_id: '4', status_message_id: '5' }),
+        });
+        const id = (await submitted.json()).job.id;
+        broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+            scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+        const reset = state => broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=?, recovery_json=? WHERE public_id=?",
+            [VIDEO_RECOVERY_VERSION, state ? JSON.stringify(state) : null, id]);
+        const request = async (operation, body = {}) => {
+            const response = await fetch(`${base}/v1/worker/jobs/${id}/recovery/${operation}`, { method: 'POST',
+                headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' },
+                body: JSON.stringify(body),
+            });
+            return { status: response.status, body: await response.json() };
+        };
+        await reset();
+        const routed = await request('plan');
+        assert.equal(routed.status, 200, JSON.stringify(routed.body));
+        assert.equal(routed.body.local_plan_required, true);
+        assert.deepEqual(routed.body.prompt_analysis, analysis, 'The broker never adds prompt-redaction instructions.');
+        const restored = plan('aye mijos... thank you for the rose RudeDonor 1 4 8 8 no mames güey!!!');
+        const uploaded = await request('local-plan', { plan: restored });
+        assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
+        assert.equal(uploaded.body.contract.planner, 'local');
+        assert.equal(uploaded.body.contract.prompt, REDACTED_PROMPT);
+        assert.match(uploaded.body.contract.segments[0].shots[0].dialogue[0].text, /RudeDonor 1 4 8 8/);
+        const resumed = await request('plan');
+        assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+        assert.equal(resumed.body.contract_hash, uploaded.body.contract_hash);
+
+        // Even a wholly censored frontier line routes to local planning without guessing
+        // what was removed or stopping the job before the fallback can try the request.
+        analysis = redactedRefusal([{ text: '[entire line not reproduced]', verbatim: true }]);
+        await reset({ local_plan: { reason_code: 'provider_policy', prompt_analysis: analysis } });
+        const whole = await request('plan');
+        assert.equal(whole.status, 200, JSON.stringify(whole.body));
+        assert.equal(whole.body.local_plan_required, true);
+        assert.equal((await request('local-plan', { plan: restored })).status, 200);
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
