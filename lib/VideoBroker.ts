@@ -67,7 +67,7 @@ import {
     VideoPlanSourceImage,
     configuredPrimaryVideoPlannerOptions,
     createFrontierVideoPlan,
-    validateFrontierVideoPlanForKeyframe,
+    validateLocalVideoPlanForKeyframe,
     videoPlannerFingerprint,
 } from './VideoFrontierPlanner.js';
 import {
@@ -109,6 +109,8 @@ import {
 } from './VideoSegmentKeyframePlanner.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
+// Statuses in which a worker lease is expected to be live.
+const LEASED_SQL = ['leased', 'planning', 'running', 'uploading'].map(status => `'${status}'`).join(',');
 const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', import.meta.url));
@@ -217,6 +219,10 @@ interface WorkerConnection {
     warmModel: VideoGeneratorModelId | null;
     leaseId: string | null;
     scheduler: VideoWorkerSchedulerState;
+    // The desktop advertises idle capacity right after every hello acknowledgement.
+    // When the hello itself already leased a job, that advertisement must not be
+    // mistaken for a release of the lease that is still in flight to the worker.
+    startupReadyPending: boolean;
     imageModels: QwenImageModelId[];
     currentImageJob: { id: string; leaseId: string } | null;
 }
@@ -1492,6 +1498,7 @@ export class VideoBroker {
     private writeChain: Promise<unknown> = Promise.resolve();
     private readonly preparationQueued = new Set<string>();
     private readonly preparationAttempted = new Set<string>();
+    private dispatchChain: Promise<void> = Promise.resolve();
     private readonly plannerInFlight = new Map<string, Promise<{ plan: Record<string, any>; plannerModel: string }>>();
     private readonly segmentContractInFlight = new Map<string, Promise<void>>();
     private readonly keyframeInFlight = new Map<string, Promise<void>>();
@@ -4757,6 +4764,7 @@ export class VideoBroker {
                         warmModel: generatorModel(hello.warm_model),
                         leaseId: hello.current_lease || null,
                         scheduler: workerScheduler(hello.scheduler),
+                        startupReadyPending: !hello.current_job,
                         imageModels: Array.isArray(hello.image_models)
                             ? hello.image_models.filter(isQwenImageModel) : [],
                         currentImageJob: null,
@@ -4809,6 +4817,7 @@ export class VideoBroker {
             if (row?.status === 'running' && row.lease_token === claimed.lease_id) {
                 this.worker.currentImageJob = { id: row.public_id, leaseId: claimed.lease_id };
                 this.worker.ready = false;
+                this.worker.startupReadyPending = false;
             } else {
                 cancel = { type: 'image_cancel', job_id: claimed.id };
             }
@@ -4978,10 +4987,23 @@ export class VideoBroker {
             if (message.warm_model === null || message.warm_model !== undefined) {
                 this.worker.warmModel = generatorModel(message.warm_model);
             }
+            const startupReady = this.worker.startupReadyPending;
+            this.worker.startupReadyPending = false;
+            if (startupReady && (this.worker.currentJob || this.worker.currentImageJob)) {
+                // The hello already dispatched a job; that message is still on its way
+                // to the worker, so this is idle capacity the broker has already used.
+                return;
+            }
             if (this.worker.currentImageJob) {
                 const dropped = this.worker.currentImageJob;
                 this.worker.currentImageJob = null;
                 await this.releaseImageJob(dropped.id, dropped.leaseId, 'The desktop worker dropped the image job.', true);
+            }
+            if (this.worker.currentJob) {
+                // The worker dropped a job the broker still counts as leased (for
+                // example after a lost lease during planning). Put it back at the
+                // front of the queue instead of leaving it stranded in a lease.
+                await this.requeueAbandonedLease(this.worker.currentJob, this.worker.leaseId);
             }
             this.worker.ready = true;
             this.worker.currentJob = null;
@@ -5365,7 +5387,15 @@ export class VideoBroker {
         }
     }
 
-    private async dispatchNext(): Promise<void> {
+    private dispatchNext(): Promise<void> {
+        // Dispatch runs from socket handlers, the heartbeat timer, and preparation
+        // completion. Serialize it so two overlapping calls cannot each lease a job.
+        const run = this.dispatchChain.then(() => this.dispatchNextUnlocked());
+        this.dispatchChain = run.catch(() => undefined);
+        return run;
+    }
+
+    private async dispatchNextUnlocked(): Promise<void> {
         if (!this.worker || !this.worker.ready || this.worker.currentJob || this.worker.currentImageJob) return;
         if (this.options.recoveryEnabled && this.worker.recoveryVersion < VIDEO_RECOVERY_VERSION) return;
         if (!schedulerAcceptsReservations(this.worker.scheduler)) return;
@@ -5559,11 +5589,57 @@ export class VideoBroker {
         }
     }
 
+    private async requeueAbandonedLease(publicId: string, leaseToken: string | null): Promise<boolean> {
+        const result = await this.run(
+            `UPDATE video_jobs SET status = 'queued', stage = 'Resuming after a lost worker lease',
+             progress = NULL, progress_scope = NULL, segment_index = NULL,
+             segment_count = NULL, segment_progress = NULL,
+             worker_id = NULL, lease_expires_at = NULL, lease_token = NULL,
+             gpu_queue_state = NULL, gpu_queue_submitted_at = NULL,
+             gpu_admitted_at = NULL, gpu_queue_wait_seconds = NULL,
+             gpu_queue_position = NULL, gpu_queue_jobs_ahead = NULL,
+             gpu_estimated_admission_low_at = NULL, gpu_estimated_admission_high_at = NULL,
+             gpu_queue_block_reason = NULL, gpu_queue_block_detail = NULL, updated_at = ?
+             WHERE public_id = ? AND status IN (${LEASED_SQL})
+             AND (lease_token IS ? OR lease_token = ?)`,
+            [nowSeconds(), publicId, leaseToken, leaseToken],
+        );
+        if (result.changes === 1) {
+            console.warn(`Requeued video job ${publicId} after the worker released its lease.`);
+        }
+        return result.changes === 1;
+    }
+
+    private async requeueExpiredLeases(): Promise<void> {
+        // A lease that expired while the connected worker is not working on that job
+        // belongs to nobody: dispatch only ever selects queued rows, so without this
+        // sweep the job would sit at the head of the queue forever.
+        if (!this.worker) return;
+        const now = nowSeconds();
+        const expired = await this.all<Pick<JobRow, 'public_id' | 'status' | 'worker_id' | 'lease_token'>>(
+            `SELECT public_id, status, worker_id, lease_token FROM video_jobs
+             WHERE status IN (${LEASED_SQL}) AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+             ORDER BY id ASC`,
+            [now],
+        );
+        for (const job of expired) {
+            if (job.public_id === this.worker.currentJob) continue;
+            const requeued = await this.requeueAbandonedLease(job.public_id, job.lease_token);
+            if (requeued) {
+                console.warn(
+                    `Video job ${job.public_id} was ${job.status} on ${job.worker_id || 'no worker'} `
+                    + 'with an expired lease and no active worker; returned it to the queue.',
+                );
+            }
+        }
+    }
+
     private async checkHeartbeat(): Promise<void> {
         if (this.worker && Date.now() - this.worker.lastHeartbeat > (this.options.heartbeatTimeoutMs || 45000)) {
             this.worker.socket.terminate();
             await this.markWorkerOffline();
         }
+        await this.requeueExpiredLeases();
         const control = await this.control();
         if (!control.paused_until && !control.dispatch_paused) await this.dispatchNext();
     }
@@ -5809,7 +5885,10 @@ export class VideoBroker {
                 if (!state.prepared) {
                     if (!state.local_plan) throw new Error('Local planning was not requested for this job.');
                     const plan = body.plan;
-                    if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Invalid local screenplay.');
+                    for (const warning of validateLocalVideoPlanForKeyframe(
+                        plan, job.model, job.prompt, job.requested_duration_seconds)) {
+                        console.warn(`Local recovery screenplay for ${id} misses a frontier contract (${warning}).`);
+                    }
                     continueUnbrokenLocalSegments(plan);
                     repairVideoTiming(plan, 15, 5);
                     if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds, parseVideoSourceAudioLyrics(job.source_audio_lyrics_json));
@@ -6190,12 +6269,18 @@ export class VideoBroker {
             try {
                 const body = await readJson(req, 512 * 1024);
                 const plan = body?.plan;
-                validateFrontierVideoPlanForKeyframe(
+                const warnings = validateLocalVideoPlanForKeyframe(
                     plan,
                     job.model,
                     job.prompt,
                     job.requested_duration_seconds,
                 );
+                for (const warning of warnings) {
+                    console.warn(
+                        `Local screenplay for ${job.public_id} misses a frontier contract (${warning}); `
+                        + 'storing it anyway so identity continuity frames stay available.',
+                    );
+                }
                 if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds, parseVideoSourceAudioLyrics(job.source_audio_lyrics_json));
                 const estimate = await this.plannedRuntimeEstimate(job, plan);
                 const now = nowSeconds();
@@ -6224,6 +6309,7 @@ export class VideoBroker {
                     ok: true,
                     planner_model: LOCAL_VIDEO_PLANNER_MODEL,
                     plan_identity: segmentKeyframePlanIdentity(plan),
+                    warnings,
                     job: (await this.views([job]))[0],
                 });
             } catch (error) {
