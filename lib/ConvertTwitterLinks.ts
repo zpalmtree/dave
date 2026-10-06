@@ -1,8 +1,6 @@
-import { Message, Guild, PermissionsBitField, TextChannel, MessageReaction, User } from 'discord.js';
+import { Message, PermissionsBitField, TextChannel, MessageReaction, User } from 'discord.js';
 
 import {
-    getUsername,
-    truncateResponse,
     sleep,
     tryReactMessage,
 } from './Utilities.js';
@@ -28,7 +26,6 @@ export async function convertTwitterLinks(msg: Message): Promise<void> {
         }
 
         if (fixedURLs.length > 0) {
-            const username = await getUsername(msg.author.id, msg.guild);
             const content = `${fixedURLs.join('\n')}`;
 
             const suppressPromise = msg.suppressEmbeds(true);
