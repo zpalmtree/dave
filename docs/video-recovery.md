@@ -255,7 +255,56 @@ and reload the supervised worker child while idle; do not overwrite newer live
 recovery code with the older repository snapshot. Verify with
 `python3 -m unittest discover -s desktop -p test_video_transparent_source.py`.
 
-Validation for this change: all 502 Node tests passed, followed by all eight
+Lyric-driven scenery must now come from the contextual meaning of the whole
+passage. Frontier analysis records the reading in `tone` and `resolved_intent`,
+explains inferred visual choices in `inferred_staging`, and records likely
+misreadings in `prohibited_substitutions`. The screenplay carries that reading
+into its actual visual directions. Inferred staging separates the environment's
+material conditions from the speaker's attitude before choosing lighting or
+activity: pride must not automatically upgrade the setting, nor grief ruin it.
+Source-audio guidance no longer tells it to
+literalize each passage automatically. This is general planning guidance, not
+a song-specific setting template, decoration blacklist, or new rejection gate.
+Explicit visual direction still wins, and the source-performance identity and
+framing rules still apply. An established background should persist across
+vocal phrases rather than reset with each line. For song performances on empty
+cutouts, background inference is the normal path when the passage supports it;
+background-only design must not be misclassified as forbidden performer restaging.
+Unclear context calls for restraint, and meaningful photographed settings remain
+protected.
+
+Named-song planning receives the already-resolved title and artist alongside the
+transcript. URL-only downloads fall back to the returned track title; an uploader
+channel is never treated as the artist. Metadata is bounded, serialized, and
+marked as untrusted descriptive data. Older jobs without it still plan normally.
+Local fallback receives the current broker guidance, including song identity and
+timing resolved after the initial worker lease, rather than stale lease guidance.
+
+`desktop/video-lyric-context.patch` applies the same interpretation rule to the
+local analyzer, screenplay planner, and semantic fidelity check using their
+existing `chosen_interpretation`, `important_terms`, `visible_proof`, and
+`scene_beats` fields. Apply with `git apply --check` and `git apply` in the live
+generator directory. It also updates `video_recovery.py` to forward current
+guidance; reload the supervised worker child while idle. The generator-only
+instructions load on each new subprocess. Run `test_video_lyric_context` against
+the installed desktop sources to verify current and legacy broker responses.
+
+For a live, planning-only comparison, build first, then run
+`node scripts/benchmark-video-lyric-context.mjs --source cutout.png --output results`.
+Optionally supply `--job exported-job.json` containing the original `prompt`,
+`lyrics`, and `plan.source_audio.duration_seconds` to include an unchanged real
+request and its explicit-background control. When present, `recovery.song` supplies
+the same resolved recording metadata used in production. `--cases id,id` selects a subset.
+The original synthetic lyrics in `tests/fixtures/video-lyric-context.json` cover
+a literal gathering, bitter celebration, metaphorical fire, pride under material
+hardship, and grief in luxury. Review rubrics
+are saved alongside results and are never sent to the planner. The harness checks
+timing, unchanged prompts, source openings, and empty added dialogue; semantic
+fit still needs inspection of the saved analysis and shot directions. It never
+enqueues or renders videos. Keep before/after outputs to distinguish a general
+improvement from a single favorable stochastic plan.
+
+Validation for the initial source-identity change: all 502 Node tests passed, followed by all eight
 continuity/opening tests after the final checker adjustment. A live comparison
 accepted the original image and requested reanchoring for the job's drifted
 boundary frame. Live GPT and production-configured Claude replans retained the

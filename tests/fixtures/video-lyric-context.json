@@ -1,0 +1,27 @@
+[
+  {
+    "id": "literal_gathering",
+    "lines": ["All our family in the garden, paper lanterns overhead", "Set another place beside me, pass the bread around", "This celebration brings us home, together at the table"],
+    "review": "A welcoming family gathering is supported; do not apply a blanket gritty or dark aesthetic or ban the explicitly mentioned lanterns."
+  },
+  {
+    "id": "bitter_celebration",
+    "lines": ["They call it a celebration, I cannot feel a thing", "Your empty chair beside me in this quiet kitchen", "I raise a glass to silence, another year without you"],
+    "review": "Loss and absence in an intimate domestic setting; celebration is bitter, not permission for party decor or a cheerful gathering."
+  },
+  {
+    "id": "nonliteral_fire",
+    "lines": ["I have a fire in my heart, I will stand and speak my mind", "This office kept me silent, now my voice is finally mine", "I am done with being frightened, I am walking through that door"],
+    "review": "Resolve in a workplace context; do not turn emotional fire into literal flames, a disaster, or a generic nightclub."
+  },
+  {
+    "id": "pride_under_hardship",
+    "lines": ["Cracked steps to our small flat, the rent is overdue", "We patched the windows through the winter, we pulled each other through", "Tonight we stand here proud together, this victory is ours"],
+    "review": "Pride and victory in explicitly strained material conditions. Preserve the modest, worn dwelling; do not upgrade it into a prosperous home, resort, banquet, or decorative party set, and do not invent crime or catastrophe."
+  },
+  {
+    "id": "grief_in_luxury",
+    "lines": ["Polished marble in the mansion, crystal shining overhead", "Every room is kept so perfect, every silver table set", "But all this wealth means nothing, I still miss you every day"],
+    "review": "Grief in an explicitly affluent, well-maintained setting. Preserve that physical contrast; do not make the mansion ruined, filthy, or impoverished to signal sadness."
+  }
+]
