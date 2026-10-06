@@ -427,7 +427,7 @@ test('video runtime is formatted for the delivered post', () => {
     }), /The screenplay was truncated\./);
 });
 
-test('video replies preserve the full accepted prompt', () => {
+test('video replies preserve the full accepted prompt when it fits alongside the status', () => {
     const prompt = `Opening scene. ${'Keep this exact requested detail. '.repeat(50)}Final instruction.`;
     const job = {
         id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
@@ -436,7 +436,7 @@ test('video replies preserve the full accepted prompt', () => {
         prompt,
         prompt_tease: 'Pervert.',
         generation_notice: 'The screenplay was prepared successfully.',
-        error: 'A detailed worker failure occurred while preparing the requested video. '.repeat(20),
+        error: 'A worker failure occurred while preparing the requested video.',
         status: 'queued',
         queue_position: 2,
         paused_until: null,
@@ -459,6 +459,31 @@ test('video replies preserve the full accepted prompt', () => {
     assert.doesNotMatch(failed, /Pervert/);
     assert.equal(completedVideoAttachmentName(job), 'SPOILER_minimax-a1869ead.mp4');
     assert.equal(completedVideoAttachmentName({ ...job, prompt_tease: null }), 'minimax-a1869ead.mp4');
+});
+
+test('long prompts never cut status timestamps or GPU block explanations', () => {
+    const base = {
+        id: 'c730ab10-test', model: 'minimax', status: 'queued', queue_position: 2,
+        worker_online: true, expected_finish_at: 2_000_000_450,
+        estimate_low_seconds: 1000, estimate_high_seconds: 4000,
+    };
+    const states = [
+        base,
+        { ...base, paused_until: 2_000_000_000 },
+        { ...base, status: 'planning', gpu_queue_state: 'queued',
+            gpu_queue_block_reason: 'external_gpu_busy', expected_finish_at: null },
+    ];
+    for (const state of states) {
+        for (let length = 1700; length <= 2100; length++) {
+            const job = { ...state, prompt: 'x'.repeat(length) };
+            const prefix = formatVideoJob(job);
+            const reply = formatVideoStatusPost(job);
+            assert.ok(reply.startsWith(`${prefix}\n> `), `Status was cut at prompt length ${length}`);
+            assert.ok(reply.length <= 1999);
+            assert.doesNotMatch(reply.replace(/<t:\d+:[FR]>/g, ''), /<t:/);
+            assert.equal(reply.endsWith('…'), prefix.length + 3 + length > 1999);
+        }
+    }
 });
 
 test('video replies keep multiline prompts inside a Discord multiline quote', () => {

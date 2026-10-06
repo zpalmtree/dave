@@ -579,7 +579,8 @@ test('broker keeps the measured end-to-end runtime on the completed job', async 
             () => botFetch('/v1/users/runtime-user-2/jobs'),
             value => value.body.jobs[0].gpu_queue_state === 'queued',
         );
-        assert.ok(waitingForGpu.body.jobs[0].expected_finish_at > Math.floor(Date.now() / 1000));
+        assert.equal(waitingForGpu.body.jobs[0].expected_start_at, null);
+        assert.equal(waitingForGpu.body.jobs[0].expected_finish_at, null);
         assert.equal(waitingForGpu.body.jobs[0].gpu_queue_block_reason, 'external_gpu_busy');
         assert.equal(
             waitingForGpu.body.jobs[0].gpu_queue_block_detail,
@@ -3634,6 +3635,36 @@ test('desktop gpuq reservation anchors ETA to admission and fences terminal even
             }),
         });
         assert.equal(queuedBehindGpuWork.body.job.queue_position, 3);
+
+        // gpuq can supply an admission estimate even while external memory
+        // pressure prevents admission indefinitely. Do not turn it into an ETA.
+        for (const reason of ['external_gpu_busy', 'gaming_mode']) {
+            socket.send(JSON.stringify({
+                type: 'event', event: 'gpu_queue', job_id: lease.job.id,
+                state: 'queued', submitted_at: submittedAt, queue_position: 2, jobs_ahead: 1,
+                estimated_admission_low_at: estimatedAdmissionLow,
+                estimated_admission_high_at: estimatedAdmissionHigh,
+                block_reason: reason,
+            }));
+            const blocked = await eventually(() => botFetch('/v1/queue'),
+                value => value.body.jobs.find(job => job.id === lease.job.id)?.gpu_queue_block_reason === reason);
+            for (const job of blocked.body.jobs) {
+                assert.equal(job.expected_start_at, null);
+                assert.equal(job.expected_finish_at, null);
+            }
+            assert.equal(blocked.body.jobs.find(job => job.id === queuedBehindGpuWork.body.job.id).queue_position, 3);
+        }
+        socket.send(JSON.stringify({
+            type: 'event', event: 'gpu_queue', job_id: lease.job.id,
+            state: 'queued', submitted_at: submittedAt, queue_position: 2, jobs_ahead: 1,
+            estimated_admission_low_at: estimatedAdmissionLow,
+            estimated_admission_high_at: estimatedAdmissionHigh,
+        }));
+        const unblocked = await eventually(() => botFetch('/v1/queue'),
+            value => value.body.jobs.find(job => job.id === lease.job.id)?.gpu_queue_block_reason === null);
+        for (const job of unblocked.body.jobs) {
+            assert.ok(job.expected_finish_at > job.expected_start_at);
+        }
 
         const admittedAt = Math.floor(Date.now() / 1000);
         socket.send(JSON.stringify({
