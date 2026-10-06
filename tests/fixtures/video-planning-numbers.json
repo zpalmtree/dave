@@ -1,0 +1,9 @@
+[
+  {"prompt":"Make it 30 seconds. Use 6 scenes.\nScene 1: A gardener enters.\nScene 2: A bird lands.\n3. The gardener waves.\n4) The bird departs.","duration":30,"numbers":[]},
+  {"prompt":"A 30-second video. Runtime: 30 seconds.\nScene 1: Show 2 lanterns and a sign reading \"30\".","duration":30,"numbers":["2","30"]},
+  {"prompt":"0:00–0:05 A gardener enters.\n0:05–0:30 Show 7 flowers.","duration":30,"numbers":["7"]},
+  {"prompt":"A sign says \"Scene 6: 30 seconds\". Make it 30 seconds.","duration":30,"numbers":["6","30"]},
+  {"prompt":"Wait 3 seconds, then show a 30-second video with 2 cats.","duration":30,"numbers":["3","2"]},
+  {"prompt":"Show 30 birds. Make it 30 seconds.","duration":30,"numbers":["30"]},
+  {"prompt":"A label reads \"6 scenes\" and the price is 12.50 dollars.","duration":null,"numbers":["6","12.50"]}
+]

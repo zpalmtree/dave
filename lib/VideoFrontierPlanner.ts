@@ -1,4 +1,4 @@
-import { repairVideoTiming } from './VideoRecovery.js';
+import { repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA } from './VideoAudioContinuity.js';
 import { createHash } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
@@ -1591,6 +1591,7 @@ export function validateFrontierVideoPlanForKeyframe(
         outputTotal += segment.output_seconds === undefined ? floor : declaredOutput;
         finishedTotal += segment.output_seconds === undefined ? target : declaredOutput;
     }
+    requireRecoveryPlanningPolicy(plan, requestedDurationSeconds);
     if (!plan.recovery_extended && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `Video planner screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
@@ -2646,7 +2647,7 @@ export async function createFrontierVideoPlan(
                         model: 'deterministic-video-plan-compiler',
                         serviceTier: 'local',
                         durationSeconds: 0,
-                        detail: 'truncated_to_automatic_duration_budget',
+                        detail: 'timing_repaired_preserving_content',
                     });
                     if (rejectedCandidateReason) {
                         compiled.planner_route = 'frontier-salvaged';
@@ -2875,7 +2876,7 @@ export async function createFrontierVideoPlan(
                         model: 'deterministic-video-plan-compiler',
                         serviceTier: 'local',
                         durationSeconds: 0,
-                        detail: 'truncated_to_automatic_duration_budget',
+                        detail: 'timing_repaired_preserving_content',
                     });
                     return attributed(compiled);
                 }

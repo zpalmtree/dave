@@ -219,3 +219,38 @@ recording/upload retries without rerendering, and coordinator-path preflight.
 The existing desktop generator suite has three pre-existing failures referring
 to removed legacy keyframe graph/cache symbols. These reproduce against the
 unchanged starting generator; worker/runtime and new recovery tests pass.
+
+## Planning duration and coverage policy
+
+Planning preserves every requested scene and required line within the explicit
+finished runtime. Normalization may shorten optional timing slack across all
+scenes; it must not delete later scenes, truncate speech, or silently increase
+the requested runtime. Six concise scenes can fit in 30 seconds. If the current
+screenplay's timing floors cannot fit, the planner receives a duration conflict
+and can replan. Exhausted drafts and an invalid fallback stop before rendering
+with the specific validation or quality failure. A longer runtime requires a
+new authorized request. Automatic planning retains its existing desktop cap.
+
+Runtime directives, outline numbers, scene counts, and timestamp ranges are
+instruction metadata, not numbers that must appear on screen or in speech.
+Quoted numbers and actual story quantities remain binding. Runtime and coverage
+are still checked by the timing validator and story review respectively.
+
+Fallback candidates go through the same duration and quality checks as model
+drafts. Planning logs never claim a candidate has rendered. Terminal errors
+report the actual local screenplay attempt count and identify recovery passes
+as a separate counter. Legacy quality-bypassed plans remain rejected, now with
+their recorded quality diagnostics.
+
+The desktop generator and changed regression expectations are archived in
+`desktop/video-planning-policy.patch`. Install or verify the exact audited
+revision with `python3 scripts/apply-video-planning-policy-desktop.py --check`
+and then without `--check`. Existing unrelated desktop edits are included only
+in baseline hashes and are not overwritten. The generator runs in a new child
+process for each local planning request, so this generator-only update needs no
+worker restart. Deploy both server branches with `scripts/deploy-bots.sh --with-broker`.
+
+Neutral offline cases in `desktop/test_video_planning_policy.py` and
+`tests/video-planning-policy.test.mjs` cover six-scene timing, retained endings,
+over-budget speech, metadata versus content numbers, validated fallback success,
+and diagnostic fallback failure. These tests do not establish rendered quality.

@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { requestedVideoDurationSeconds } from './VideoProtocol.js';
 
 // Version 3 workers can plan, compose opening images, and review locally.
 export const VIDEO_RECOVERY_VERSION = 3;
@@ -178,7 +179,23 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
     }
 }
 
+/** Approval cannot silently authorize omitted content or a different runtime. */
+export function requireRecoveryPlanningPolicy(plan: any, requestedSeconds?: number | null): void {
+    if (plan?.best_effort_truncated) {
+        throw new UnapprovedLocalRecoveryPlanError('The screenplay was truncated; preserve every requested scene and line before rendering.');
+    }
+    if (requestedSeconds == null) return;
+    const total = (plan?.segments || []).reduce((sum: number, segment: any) =>
+        sum + Number(segment.output_seconds ?? segment.target_seconds), 0);
+    if (!Number.isFinite(total) || Math.abs(total - requestedSeconds) > 0.05) {
+        throw new UnapprovedLocalRecoveryPlanError(
+            `Duration conflict: this screenplay delivers ${total.toFixed(2)}s, but the requested runtime is ${requestedSeconds}s. `
+            + 'Preserve every requested scene and line and replan within the runtime; a longer video needs authorization.');
+    }
+}
+
 export function approvedRecoveryContract(plan: any, prompt: string, notice = '', useSources = true): VideoRecoveryContract {
+    requireRecoveryPlanningPolicy(plan, requestedVideoDurationSeconds(prompt));
     const analysis = plan?.prompt_analysis;
     if (!analysis || analysis.frontier_handling?.disposition !== 'fulfill') {
         throw new Error('Waiting for an approved story before rendering.');
@@ -227,8 +244,14 @@ export function approvedLocalRecoveryContract(plan: any, prompt: string, reason:
         || plan.segments.some((segment: any) => !Array.isArray(segment?.shots) || !segment.shots.length)) {
         throw new UnapprovedLocalRecoveryPlanError('The local screenplay has no renderable scenes.');
     }
+    requireRecoveryPlanningPolicy(plan, requestedVideoDurationSeconds(prompt));
     if (plan.quality_gate_bypassed) {
-        throw new UnapprovedLocalRecoveryPlanError('The local screenplay failed its quality gate.');
+        const issues = (Array.isArray(plan.quality_gate_issues) ? plan.quality_gate_issues : [])
+            .slice(0, 4).map((issue: any) => String(issue).replace(/\s+/g, ' ').slice(0, 400)).join('; ');
+        const attempts = Number(plan.planner?.screenplay_attempts);
+        throw new UnapprovedLocalRecoveryPlanError('The local screenplay failed its quality gate'
+            + (Number.isInteger(attempts) && attempts > 0 ? ` after ${attempts} screenplay attempts` : '')
+            + (issues ? `: ${issues}.` : '.') + ' No video was rendered.');
     }
     requireProtectedRecoveryDialogue(plan, [frontierAnalysis, plan.prompt_analysis, plan.semantic_analysis]);
     let linkedScenes = 0;

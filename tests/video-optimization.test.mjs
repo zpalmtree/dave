@@ -308,7 +308,7 @@ test('cloud qualification preserves standard H3 and does not require archived Fa
     assert.ok(!VIDEO_MODELS.minimax.generatorArgs.includes('--fast'));
 });
 
-test('duration directives allow repair while visible counts and quotes remain binding', () => {
+test('duration directives and visible counts and quotes remain binding', () => {
     const prompt = 'A duck waves. Make it 12 seconds.';
     assert.equal(requestedVideoDurationSeconds(prompt), 12);
     assert.equal(requestedVideoDurationSeconds('A sign reads "Make it 12 seconds".'), null);
@@ -323,7 +323,7 @@ test('duration directives allow repair while visible counts and quotes remain bi
     assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', 'Show 12 ducks. Make it 12 seconds.'), /omitted explicit numbers/);
     assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', 'A sign reads "12". Make it 12 seconds.'), /quoted wording/);
     plan.segments[0].output_seconds = 10;
-    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', prompt));
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', prompt), /Duration conflict/);
 });
 
 test('renderer wins require completed human ratings and equal output duration', () => {
