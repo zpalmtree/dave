@@ -44,12 +44,6 @@ import {
     handleNikocado,
     handleImage,
     handleYoutube,
-    handleStats,
-    handleUsersStats,
-    handleTokens,
-    handleUsersTokens,
-    handleCommandsTokens,
-    handleGlobalTokens,
     handleReady,
     handlePoll,
     handleMultiPoll,
@@ -109,6 +103,15 @@ import { exchangeService } from './Exchange.js';
 import { handleWeather } from './Weather.js';
 
 import { handleWorldCup } from './WorldCup.js';
+
+import {
+    handleCommandsTokens,
+    handleGlobalTokens,
+    handleStats,
+    handleTokens,
+    handleUsersStats,
+    handleUsersTokens,
+} from './StatsCommands.js';
 
 import { config } from './Config.js';
 
