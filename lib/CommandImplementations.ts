@@ -56,7 +56,7 @@ import {
     tryDeleteMessage,
     tryDeleteReaction,
     tryReactMessage,
-    isValidSolAddress,
+    replyWithMention,
     escapeDiscordMarkdown,
 } from './Utilities.js';
 
@@ -157,121 +157,6 @@ const states = [
 ];
 
 
-export async function replyWithMention(msg: Message, reply: string): Promise<void> {
-    if (msg.mentions.users.size > 0)   {
-        const usersMentioned = [...msg.mentions.users.keys()].map((id) => `<@${id}>`).join(' ');
-        await msg.reply(`${usersMentioned} ${reply}`);
-    } else {
-        await (msg.channel as TextChannel).send(reply);
-    }
-}
-
-export async function handleGen3Count(msg: Message): Promise<void> {
-    await replyWithMention(msg, `Generation 3 slugs can be found by filtering for Shipwreck, Submarine, Fish Tank, Underwater Cult, and Night Shift backgrounds. They are part of the same slugs collection, with new, rarer, underwater themed traits. They were awarded to users who burnt three slugs.`);
-}
-
-export async function handleGen4Count(msg: Message, args: string): Promise<void> {
-    const url = "https://letsalllovelain.com/slugs/";
-    const res = await fetch(url);
-
-    const address = args.trim();
-
-    if (address !== '' && !isValidSolAddress(address)) {
-        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
-        return;
-    }
-
-    if (!res.ok) {
-        await msg.reply('Failed to fetch Gen3 count from API!');
-        return;
-    }
-
-    const data = await res.json();
-
-    const gen3Date = new Date('2022-11-14');
-    const gen4Date = new Date('2030-11-14');
-
-    let gen3Count = 0;
-    let burns = 0;
-
-    for (const user of data.burnStats.users) {
-        if (address !== '' && user.address !== address) {
-            continue;
-        }
-
-        let eligibleBurns = 0;
-
-        for (const burn of user.transactions) {
-            if (new Date(burn.timestamp) >= gen3Date && new Date(burn.timestamp) <= gen4Date) {
-                eligibleBurns += burn.slugsBurnt.length;
-            }
-        }
-
-        gen3Count += Math.floor(eligibleBurns / 4);
-        burns += eligibleBurns;
-    }
-
-    if (address !== '') {
-        const burnsForNextSlug = 4 - (burns % 4);
-        const slugStr = burnsForNextSlug === 1 ? 'slug' : 'slugs';
-
-        if (gen3Count === 0) {
-            await replyWithMention(
-                msg,
-                `You have ${burns} eligible burn${burns === 1 ? '' : 's'}. Every four slugs burnt will get you one generation 4 slug. Burn ${burnsForNextSlug} ${burns > 0 ? 'more ' : ''}${slugStr} to be eligible for your first generation 4 slug.`
-            );
-        } else {
-            await replyWithMention(
-                msg,
-                `You are currently set to receive ${gen3Count} generation 4 slug${gen3Count > 1 ? 's' : ''}! You have ${burns} eligible burns. Burn ${burnsForNextSlug} more ${slugStr} to be eligible for another generation 4 slug.`,
-            );
-        }
-    } else {
-        await replyWithMention(msg, `The current projected Generation 4 slug supply is ${gen3Count}`);
-    }
-}
-
-
-export async function handleBurnt(msg: Message, args: string): Promise<void> {
-    const address = args.trim();
-
-    if (address !== '' && !isValidSolAddress(address)) {
-        await replyWithMention(msg, `That does not appear to be a valid Solana wallet address (${address})`);
-        return;
-    }
-
-    const url = "https://letsalllovelain.com/slugs/";
-    const res = await fetch(url);
-
-    if (!res.ok) {
-        await msg.reply('Failed to fetch burnt count from API!');
-        return;
-    }
-    
-    const data = await res.json();
-
-    if (address === '') {
-        await replyWithMention(msg, `${data.slugs.burnt.length} slugs have been burnt!`);
-    } else {
-        let burns = 0;
-
-        for (const user of data.burnStats.users) {
-            if (user.address !== address) {
-                continue;
-            }
-
-            for (const burn of user.transactions) {
-                burns += burn.slugsBurnt.length;
-            }
-        }
-
-        if (burns === 0) {
-            await msg.reply(`${address} hasn't burnt any slugs yet. What are they playing at?`);
-        } else {
-            await msg.reply(`${address} has burnt ${burns} slug${burns === 1 ? '' : 's'}. Good job!`);
-        }
-    }
-}
 
 export async function handleFortune(msg: Message): Promise<void> {
     await msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
@@ -2275,95 +2160,6 @@ export async function handleViper(msg: Message, args: string): Promise<void> {
     await handleGif(msg, args, 'viper.gif', 256, 0.8);
 }
 
-export async function handleCock(msg: Message): Promise<void> {
-    const guwap = '238350296093294592';
-
-    if (msg.author.id === guwap) {
-        msg.reply(`Nice balls!`);
-    } else {
-        msg.reply(`Nice cock!`);
-    }
-}
-
-export async function handleBurn(msg: Message): Promise<void> {
-    await replyWithMention(msg, `A lot of slug utility comes from burning a slug.
-**Why burn a slug?**
-* Help be part of the most deflationary collection on Solana - with over 4100 slugs burnt!
-* Access to alpha, whitelist, and other burner only channels.
-* Alpha bots - Find trending magiceden collections, new twitter accounts, and just created mints.
-* Free stuff - Sometimes we will raffle 1/1s, airdrops, or other valuable items. Burners come first whenever this happens.
-* Merch - This is still in the works, but slug burners will have the first access to slug merch.
-* Future slug generations - As part of the slugs deflationary mechanism, burning enough slugs entitles you to a mint from the next slug generation. The current rate is 4:1, for generation four.`);
-}
-
-export async function handleUtility(msg: Message): Promise<void> {
-    await replyWithMention(msg, `**Why buy a slug?**
-* Gain benefits on our sleek portfolio tracker, slime: <https://slime.cx/>
-* Enjoy the slug supply constantly decreasing. It's already shrunk from 10,000 to 7,200!
-* Try out the slug AI image generator and chat bots
-* Burn your slug for more benefits! Try \`${config.prefix}burn\` for more info.
-* Chill in one of the most active chats in Solana. No more gm spam!
-* Help support the <https://sol-incinerator.com/>'s free operation.`);
-}
-
-export async function handle3d(msg: Message): Promise<void> {
-    await replyWithMention(msg, `3D slugs or Slugs Regenesis are a separate collection by the same team but the supply is much lower. As a free mint for rug victims, they don't have any defined utility yet, but they've got rocket launchers and katanas, they're cool as fuck. <https://magiceden.io/marketplace/slugs_regenesis>`);
-}
-
-export async function handleGen2(msg: Message): Promise<void> {
-    await replyWithMention(msg, `Generation 2 slugs can be found by filtering for Arena, Temple, and Pyramid backgrounds. They are part of the same slugs collection, with new, rarer, god of death themed traits. They were awarded to users who burnt two slugs.`);
-}
-
-export async function handleBuy(msg: Message): Promise<void> {
-    await replyWithMention(msg, `<https://magiceden.io/marketplace/sol_slugs>`);
-}
-
-export async function handleVerify(msg: Message): Promise<void> {
-    await replyWithMention(msg, `Get your holder and burner roles here: <https://solslugs.com/#/verify>`);
-}
-
-export async function handleIncinerator(msg: Message): Promise<void> {
-    await replyWithMention(msg, `Burn your slugs, rugs, or scams here: <https://sol-incinerator.com/>`);
-}
-
-export async function handleTrending(msg: Message): Promise<void> {
-    await replyWithMention(msg, `The trending bot is separated into 6 different channels, by window of time. The 1m channel, for example, will show the hottest collections within a 1 minute interval. A hot collection is defined as having the greatest NUMBER of sales within that interval.
-
-So a collection that sells 100 units in 1 minute would be hotter than one that sold 50 units in 1 minute.
-
-The colors indicate the sold to listed balance.
-
-Green: Sold > Listed
-Yellow: Sold = Listed
-Red: Sold < Listed
-
-Volume is the total amount of Solana transacted within the interval. Low is the lowest sale price, High is the highest sale price, and Average is the average sale price.
-
-It is useful to look at how these collections are trending - is the number of sold going up each interval, for example? Is there a high average, indicating people are sniping rares? There's a strategy to develop using the trending bot, but if use effectively, can lead to great trading success.`);
-}
-
-export async function handleSign(msg: Message): Promise<void> {
-    await replyWithMention(msg, 'https://media.discordapp.net/attachments/483470443001413675/1064019335955365918/sign.png');
-}
-
-export async function handleFrozen(msg: Message): Promise<void> {
-    await replyWithMention(msg, `Some scam tokens are freezing the token accounts so you can’t get burn or transfer them. Our dev has posted about the issue on Solana’s GitHub in hopes they fix it, but we will be pushing an update soon with our redesign that makes it more obvious the token is frozen and cannot be burnt.\n\nIf you have a GitHub account, you could let the Solana devs know you would like to see this fixed - <https://github.com/solana-labs/solana-program-library/issues/3295>`);
-}
-
-export async function handleIncineratorFAQ(msg: Message): Promise<void> {
-    await replyWithMention(msg, `Q. Where is the money coming from?
-A. Its liberating a small storage fee 
-
-Q. I only got 0.002 for an NFT. What gives!?
-A. The MAJORITY of NFTs give 0.01. Non-master editions(non unique) tokens, like scams, still give 0.002
-
-Q. Theres an NFT in my wallet that wont burn. Why?
-A. Some nfts, scams in particular, abuse the freeze instruction - you cant send them out or burn them.
-
-Q. I burned and it doesnt seem like I got anything. What happened?
-A. The amount you get is very small, unless youre burning a lot of NFTs. You need to burn at least 100 to get 1 sol!`);
-}
-
 export async function handleItsOver(msg: Message, args: string): Promise<void> {
     const files = [
         'https://cdn.discordapp.com/attachments/483470443001413675/1047016075017072640/1.mp4',
@@ -2397,18 +2193,6 @@ export async function handleItsOver(msg: Message, args: string): Promise<void> {
     }
 
     await (msg.channel as TextChannel).send(file);
-}
-
-export async function handleSlime(msg: Message): Promise<void> {
-    await replyWithMention(msg, 'https://slime.cx/');
-}
-
-export async function handleGitbook(msg: Message): Promise<void> {
-    await replyWithMention(msg, 'https://solana-slugs.gitbook.io/solana-slugs/');
-}
-
-export async function handleAIInfo(msg: Message): Promise<void> {
-    await replyWithMention(msg, 'https://media.discordapp.net/attachments/891081746186113024/1074511672401731724/image.png');
 }
 
 export async function handleChickenFried(msg: Message): Promise<void> {

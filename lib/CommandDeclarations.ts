@@ -1314,7 +1314,8 @@ const sharedCommands: Command[] = [
     },
 ];
 
-/* Track-specific commands and legacy duplicate declarations. */
+/* Commands registered only on this deployment track. The slugs track also
+ * registers slugCommands from SlugCommands.ts here. */
 const trackCommands: Command[] = [
     {
         aliases: ['nikocado', 'orlin', 'niko', 'avocado'],
@@ -1324,67 +1325,6 @@ const trackCommands: Command[] = [
             implementation: handleNikocado,
             description: 'Get a random nikocado',
         },
-    },
-    {
-        aliases: ['math'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMath,
-            description: 'Perform math or conversions',
-            helpDescription: 'Perform computations using the [math.js](https://mathjs.org/docs/index.html) library',
-            examples: [
-                {
-                    value: 'math 123 * 456',
-                },
-                {
-                    value: 'math 100 fahrenheit to celsius',
-                }
-            ],
-        },
-    },
-    {
-        aliases: ['doggo', 'dog', 'doggy'],
-        primaryCommand: {
-            argsFormat: Args.Split,
-            implementation: handleDoggo,
-            description: 'Get a random dog picture',
-            examples: [
-                {
-                    value: 'doggo',
-                },
-                {
-                    value: 'doggo corgi',
-                },
-                {
-                    value: 'doggo golden retriever',
-                },
-            ],
-        },
-        relatedCommands: [
-            'kitty',
-        ],
-    },
-    {
-        aliases: ['kitty', 'cat'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleKitty,
-            description: 'Get a random cat picture',
-            examples: [
-                {
-                    value: 'kitty',
-                },
-                {
-                    value: 'kitty persian',
-                },
-                {
-                    value: 'kitty european burmese',
-                },
-            ],
-        },
-        relatedCommands: [
-            'doggo',
-        ],
     },
     {
         aliases: ['stock', 'stonk'],
@@ -1400,73 +1340,6 @@ const trackCommands: Command[] = [
             ],
             needDb: false,
         }
-    },
-    {
-        aliases: ['poll', 'vote'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handlePoll,
-            description: 'Propose a yes/no query and let users vote',
-            examples: [
-                {
-                    value: 'poll Do you like peanut butter?',
-                },
-            ],
-        },
-        relatedCommands: [
-            'multipoll',
-        ],
-    },
-    {
-        aliases: ['multipoll', 'multivote'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleMultiPoll,
-            description: 'Create a query with multiple options and let users vote',
-            helpDescription: 'Create a query with multiple options and let users vote. ' +
-                'Multipoll should start with the query, then be followed by a forward slash (`/`). ' +
-                'Then, enter the poll options, each one again separated by a forward slash.',
-            examples: [
-                {
-                    value: 'multipoll What is your favourite fast food restaurant? / McDonalds / Burger King / Wendys / Taco Bell',
-                },
-            ],
-        },
-        relatedCommands: [
-            'poll',
-        ],
-    },
-    {
-        aliases: ['time'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleTime,
-            description: 'Get the current time in your Discord locale',
-            examples: [
-                {
-                    value: 'time',
-                },
-            ],
-        },
-        relatedCommands: [
-            'date',
-        ],
-    },
-    {
-        aliases: ['date'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDate,
-            description: 'Get the current date in your Discord locale',
-            examples: [
-                {
-                    value: 'date',
-                },
-            ],
-        },
-        relatedCommands: [
-            'time',
-        ],
     },
     {
         aliases: ['buggles'],
