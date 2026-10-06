@@ -1,7 +1,6 @@
 import {
     Database,
     RunResult,
-    verbose,
 } from 'sqlite3';
 
 import { config } from './Config.js';

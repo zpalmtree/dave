@@ -293,6 +293,18 @@ export async function tryDeleteReaction(reaction: MessageReaction, id: string) {
     }
 }
 
+/* Prefixes an AI chat system prompt with today's date and the requester's
+ * name. */
+export function createSystemPrompt(prompt: string, username: string): string {
+    const now = new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
+    return `The current date is ${now}. The person interacting with you is named ${username}. ${prompt}`;
+}
+
 export function escapeDiscordMarkdown(text: string) {
     return escapeMarkdown(
         text,
@@ -438,8 +450,6 @@ export function extractURLsAndValidateExtensions(
     extensions: string[]
 ): { validURLs: string[], invalidURLs: string[] } {
     // Join the extensions into a string to insert into the regex pattern
-    const extensionsPattern = extensions.join('|');
-
     // URL regex with a group for possible filenames at the end
     const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
 

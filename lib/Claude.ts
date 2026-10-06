@@ -1,7 +1,13 @@
 import { Message } from 'discord.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
-import { truncateResponse, getUsername, extractURLsAndValidateExtensions, withTyping, replyLongMessage } from './Utilities.js';
+import {
+    createSystemPrompt,
+    getImageURLsFromMessage,
+    getUsername,
+    replyLongMessage,
+    withTyping,
+} from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
 import {
     extractClaudeResponseText,
@@ -92,50 +98,6 @@ async function convertImageToBase64(url: string): Promise<{ data: string; mediaT
         console.error('Error converting image to base64:', error);
         return null;
     }
-}
-
-// Function to extract image URLs from message
-function getImageURLsFromMessage(
-    msg: Message,
-    repliedMessage?: Message,
-): string[] {
-    const urlSet = new Set<string>();
-    const supportedExtensions = ['png', 'gif', 'jpg', 'jpeg', 'webp'];
-    const supportedMimeTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp'];
-
-    function processMessage(message: Message) {
-        // Check attachments
-        message.attachments.forEach((attachment) => {
-            if (supportedMimeTypes.includes(attachment.contentType || '')) {
-                urlSet.add(attachment.url);
-            } else {
-                const extension = attachment.name?.split('.').pop()?.toLowerCase();
-                if (extension && supportedExtensions.includes(extension)) {
-                    urlSet.add(attachment.url);
-                }
-            }
-        });
-
-        // Check embeds
-        message.embeds.forEach((embed) => {
-            if (embed.image) urlSet.add(embed.image.url);
-            if (embed.thumbnail) urlSet.add(embed.thumbnail.url);
-        });
-
-        // Extract URLs from content
-        const { validURLs } = extractURLsAndValidateExtensions(
-            message.content,
-            supportedExtensions,
-        );
-        validURLs.forEach((url) => urlSet.add(url));
-    }
-
-    processMessage(msg);
-    if (repliedMessage) {
-        processMessage(repliedMessage);
-    }
-
-    return Array.from(urlSet);
 }
 
 async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<ClaudeResponse> {
@@ -349,16 +311,6 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         console.error('Claude API Error:', err);
         return { error: formatProviderApiError({ provider: 'Claude', error: err }) };
     }
-}
-
-function createSystemPrompt(prompt: string, username: string): string {
-    const now = new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-    });
-    return `The current date is ${now}. The person interacting with you is named ${username}. ${prompt}`;
 }
 
 function getDefaultSystemPrompt(): string {

@@ -6,16 +6,15 @@ import {
 import { OpenAI } from 'openai';
 import type {
   Response as ResponsesPayload,
-  ResponseOutputItem,
   ResponseStreamEvent,
 } from 'openai/resources/responses/responses.js';
 import type { Stream } from 'openai/streaming';
 import { config } from './Config.js';
 import {
-    truncateResponse,
     extractURLs,
     getUsername,
     getImageURLsFromMessage,
+    createSystemPrompt,
     withTyping,
     replyLongMessage,
 } from './Utilities.js';
@@ -113,7 +112,6 @@ interface OpenAIHandlerOptions {
     temperature?: number;
     model?: string;
     includeSystemPrompt?: boolean;
-    files?: string[];
     maxTokens?: number;
     maxCompletionTokens?: number;
     includeFiles?: boolean;
@@ -436,7 +434,6 @@ async function masterOpenAIHandler(
         temperature = DEFAULT_SETTINGS.temperature,
         model = DEFAULT_SETTINGS.model,
         includeSystemPrompt = true,
-        files = [],
         maxTokens = DEFAULT_SETTINGS.maxTokens,
         maxCompletionTokens,
         includeFiles = true,
@@ -776,16 +773,6 @@ async function gatherImageURLsForRequest(
   }
 
   return Array.from(urls);
-}
-
-function createSystemPrompt(prompt: string, username: string): string {
-    const now = new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-    });
-    return `The current date is ${now}. The person interacting with you is named ${username}. ${prompt}`;
 }
 
 function getDefaultSystemPrompt(): string {

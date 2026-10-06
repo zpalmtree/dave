@@ -1,6 +1,5 @@
 import {
     Message,
-    AttachmentBuilder,
     EmbedBuilder,
     User,
     MessageReaction,

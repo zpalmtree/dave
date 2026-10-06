@@ -5,6 +5,7 @@ import {
     truncateResponse,
     getUsername,
     getImageURLsFromMessage,
+    createSystemPrompt,
     withTyping,
 } from './Utilities.js';
 import { formatProviderApiError } from './ApiErrors.js';
@@ -84,7 +85,6 @@ interface GrokHandlerOptions {
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     model?: string;
     includeSystemPrompt?: boolean;
-    files?: string[];
     maxCompletionTokens?: number;
     includeFiles?: boolean;
 }
@@ -141,7 +141,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         reasoningEffort = DEFAULT_SETTINGS.reasoningEffort,
         model = DEFAULT_SETTINGS.model,
         includeSystemPrompt = true,
-        files = [],
         maxCompletionTokens,
         includeFiles = true,
     } = options;
@@ -334,16 +333,6 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
     } finally {
         if (timeoutId) clearTimeout(timeoutId);
     }
-}
-
-function createSystemPrompt(prompt: string, username: string): string {
-    const now = new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-    });
-    return `The current date is ${now}. The person interacting with you is named ${username}. ${prompt}`;
 }
 
 function getDefaultSystemPrompt(): string {

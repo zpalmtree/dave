@@ -1,6 +1,5 @@
 import {
     Message,
-    EmbedBuilder,
     AttachmentBuilder,
 } from 'discord.js';
 import {
@@ -14,8 +13,6 @@ import {
 } from '@google/genai';
 import { config } from './Config.js';
 import {
-    truncateResponse,
-    getUsername,
     getImageURLsFromMessage,
     replyLongMessage,
     trySendTyping,
@@ -65,17 +62,6 @@ interface ImageData {
     data: string;
 }
 
-// Finish reason types for safety checks
-// Using string literals instead of an enum to match the Google API strings exactly
-type FinishReason =
-    | 'STOP'
-    | 'MAX_TOKENS'
-    | 'SAFETY'
-    | 'RECITATION'
-    | 'OTHER'
-    | 'UNSPECIFIED'
-    | 'IMAGE_SAFETY'
-    | 'TEXT_SAFETY';
 
 // Hardcoded banned users list
 const BANNED_USERS = ['663270358161293343'];
@@ -111,33 +97,6 @@ const genAI = new GoogleGenAI({
     apiVersion: 'v1alpha',
 });
 
-const ART_STYLES = [
-    'pixel art',
-    'vaporwave',
-    'synthwave',
-    'retrofuturism',
-    'psychedelic',
-    'biopunk',
-    'cyberdelic',
-    'kawaii',
-    'anime',
-    'post-apocalyptic surrealism',
-    'Abstract Expressionism',
-    'Ghibli-esque',
-    'yokai',
-    'rubber hose',
-    'claymation',
-    'comic strip',
-    'steampunk',
-    'photorealistic',
-    'hyperrealistic',
-    'isometric',
-    'neon',
-    'geometric',
-    'organic',
-    'biomechanical',
-];
-
 const TEXT_MODEL = AI_MODELS.geminiChat;
 const IMAGE_MODEL = AI_MODELS.geminiImage;
 
@@ -166,20 +125,6 @@ const SAFETY_SETTINGS: SafetySetting[] = [
 
 // Cache for conversation history
 const chatHistoryCache = new Map<string, any[]>();
-
-function appendArtStyle(prompt: string, numStyles: number = 0) {
-    if (numStyles === 0) {
-        return prompt;
-    }
-
-    const styles = [];
-    for (let i = 0; i < numStyles; i++) {
-        const artStyle = ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)];
-        styles.push(`${artStyle} art style`);
-    }
-
-    return `${prompt}, ${styles.join(', ')}`;
-}
 
 /**
  * Fetches an image from a URL and converts it to base64
@@ -424,9 +369,6 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             await msg.reply("Sorry, this function has been disabled for your user.");
             return;
         }
-
-        // Get username for personalization
-        const username = await getUsername(msg.author.id, msg.guild);
 
         // Check for replied message for context
         const replyMsgId = msg?.reference?.messageId;

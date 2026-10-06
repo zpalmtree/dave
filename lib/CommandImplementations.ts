@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import moment from 'moment';
 
 import fetch from 'node-fetch';
@@ -7,16 +5,14 @@ import fetch from 'node-fetch';
 import imageminGifsicle from 'imagemin-gifsicle';
 import TextOnGif from 'text-on-gif';
 
-import { stringify, unescape } from 'querystring';
+import { stringify } from 'querystring';
 import { evaluate } from 'mathjs';
 import { Database } from 'sqlite3';
 
 import {
     Message,
-    Client,
     TextChannel,
     User,
-    GuildMember,
     ColorResolvable,
     PermissionFlagsBits,
     AttachmentBuilder,
@@ -46,7 +42,6 @@ import {
     canAccessCommand,
     getUsername,
     shuffleArray,
-    formatLargeNumber,
     formatCompactNumber,
     formatUsdCost,
     pluralize,
@@ -63,13 +58,10 @@ import {
     insertQuery,
     selectQuery,
     selectOneQuery,
-    deleteQuery,
 } from './Database.js';
 
 import {
     TimeUnits,
-    Quote,
-    Command,
 } from './Types.js';
 
 import {
@@ -100,60 +92,6 @@ const timeUnits: TimeUnits = {
     m: 60,
     s: 1
 };
-
-const states = [
-    "New York",
-    "Washington",
-    "New Jersey",
-    "California",
-    "Illinois",
-    "Michigan",
-    "Florida",
-    "Louisiana",
-    "Texas",
-    "Massachusetts",
-    "Georgia",
-    "Colorado",
-    "Tennessee",
-    "Pennsylvania",
-    "Wisconsin",
-    "Ohio",
-    "Connecticut",
-    "North Carolina",
-    "Indiana",
-    "Mississippi",
-    "Maryland",
-    "Virginia",
-    "South Carolina",
-    "Nevada",
-    "Utah",
-    "Minnesota",
-    "Arkansas",
-    "Oregon",
-    "Alabama",
-    "Arizona",
-    "Missouri",
-    "District of Columbia",
-    "Kentucky",
-    "Iowa",
-    "Maine",
-    "Rhode Island",
-    "New Hampshire",
-    "Oklahoma",
-    "New Mexico",
-    "Kansas",
-    "Delaware",
-    "Hawaii",
-    "Vermont",
-    "Idaho",
-    "Nebraska",
-    "Montana",
-    "Alaska",
-    "North Dakota",
-    "Wyoming",
-    "South Dakota",
-    "West Virginia",
-];
 
 export async function handleFortune(msg: Message): Promise<void> {
     await msg.reply(`Your fortune: ${pickRandomItem(fortunes)}`);
@@ -859,7 +797,6 @@ export async function handleExchange(msg: Message, args: string): Promise<void> 
         success,
         error,
         amount,
-        amountInUsd,
         fromCurrency,
         toCurrency,
     } = exchangeService.exchange(from, to, asNum);
@@ -1647,8 +1584,6 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
         return;
     }
 
-    const mention = Array.from(notReadyUsers).map((x) => `<@${x}>`).join(' ');
-
     const description = 'React with 👍 when you are ready. Once everyone is ready, ' + 
         'a countdown will automatically start! The countdown will be cancelled after 5 ' +
         'minutes if not all users are ready.';
@@ -1852,8 +1787,6 @@ export async function handleMultiPoll(msg: Message, args: string) {
         await msg.reply('Multipoll requires at least 2 different options.');
         return;
     }
-
-    let i = 0;
 
     for (let i = 0; i < options.length; i++) {
         responseMapping.set(i, new Set());
@@ -2182,17 +2115,15 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
     /* Optional timespan for dot graph (for example 30m, 5s, 20h) */
     const timeRegex = /^([0-9]+)([YMWdhms])/;
 
-    let [ timeString, num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
+    const [ , num, unit ] = timeRegex.exec(arg) || [ '24h', 24, 'h' ];
     let timeSpan: number = Number(num) * timeUnits[unit as keyof TimeUnits];
 
     /* Timespan cannot be larger than 498 days */
     /* Default timespan is 24h */
     if (timeSpan > 86400 * 498) {
         timeSpan = 86400 * 498;
-        timeString = '1w';
     } else if (timeSpan <= 0) {
         timeSpan = 86400;
-        timeString = '24h';
     }
 
     let dotGraph;
