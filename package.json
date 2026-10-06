@@ -26,7 +26,6 @@
   ],
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
-    "@types/bad-words": "^3.0.1",
     "@types/imagemin": "^8.0.0",
     "@types/mathjs": "^6.0.0",
     "@types/node": "^16.6.1",

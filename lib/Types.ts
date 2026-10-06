@@ -112,6 +112,7 @@ export interface RGB {
     b: number;
 }
 
+/* Referenced by the gitignored, per-host Config.ts files. */
 export interface Coin {
     label: string;
     id: string;

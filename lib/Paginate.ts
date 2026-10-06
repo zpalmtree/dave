@@ -124,7 +124,7 @@ export class Paginate<T> {
         return parts.join('\n\n');
     }
 
-    public constructor(options: any) {
+    public constructor(options: PaginateOptions<T>) {
         const {
             sourceMessage,
             itemsPerPage = 1,
