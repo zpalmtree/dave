@@ -10,6 +10,21 @@ import video_named_song as songs
 
 
 class NamedSongTests(unittest.TestCase):
+    def test_cache_reuses_only_audio_with_matching_identity_and_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / 'original.mp3'
+            original.write_bytes(b'audio' * 300)
+            spec = {'title': 'Electric Feel', 'artist': 'MGMT', 'url': ''}
+            source = {'title': 'MGMT - Electric Feel', 'duration': 228, 'url': 'https://www.youtube.com/watch?v=MmZexg8sxyk'}
+            songs.cache_recording(spec, original, source, root / 'cache')
+            output = root / 'reused.mp3'
+            self.assertEqual(songs.cached_recording(spec, output, root / 'cache'), source)
+            self.assertEqual(output.read_bytes(), original.read_bytes())
+            self.assertIsNone(songs.cached_recording({**spec, 'artist': 'Other'}, output, root / 'cache'))
+            next((root / 'cache').glob('*.mp3')).write_bytes(b'corrupt' * 300)
+            self.assertIsNone(songs.cached_recording(spec, output, root / 'cache'))
+
     def test_worker_downloads_without_gpu_and_preserves_cancellation(self):
         import video_recovery as recovery
         if not hasattr(recovery, 'compose_song'):
@@ -66,7 +81,8 @@ class NamedSongTests(unittest.TestCase):
 
     def test_a_blocked_download_stops_without_using_another_song(self):
         result = mock.Mock(returncode=1, stderr='Sign in to confirm you are not a bot.')
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(songs.shutil, 'which', return_value='yt-dlp'), \
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(songs, 'cached_recording', return_value=None), \
+                mock.patch.object(songs.shutil, 'which', return_value='yt-dlp'), \
                 mock.patch.object(songs.subprocess, 'run', return_value=result) as run:
             with self.assertRaisesRegex(RuntimeError, 'Sign in'):
                 songs.fetch_recording({'title': 'Electric Feel', 'artist': 'MGMT', 'url': ''}, Path(directory) / 'song.mp3', 'ffmpeg')

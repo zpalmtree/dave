@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +26,47 @@ def youtube_url(value: str) -> str:
 
 def words(value):
     return set(re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', str(value)).casefold()))
+
+
+def recording_cache_key(spec):
+    identity = {key: str(spec.get(key) or '').strip().casefold() if key != 'url' else str(spec.get(key) or '')
+                for key in ('title', 'artist', 'url')}
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def cache_recording(spec, output, source, directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    key = recording_cache_key(spec)
+    audio = directory / (key + '.mp3')
+    temporary = audio.with_suffix('.part')
+    shutil.copyfile(output, temporary)
+    temporary.replace(audio)
+    metadata = {**source, 'audio_sha256': hashlib.sha256(audio.read_bytes()).hexdigest()}
+    (directory / (key + '.json')).write_text(json.dumps(metadata), encoding='utf-8')
+    # Keep at most 32 recordings; this is a reuse cache rather than a music library.
+    for old in sorted(directory.glob('*.mp3'), key=lambda p: p.stat().st_mtime, reverse=True)[32:]:
+        old.unlink(missing_ok=True)
+        old.with_suffix('.json').unlink(missing_ok=True)
+
+
+def cached_recording(spec, output, directory):
+    audio = directory / (recording_cache_key(spec) + '.mp3')
+    try:
+        metadata = json.loads(audio.with_suffix('.json').read_text(encoding='utf-8'))
+        if not 1024 <= audio.stat().st_size <= 12 * 1024 * 1024:
+            return None
+        if hashlib.sha256(audio.read_bytes()).hexdigest() != metadata.pop('audio_sha256'):
+            return None
+        youtube_url(metadata['url'])
+        if not 8 <= float(metadata['duration']) <= 600:
+            return None
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(audio, output)
+        output.with_suffix('.json').write_text(json.dumps(metadata), encoding='utf-8')
+        os.utime(audio, None)
+        return metadata
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def choose_recording(entries, title, artist):
@@ -56,6 +99,11 @@ def choose_recording(entries, title, artist):
 
 
 def fetch_recording(spec, output: Path, ffmpeg: str):
+    cache = Path(__file__).with_name('worker_song_cache')
+    stored = cached_recording(spec, output, cache)
+    if stored:
+        print(f"Using verified cached recording: {stored['title']}", flush=True)
+        return stored
     bundled = Path(__file__).with_name('yt-dlp.exe')
     executable = os.environ.get('VIDEO_YTDLP') or (str(bundled) if os.name == 'nt' and bundled.exists() else shutil.which('yt-dlp'))
     if not executable:
@@ -95,6 +143,7 @@ def fetch_recording(spec, output: Path, ffmpeg: str):
     source = {key: metadata.get(key) for key in ('id', 'title', 'channel', 'duration')}
     source['url'] = url
     output.with_suffix('.json').write_text(json.dumps(source), encoding='utf-8')
+    cache_recording(spec, output, source, cache)
     print(f"Retrieved {source['title']} from {source['channel']} ({duration:.1f}s).", flush=True)
     return source
 
@@ -105,4 +154,8 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--ffmpeg', required=True)
     args = parser.parse_args()
-    fetch_recording(json.loads(args.spec.read_text(encoding='utf-8')), args.output, args.ffmpeg)
+    try:
+        fetch_recording(json.loads(args.spec.read_text(encoding='utf-8')), args.output, args.ffmpeg)
+    except Exception as error:
+        print(str(error)[-700:], file=sys.stderr, flush=True)
+        raise SystemExit(1)

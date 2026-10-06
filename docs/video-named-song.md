@@ -13,7 +13,9 @@ no playlists, arbitrary hosts, browser cookies, or authentication bypasses are u
 or missing recording stops with an error asking for an upload or a more specific link.
 
 Downloads run on the desktop as CPU/network work without a GPU reservation. Recordings are
-limited to ten minutes, 100 MiB downloaded media and 12 MiB uploaded MP3; subprocesses have
+cached by requested song identity with a verified SHA-256 digest, retaining at most 32 files.
+A previously successful download can be reused when YouTube is temporarily unavailable.
+Recordings are limited to ten minutes, 100 MiB downloaded media and 12 MiB uploaded MP3; subprocesses have
 timeouts. The broker normalizes and transcribes the recording, chooses the requested section,
 then sends only that excerpt through the existing immutable-audio H3 pipeline. The selected
 recording URL/title and excerpt timing remain in the job's recovery state/database.
