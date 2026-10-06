@@ -76,32 +76,6 @@ export async function deleteQuery(query: string, db: Database, params: any = [])
     });
 }
 
-export async function updateQuery(query: string, db: Database, params: any = []): Promise<number> {
-    return new Promise((resolve, reject) => {
-        const f = function (this: RunResult, err: Error | null) {
-            if (err) {
-                return reject(err);
-            }
-
-            return resolve(this.changes);
-        }
-
-        db.run(query, params, f);
-    });
-}
-
-export async function serializeQueries(callback: () => any, db: Database): Promise<void> {
-    return new Promise((resolve, reject) => {
-        db.serialize();
-
-        callback()
-            .finally(() => {
-                db.parallelize();
-                resolve();
-            });
-    });
-}
-
 export async function createTablesIfNeeded(db: Database) {
     /* This table stores our quotes. Simple as. */
     await executeQuery(`CREATE TABLE IF NOT EXISTS quote (

@@ -3,7 +3,6 @@ import {
     Guild,
     Message,
     MessageReaction,
-    User,
     TextChannel,
     escapeMarkdown,
 } from 'discord.js';
@@ -12,7 +11,6 @@ export { trySendTyping, withTyping } from './Typing.js';
 
 import moment from 'moment';
 import fetch from 'node-fetch';
-import FormData from 'form-data';
 
 import { RGB } from './Types.js';
 import { config } from './Config.js';
@@ -229,61 +227,35 @@ export function roundToNPlaces(num: number, places: number) {
     return Math.round((num + Number.EPSILON) * x) / x;
 }
 
-export function formatLargeNumber(num: number): string {
-    const million = 1_000_000;
-    const billion = 1000 * million;
-    const trillion = 1000 * billion;
-    const quadrillion = 1000 * trillion;
-    const quintillion = 1000 * quadrillion;
-    const sextillion = 1000 * quintillion;
-    const septillion = 1000 * sextillion;
-    const octillion = 1000 * septillion;
-    const nonillion = 1000 * octillion;
-    const decillion = 1000 * nonillion;
+const LARGE_NUMBER_NAMES = [
+    'million',
+    'billion',
+    'trillion',
+    'quadrillion',
+    'quintillion',
+    'sextillion',
+    'septillion',
+    'octillion',
+    'nonillion',
+];
 
-    if (num < million) {
+export function formatLargeNumber(num: number): string {
+    let unit = 1_000_000;
+
+    if (num < unit) {
         return num.toString();
     }
 
-    if (num < billion) {
-        return `${roundToNPlaces(num / million, 2)} million`;
-    }
+    for (const name of LARGE_NUMBER_NAMES) {
+        if (num < unit * 1000) {
+            return `${roundToNPlaces(num / unit, 2)} ${name}`;
+        }
 
-    if (num < trillion) {
-        return `${roundToNPlaces(num / billion, 2)} billion`;
-    }
-
-    if (num < quadrillion) {
-        return `${roundToNPlaces(num / trillion, 2)} trillion`;
-    }
-
-    if (num < quintillion) {
-        return `${roundToNPlaces(num / quadrillion, 2)} quadrillion`;
-    }
-
-    if (num < sextillion) {
-        return `${roundToNPlaces(num / quintillion, 2)} quintillion`;
-    }
-
-    if (num < septillion) {
-        return `${roundToNPlaces(num / sextillion, 2)} sextillion`;
-    }
-
-    if (num < octillion) {
-        return `${roundToNPlaces(num / septillion, 2)} septillion`;
-    }
-
-    if (num < nonillion) {
-        return `${roundToNPlaces(num / octillion, 2)} octillion`;
-    }
-
-    if (num < decillion) {
-        return `${roundToNPlaces(num / decillion, 2)} decillion`;
+        unit *= 1000;
     }
 
     /* Whatever, who the fuck even knows the names of numbers this big. */
     return num.toString();
-
 }
 
 export async function tryDeleteMessage(msg: Message) {
@@ -321,44 +293,6 @@ export async function tryDeleteReaction(reaction: MessageReaction, id: string) {
     }
 }
 
-export async function uploadToImgur(image: any, filename?: string): Promise<string> {
-    const form = new FormData();
-
-    form.append('image', image, {
-        filename,
-    });
-
-    const response = await fetch(`https://api.imgur.com/3/image`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Client-ID ${config.imgurClientId}`,
-        },
-        body: form,
-    });
-
-    const data = await response.json();
-
-    if (!data.success) {
-        throw new Error(data.data.error.message);
-    }
-
-    return data.data.link;
-}
-
-export function getDefaultTimeZone() {
-    if (moment().isDST()) {
-        return {
-            offset: -4,
-            label: 'EDT',
-        };
-    } else {
-        return {
-            offset: -5,
-            label: 'EST',
-        };
-    }
-}
-
 export function escapeDiscordMarkdown(text: string) {
     return escapeMarkdown(
         text,
@@ -388,11 +322,6 @@ export async function handleGetFromME(url: string) {
     }
     const data = await res.json();
     return data;
-}
-
-export function isCapital(char: string) {
-    const charCode = char.charCodeAt(0);
-    return (charCode >= 65 && charCode <= 90);
 }
 
 export function truncateResponse(msg: string, limit: number = 1999): string {
@@ -446,46 +375,12 @@ export function splitMessage(message: string, limit: number = 1999): string[] {
             }
         }
         
-        // Fall back to hard split if no good break point found
-        if (splitIndex === endIndex && splitIndex > currentIndex) {
-            // Just split at the limit
-            splitIndex = endIndex;
-        }
-        
         // Add this part
         parts.push(message.slice(currentIndex, splitIndex));
         currentIndex = splitIndex;
     }
 
     return parts;
-}
-
-/**
- * Sends a message as multiple parts if it exceeds Discord's character limit
- * @param channel The Discord channel to send the message to
- * @param content The content to send
- * @param options Additional options for the message
- * @returns An array of sent messages
- */
-export async function sendLongMessage(
-    channel: import('discord.js').TextBasedChannel,
-    content: string,
-    options: any = {}
-): Promise<import('discord.js').Message[]> {
-    const parts = splitMessage(content);
-    const messages: import('discord.js').Message[] = [];
-    
-    for (const part of parts) {
-        if ('send' in channel) {
-            const sentMessage = await (channel as TextChannel).send({
-                ...options,
-                content: part
-            });
-            messages.push(sentMessage);
-        }
-    }
-    
-    return messages;
 }
 
 /**
