@@ -2769,9 +2769,14 @@ export class VideoBroker {
         const configured = configuredPrimaryVideoPlannerOptions(job.channel_id);
         // An uploaded song replaces the persona guidance at submission. A composed song keeps it
         // and adds the song rules, which override its voice and dialogue lead-in instructions.
+        const song = job.source_audio_origin === 'recording' && job.recovery_json
+            ? JSON.parse(job.recovery_json).song : null;
         const songGuidance = job.source_audio_origin && job.source_audio_seconds
             ? videoSourceAudioPlannerGuidance(parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
-                job.source_audio_seconds, job.source_audio_origin) : '';
+                job.source_audio_seconds, job.source_audio_origin, song ? {
+                    title: song.recording?.title || song.source?.title,
+                    artist: song.recording?.artist,
+                } : undefined) : '';
         const plannerGuidance = [job.planner_guidance, songGuidance]
             .map(value => String(value || '').trim())
             .filter(Boolean)
@@ -4968,6 +4973,7 @@ export class VideoBroker {
                 if (!state.prepared) {
                     writeJson(res, 200, { local_plan_required: true, reason_code: state.local_plan.reason_code,
                         prompt_analysis: state.local_plan.prompt_analysis || null,
+                        planner_guidance: options.plannerGuidance || '',
                         checkpoint: state.checkpoint || {}, sources: encodedSources() });
                     return;
                 }

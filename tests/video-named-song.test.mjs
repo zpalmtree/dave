@@ -81,6 +81,17 @@ test('named recording is fetched once, cut to the requested chorus, and never si
         assert.equal(JSON.parse(row.source_excerpt_json).start_seconds, 30);
         assert.equal(JSON.parse(row.source_audio_lyrics_json).words[0].start, 1);
         assert.match(broker.frontierOptions(row, true).plannerGuidance, /preserve its original recorded vocals/);
+        const guidance = broker.frontierOptions(row, true).plannerGuidance;
+        assert.ok(guidance.includes(JSON.stringify({ title: recording.title, artist: recording.artist })),
+            'resolved title and artist must survive soundtrack storage into visual planning');
+        const urlOnly = { ...row, recovery_json: JSON.stringify({ song: {
+            recording: { title: '', artist: '', url: 'https://youtu.be/MmZexg8sxyk' },
+            source: { title: 'Actual downloaded track title', channel: 'An uploader is not the artist' },
+        } }) };
+        const urlGuidance = broker.frontierOptions(urlOnly, true).plannerGuidance;
+        assert.ok(urlGuidance.includes(JSON.stringify({ title: 'Actual downloaded track title' })));
+        assert.ok(!urlGuidance.includes('An uploader is not the artist'));
+        assert.ok(!broker.frontierOptions({ ...row, recovery_json: null }, true).plannerGuidance.includes('Resolved recording metadata'));
         assert.equal((await broker.views([row]))[0].composed_song, false);
         await broker.run("UPDATE video_jobs SET status='delivered' WHERE public_id=?", [id]);
         const failed = await submit('second');

@@ -599,6 +599,9 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
         assert.equal(routed.status, 200);
         assert.equal(routed.body.local_plan_required, true);
         assert.equal(routed.body.reason_code, 'provider_policy');
+        assert.equal(routed.body.planner_guidance, broker.frontierOptions(
+            await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [id]), true).plannerGuidance || '',
+        'local planning must receive the current guidance, including soundtracks resolved after leasing');
         assert.equal(routed.body.sources.length, 1, 'The local planner receives the original portrait.');
         assert.equal((await request('plan')).body.local_plan_required, true);
         assert.equal(planningCalls, 2, 'A persisted local routing decision never asks the frontier again.');
