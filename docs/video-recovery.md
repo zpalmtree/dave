@@ -236,6 +236,25 @@ an updated copy passes `git apply --reverse --check`. New generator subprocesses
 load it without a worker restart. Deploy the frontier and continuity changes
 on both tracks with `scripts/deploy-bots.sh --with-broker`.
 
+For cutout performances, background design is now separate from subject identity.
+A transparent or empty flat backdrop may develop into a restrained setting
+grounded in the supplied lyrics, while the performer's crop, facial features,
+and visible body remain fixed. Meaningful photographed settings and explicit
+requests for unchanged backgrounds remain protected. The video starts from the
+supplied composition and develops the new setting continuously behind it.
+The follow-up desktop instruction is `desktop/source-performance-background.patch`,
+applied after `desktop/source-image-performance.patch`.
+
+Recovery image decoding now composites alpha over a neutral white matte before
+converting to RGB, including palette transparency. Previously it discarded alpha,
+exposing hidden black pixels and hardening antialiased cutout edges. Review JPEGs
+use the same blend; opaque backgrounds and subject pixels retain their colors.
+This fixes transparency handling, not missing detail in a tiny source photograph.
+Apply `desktop/video-transparent-source.patch` to the installed `video_recovery.py`
+and reload the supervised worker child while idle; do not overwrite newer live
+recovery code with the older repository snapshot. Verify with
+`python3 -m unittest discover -s desktop -p test_video_transparent_source.py`.
+
 Validation for this change: all 502 Node tests passed, followed by all eight
 continuity/opening tests after the final checker adjustment. A live comparison
 accepted the original image and requested reanchoring for the job's drifted
