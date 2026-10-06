@@ -1,4 +1,5 @@
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
+import { VideoStickerSourceImage, videoStickerSourceImage } from './VideoSticker.js';
 import { describeVideoSourceExcerpt, extractVideoSourceRange, videoSourceRange, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { classifyVideoEditIntent, VideoEditMode } from './VideoEditIntent.js';
 import { withTyping } from './Typing.js';
@@ -298,6 +299,7 @@ export interface SubmittedVideoClipSourceImage {
 
 export type SubmittedVideoAttachmentOrClipSourceImage =
     | SubmittedVideoAttachmentSourceImage
+    | VideoStickerSourceImage
     | SubmittedVideoClipSourceImage;
 
 export type SubmittedVideoSourceImage =
@@ -313,7 +315,7 @@ function inferredImageMime(name: string | null | undefined): string | null {
     return null;
 }
 
-export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachmentSourceImage | null {
+export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachmentSourceImage | VideoStickerSourceImage | null {
     const candidates = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
@@ -321,7 +323,13 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachm
     if (candidates.length > 1) {
         throw new Error('Please attach just one image.');
     }
-    if (!candidates.length) return null;
+    if (!candidates.length) {
+        const stickers = [...(msg.stickers?.values() || [])];
+        if (stickers.length > 1) throw new Error('Please send just one sticker for the starting image.');
+        if (!stickers.length) return null;
+        const sticker = stickers[0];
+        return videoStickerSourceImage({ sticker_id: sticker.id, sticker_format: sticker.format, name: sticker.name });
+    }
     const attachment = candidates[0];
     const mime = attachment.contentType?.split(';')[0].toLowerCase()
         || inferredImageMime(attachment.name);
@@ -358,7 +366,7 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
 export function videoAttachmentImageFromMessages(
     commandMessage: Message,
     referencedMessage: Message | null,
-): SubmittedVideoAttachmentSourceImage | null {
+): SubmittedVideoAttachmentSourceImage | VideoStickerSourceImage | null {
     for (const message of [commandMessage, referencedMessage]) {
         if (!message) continue;
         const image = videoSourceImageFromMessage(message);
