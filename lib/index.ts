@@ -1,19 +1,15 @@
 import sqlite3 from 'sqlite3';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 import {
     Message,
     Client,
     GatewayIntentBits,
-    GuildChannel,
 } from 'discord.js';
 
 import { config } from './Config.js';
 import {
     tryDeleteMessage,
     tryReactMessage,
-    handleGetFromME,
-    numberWithCommas
 } from './Utilities.js';
 import { startGitHubCommitWatch } from './GitHubCommitWatch.js';
 import { getDiscordLoginRetryDelay } from './DiscordRetry.js';
@@ -46,38 +42,7 @@ import { startUproar } from './Uproar.js';
 import { exchangeService } from './Exchange.js';
 import { startVideoGenerationService } from './VideoGeneration.js';
 import { startQwenImageService } from './QwenImage.js';
-
-const MAGIC_EDEN_SOL_SLUGS_STATS_URL = 'https://api-mainnet.magiceden.dev/rpc/getCollectionEscrowStats/sol_slugs';
-const TENSOR_SOL_SLUGS_STATS_URL = 'https://api.mainnet.tensordev.io/api/v1/collections?sortBy=statsV2.volumeAll:desc&limit=1&slugDisplays=sol_slugs';
-
-function unwrapMagicEdenStats(magicEdenData: any): any {
-    return magicEdenData?.results ?? magicEdenData;
-}
-
-async function fetchTensorSolSlugsStats(): Promise<any> {
-    if (!process.env.TENSOR_API_KEY) {
-        throw new Error('TENSOR_API_KEY is not configured.');
-    }
-
-    const res = await fetch(TENSOR_SOL_SLUGS_STATS_URL, {
-        headers: {
-            'x-tensor-api-key': process.env.TENSOR_API_KEY,
-        },
-    });
-
-    if (!res.ok) {
-        throw new Error(`Failed to fetch Tensor stats: ${res.status}`);
-    }
-
-    const data = await res.json();
-    const stats = data?.collections?.[0]?.stats;
-
-    if (!stats) {
-        throw new Error('Tensor response is missing collection stats.');
-    }
-
-    return stats;
-}
+import { startSlugStatChannels } from './SlugStatChannels.js';
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
     if (!msg.reference?.messageId) {
@@ -154,70 +119,12 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
     await dispatchPrefixedCommand(msg, db);
 }
 
-async function handleFloorPriceChannel(client: Client, magicEdenData: any) {
-    try {
-        const myChannel = client.channels.cache.get(config.priceChannel) as GuildChannel;
-
-        if (myChannel) {
-            const stats = unwrapMagicEdenStats(magicEdenData);
-            const floorPriceLamports = Number(stats?.floorPrice);
-
-            if (!Number.isFinite(floorPriceLamports)) {
-                console.log('Skipping floor price channel update: Magic Eden response is missing floorPrice.');
-                return;
-            }
-
-            const price = floorPriceLamports / LAMPORTS_PER_SOL;
-            await myChannel.setName(`Floor Price: ◎${price}`);
-        }
-    } catch (error) {
-        console.log(error);
-    }
-};
-
-async function handleTotalVolumeChannel(client: Client, tensorStats: any) {
-    try {
-        const myChannel = client.channels.cache.get(config.volumeChannel) as GuildChannel;
-        if (myChannel) {
-            const volumeAllLamports = Number(tensorStats?.volumeAll);
-
-            if (!Number.isFinite(volumeAllLamports)) {
-                console.log('Skipping total volume channel update: Tensor response is missing volumeAll.');
-                return;
-            }
-
-            const volume = numberWithCommas((Math.round(volumeAllLamports / LAMPORTS_PER_SOL)).toString());
-            await myChannel.setName(`Total Volume: ◎${volume}`);
-        }
-    } catch (error) {
-        console.log(error);
-    }
-};
-
-async function magicEdenStatUpdater(client: Client) {
-    try {
-        const magicEdenData = await handleGetFromME(MAGIC_EDEN_SOL_SLUGS_STATS_URL);
-        await handleFloorPriceChannel(client, magicEdenData);
-    } catch (err) {
-        console.log(err);
-    }
-
-    try {
-        const tensorStats = await fetchTensorSolSlugsStats();
-        await handleTotalVolumeChannel(client, tensorStats);
-    } catch (err) {
-        console.log(err);
-    }
-
-    setTimeout(() => magicEdenStatUpdater(client), 60 * 1000);
-}
-
 function createDiscordClient(db: sqlite3.Database): Client {
     const client = new Client({
         intents: [
             GatewayIntentBits.Guilds,
-    		GatewayIntentBits.GuildMessages,
-		    GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
             GatewayIntentBits.GuildMessageReactions,
         ],
     });
@@ -225,7 +132,7 @@ function createDiscordClient(db: sqlite3.Database): Client {
     client.on('clientReady', async () => {
         console.log('Logged in');
 
-        magicEdenStatUpdater(client);
+        startSlugStatChannels(client);
         restoreTimers(db, client);
         startVideoGenerationService(client);
         startQwenImageService(client);
