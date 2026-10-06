@@ -1510,12 +1510,30 @@ export async function handleUsersTokens(msg: Message, db: Database, global: bool
         .setTitle(`${global ? 'Global token' : 'Token'} spend by user`)
         .setDescription(`Estimated AI token spend per user${global ? ', across all servers' : ''}\n\n${formatTokenSpendTotal(users)}`);
 
+    // Keep name lookups for the lifetime of this spend snapshot, including
+    // failed lookups. Global rows often belong to users outside this guild;
+    // use cached nicknames without probing membership for every page visit.
+    const usernames = new Map<string, Promise<string>>();
+    // Platform adapters without global user lookup still resolve via guilds.
+    const useGlobalLookup = global && Boolean(msg.client.users);
+    const usernameFor = (id: string): Promise<string> => {
+        let username = usernames.get(id);
+        if (!username) {
+            const cachedNickname = useGlobalLookup ? msg.guild?.members.cache?.get(id)?.displayName : undefined;
+            username = cachedNickname
+                ? Promise.resolve(cachedNickname)
+                : getUsername(id, useGlobalLookup ? null : msg.guild, msg.client);
+            usernames.set(id, username);
+        }
+        return username;
+    };
+
     const pages = new Paginate({
         sourceMessage: msg,
         itemsPerPage: 9,
         displayFunction: async (user: any) => {
             return {
-                name: await getUsername(user.user, msg.guild, msg.client),
+                name: await usernameFor(user.user),
                 value: formatTokenSpend(user),
                 inline: true,
             };
@@ -1532,12 +1550,11 @@ export async function handleGlobalTokens(msg: Message, args: string[], db: Datab
     if (!canAccessCommand(msg, true)) {
         return;
     }
-    if (msg.client.user) await syncVideoUsageForBot(msg.client.user.id);
-
     const mentionedUsers = [...msg.mentions.users.values()];
 
     /* Get global token spend of a specific user, broken down by command */
     if (mentionedUsers.length > 0) {
+        if (msg.client.user) await syncVideoUsageForBot(msg.client.user.id);
         await handleUserTokens(msg, db, mentionedUsers[0].id, true);
         return;
     }
