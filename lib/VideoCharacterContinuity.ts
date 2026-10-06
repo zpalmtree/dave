@@ -1,7 +1,7 @@
 import { GoogleGenAI, MediaResolution, ThinkingLevel } from '@google/genai';
 import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
-import { VideoProviderHooks, videoRequestInputTokenBound } from './VideoUsage.js';
+import { VideoProviderHooks, geminiVideoUsage, videoRequestInputTokenBound } from './VideoUsage.js';
 
 export interface CharacterContinuityDecision {
     action: 'continue' | 'reanchor';
@@ -79,10 +79,7 @@ export async function checkVideoOpeningIdentity(
         const usage = response.usageMetadata;
         await hooks.onUsage?.({ stage, attempt: 1, outcome: 'success', provider: 'google',
             model: response.modelVersion || model, serviceTier: 'default',
-            inputTokens: Math.max(0, Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0)),
-            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
-            cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
-            rawUsage: usage as unknown as Record<string, unknown>, usageMissing: !usage });
+            ...geminiVideoUsage(usage) });
         const decision = validateOpeningIdentityDecision(JSON.parse(String(response.text || '')));
         outcome = 'success';
         return decision;
@@ -165,10 +162,7 @@ export async function checkVideoCharacterContinuity(
         const usage = response.usageMetadata;
         await hooks.onUsage?.({ stage, attempt: 1, outcome: 'success', provider: 'google',
             model: response.modelVersion || model, serviceTier: 'default',
-            inputTokens: Math.max(0, Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0)),
-            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
-            cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
-            rawUsage: usage as unknown as Record<string, unknown>, usageMissing: !usage });
+            ...geminiVideoUsage(usage) });
         const decision = validateContinuityDecision(JSON.parse(String(response.text || '')));
         outcome = 'success';
         return decision;

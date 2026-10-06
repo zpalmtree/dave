@@ -3,7 +3,7 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
 import { geminiCompatibleResponseSchema } from './VideoFrontierPlanner.js';
-import { VideoProviderHooks, VideoUsagePersistenceError, videoRequestInputTokenBound } from './VideoUsage.js';
+import { VideoProviderHooks, VideoUsagePersistenceError, geminiVideoUsage, videoRequestInputTokenBound } from './VideoUsage.js';
 
 export const VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL = AI_MODELS.geminiChat;
 
@@ -145,14 +145,7 @@ export async function createVideoSegmentKeyframeContracts(
             provider: 'google',
             model: response.modelVersion || VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL,
             serviceTier: 'default',
-            inputTokens: Math.max(
-                0,
-                Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0),
-            ),
-            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
-            cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
-            rawUsage: usage as unknown as Record<string, unknown>,
-            usageMissing: !usage,
+            ...geminiVideoUsage(usage),
         });
         const contracts = validatedContracts(JSON.parse(String(response.text || '')), targets);
         outcome = 'success';
