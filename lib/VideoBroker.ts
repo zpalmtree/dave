@@ -23,6 +23,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { configuredVideoOptimization, type VideoOptimizationSelection } from './VideoOptimizationRollout.js';
 import {
     ACTIVE_VIDEO_STATUSES,
+    LEASED_VIDEO_STATUSES,
     QWEN_IMAGE_ASPECTS,
     QWEN_IMAGE_MAX_ATTEMPTS,
     QWEN_IMAGE_MAX_REFERENCES,
@@ -129,8 +130,7 @@ import {
 } from './VideoSegmentKeyframePlanner.js';
 
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
-// Statuses in which a worker lease is expected to be live.
-const LEASED_SQL = ['leased', 'planning', 'running', 'uploading'].map(status => `'${status}'`).join(',');
+const LEASED_SQL = LEASED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 // Generated scene openings for fantastical premises drift into a glossy CG look,
 // and H3 then keeps that medium and gives Meximutt cartoon eyes. State the

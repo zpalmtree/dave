@@ -135,6 +135,9 @@ export const ACTIVE_VIDEO_STATUSES: VideoJobStatus[] = [
     'uploading',
 ];
 
+/** Statuses in which a worker lease is expected to be live. */
+export const LEASED_VIDEO_STATUSES: VideoJobStatus[] = ['leased', 'planning', 'running', 'uploading'];
+
 export const UNFINISHED_VIDEO_STATUSES: VideoJobStatus[] = [
     ...ACTIVE_VIDEO_STATUSES,
     'ready',

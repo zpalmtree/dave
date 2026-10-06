@@ -1,7 +1,7 @@
-import { VIDEO_MODELS, VideoJobView } from './VideoProtocol.js';
+import { LEASED_VIDEO_STATUSES, VIDEO_MODELS, VideoJobView } from './VideoProtocol.js';
 
 /** Statuses in which a job can be sitting in the GPU coordinator's queue. */
-const GPU_WAITING_STATUSES = new Set(['leased', 'planning', 'running', 'uploading']);
+const GPU_WAITING_STATUSES = new Set(LEASED_VIDEO_STATUSES);
 
 export interface VideoStallThresholds {
     /** Seconds a job may wait for GPU admission with nothing ahead before it counts as stalled. */
