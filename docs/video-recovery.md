@@ -210,6 +210,42 @@ so update the worker first to avoid a stalled queue.
 
 ## Verification
 
+### Source-image vocal performances
+
+For a request that only asks the pictured subject to speak, sing, rap, or
+lip-sync, frontier planning and desktop fallback preserve the source composition
+and individual features throughout. Mouth articulation, blinks, and modest head
+motion carry the performance. Song lyrics do not independently authorize body
+reveals, new props, confetti, or camera pullbacks. Explicit additional staging,
+music-video treatment, transformations, and narrative adaptations retain their
+own direction.
+
+Job `3ed9783e` exposed both over-staging and an overly permissive boundary check:
+the source dog acquired different eyes, muzzle proportions, and facial markings,
+but matching breed and coat color were accepted as identity. Opening and
+continuation checks now explicitly compare individual animal features, using
+the original image above screenplay descriptions. The continuation check uses
+high image resolution and medium reasoning, and must explain concrete facial
+matches or differences. This remains a boundary check; it does not review or
+repair drift within an already-rendered segment.
+
+The desktop-only prompt addition is archived in
+`desktop/source-image-performance.patch` and applied to the live `video_gen.py`.
+From the generator directory, use `git apply --check` before applying that patch;
+an updated copy passes `git apply --reverse --check`. New generator subprocesses
+load it without a worker restart. Deploy the frontier and continuity changes
+on both tracks with `scripts/deploy-bots.sh --with-broker`.
+
+Validation for this change: all 502 Node tests passed, followed by all eight
+continuity/opening tests after the final checker adjustment. A live comparison
+accepted the original image and requested reanchoring for the job's drifted
+boundary frame. Live GPT and production-configured Claude replans retained the
+close-up without the invented body reveal or confetti; Claude used its existing
+two-pass fallback after an initial duration conflict. The desktop suite retained
+the same three legacy errors on both baseline and updated code. No new video was
+rendered, so these checks establish planning and boundary decisions, not final
+rendered fidelity.
+
 `yarn test` covers contract preservation, timing repair, refusal handling, source identity,
 matching output approval, deferred recovery, and broker/delivery regressions.
 `desktop/test_video_recovery.py` uses real decodable video fixtures to exercise
