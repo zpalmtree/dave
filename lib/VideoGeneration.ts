@@ -2,6 +2,7 @@ import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVid
 import { VideoStickerSourceImage, videoStickerSourceImage } from './VideoSticker.js';
 import { describeVideoSourceExcerpt, extractVideoSourceRange, videoSourceRange, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { classifyVideoEditIntent, VideoEditMode } from './VideoEditIntent.js';
+import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
@@ -347,14 +348,12 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachm
     };
 }
 
-const VIDEO_CLIP_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm', 'mkv'];
-
 /** The broker extracts a representative frame from the clip with ffmpeg. */
 export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoClipSourceImage | null {
     const clips = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         const extension = attachment.name?.split('.').pop()?.toLowerCase();
-        return Boolean(mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.includes(extension)));
+        return Boolean(mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.has(extension)));
     });
     if (clips.length > 1) {
         throw new Error('Please attach just one video clip.');
