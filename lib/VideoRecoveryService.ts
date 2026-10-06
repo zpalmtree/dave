@@ -2,7 +2,7 @@ import { pinVideoPlanToAudio, VideoSourceAudioLyrics } from './VideoSourceAudio.
 import { createFrontierVideoPlan, FrontierPlannerRejectedError, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
 import { VideoFrontierCallOptions } from './VideoUsage.js';
 import { VideoModelId } from './VideoProtocol.js';
-import { approvedRecoveryContract, recoveryHash, repairVideoTiming } from './VideoRecovery.js';
+import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 
 export class RecoveryStoppedError extends Error {}
 
@@ -40,7 +40,7 @@ export async function prepareRecoveryPlan(input: {
             const plan: any = await planner(prompt, input.model, input.requester,
                 useSources ? input.sources : undefined, {
                     ...input.options,
-                    plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`
+                    plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. The requested total runtime is binding; preserve every requested scene and line, and never extend the runtime without authorization. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`
                         + (input.requireSourceIdentity ? '\nThe supplied character identity is required. Do not invent a replacement person or change their anatomy, body proportions, hair, or clothing.' : '')
                         + (input.requireOriginalFirstFrame ? '\nFrame zero must be the supplied portrait itself, fully framed and unchanged. Set keyframe.recommended=false. Start in its exact pose, crop and background, then reveal the permitted story through motion or later shots.' : ''),
                 });
@@ -54,6 +54,7 @@ export async function prepareRecoveryPlan(input: {
             }
             repairVideoTiming(plan, 15, 5);
             if (input.sourceAudioSeconds) pinVideoPlanToAudio(plan, input.sourceAudioSeconds, input.sourceAudioLyrics);
+            requireRecoveryPlanningPolicy(plan, input.sourceAudioSeconds ?? input.options.requestedDurationSeconds);
             const contract = approvedRecoveryContract(plan, prompt, notice, useSources);
             if (input.requireSourceIdentity || input.requireOriginalFirstFrame) contract.source_reference_required = true;
             if (input.requireOriginalFirstFrame) contract.original_first_frame = true;

@@ -1039,7 +1039,7 @@ test('broker-side frontier validation rejects plans the desktop would reject bef
     );
 });
 
-test('frontier validation treats authored finished duration as a recoverable preference', () => {
+test('frontier validation requires the authored finished duration to match the request', () => {
     const plan = {
         intent: 'A fifteen-second drawing timelapse.',
         continuity_bible: 'The cursor continuously builds one character.',
@@ -1062,7 +1062,7 @@ test('frontier validation treats authored finished duration as a recoverable pre
         () => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15),
     );
     plan.segments[0].output_seconds = 14;
-    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15));
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', '', 15), /Duration conflict/);
 });
 
 test('frontier dialogue staging makes every speaking shot visually explicit without a model call', () => {

@@ -405,10 +405,26 @@ export function requestedVideoDurationSeconds(prompt: string): number | null {
     return videoDurationRequirement(prompt)?.seconds ?? null;
 }
 
-/** A total-duration directive belongs in timing fields, not in visible/spoken content. */
+/** Timing and outline metadata belong in structure, not visible/spoken content. */
 export function videoPromptContentNumbers(prompt: string): string[] {
-    const range = videoDurationRequirement(prompt)?.numberRange;
-    const content = range ? prompt.slice(0, range[0]) + ' '.repeat(range[1] - range[0]) + prompt.slice(range[1]) : prompt;
+    const quotes = [...prompt.matchAll(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)/g)];
+    let content = prompt.replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)/g,
+        quote => ' '.repeat(quote.length));
+    for (const pattern of [
+        /^\s*(?:[-*]\s*)?(?:scene|shot|beat)\s+\d+\s*(?:[:.)\-–—]|$)/gim,
+        /^\s*\d+[.)]\s+/gm,
+        /\b\d+\s+(?:scenes?|shots?|beats?)\b/gi,
+        /\b\d{1,2}:[0-5]\d(?:\.\d+)?\s*[-–—]\s*\d{1,2}:[0-5]\d(?:\.\d+)?\b/g,
+    ]) content = content.replace(pattern, match => ' '.repeat(match.length));
+    for (const quote of quotes) {
+        content = content.slice(0, quote.index!) + quote[0] + content.slice(quote.index! + quote[0].length);
+    }
+    // Repeated duration instructions must not become duplicate story requirements.
+    for (;;) {
+        const range = videoDurationRequirement(content)?.numberRange;
+        if (!range) break;
+        content = content.slice(0, range[0]) + ' '.repeat(range[1] - range[0]) + content.slice(range[1]);
+    }
     return [...new Set(content.match(/\b\d+(?:\.\d+)?\b/g) || [])];
 }
 

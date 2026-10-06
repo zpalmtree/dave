@@ -1,0 +1,641 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -2658,9 +2658,22 @@
+ 
+ def video_prompt_content_numbers(raw_prompt: str, requested_duration: float | None) -> list[str]:
+     """Total runtime belongs in timing fields; other numbers remain scene requirements."""
+-    content = raw_prompt
++    quoted = list(re.finditer(r'''"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)''', raw_prompt))
++    masked = re.sub(r'''"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)''',
++                    lambda match: " " * len(match[0]), raw_prompt)
++    metadata_patterns = [
++        r"(?im)^\s*(?:[-*]\s*)?(?:scene|shot|beat)\s+\d+\s*(?:[:.)\-–—]|$)",
++        r"(?m)^\s*\d+[.)]\s+",
++        r"(?i)\b\d+\s+(?:scenes?|shots?|beats?)\b",
++        r"\b\d{1,2}:[0-5]\d(?:\.\d+)?\s*[-–—]\s*\d{1,2}:[0-5]\d(?:\.\d+)?\b",
++    ]
++    for pattern in metadata_patterns:
++        masked = re.sub(pattern, lambda match: " " * len(match[0]), masked)
++    for match in quoted:
++        masked = masked[:match.start()] + match[0] + masked[match.end():]
++    content = masked
+     if requested_duration is not None:
+-        text = re.sub(r"[‐‑‒–—]", "-", raw_prompt)
++        text = re.sub(r"[‐‑‒–—]", "-", content)
+         text = re.sub(r'''"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)''',
+                       lambda match: " " * len(match[0]), text)
+         amount = r"(\d+(?:\.\d+)?)"
+@@ -2671,24 +2684,21 @@
+             rf"\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\s+(?:with\s+)?(?:a\s+)?(?:total\s+)?(?:duration|runtime|length)?\s*(?:of|=|:|is|be|lasting|lasts|should\s+be|must\s+be)?\s*{amount}\s*{unit}\b",
+             rf"\b{amount}\s*{unit}\s*(?:long|in\s+total|total|overall)\b",
+         ]
+-        matches = [match for pattern in patterns if (match := re.search(pattern, text, re.IGNORECASE))]
+-        if not matches:
+-            for match in re.finditer(rf"\b{amount}\s*(?:-\s*)?{unit}\b", text, re.IGNORECASE):
+-                after = text[match.end():match.end() + 100]
+-                media = re.search(r"\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\b", after, re.IGNORECASE)
+-                if not media:
+-                    continue
+-                bridge = after[:media.start()]
+-                if re.search(r"\b(?:then|after|before|followed|pause|wait|hold)\b", bridge, re.IGNORECASE) or re.search(rf"\b{amount}\s*(?:-\s*)?{unit}\b", bridge, re.IGNORECASE):
+-                    continue
+-                matches.append(match)
+-                break
+-        if matches:
+-            match = matches[0]
++        matches = [match for pattern in patterns for match in re.finditer(pattern, text, re.IGNORECASE)]
++        for match in re.finditer(rf"\b{amount}\s*(?:-\s*)?{unit}\b", text, re.IGNORECASE):
++            after = text[match.end():match.end() + 100]
++            media = re.search(r"\b(?:video|clip|animation|timelapse|film|sequence|montage|short)\b", after, re.IGNORECASE)
++            if not media:
++                continue
++            bridge = after[:media.start()]
++            if re.search(r"\b(?:then|after|before|followed|pause|wait|hold)\b", bridge, re.IGNORECASE) or re.search(rf"\b{amount}\s*(?:-\s*)?{unit}\b", bridge, re.IGNORECASE):
++                continue
++            matches.append(match)
++        for match in matches:
+             seconds = float(match[1]) * (60 if match[2].lower().startswith("min") else 1)
+             if abs(seconds - requested_duration) < 1e-6:
+                 start, end = match.span(1)
+-                content = raw_prompt[:start] + " " * (end - start) + raw_prompt[end:]
++                content = content[:start] + " " * (end - start) + content[end:]
+     return list(dict.fromkeys(re.findall(r"\b\d+(?:\.\d+)?\b", content)))
+ 
+ 
+@@ -2996,6 +3006,8 @@
+     quality_gate_soft_issues = plan.get("quality_gate_soft_issues") if isinstance(plan, dict) else None
+     planner_route = plan.get("planner_route") if isinstance(plan, dict) else None
+     fallback_tier = plan.get("fallback_tier") if isinstance(plan, dict) else None
++    if best_effort_truncated or quality_gate_bypassed:
++        raise VideoGenError("screenplay contains unapproved omissions or failed quality checks; replan before rendering")
+     if not isinstance(plan, dict) or not isinstance(plan.get("segments"), list) or not plan["segments"]:
+         raise VideoGenError("planner returned no screenplay segments")
+     expected_known_coverage = known_explicit_coverage_contract(raw_prompt)
+@@ -3168,7 +3180,7 @@
+         target = max(floor, planned_target - dead_air)
+         # Keep a final-cut point that was valid for the planner's target inside
+         # the trimmed segment instead of leaving it past the new end.
+-        if requested_duration is None and floor <= segment_max + 1e-6:
++        if floor <= segment_max + 1e-6:
+             # The model often asks for more idle time than a segment can render.
+             # Shorten that slack before discarding an otherwise usable screenplay.
+             target = min(target, segment_max)
+@@ -3194,10 +3206,14 @@
+             f"{AUTO_TOTAL_CAP_SECONDS:g}s generation limit"
+         )
+     if requested_duration is not None:
+-        # Preserve the existing frame-grid tolerance for externally supplied
+-        # plans. The deterministic local fallback is truncated before it gets
+-        # here, while a small validated timing floor must not fail a job.
+-        desired_total = max(segment_min, requested_duration, minimum_total)
++        has_delivery_cuts = all(segment.get("output_seconds") is not None for segment in normalized)
++        if not has_delivery_cuts and minimum_total > requested_duration + 1e-6:
++            raise VideoGenError(
++                f"duration conflict: this screenplay needs at least {minimum_total:g}s to preserve "
++                f"all scenes and dialogue, but the requested runtime is {requested_duration:g}s. "
++                "Replan more concisely or request authorization for a longer runtime; no scenes were removed."
++            )
++        desired_total = max(minimum_total, sum(targets)) if has_delivery_cuts else requested_duration
+     else:
+         desired_total = min(sum(targets), AUTO_TOTAL_CAP_SECONDS)
+         if preferred_total is not None:
+@@ -3240,9 +3256,16 @@
+             raise VideoGenError(
+                 f"planner segment {index + 1} has invalid final-cut duration {output:g}s"
+             )
++        if output + 1e-6 < dialogue_floor_seconds(segment):
++            raise VideoGenError(f"duration conflict: final cut of segment {index + 1} truncates required dialogue")
+         if segment.get("output_seconds") is not None:
+             segment["output_seconds"] = output
+         output_total += output
++    if requested_duration is not None and abs(output_total - requested_duration) > 0.05:
++        raise VideoGenError(
++            f"duration conflict: screenplay delivers {output_total:g}s instead of the requested "
++            f"{requested_duration:g}s; preserve all scenes and replan within the runtime"
++        )
+     if requested_duration is None and output_total > AUTO_TOTAL_CAP_SECONDS + 1e-6:
+         raise VideoGenError(
+             f"planner finished runtime {output_total:.1f}s exceeds the "
+@@ -4098,33 +4121,6 @@
+             )
+     if not segments:
+         raise VideoGenError("semantic fallback contained no usable scene beats")
+-    duration_budget = max(
+-        segment_min,
+-        requested_duration if requested_duration is not None else AUTO_TOTAL_CAP_SECONDS,
+-    )
+-    total_before_truncation = sum(float(segment["target_seconds"]) for segment in segments)
+-    if total_before_truncation > duration_budget + 1e-6:
+-        remaining = duration_budget
+-        retained: list[dict[str, Any]] = []
+-        for segment in segments:
+-            if remaining < segment_min - 1e-6:
+-                break
+-            target = min(float(segment["target_seconds"]), remaining, segment_max)
+-            if target < segment_min - 1e-6:
+-                break
+-            truncate_dialogue_to_seconds(segment["shots"], target)
+-            floor = max(segment_min, dialogue_floor_seconds(segment))
+-            if floor > target + 1e-6:
+-                break
+-            old_total = sum(float(shot["duration_seconds"]) for shot in segment["shots"]) or 1.0
+-            segment["target_seconds"] = target
+-            for shot in segment["shots"]:
+-                shot["duration_seconds"] = float(shot["duration_seconds"]) * target / old_total
+-            retained.append(segment)
+-            remaining -= target
+-        if not retained:
+-            raise VideoGenError("semantic fallback could not retain a renderable segment")
+-        segments = retained
+     if source_image_supplied:
+         first_shot = segments[0]["shots"][0]
+         first_shot["visual"] = (
+@@ -4209,12 +4205,6 @@
+         },
+         "segments": segments,
+     }
+-    if total_before_truncation > duration_budget + 1e-6:
+-        result["best_effort_truncated"] = True
+-        result["generation_notice"] = (
+-            f"The screenplay exceeded the {duration_budget:g}-second generation budget and was "
+-            "truncated; later beats or dialogue may be omitted."
+-        )
+     return result
+ 
+ 
+@@ -4773,7 +4763,9 @@
+         5.0 if "h3" in models else 3.0
+     )
+     duration_instruction = (
+-        f"The complete finished video must total {requested_duration:g} seconds."
++        f"The complete finished video must total {requested_duration:g} seconds. Preserve every requested "
++        "scene and required line. Shorten staging and optional pauses to fit; never omit scenes or "
++        "truncate required dialogue, and never increase the requested runtime."
+         if requested_duration is not None
+         else f"Choose the shortest natural total duration, no more than {AUTO_TOTAL_CAP_SECONDS:g} seconds."
+     )
+@@ -4815,6 +4807,7 @@
+     if image_path is not None:
+         user_message["images"] = [base64.b64encode(image_path.read_bytes()).decode("ascii")]
+     last_error = ""
++    screenplay_attempts = 0
+     closest_rejected_plan: dict[str, Any] | None = None
+     closest_rejected_issues: list[str] = []
+     closest_rejected_provider = "llama.cpp"
+@@ -4840,6 +4833,7 @@
+             )
+         print(f"Planning screenplay locally with {model}...", flush=True)
+         for attempt in range(LOCAL_PLAN_ATTEMPTS):
++            screenplay_attempts += 1
+             content = ""
+             try:
+                 response = planner_json(
+@@ -4914,6 +4908,7 @@
+                     "provider": _last_planner_provider,
+                     "model": model,
+                     "fallback": planner_index > 0,
++                    "screenplay_attempts": screenplay_attempts,
+                 }
+                 print("Screenplay intent:", flush=True)
+                 print(f"  {plan['intent']}", flush=True)
+@@ -4946,32 +4941,38 @@
+         unload_planner_model(model)
+     print(
+         f"WARNING: The local planner could not produce a valid screenplay ({last_error}); "
+-        "using the validated semantic fallback.",
++        "evaluating a semantic fallback candidate; no video has been rendered.",
+         flush=True,
+     )
+-    fallback_candidate = fill_plan_headers(
+-        fallback_video_plan(
++    try:
++        fallback_candidate = fill_plan_headers(
++            fallback_video_plan(
++                raw_prompt,
++                analysis,
++                requested_duration,
++                segment_max,
++                segment_min,
++                source_image_supplied=image_path is not None,
++                frontier_analysis=frontier_analysis,
++            ),
++            analysis,
++        )
++        fallback_candidate["semantic_analysis"] = analysis
++        if frontier_analysis:
++            fallback_candidate["prompt_analysis"] = frontier_analysis
++        fallback = validate_plan_shape(
++            fallback_candidate,
+             raw_prompt,
+-            analysis,
+             requested_duration,
+             segment_max,
+             segment_min,
+-            source_image_supplied=image_path is not None,
+-            frontier_analysis=frontier_analysis,
+-        ),
+-        analysis,
+-    )
+-    fallback_candidate["semantic_analysis"] = analysis
+-    if frontier_analysis:
+-        fallback_candidate["prompt_analysis"] = frontier_analysis
+-    fallback = validate_plan_shape(
+-        fallback_candidate,
+-        raw_prompt,
+-        requested_duration,
+-        segment_max,
+-        segment_min,
+-        None if requested_duration is not None else float(analysis["recommended_total_seconds"]),
+-    )
++            None if requested_duration is not None else float(analysis["recommended_total_seconds"]),
++        )
++    except (TypeError, ValueError, VideoGenError) as exc:
++        raise VideoGenError(
++            f"Local screenplay planning failed after {screenplay_attempts} screenplay attempts; "
++            f"fallback validation failed: {exc}. No video was rendered."
++        ) from exc
+     fallback_issues = plan_quality_issues(raw_prompt, analysis, fallback)
+     if not fallback_issues:
+         try:
+@@ -5016,44 +5017,14 @@
+             # Keep the original issues when the repair cannot be reviewed.
+             print(f"WARNING: Opening-frame repair review unavailable: {exc}", flush=True)
+         hard_issues, soft_issues = split_quality_issues(fallback_issues)
+-    if hard_issues and not (
+-        fallback_tier == "source-opening-repair" and only_opening_frame_issues(fallback_issues)
+-    ):
+-        fallback = anchored_literal_fallback(
+-            fallback,
+-            raw_prompt,
+-            source_image_supplied=image_path is not None,
+-            requested_duration=requested_duration,
++    if fallback_issues:
++        details = "; ".join(re.sub(r"\s+", " ", str(issue)).strip()[:400]
++                            for issue in fallback_issues[:4])
++        raise VideoGenError(
++            f"Local screenplay planning failed after {screenplay_attempts} screenplay attempts; "
++            f"fallback quality gate: {details}. No video was rendered."
+         )
+-        fallback_tier = "anchored-literal-fallback"
+-    if fallback_issues:
+-        bounded_issues = [
+-            re.sub(r"\s+", " ", str(issue)).strip()[:400]
+-            for issue in fallback_issues[:4]
+-            if str(issue).strip()
+-        ] or ["the semantic fallback was not approved"]
+-        prior_notice = str(fallback.get("generation_notice") or "").strip()
+-        fallback_description = (
+-            "a simplified source-anchored fallback"
+-            if fallback_tier == "anchored-literal-fallback" else
+-            "the screenplay with its opening frame anchored to the supplied image"
+-            if fallback_tier == "source-opening-repair" else
+-            "the closest structurally valid attempt"
+-        )
+-        print(
+-            "WARNING: no screenplay fully passed the render-quality gate; rendering "
+-            f"{fallback_description}: " + "; ".join(bounded_issues),
+-            flush=True,
+-        )
+-        fallback["generation_notice"] = (
+-            f"{prior_notice} The local quality gate could not fully approve a screenplay, so "
+-            f"{fallback_description} was rendered instead of cancelling the video."
+-        ).strip()
+-        fallback["quality_gate_bypassed"] = True
+-        fallback["quality_gate_issues"] = bounded_issues
+-        fallback["quality_gate_hard_issues"] = hard_issues[:4]
+-        fallback["quality_gate_soft_issues"] = soft_issues[:4]
+-    fallback["planner_route"] = "local-best-effort"
++    fallback["planner_route"] = "local-validated-fallback"
+     fallback["fallback_tier"] = fallback_tier
+     fallback["planner"] = {
+         "provider": (
+@@ -5066,7 +5037,7 @@
+             else closest_rejected_model if selected_near_pass else None
+         ),
+         "fallback": True,
+-        "quality_gate_bypassed": bool(fallback_issues),
++        "screenplay_attempts": screenplay_attempts,
+     }
+     print("Screenplay intent:", flush=True)
+     print(f"  {fallback['intent']}", flush=True)
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -387,7 +387,7 @@
+             video_gen.dialogue_floor_seconds(short),
+         )
+ 
+-    def test_small_dialogue_floor_overrun_uses_frame_grid_tolerance(self):
++    def test_dialogue_floor_overrun_requires_replanning(self):
+         plan = sample_plan()["segments"][0]
+         plan["target_seconds"] = 7.0
+         plan["shots"][0]["duration_seconds"] = 7.0
+@@ -407,30 +407,31 @@
+         ]
+         screenplay = sample_plan()
+         screenplay["segments"] = [plan]
+-        result = video_gen.validate_plan_shape(
+-            screenplay,
+-            "Juan speaks, then Igor replies.",
+-            7.0,
+-            15.0,
+-            5.0,
+-        )
+-        self.assertGreater(result["target_total_seconds"], 7.0)
+-        self.assertLessEqual(result["target_total_seconds"], 7.5)
+-
+-    def test_impossible_explicit_duration_expands_instead_of_failing(self):
++        with self.assertRaisesRegex(video_gen.VideoGenError, "duration conflict"):
++            video_gen.validate_plan_shape(
++                screenplay,
++                "Juan speaks, then Igor replies.",
++                7.0,
++                15.0,
++                5.0,
++            )
++
++
++    def test_impossible_explicit_duration_reports_conflict(self):
+         prompt = (
+             "This deliberately long spoken sentence contains enough words that seven seconds "
+             "cannot possibly deliver it clearly, so the fallback must preserve all wording."
+         )
+         screenplay = sample_plan(prompt)
+-        result = video_gen.validate_plan_shape(
+-            screenplay,
+-            prompt,
+-            7.0,
+-            15.0,
+-            5.0,
+-        )
+-        self.assertGreater(result["target_total_seconds"], 7.0)
++        with self.assertRaisesRegex(video_gen.VideoGenError, "duration conflict"):
++            video_gen.validate_plan_shape(
++                screenplay,
++                prompt,
++                7.0,
++                15.0,
++                5.0,
++            )
++
+ 
+     def test_h3_segment_cap_slices_shot_timeline_without_changing_duration(self):
+         plan = sample_plan()
+@@ -1575,14 +1576,16 @@
+             mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
+             mock.patch.object(Path, "read_bytes", return_value=b"image"),
+         ):
+-            video_gen.create_video_plan(
+-                prompt,
+-                Path("source.png"),
+-                None,
+-                "3:2",
+-                ("h3",),
+-                frontier_analysis=contract,
+-            )
++            with self.assertRaisesRegex(video_gen.VideoGenError, "fallback quality gate"):
++                video_gen.create_video_plan(
++                    prompt,
++                    Path("source.png"),
++                    None,
++                    "3:2",
++                    ("h3",),
++                    frontier_analysis=contract,
++                )
++
+ 
+         self.assertTrue(planner_contents)
+         self.assertIn('"circular bronze arrow"', planner_contents[0])
+@@ -1939,7 +1942,7 @@
+             mock.patch.object(video_gen, "unload_planner_model"),
+         ):
+             result = video_gen.create_video_plan(
+-                prompt, None, 5.0, "16:9", ("h3",),
++                prompt, None, 7.0, "16:9", ("h3",),
+                 frontier_analysis=self.policy_refusal(),
+             )
+ 
+@@ -2241,7 +2244,7 @@
+         self.assertIn("semantic analysis only repeats the raw request", issues)
+         self.assertIn("a multi-period timeline was reduced to one generated segment", issues)
+ 
+-    def test_structurally_valid_semantic_fallback_renders_after_fidelity_failure(self):
++    def test_structurally_valid_semantic_fallback_rejects_after_fidelity_failure(self):
+         analysis = video_gen.conservative_semantic_analysis("Five dogs march together.")
+         analysis["recommended_total_seconds"] = 5.0
+         requested_models = []
+@@ -2266,27 +2269,11 @@
+             mock.patch.object(video_gen, "analyze_video_intent", return_value=analysis),
+             mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
+         ):
+-            result = video_gen.create_video_plan(
+-                "Five dogs march together.", None, 5.0, "16:9", ("ltx",)
+-            )
+-
+-        self.assertEqual(set(requested_models), {video_gen.PROMPT_INTENT_MODEL})
+-        self.assertTrue(result["quality_gate_bypassed"])
+-        self.assertIn(
+-            "an optional scarf was not shown",
+-            result["quality_gate_issues"],
+-        )
+-        self.assertTrue(result["planner"]["quality_gate_bypassed"])
+-        self.assertIn("instead of cancelling the video", result["generation_notice"])
+-        reloaded = video_gen.validate_plan_shape(
+-            result,
+-            "Five dogs march together.",
+-            5.0,
+-            20.0,
+-            3.0,
+-        )
+-        self.assertTrue(reloaded["quality_gate_bypassed"])
+-        self.assertEqual(reloaded["quality_gate_issues"], result["quality_gate_issues"])
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'after 3 screenplay attempts; fallback quality gate: an optional scarf was not shown'):
++                video_gen.create_video_plan(
++                    "Five dogs march together.", None, 5.0, "16:9", ("ltx",)
++                )
++
+ 
+     def test_local_planner_uses_third_quality_repair_before_fallback(self):
+         prompt = "Five dogs march together."
+@@ -2329,7 +2316,7 @@
+         self.assertFalse(result["planner"]["fallback"])
+         self.assertNotIn("quality_gate_bypassed", result)
+ 
+-    def test_closest_rejected_local_plan_wins_over_a_worse_semantic_fallback(self):
++    def test_closest_rejected_local_plan_reports_its_remaining_defect(self):
+         prompt = "Five dogs march together."
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+         analysis.update({
+@@ -2364,13 +2351,9 @@
+             ),
+             mock.patch.object(video_gen, "verify_plan_fidelity", side_effect=fidelity),
+         ):
+-            result = video_gen.create_video_plan(prompt, None, 5.0, "16:9", ("h3",))
+-
+-        self.assertEqual(result["intent"], candidate["intent"])
+-        self.assertEqual(result["quality_gate_issues"], ["one remaining staging miss"])
+-        self.assertEqual(result["planner"]["provider"], "llama.cpp")
+-        self.assertEqual(result["planner"]["model"], video_gen.PROMPT_INTENT_MODEL)
+-        self.assertIn("closest structurally valid attempt", result["generation_notice"])
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate: one remaining staging miss'):
++                video_gen.create_video_plan(prompt, None, 5.0, "16:9", ("h3",))
++
+ 
+     def test_unobservable_trait_is_not_a_visual_quality_requirement(self):
+         issues = video_gen.normalize_quality_issues([
+@@ -2401,7 +2384,7 @@
+ 
+         self.assertTrue(any("negated employment premise" in issue for issue in issues))
+ 
+-    def test_hard_local_failure_delivers_one_source_anchored_fallback_scene(self):
++    def test_hard_local_failure_stops_before_render(self):
+         prompt = "Blonde women won't work third shift factory jobs."
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+         analysis.update({
+@@ -2451,20 +2434,11 @@
+             mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
+             mock.patch.object(Path, "read_bytes", return_value=b"image"),
+         ):
+-            result = video_gen.create_video_plan(
+-                prompt, Path("source.png"), None, "2:3", ("h3",)
+-            )
+-
+-        self.assertTrue(result["quality_gate_bypassed"])
+-        self.assertEqual(result["fallback_tier"], "anchored-literal-fallback")
+-        self.assertEqual(result["planner_route"], "local-best-effort")
+-        self.assertEqual(len(result["segments"]), 1)
+-        self.assertIn("only visible protagonist", result["segments"][0]["shots"][0]["visual"])
+-        self.assertTrue(result["quality_gate_hard_issues"])
+-        reloaded = video_gen.validate_plan_shape(result, prompt, None, 15.0, 5.0)
+-        self.assertEqual(reloaded["planner_route"], "local-best-effort")
+-        self.assertEqual(reloaded["fallback_tier"], "anchored-literal-fallback")
+-        self.assertTrue(reloaded["quality_gate_hard_issues"])
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate:.*negated employment'):
++                video_gen.create_video_plan(
++                    prompt, Path("source.png"), None, "2:3", ("h3",)
++                )
++
+ 
+     def test_anchored_fallback_preserves_explicit_validated_timing(self):
+         prompt = "The pictured worker won't enter the factory."
+@@ -2562,19 +2536,18 @@
+                     mock.patch.object(video_gen, "unload_planner_model"),
+                     mock.patch.object(Path, "read_bytes", return_value=b"image"),
+                 ):
++                    if not repair_passes:
++                        with self.assertRaisesRegex(video_gen.VideoGenError, "fallback quality gate"):
++                            video_gen.create_video_plan(prompt, Path("source.jpg"), None, "1:1", ("h3",))
++                        continue
+                     result = video_gen.create_video_plan(prompt, Path("source.jpg"), None, "1:1", ("h3",))
+-                if not repair_passes:
+-                    self.assertEqual(result["fallback_tier"], "source-opening-repair")
+-                else:
+-                    self.assertNotIn("fallback_tier", result)
++                self.assertNotIn("fallback_tier", result)
+                 self.assertEqual(len(result["segments"]), 6)
+                 self.assertIn("Bull at left", result["segments"][0]["shots"][0]["visual"])
+                 self.assertAlmostEqual(result["target_total_seconds"], 26.0)
+                 self.assertEqual(result["segments"][-1]["shots"][0]["visual"], candidate["segments"][-1]["shots"][0]["visual"])
+-                self.assertEqual(bool(result.get("quality_gate_bypassed")), not repair_passes)
+-                if not repair_passes:
+-                    self.assertIn("opening frame anchored", result["generation_notice"])
+-                    self.assertEqual(result["quality_gate_issues"], complaints)
++                self.assertNotIn("quality_gate_bypassed", result)
++
+ 
+     def test_opening_repair_does_not_classify_unrelated_failures_as_frame_zero(self):
+         self.assertFalse(video_gen.only_opening_frame_issues([]))
+@@ -2623,7 +2596,7 @@
+         self.assertIn("5-second generated shot trimmed to 3 seconds is valid", content)
+         self.assertIn("semantic_analysis", plan)
+ 
+-    def test_generic_timeline_fallback_renders_when_review_is_unavailable(self):
++    def test_generic_timeline_fallback_rejects_when_review_is_unavailable(self):
+         prompt = "A time-lapse through the years as two friends age and their house decays."
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+ 
+@@ -2635,16 +2608,11 @@
+                 side_effect=video_gen.VideoGenError("planner unavailable"),
+             ),
+         ):
+-            result = video_gen.create_video_plan(prompt, None, None, "1:1", ("h3",))
+-
+-        self.assertTrue(result["quality_gate_bypassed"])
+-        self.assertIn("semantic analysis only repeats the raw request", result["quality_gate_issues"])
+-        self.assertTrue(any(
+-            "a multi-period timeline was reduced" in issue
+-            for issue in result["quality_gate_issues"]
+-        ))
+-
+-    def test_semantic_fallback_renders_when_the_reviewer_errors(self):
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate:.*semantic analysis only repeats'):
++                video_gen.create_video_plan(prompt, None, None, "1:1", ("h3",))
++
++
++    def test_semantic_fallback_rejects_when_the_reviewer_errors(self):
+         prompt = "Five dogs march together."
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+         analysis.update({
+@@ -2669,13 +2637,9 @@
+                 side_effect=video_gen.VideoGenError("reviewer offline"),
+             ),
+         ):
+-            result = video_gen.create_video_plan(prompt, None, 5.0, "16:9", ("h3",))
+-
+-        self.assertTrue(result["quality_gate_bypassed"])
+-        self.assertTrue(any(
+-            "semantic fallback review unavailable: reviewer offline" in issue
+-            for issue in result["quality_gate_issues"]
+-        ))
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate: semantic fallback review unavailable: reviewer offline'):
++                video_gen.create_video_plan(prompt, None, 5.0, "16:9", ("h3",))
++
+ 
+     def test_literal_emergency_plan_splits_long_requests_instead_of_failing(self):
+         result = video_gen.literal_video_plan(
+@@ -2976,7 +2940,7 @@
+         )
+         self.assertEqual(result["segments"][0]["shots"][0]["dialogue"][0]["text"], "Present.")
+ 
+-    def test_semantic_fallback_truncates_long_speech_to_explicit_duration(self):
++    def test_semantic_fallback_preserves_long_speech_and_rejects_short_runtime(self):
+         prompt = (
+             "I absolutely insist that this deliberately long declaration remains intact even when "
+             "the requested clip is far too short to say every single word naturally and clearly, "
+@@ -2984,27 +2948,19 @@
+         )
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+         fallback = video_gen.fallback_video_plan(prompt, analysis, 7.0, 15.0, 5.0)
+-        result = video_gen.validate_plan_shape(fallback, prompt, 7.0, 15.0, 5.0)
+-        self.assertEqual(result["target_total_seconds"], 7.0)
+-        self.assertTrue(all(segment["target_seconds"] <= 15.0 for segment in result["segments"]))
+-        spoken = " ".join(
+-            line["text"]
+-            for segment in result["segments"]
+-            for shot in segment["shots"]
+-            for line in shot["dialogue"]
+-        )
+-        self.assertTrue(video_gen.spoken_words(prompt).startswith(video_gen.spoken_words(spoken)))
+-        self.assertNotEqual(video_gen.spoken_words(spoken), video_gen.spoken_words(prompt))
+-        self.assertIn("truncated", result["generation_notice"])
+-
+-    def test_required_speech_is_truncated_at_the_automatic_cap(self):
++        self.assertEqual(video_gen.spoken_words(plan_dialogue_text(fallback)), video_gen.spoken_words(prompt))
++        with self.assertRaisesRegex(video_gen.VideoGenError, "duration conflict"):
++            video_gen.validate_plan_shape(fallback, prompt, 7.0, 15.0, 5.0)
++
++
++    def test_required_speech_is_not_truncated_at_the_automatic_cap(self):
+         prompt = "I believe " + " ".join(f"thought{index}" for index in range(400))
+         analysis = video_gen.conservative_semantic_analysis(prompt)
+         fallback = video_gen.fallback_video_plan(prompt, analysis, None, 15.0, 5.0)
+-        result = video_gen.validate_plan_shape(fallback, prompt, None, 15.0, 5.0)
+-        self.assertLessEqual(result["target_total_seconds"], video_gen.AUTO_TOTAL_CAP_SECONDS)
+-        self.assertTrue(result["best_effort_truncated"])
+-        self.assertIn("120-second generation budget", result["generation_notice"])
++        self.assertEqual(video_gen.spoken_words(plan_dialogue_text(fallback)), video_gen.spoken_words(prompt))
++        with self.assertRaisesRegex(video_gen.VideoGenError, "generation limit"):
++            video_gen.validate_plan_shape(fallback, prompt, None, 15.0, 5.0)
++
+ 
+     def test_exhaustive_roster_cannot_exceed_generated_footage_cap(self):
+         members = [f"President {index + 1}" for index in range(45)]

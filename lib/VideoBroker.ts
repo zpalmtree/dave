@@ -6,7 +6,7 @@ import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, Stor
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
-import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming } from './VideoRecovery.js';
+import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole,
     validateContinuityDecision, validateOpeningIdentityDecision } from './VideoCharacterContinuity.js';
@@ -5219,7 +5219,7 @@ export class VideoBroker {
                         [exhausted ? 'failed' : 'queued',
                             exhausted ? 'Video recovery stopped' : 'Waiting to resume video recovery',
                             JSON.stringify(prior), exhausted ? null : nowSeconds() + delay,
-                            exhausted ? `Video recovery stopped after ${prior.waits} failed passes. ${prior.last_error}` : null,
+                            exhausted ? `Video recovery stopped after ${prior.waits} failed recovery ${prior.waits === 1 ? 'pass' : 'passes'} (separate from screenplay attempts). ${prior.last_error}` : null,
                             exhausted ? nowSeconds() : null, nowSeconds(), jobId]);
                     this.worker.currentJob = null;
                     this.worker.ready = false;
@@ -5786,6 +5786,7 @@ export class VideoBroker {
                     const notice = sanitizeVideoWorkerText(String(plan.generation_notice || ''), '', 1000).trim();
                     let contract;
                     try {
+                        requireRecoveryPlanningPolicy(plan, job.source_audio_seconds ?? job.requested_duration_seconds);
                         contract = approvedLocalRecoveryContract(plan, job.prompt, state.local_plan.reason_code,
                             notice, true, state.local_plan.prompt_analysis);
                     } catch (error) {
