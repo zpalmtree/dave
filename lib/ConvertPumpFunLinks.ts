@@ -1,9 +1,6 @@
 import { Message, TextChannel, PermissionsBitField, MessageReaction, User } from 'discord.js';
 
 import {
-    getUsername,
-    truncateResponse,
-    sleep,
     tryReactMessage,
 } from './Utilities.js';
 
@@ -27,7 +24,6 @@ export async function convertPumpFunLinks(msg: Message): Promise<void> {
         }
 
         if (fixedURLs.length > 0) {
-            const username = await getUsername(msg.author.id, msg.guild);
             const content = `${fixedURLs.join('\n')}`;
 
             // Send the birdeye links without suppressing the original embed
