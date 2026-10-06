@@ -2,7 +2,7 @@ import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressCont
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
-    cutVideoSourceAudio, excerptVideoSourceAudioLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
+    cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
@@ -2891,7 +2891,8 @@ export class VideoBroker {
                 sourceExcerpt = await (this.options.sourceAudioExcerptSelector || selectVideoSourceAudioExcerpt)(
                     { prompt, lyrics: songLyrics, seconds: song.duration, range: sourceRange }, submissionHooks);
                 sourceAudio = await (this.options.sourceAudioCutter || cutVideoSourceAudio)(song, sourceExcerpt, directory);
-                sourceAudioLyrics = excerptVideoSourceAudioLyrics(songLyrics, sourceExcerpt);
+                sourceAudioLyrics = await resolveVideoSourceExcerptLyrics(songLyrics, sourceExcerpt, sourceAudio,
+                    submissionHooks, this.options.sourceAudioTranscriber || transcribeVideoSourceAudio);
                 requestedDuration = sourceAudio.duration;
                 plannerGuidance = videoSourceAudioPlannerGuidance(sourceAudioLyrics, sourceAudio.duration);
             } catch (error) {
@@ -5722,7 +5723,8 @@ export class VideoBroker {
             excerpt = await (this.options.sourceAudioExcerptSelector || selectVideoSourceAudioExcerpt)(
                 { prompt: job.prompt, lyrics, seconds: song.duration, range: videoSourceRange(range) }, this.providerHooks(job));
             song = await (this.options.sourceAudioCutter || cutVideoSourceAudio)(song, excerpt, directory);
-            lyrics = excerptVideoSourceAudioLyrics(lyrics, excerpt);
+            lyrics = await resolveVideoSourceExcerptLyrics(lyrics, excerpt, song,
+                this.providerHooks(job), this.options.sourceAudioTranscriber || transcribeVideoSourceAudio);
             state.song.source = body.recording || state.song.recording;
         }
         await this.run(`UPDATE video_jobs SET source_audio_path=?, source_audio_seconds=?, source_audio_lyrics_json=?,

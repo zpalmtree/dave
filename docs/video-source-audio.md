@@ -58,6 +58,12 @@ to let the shots act out or literalize the lyrics when the request leaves the
 action open, and to show singing only where there are vocals. The transcript is
 labelled as approximate song content, never instructions.
 
+After a song is cut, word and line timestamps are shifted onto the excerpt's
+timeline. If no usable word/line timeline survives, the broker transcribes the
+cut audio once more and uses those local timestamps directly. This recovery
+applies to uploads and named recordings; a failed retry retains any available
+timing and the original recording. Valid excerpt timing adds no provider call.
+
 Pinning the plan to the song then moves each cut out of any sung word, by up to
 two seconds. It prefers a pause of at least a quarter second, then the start of
 a transcribed line, then any gap between words. Each shot records
@@ -123,3 +129,14 @@ Checks:
 GPU smoke renders must run through `gpuq`, with declared Gaming Mode and
 preemption policies. The synthetic-vocal smoke fixture uses an original spoken
 rhythmic phrase plus a generated beat; it contains no third-party song.
+
+For a controlled vocal-isolation experiment, run
+`scripts/benchmark-video-vocal-conditioning.py` in the desktop Python environment
+through `gpuq run --profile video-h3 --priority normal --when-gaming hold --on-preempt fail -- ...`.
+Supply `--desktop`, `--audio`, `--image`, a new `--output` directory, and `--prompt`;
+optionally set `--start`, `--seconds` (1-12), and `--seed`. The default renderer
+is the production base H3 model; `--renderer taomate` tests the fast renderer.
+The script separates vocals with torchaudio's Hybrid Demucs on CPU, renders both
+audio-conditioning variants with identical visual settings, and puts the same
+original mix on both final videos. It saves the request, workflows and timings
+for review. Vocal isolation remains an experiment, not a production default.
