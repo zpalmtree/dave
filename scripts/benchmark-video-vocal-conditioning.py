@@ -42,7 +42,7 @@ def main():
     request_path.write_text(json.dumps(signature, indent=2))
     sys.path.insert(0, str(args.desktop))
     import video_gen as vg
-    from video_source_audio import audio_window, condition_h3_on_song, mux_original_song
+    from video_source_audio import audio_window, condition_h3_on_song, assemble_song_video, mux_original_song
     import numpy as np
     import torch
     from torchaudio.pipelines import HDEMUCS_HIGH_MUSDB_PLUS
@@ -95,7 +95,12 @@ def main():
                 raise RuntimeError(str(response))
             print(f'Rendering {name}: {response["prompt_id"]}', flush=True)
             output = vg.wait_for_generation(vg.DEFAULT_SERVER, response['prompt_id'], prefix, 1800)
-            mux_original_song(ffmpeg, output, mix, destination, 0, frames)
+            # Match production assembly: trim decoded frames before stream-copying
+            # audio onto them. A packet-level -t cut can retain extra B-frames.
+            trimmed = args.output / (name + '-trimmed.mp4')
+            assemble_song_video(ffmpeg, [output], [{'source_audio_frames': frames}], trimmed)
+            mux_original_song(ffmpeg, trimmed, mix, destination, 0, frames)
+            trimmed.unlink()
         report['variants'][name] = {'path': str(destination), 'seconds': round(time.monotonic() - started, 2)}
         (args.output / 'report.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(report), flush=True)
