@@ -14,9 +14,9 @@ import {
     oalgoSourceImageCompositePlan,
     videoSegmentUsesFrameZeroIdentity,
     videoFailureDisposition,
-    videoClipProxyFrameUrl,
 } from '../dist/VideoBroker.js';
 import { projectedVideoFinishAt, videoPlanRuntimeScale } from '../dist/VideoRuntimeStats.js';
+import { videoClipProxyFrameUrl } from '../dist/VideoSourceImage.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtocol.js';
