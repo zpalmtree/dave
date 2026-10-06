@@ -961,9 +961,11 @@ async function getGoogleSearchResults(query: string): Promise<any[]> {
     const url = `https://www.googleapis.com/customsearch/v1?${stringify(params)}`;
 
     const response = await fetch(url);
-    
+
     if (!response.ok) {
-        throw new Error(`Google API error: ${response.status} ${response.statusText}`);
+        const body = await response.json().catch(() => null);
+        const reason = body?.error?.message || `${response.status} ${response.statusText}`;
+        throw new Error(`Google API error: ${reason}`);
     }
 
     const data = await response.json();
@@ -998,9 +1000,11 @@ async function getGoogleImageResults(query: string): Promise<any[]> {
     const url = `https://www.googleapis.com/customsearch/v1?${stringify(params)}`;
 
     const response = await fetch(url);
-    
+
     if (!response.ok) {
-        throw new Error(`Google API error: ${response.status} ${response.statusText}`);
+        const body = await response.json().catch(() => null);
+        const reason = body?.error?.message || `${response.status} ${response.statusText}`;
+        throw new Error(`Google API error: ${reason}`);
     }
 
     const data = await response.json();
@@ -1082,28 +1086,50 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
     return videos;
 }
 
-export async function handleReady(msg: Message, args: string[], db: Database) {
-    const notReadyUsers = new Set<string>([...msg.mentions.users.keys()]);
-    const readyUsers = new Set<string>([]);
+let previousReady: undefined | any = undefined;
+
+export async function handleReady(msg: Message, args: string, db: Database) {
+    let notReadyUsers = new Set<string>([...msg.mentions.users.keys()]);
+    let readyUsers = new Set<string>([]);
 
     let title = 'Are you ready?';
 
-    /* They didn't mention anyone, lets make them unready so we can allow
-     * sending the message */
-    if (notReadyUsers.size === 0) {
-        notReadyUsers.add(msg.author.id);
-    /* If the user doesn't mention themselves and there are other attendents, make them ready automatically. */
-    } else if (!notReadyUsers.has(msg.author.id)) {
-        readyUsers.add(msg.author.id);
+    if (args === 'last') {
+        if (!previousReady) {
+            await msg.reply(`No previous ready, bot may have recently restarted.`);
+            return;
+        }
+
+        // Make the invoking user ready and all other users not ready
+        notReadyUsers = new Set<string>(previousReady.readyUsers);
+        readyUsers = new Set<string>([msg.author.id]);
+
+        for (const user of previousReady.notReadyUsers) {
+            notReadyUsers.add(user);
+        }
+
+        notReadyUsers.delete(msg.author.id);
+
+    } else {
+        if (notReadyUsers.size === 0) {
+            notReadyUsers.add(msg.author.id);
+        } else if (!notReadyUsers.has(msg.author.id)) {
+            readyUsers.add(msg.author.id);
+        }
     }
 
-    if (notReadyUsers.size === 0) {
+    if (notReadyUsers.size === 0 && readyUsers.size <= 1) {
         await msg.reply(`At least one user other than yourself must be mentioned or attending the movie ID. See \`${config.prefix}help ready\``);
         return;
     }
 
-    const description = 'React with 👍 when you are ready. Once everyone is ready, ' + 
-        'a countdown will automatically start! The countdown will be cancelled after 5 ' +
+    previousReady = {
+        notReadyUsers,
+        readyUsers,
+    };
+
+    const description = 'React with 👍 when you are ready and 👎 if you want to unready. Once everyone is ready, ' + 
+        'a countdown will automatically start! The countdown will be cancelled after 15 ' +
         'minutes if not all users are ready.';
 
     const f = async () => {
@@ -1138,6 +1164,7 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     });
 
     await tryReactMessage(sentMessage, '👍');
+    await tryReactMessage(sentMessage, '👎');
 
     const collector = sentMessage.createReactionCollector({
         filter: (reaction: MessageReaction, user: User) => {
@@ -1149,12 +1176,21 @@ export async function handleReady(msg: Message, args: string[], db: Database) {
     collector.on('collect', async (reaction: MessageReaction, user: User) => {
         tryDeleteReaction(reaction, user.id);
 
-        if (!notReadyUsers.has(user.id)) {
-            return;
-        }
+        if (reaction.emoji.name === '👍') {
+            if (!notReadyUsers.has(user.id)) {
+                return;
+            }
 
-        notReadyUsers.delete(user.id);
-        readyUsers.add(user.id);
+            notReadyUsers.delete(user.id);
+            readyUsers.add(user.id);
+        } else if (reaction.emoji.name === '👎') {
+            if (!readyUsers.has(user.id)) {
+                return;
+            }
+
+            readyUsers.delete(user.id);
+            notReadyUsers.add(user.id);
+        }
 
         if (notReadyUsers.size === 0) {
             collector.stop('messageDelete');

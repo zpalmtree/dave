@@ -984,7 +984,7 @@ const sharedCommands: Command[] = [
     {
         aliases: ['ready'],
         primaryCommand: {
-            argsFormat: Args.Split,
+            argsFormat: Args.Combined,
             implementation: handleReady,
             description: 'Verify if users are ready to launch a countdown',
             helpDescription: 'Lets you verify if users are ready for a movie, or other ' +
