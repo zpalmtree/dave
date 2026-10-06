@@ -10,7 +10,6 @@ import {
 export { trySendTyping, withTyping } from './Typing.js';
 
 import moment from 'moment';
-import fetch from 'node-fetch';
 
 import { RGB } from './Types.js';
 import { config } from './Config.js';
@@ -324,15 +323,6 @@ export function escapeDiscordMarkdown(text: string) {
             maskedLink: true,
         },
     );
-}
-
-export async function handleGetFromME(url: string) {    
-    const res = await fetch(url);
-    if (!res.ok) {
-        throw new Error("failed to fetch from API");
-    }
-    const data = await res.json();
-    return data;
 }
 
 export function truncateResponse(msg: string, limit: number = 1999): string {
