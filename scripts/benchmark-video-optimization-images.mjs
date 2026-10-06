@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { readFile, writeFile, access } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
-import { derivedSegmentKeyframePlan } from '../dist/VideoBroker.js';
 import { oalgoSourceImageCompositePlan } from '../dist/VideoOalgoComposite.js';
+import { derivedSegmentKeyframePlan } from '../dist/VideoSegmentKeyframePlanner.js';
 import { generateFrontierVideoKeyframeCandidate, reviewVideoKeyframe, buildVideoKeyframeReviewPrompt } from '../dist/VideoKeyframeProvider.js';
 import { VideoExperimentLedger, executionFingerprint, ledgerTotals } from './video-experiment-ledger.mjs';
 import { saveJsonAtomic, stableHash, stableShuffle, mean, percentile } from './video-cost-ab-lib.mjs';
@@ -14,7 +14,7 @@ const phase = argument('phase', 'prepare');
 const oldDirectory = resolve(argument('retained-frames', 'artifacts/video-keyframe-benchmarks/2026-08-25T11-16-53.002Z'));
 const REVIEWERS = { 'sol-high': { model: 'gpt-5.6-sol', effort: 'high' }, 'sol-low': { model: 'gpt-5.6-sol', effort: 'low' }, 'flash-low': { model: 'gemini-3.8-flash', effort: 'low' } };
 const IMAGE_MODELS = { pro: { geminiModel: 'gemini-3-pro-image', imageSize: '2K' }, flash: { geminiModel: 'gemini-3.1-flash-image', imageSize: '1K' } };
-const paths = ['dist/VideoKeyframeProvider.js', 'dist/VideoBroker.js', 'dist/VideoOalgoComposite.js', 'dist/VideoFrontierPlanner.js',
+const paths = ['dist/VideoKeyframeProvider.js', 'dist/VideoSegmentKeyframePlanner.js', 'dist/VideoOalgoComposite.js', 'dist/VideoFrontierPlanner.js',
     'dist/VideoUsage.js', 'scripts/benchmark-video-optimization-images.mjs', 'scripts/video-experiment-ledger.mjs'];
 const imageReference = (path, label, facts, kind = 'identity') => ({ image_path: path, label, kind,
     visualFactsToPreserve: facts, mimeType: path.endsWith('.png') ? 'image/png' : 'image/jpeg' });
