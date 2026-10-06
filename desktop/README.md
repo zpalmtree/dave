@@ -1,5 +1,37 @@
 # Desktop video optimization changes
 
+## Recovery latency and timing
+
+`video-speed.patch` overlaps the next independent cut/dissolve opening with the
+current render, caches its response against the approved contract and regeneration
+revision, and records recovery HTTP timings. Continuations still wait for the
+previous video's frame; local image inference still takes its own GPUq lease.
+Only one opening is prefetched at a time. The broker also plans the next queued
+recovery job while the worker renders, sharing any in-flight planning call with
+the worker. Song composition and local planning remain worker operations.
+
+The generator reads `timing_history.jsonl` before falling back to a recursive
+manifest scan. On October 6, the old scan took 59.985 seconds across 2,354
+observations; the log path took 0.013 seconds across 1,820 observations. This is
+one CPU/I/O measurement, not an end-to-end render benchmark. H3 graphs, sampling
+steps, resolution and quality are unchanged.
+
+Apply with `python3 scripts/apply-video-speed-desktop.py --check`, then without
+`--check`. Reload the supervised desktop worker while idle and deploy both bot
+tracks with `scripts/deploy-bots.sh --with-broker`. The broker migration retains
+old provider timings and gives each new provider invocation a separate key.
+Worker snapshots aggregate repeated GPU waits before their idempotent database
+upsert; repeated uploads do not add the same wait twice. The completed job's
+queue-wait field is also updated with that aggregate. Historical overwritten
+values cannot be reconstructed by this migration.
+
+Validation: all 478 bot tests passed, followed by a fifth focused latency test
+covering migration of populated old timing tables. All 41 desktop speed/recovery
+tests passed. The generator suite passed 187 of 190 tests; its three missing
+legacy keyframe-symbol errors were reproduced against the untouched baseline.
+The desktop changes are archived as a delta over the live source, preserving
+unrelated changes already installed there.
+
 ## TaoMate fast renderer
 
 `video-taomate.patch` adds the tested three-step TaoMate SLA 25% profile and selects
