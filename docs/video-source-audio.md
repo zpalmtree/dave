@@ -109,6 +109,18 @@ Video tracks are assembled without AAC padding accumulating at boundaries, and
 one continuous original audio track is muxed into the result. Standard delivery
 encoding and loudness normalization still apply.
 
+Single-scene recovery renders also trim decoded video frames before muxing the
+song. A 123-frame scene occupies H3's 124-frame bucket; stream-copying with only
+`-t` can retain the extra B-frame and fail the final frame-count check. The
+generator now uses `finalize_song_video` for both single and multiple scenes.
+CPU regression checks cover padded and exact-length single scenes, plus joins.
+
+This follow-up is recorded in `desktop/video-song-single-scene-trim.patch` for
+`video_gen.py`, together with the updated `desktop/video_source_audio.py`.
+Both are applied to the live desktop. Check the patch before applying it to
+another matching revision, and copy the helper alongside it. New generator
+subprocesses load these changes without a worker restart.
+
 ## Installation and verification
 
 Apply `scripts/apply-video-source-audio-desktop.py` to the audited desktop
