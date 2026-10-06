@@ -307,6 +307,7 @@ export function isQwenImageModel(value: unknown): value is QwenImageModelId {
 export interface VideoWorkerHello {
     source_audio_version?: number;
     song_compose_version?: number;
+    song_download_version?: number;
     video_edit_version?: number;
     recovery_version?: number;
     type: 'hello';

@@ -7,11 +7,12 @@ import { VideoFrontierCallOptions } from './VideoUsage.js';
  * MiniMax Music 3 model first; the job then plans and renders exactly like an uploaded song.
  */
 export interface VideoSongDecision {
-    mode: 'none' | 'compose';
+    mode: 'none' | 'compose' | 'recording';
     reason: string;
     seconds: number;
     caption: string;
     lyrics: string;
+    recording?: { title: string; artist: string; url: string };
 }
 
 export const VIDEO_COMPOSED_SONG_MIN_SECONDS = 15;
@@ -22,7 +23,7 @@ const DEFAULT_SONG_SECONDS = 30;
 const SONG_REQUEST = /\b(?:songs?|music[\s-]*videos?|mv|sing(?:s|ing|er)?|sung|rap(?:s|ping|per)?|ballads?|anthems?|lyrics?|jingles?|chorus|karaoke|duets?|serenades?|hymns?|lullab(?:y|ies)|cumbias?|corridos?|rancheras?|reggaeton|opera|canci[oó]n(?:es)?|cantar?|canta(?:ndo)?)\b/i;
 
 export function mayWantComposedSong(prompt: string): boolean {
-    return SONG_REQUEST.test(prompt);
+    return SONG_REQUEST.test(prompt) || /\b(?:lip[ -]?sync|dance\s+to|soundtrack)\b/i.test(prompt);
 }
 
 export function videoComposedSongEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
@@ -32,13 +33,16 @@ export function videoComposedSongEnabled(environment: NodeJS.ProcessEnv = proces
 const SONG_SCHEMA = {
     type: 'object',
     additionalProperties: false,
-    required: ['mode', 'reason', 'seconds', 'caption', 'lyrics'],
+    required: ['mode', 'reason', 'seconds', 'caption', 'lyrics', 'recording_title', 'recording_artist', 'recording_url'],
     properties: {
-        mode: { type: 'string', enum: ['none', 'compose'] },
+        mode: { type: 'string', enum: ['none', 'compose', 'recording'] },
         reason: { type: 'string' },
         seconds: { type: 'number' },
         caption: { type: 'string' },
         lyrics: { type: 'string' },
+        recording_title: { type: 'string' },
+        recording_artist: { type: 'string' },
+        recording_url: { type: 'string' },
     },
 } as const;
 
@@ -46,7 +50,9 @@ export const VIDEO_SONGWRITER_INSTRUCTIONS = `You are the songwriter for a short
 
 Decide mode. Choose compose when the request asks for a song, a music video, or someone singing or rapping a song. Choose none when the request is mainly speech, dialogue, or a skit whose characters talk; when it only wants background music or sound effects; or when singing would be a few words inside an otherwise spoken video. When mode is none, return seconds 0 and an empty caption and lyrics.
 
-When composing, write an original song for the request. If it names an existing song, write an original song in its spirit around the requested title or idea, and never reproduce existing lyrics beyond a title phrase. Follow the character guidance for who sings and how they sound, including accent, vocabulary and slang. The lyrics are what that character sings, so slang and catchphrases the guidance asks for belong in them. Keep the lyrics in the language mix the request and guidance imply.
+Choose recording when the request asks to sing, lip-sync, dance to, or use a specific EXISTING song or a supplied YouTube song link. Return its recording_title and recording_artist (infer the artist only when unambiguous, e.g. Electric Feel is MGMT). recording_url must be an actual YouTube URL present in the request, never an invented link. The desktop finds the recording and the broker selects the requested verse or chorus. Return empty caption and lyrics, and seconds 0; do not quote the song's lyrics or replace it with an inspired original. If an artist or version is ambiguous, leave recording_artist empty so the user can specify it or supply a link. The song's recorded voice is retained, not changed into the character's voice.
+
+When composing, write an original song for the request. A request for a new song about a subject or in an artist's style uses compose; an existing song's name uses recording. For compose and none, all recording fields are empty. Follow the character guidance for who sings and how they sound, including accent, vocabulary and slang. The lyrics are what that character sings, so slang and catchphrases the guidance asks for belong in them. Keep the lyrics in the language mix the request and guidance imply.
 
 seconds: the finished song length, about ${DEFAULT_SONG_SECONDS} unless the request asks for a length, between ${VIDEO_COMPOSED_SONG_MIN_SECONDS} and ${VIDEO_COMPOSED_SONG_MAX_SECONDS}.
 
@@ -83,6 +89,24 @@ function songwriterInput(input: { prompt: string; plannerGuidance?: string; requ
 export function validatedVideoSongDecision(value: any, requestedDurationSeconds?: number | null): VideoSongDecision {
     const reason = String(value?.reason || '').trim().slice(0, 300);
     const none = (why = reason): VideoSongDecision => ({ mode: 'none', reason: why, seconds: 0, caption: '', lyrics: '' });
+    if (value?.mode === 'recording') {
+        const title = String(value.recording_title || '').trim().slice(0, 200);
+        const artist = String(value.recording_artist || '').trim().slice(0, 200);
+        const rawUrl = String(value.recording_url || '').trim();
+        let url = '';
+        if (rawUrl) {
+            const parsed = new URL(rawUrl);
+            const id = parsed.hostname === 'youtu.be' ? parsed.pathname.slice(1)
+                : ['youtube.com', 'www.youtube.com', 'music.youtube.com'].includes(parsed.hostname)
+                    && parsed.pathname === '/watch' ? parsed.searchParams.get('v') : null;
+            if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !id || !/^[\w-]{11}$/.test(id)) {
+                throw new Error('Use a YouTube song link or specify the song and artist.');
+            }
+            url = `https://www.youtube.com/watch?v=${id}`;
+        }
+        if (!url && (!title || !artist)) throw new Error('Please specify the song and artist, or attach the recording or a YouTube song link.');
+        return { mode: 'recording', reason, seconds: 0, caption: '', lyrics: '', recording: { title, artist, url } };
+    }
     if (value?.mode !== 'compose') return none();
     const caption = String(value.caption || '').trim().slice(0, 3000);
     // A leading intro section gives a long instrumental opening the singer has to stand through.
@@ -110,7 +134,11 @@ export async function writeVideoSong(
             input: songwriterInput({ ...input, plannerGuidance: options.plannerGuidance }),
             text: { format: { type: 'json_schema', name: 'video_song', strict: true, schema: SONG_SCHEMA } },
         }, controller.signal, 'song_writing', options);
-        return validatedVideoSongDecision(JSON.parse(String(body.output_text || '')), input.requestedDurationSeconds);
+        const value = JSON.parse(String(body.output_text || ''));
+        if (value.mode === 'recording' && value.recording_url && !input.prompt.includes(value.recording_url)) {
+            throw new Error('The requested song link could not be verified. Attach the recording or provide its YouTube link.');
+        }
+        return validatedVideoSongDecision(value, input.requestedDurationSeconds);
     } finally {
         clearTimeout(timeout);
     }

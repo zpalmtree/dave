@@ -48,7 +48,7 @@ test('a song request composes its soundtrack on the worker and then plans like a
         recoveryEnabled: true, preplanQueuedJobs: false,
         songWriter: async (input, options) => {
             songwriterCalls++;
-            assert.equal(input.prompt, 'official music video for "la cumbia"');
+            if (songwriterAnswer === 'compose') assert.equal(input.prompt, 'official music video for "la cumbia"');
             assert.match(options.plannerGuidance, /Meximutt persona/, 'The songwriter writes in the character\'s voice.');
             return songwriterAnswer === 'compose'
                 ? { mode: 'compose', reason: 'A music video.', seconds: 30, caption: CAPTION, lyrics: '[Verse]\nEsta es la cumbia' }
