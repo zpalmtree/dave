@@ -188,6 +188,10 @@ export function videoUsageCost(usage: VideoProviderUsage): number {
             + output * 2.50 / 1_000_000
             + cacheRead * 0.03 / 1_000_000;
     }
+    if (usage.model.startsWith('gemini-nano-banana-2.1')) {
+        return input * 1.5 / 1_000_000 + output * 7.5 / 1_000_000
+            + (usage.imageOutputTokens ?? images * 1680) * 30 / 1_000_000;
+    }
     if (usage.model.startsWith('gemini-3-pro-image')) {
         return input * 2 / 1_000_000 + output * 12 / 1_000_000
             + (usage.imageOutputTokens ?? images * 1120) * 120 / 1_000_000;

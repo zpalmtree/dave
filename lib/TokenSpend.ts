@@ -145,6 +145,12 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
         output: 2.50,
         cacheRead: 0.03,
     },
+    // Nano Banana 2.1; Discord image generation requests 1K output.
+    'gemini-nano-banana-2.1': {
+        input: 1.5,
+        output: 7.5,
+        perImage: 0.0336,
+    },
     'gemini-3-pro-image': {
         input: 2,
         output: 12,

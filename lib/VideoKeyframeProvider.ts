@@ -367,7 +367,7 @@ async function generateGeminiKeyframe(
         const imageTokens = (usage?.candidatesTokensDetails || [])
             .filter(value => String(value.modality).toUpperCase() === 'IMAGE')
             .reduce((sum, value) => sum + Number(value.tokenCount || 0), 0)
-            || imageCount * (geminiModel === VIDEO_KEYFRAME_MODEL || imageSize === '1K' ? 1120 : 1680);
+            || imageCount * (imageSize === '1K' ? 1120 : 1680);
         await options.onUsage?.({
             stage: 'keyframe_candidate_gemini',
             attempt,

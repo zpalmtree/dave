@@ -259,7 +259,7 @@ judge rated renderability about one point lower, and total planned runtime rose
 - `VIDEO_OPENAI_SERVICE_TIER` accepts `fast` or `flex`. It is unset by default,
   which uses standard OpenAI processing; set it to `fast` only as an emergency
   latency rollback because priority processing costs more.
-- `VIDEO_KEYFRAME_GEMINI_MODEL` accepts `gemini-3-pro-image`,
+- `VIDEO_KEYFRAME_GEMINI_MODEL` accepts `gemini-nano-banana-2.1` (default),
   `gemini-3.1-flash-image`, or `gemini-3.1-flash-lite-image`.
 - `VIDEO_KEYFRAME_IMAGE_SIZE` accepts `1K` or `2K`; Flash Lite is always 1K.
 - `VIDEO_KEYFRAME_STRATEGY` accepts `serial-v1`, `conditional-v2`, or
