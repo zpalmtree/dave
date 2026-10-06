@@ -26,10 +26,17 @@ test('named recording is fetched once, cut to the requested chorus, and never si
     execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=90', '-b:a', '128k', mp3]);
     const lyrics = { words: [31, 32, 33].map(start => ({ start, end: start + 0.5, text: 'fixture' })),
         lines: [{ start: 31, end: 33.5, text: 'fixture fixture fixture' }] };
-    let written = 0;
+    let written = 0, recoverTiming = false;
+    const transcriptionDurations = [];
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'db'), resultsDir: directory,
         botToken: 'bot', workerToken: 'worker', recoveryEnabled: true, preplanQueuedJobs: false,
-        songWriter: async () => { written++; return decision; }, sourceAudioTranscriber: async () => lyrics,
+        songWriter: async () => { written++; return decision; }, sourceAudioTranscriber: async audio => {
+            transcriptionDurations.push(Math.round(audio.duration));
+            if (!recoverTiming) return lyrics;
+            return { words: lyrics.words.map(w => ({ ...w, start: w.start - 30, end: w.end - 30 })),
+                lines: Math.round(audio.duration) === 90 ? lyrics.lines
+                    : lyrics.lines.map(w => ({ ...w, start: w.start - 30, end: w.end - 30 })) };
+        },
         sourceAudioExcerptSelector: async input => {
             assert.match(input.prompt, /chorus/);
             assert.equal(Math.round(input.seconds), 90);
@@ -83,6 +90,18 @@ test('named recording is fetched once, cut to the requested chorus, and never si
         assert.equal(failure.status, 422);
         assert.match(failure.body.error, /Attach the recording/);
         assert.equal((await request(failed, 'plan')).status, 422);
+        await broker.run("UPDATE video_jobs SET status='failed' WHERE public_id=?", [failed]);
+        recoverTiming = true;
+        const recovered = await submit('third');
+        await lease(recovered);
+        await request(recovered, 'plan');
+        const retry = await request(recovered, 'soundtrack', { audio: readFileSync(mp3).toString('base64'), format: 'mp3' });
+        assert.equal(retry.status, 200, JSON.stringify(retry.body));
+        const recoveredRow = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [recovered]);
+        assert.equal(JSON.parse(recoveredRow.source_audio_lyrics_json).words[0].start, 1);
+        assert.equal(retry.body.lyric_lines, 1);
+        assert.deepEqual(transcriptionDurations, [90, 90, 20]);
+        assert.match(broker.frontierOptions(recoveredRow, true).plannerGuidance, /vocal timeline/);
     } finally {
         broker.worker = null;
         await broker.stop();

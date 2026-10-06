@@ -5,13 +5,42 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { videoSourceAudioFromMessages, sourceAudioDescriptor, pinVideoPlanToAudio, normalizeVideoSourceAudio,
-    songLyricsFromTranscription, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VIDEO_SOURCE_AUDIO_GUIDANCE } from '../dist/VideoSourceAudio.js';
+    songLyricsFromTranscription, resolveVideoSourceExcerptLyrics, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VIDEO_SOURCE_AUDIO_GUIDANCE } from '../dist/VideoSourceAudio.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
 const descriptor = { url: 'https://cdn.discordapp.com/attachments/1/2/song.mp3', name: 'song.mp3', bytes: 1234 };
 const message = (...items) => ({ attachments: new Map(items.map((v, i) => [i, v])) });
 const attachment = (name, contentType) => ({ url: descriptor.url, name, contentType, size: 1234 });
 const plan = () => ({ segments: [{ title: 'Performance', target_seconds: 6, transition: 'start',
     shots: [{ duration_seconds: 6, visual: 'The performer raps on stage', camera: 'Medium close-up', dialogue: [{ text: 'Invented words' }] }] }] });
+
+test('excerpt timing recovers missing words locally without shifting the recovered timestamps twice', async () => {
+    const excerpt = { start_seconds: 115, end_seconds: 150, source_seconds: 228, label: 'the chorus', chosen: 'auto' };
+    const audio = { path: '/fixture/source-audio.wav', duration: 35, bytes: 1000 };
+    const local = { words: [1, 2, 3].map(start => ({ start, end: start + 0.5, text: 'fixture' })),
+        lines: [{ start: 1, end: 3.5, text: 'fixture fixture fixture' }] };
+    const full = { words: local.words, lines: [{ start: 115, end: 149, text: 'poor whole-song alignment' }] };
+    let calls = 0;
+    const transcribe = async (input, hooks) => {
+        calls++;
+        assert.equal(input, audio);
+        await hooks.onUsage({ stage: 'source_audio_transcription' });
+        await hooks.onAttempt({ stage: 'source_audio_transcription' });
+        return local;
+    };
+    const stages = [];
+    const providerHooks = { onUsage: value => stages.push(value.stage), onAttempt: value => stages.push(value.stage) };
+    assert.deepEqual(await resolveVideoSourceExcerptLyrics(full, excerpt, audio, providerHooks, transcribe), local);
+    assert.equal(calls, 1);
+    assert.deepEqual(stages, ['source_audio_excerpt_transcription', 'source_audio_excerpt_transcription']);
+    const aligned = { words: local.words.map(w => ({ ...w, start: w.start + 115, end: w.end + 115 })),
+        lines: local.lines.map(w => ({ ...w, start: w.start + 115, end: w.end + 115 })) };
+    assert.deepEqual(await resolveVideoSourceExcerptLyrics(aligned, excerpt, audio, providerHooks, transcribe), local);
+    assert.equal(calls, 1, 'valid timing needs no additional provider call');
+    assert.equal(await resolveVideoSourceExcerptLyrics(null, null, audio, providerHooks, transcribe), null);
+    assert.equal(calls, 1, 'uncut songs do not retry the same transcription');
+    assert.equal(await resolveVideoSourceExcerptLyrics(full, excerpt, audio, {}, async () => null), null);
+    assert.equal(await resolveVideoSourceExcerptLyrics(full, excerpt, audio, {}, async () => { throw Error('unavailable'); }), null);
+});
 
 test('song selection supports replies and independent image attachments, rejecting ambiguous or invalid songs', () => {
     const own = message(attachment('face.png', 'image/png'), attachment('own.MP3', 'audio/mpeg'));

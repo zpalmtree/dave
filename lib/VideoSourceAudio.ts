@@ -141,6 +141,28 @@ export function excerptVideoSourceAudioLyrics(lyrics: VideoSourceAudioLyrics | n
     return words.length < 3 ? null : { words, lines: shift(lyrics.lines) };
 }
 
+/** Recover excerpt-local timing when the full-song transcript has no usable timing in the cut. */
+export async function resolveVideoSourceExcerptLyrics(
+    lyrics: VideoSourceAudioLyrics | null, excerpt: VideoSourceExcerpt | null, audio: StoredVideoSourceAudio,
+    hooks: VideoProviderHooks = {}, transcribe: typeof transcribeVideoSourceAudio = transcribeVideoSourceAudio,
+): Promise<VideoSourceAudioLyrics | null> {
+    const shifted = excerptVideoSourceAudioLyrics(lyrics, excerpt);
+    if (!excerpt || (shifted?.words.length && shifted.lines.length)) return shifted;
+    const stage = 'source_audio_excerpt_transcription';
+    const retryHooks: VideoProviderHooks = {
+        beforeRequest: hooks.beforeRequest && (request => hooks.beforeRequest!({ ...request, stage })),
+        onUsage: hooks.onUsage && (usage => hooks.onUsage!({ ...usage, stage })),
+        onAttempt: hooks.onAttempt && (attempt => hooks.onAttempt!({ ...attempt, stage })),
+    };
+    try {
+        // This transcript is already relative to the cut: do not subtract the source offset again.
+        return await transcribe(audio, retryHooks) || shifted;
+    } catch (error) {
+        console.warn('Could not recover song excerpt timing; retaining available lyric timing.', error);
+        return shifted;
+    }
+}
+
 const WHISPER_STOCK_PHRASE = /\b(?:thanks?(?: you)? for watching|please (?:like|subscribe)|subscribe to|subtitles? by|captions? by|amara\.org)\b/i;
 const round2 = (value: number) => Math.round(value * 100) / 100;
 const lyricText = (value: unknown, limit: number) => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ')
