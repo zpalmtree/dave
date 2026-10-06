@@ -10,7 +10,6 @@ import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
 import {
     VideoFrontierCallOptions,
     VideoUsagePersistenceError,
-    openAIVideoUsage,
     videoRequestInputTokenBound,
     requestedOpenAIServiceTier,
     resolvedOpenAIServiceTier,

@@ -93,7 +93,6 @@ import {
     resolveVideoKeyframeReferences,
 } from './VideoKeyframeReferences.js';
 import {
-    VideoFrontierCallOptions,
     VideoProviderAttempt,
     VideoProviderHooks,
     VideoProviderUsage,
@@ -111,7 +110,6 @@ import {
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 // Statuses in which a worker lease is expected to be live.
 const LEASED_SQL = ['leased', 'planning', 'running', 'uploading'].map(status => `'${status}'`).join(',');
-const UNFINISHED_SQL = UNFINISHED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', import.meta.url));
 // Generated scene openings for fantastical premises drift into a glossy CG look,

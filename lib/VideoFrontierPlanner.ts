@@ -998,7 +998,6 @@ function requireExhaustiveGenerationBudget(memberCount: number, segmentMinimum: 
     );
 }
 const SAFE_NONSPEECH_AUDIO = 'Natural environmental ambience and synchronized action sound effects.';
-const SPEECH_IN_AUDIO = /\b(?:voice|speaker|character|person|man|woman)\s+(?:says?|speaks?|utters?|shouts?|whispers?|asks?|replies?|responds?|announces?|narrates?|sings?)\b|\b(?:dialogue|speech|spoken words?|vocals?)\s*:|\b(?:lip[- ]?sync|mouth movement)\b/i;
 
 function videoPlanSchemaForMaximum(maximum: number): Record<string, unknown> {
     const schema: any = JSON.parse(JSON.stringify(VIDEO_PLAN_SCHEMA));
@@ -1416,7 +1415,6 @@ function planAutomaticFloor(plan: any, model: VideoModelId): number {
 /** Repair structure and timing without weakening the independent content contract. */
 export function compileBestEffortFrontierVideoPlan(
     candidate: any, promptAnalysis: any, rawPrompt: string, model: VideoModelId,
-    validationFailure = '',
 ): Record<string, any> {
     if (promptAnalysis?.frontier_handling?.disposition === 'reject') {
         throw new FrontierPlannerRejectedError(
@@ -2952,7 +2950,6 @@ export async function createFrontierVideoPlan(
                         promptAnalysis,
                         prompt,
                         model,
-                        repairFailure,
                     );
                     validateFrontierVideoPlanForKeyframe(
                         compiled,
