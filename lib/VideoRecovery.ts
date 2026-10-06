@@ -14,7 +14,6 @@ export function recoveryLimitReached(state: any): boolean {
             && (Number(scene.cycles || 0) > 0
                 || Number(scene.video_attempts || 0) >= VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS));
 }
-export type VideoOutputFormat = 'generated';
 export interface VideoRecoveryContract {
     version: 1;
     prompt: string;
