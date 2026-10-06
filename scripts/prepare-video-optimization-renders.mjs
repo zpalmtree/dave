@@ -4,7 +4,8 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { createFrontierVideoKeyframe, generateFrontierVideoKeyframeCandidate } from '../dist/VideoKeyframeProvider.js';
-import { derivedSegmentKeyframePlan, oalgoSourceImageCompositePlan } from '../dist/VideoBroker.js';
+import { derivedSegmentKeyframePlan } from '../dist/VideoBroker.js';
+import { oalgoSourceImageCompositePlan } from '../dist/VideoOalgoComposite.js';
 import { createFrontierVideoPlan } from '../dist/VideoFrontierPlanner.js';
 import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 import { requestedVideoDurationSeconds } from '../dist/VideoProtocol.js';
@@ -117,7 +118,7 @@ async function main() {
     const report = JSON.parse(await readFile(resolve(directory, 'report.json'), 'utf8'));
     const plannerFingerprint = await campaignFingerprint();
     if (report.fingerprint !== plannerFingerprint) throw new Error('Planner report is stale.');
-    const fingerprint = await executionFingerprint(['dist/VideoKeyframeProvider.js', 'dist/VideoBroker.js',
+    const fingerprint = await executionFingerprint(['dist/VideoKeyframeProvider.js', 'dist/VideoBroker.js', 'dist/VideoOalgoComposite.js',
         'dist/VideoUsage.js', 'scripts/prepare-video-optimization-renders.mjs']);
     const controlOnly = process.argv.includes('--control-only');
     const imageReport = JSON.parse(await readFile(resolve(directory, 'image-report.json'), 'utf8').catch(() => '{}'));

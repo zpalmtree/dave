@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import fetch from 'node-fetch';
 
-import { composeOalgoSourceImages, oalgoSourceImageCompositePlan, oalgoCompositionFailureMessage, VideoBroker } from '../dist/VideoBroker.js';
+import { VideoBroker } from '../dist/VideoBroker.js';
+import { composeOalgoSourceImages, oalgoSourceImageCompositePlan, oalgoCompositionFailureMessage } from '../dist/VideoOalgoComposite.js';
 import { createFrontierVideoKeyframe, VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
 
