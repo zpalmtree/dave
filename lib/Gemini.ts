@@ -35,11 +35,16 @@ function recordGeminiUsage(
     }
 
     const cachedTokens = usageMetadata?.cachedContentTokenCount ?? 0;
+    // Images are billed separately at the requested 1K resolution.
+    const imageTokens = (usageMetadata?.candidatesTokensDetails || [])
+        .filter(value => String(value.modality).toUpperCase() === 'IMAGE')
+        .reduce((sum, value) => sum + Number(value.tokenCount || 0), 0)
+        || images * 1120;
 
     recordTokenSpend({
         model,
         inputTokens: (usageMetadata?.promptTokenCount ?? 0) - cachedTokens,
-        outputTokens: (usageMetadata?.candidatesTokenCount ?? 0)
+        outputTokens: Math.max(0, (usageMetadata?.candidatesTokenCount ?? 0) - imageTokens)
             + (usageMetadata?.thoughtsTokenCount ?? 0),
         cacheReadTokens: cachedTokens,
         images,

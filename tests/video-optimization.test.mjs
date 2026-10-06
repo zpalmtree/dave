@@ -84,6 +84,14 @@ test('usage separates cache writes, bills reasoning once, and refuses unknown pr
         2 * videoUsageCost({ model: 'gemini-3.8-flash', inputTokens: 1000, pricingDate: '2026-09-07' }));
 });
 
+test('Nano Banana 2.1 prices keyframes using image tokens with a 2K fallback', () => {
+    for (const [imageOutputTokens, expected] of [[undefined, 0.0534], [1120, 0.0366], [1680, 0.0534]]) {
+        const cost = videoUsageCost({ model: 'gemini-nano-banana-2.1',
+            inputTokens: 1000, outputTokens: 200, images: 1, imageOutputTokens });
+        assert.ok(Math.abs(cost - expected) < 1e-9);
+    }
+});
+
 test('budget reserves before a provider call, counts retries and holds unknown timeout bills across restart', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'video-ledger-'));
     const request = { stage: 'single_pass', attempt: 1, provider: 'openai', model: 'gpt-5.6-sol',

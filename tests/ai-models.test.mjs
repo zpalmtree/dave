@@ -16,7 +16,7 @@ test('uses the audited production model for each provider capability', () => {
         openAICImage: 'gpt-image-2.5-flare',
         geminiChat: 'gemini-3.8-flash',
         geminiPromptClassifier: 'gemini-3.5-flash-lite',
-        geminiImage: 'gemini-3-pro-image',
+        geminiImage: 'gemini-nano-banana-2.1',
         grokChat: 'grok-4.7',
         grokSummary: 'grok-4.5-latest',
         grokImage: 'grok-imagine-image-2.0',

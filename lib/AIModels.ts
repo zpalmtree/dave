@@ -10,7 +10,7 @@ export const AI_MODELS = {
     openAICImage: 'gpt-image-2.5-flare',
     geminiChat: 'gemini-3.8-flash',
     geminiPromptClassifier: 'gemini-3.5-flash-lite',
-    geminiImage: 'gemini-3-pro-image',
+    geminiImage: 'gemini-nano-banana-2.1',
     grokChat: 'grok-4.7',
     /* A/B testing found 4.5 faster and more natural for Discord recaps. */
     grokSummary: 'grok-4.5-latest',

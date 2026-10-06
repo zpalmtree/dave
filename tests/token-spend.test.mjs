@@ -74,6 +74,13 @@ test('prices images per unit', () => {
     }) - 0.08) < 1e-9);
 });
 
+test('prices Nano Banana 2.1 text and 1K images separately', () => {
+    assert.ok(Math.abs(estimateTokenSpendCost({
+        model: 'gemini-nano-banana-2.1',
+        inputTokens: 1000, outputTokens: 200, images: 1,
+    }) - 0.0366) < 1e-9);
+});
+
 test('prices transcription audio by duration', () => {
     const cost = estimateTokenSpendCost({
         model: 'gpt-transcribe',
