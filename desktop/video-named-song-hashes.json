@@ -1,0 +1,10 @@
+{
+  "video_worker.py": {
+    "before_sha256": "238e8157018a2422b0df3d78df545dbc82b7f2803da2cbc7d7d60f56e38a2673",
+    "after_sha256": "734679c6ceff7d7a6d4e8ef51d7f65a93a1a0ffd5aa7de1158e6d18d7a6c3245"
+  },
+  "video_recovery.py": {
+    "before_sha256": "b890b8ed79f6f237a3f1ac15a20a492f9a7c90d20b442c55ae46b3caef472d80",
+    "after_sha256": "4fcb74ee2e48538998befa0592b5b17f6e0be042bb787417652990651fdb5092"
+  }
+}

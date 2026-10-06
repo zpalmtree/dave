@@ -4,7 +4,7 @@ import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, Stor
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
     cutVideoSourceAudio, excerptVideoSourceAudioLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
-import { selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
+import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { isVideoSourceClipUrl, sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
@@ -206,6 +206,7 @@ interface WorkerConnection {
     sourceAudioVersion: number;
     /** 1: composes a song request's soundtrack with MiniMax Music 3 before planning. */
     songComposeVersion: number;
+    songDownloadVersion: number;
     videoEditVersion: number;
     socket: WebSocket;
     id: string;
@@ -352,7 +353,7 @@ interface JobRow {
     source_audio_seconds: number | null;
     source_audio_lyrics_json: string | null;
     /** 'composed' when the worker composed the song; null for a user's upload. */
-    source_audio_origin: 'composed' | null;
+    source_audio_origin: 'composed' | 'recording' | null;
     source_excerpt_json: string | null;
     source_kind: VideoJobView['source_kind'];
     source_video_path: string | null;
@@ -2296,7 +2297,7 @@ export class VideoBroker {
                 source_audio_path=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_path END,
                 source_audio_seconds=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_seconds END,
                 source_audio_lyrics_json=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_lyrics_json END,
-                source_audio_origin=NULL,
+                source_audio_origin=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_origin END,
                 result_path=NULL, result_sha256=NULL, result_bytes=NULL, notified_at=NULL, delivered_at=NULL,
                 completed_at=NULL, started_at=NULL, worker_id=NULL, lease_token=NULL, lease_expires_at=NULL,
                 progress=NULL, progress_scope=NULL, segment_index=NULL, runtime_seconds=NULL, render_seconds=NULL,
@@ -3667,9 +3668,9 @@ export class VideoBroker {
         const configured = configuredPrimaryVideoPlannerOptions(job.channel_id);
         // An uploaded song replaces the persona guidance at submission. A composed song keeps it
         // and adds the song rules, which override its voice and dialogue lead-in instructions.
-        const songGuidance = job.source_audio_origin === 'composed' && job.source_audio_seconds
+        const songGuidance = job.source_audio_origin && job.source_audio_seconds
             ? videoSourceAudioPlannerGuidance(parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
-                job.source_audio_seconds, 'composed') : '';
+                job.source_audio_seconds, job.source_audio_origin) : '';
         const plannerGuidance = [job.planner_guidance, songGuidance]
             .map(value => String(value || '').trim())
             .filter(Boolean)
@@ -4747,6 +4748,7 @@ export class VideoBroker {
                         recoveryVersion: Number(hello.recovery_version) || 0,
                         sourceAudioVersion: Number(hello.source_audio_version) || 0,
                         songComposeVersion: Number(hello.song_compose_version) || 0,
+                        songDownloadVersion: Number(hello.song_download_version) || 0,
                         videoEditVersion: Number(hello.video_edit_version) || 0,
                         lastHeartbeat: Date.now(),
                         currentJob: hello.current_job,
@@ -5574,7 +5576,7 @@ export class VideoBroker {
      * without an uploaded song gets one songwriter call; its decision is kept for the job.
      */
     private async composedSongDirective(job: JobRow, state: any, sources: VideoPlanSourceImage[],
-        options: VideoKeyframeOptions, persist: () => Promise<void>): Promise<Pick<VideoSongDecision, 'caption' | 'lyrics' | 'seconds'> | null> {
+        options: VideoKeyframeOptions, persist: () => Promise<void>): Promise<Pick<VideoSongDecision, 'caption' | 'lyrics' | 'seconds' | 'recording'> | null> {
         // A worker that cannot compose plans the job with per-scene audio, as before.
         if (job.source_audio_path || state.prepared || state.local_plan || (this.worker?.songComposeVersion || 0) < 1) return null;
         if (!state.song) {
@@ -5584,11 +5586,15 @@ export class VideoBroker {
                 state.song = await (this.options.songWriter || writeVideoSong)({ prompt: job.prompt, sources,
                     requestedDurationSeconds: job.requested_duration_seconds }, options);
             } catch (error) {
-                console.warn(`Could not write a song for ${job.public_id}; planning with per-scene audio.`, error);
-                state.song = { mode: 'none', reason: 'The songwriter failed.', seconds: 0, caption: '', lyrics: '' };
+                throw new RecoveryStoppedError(error instanceof Error ? error.message : 'Could not identify the requested soundtrack. Attach the song and try again.');
             }
             await persist();
             if (state.song.mode === 'compose') console.log(`Composing a ${state.song.seconds} s song for ${job.public_id}.`);
+        }
+        if (state.song.mode === 'recording') {
+            if ((this.worker?.songDownloadVersion || 0) < 1) throw new RecoveryStoppedError('The video worker needs named-song support. Attach the recording and try again.');
+            if (state.song.failed) throw new RecoveryStoppedError(state.song.failed);
+            return { caption: '', lyrics: '', seconds: 0, recording: state.song.recording };
         }
         if (state.song.mode !== 'compose' || state.song.failed) return null;
         return { caption: state.song.caption, lyrics: state.song.lyrics, seconds: state.song.seconds };
@@ -5596,11 +5602,13 @@ export class VideoBroker {
 
     /** Stores the worker's composed song as the job's soundtrack, exactly as an uploaded song is stored. */
     private async storeComposedSong(job: JobRow, state: any, body: any, persist: () => Promise<void>): Promise<Record<string, unknown> | null> {
-        if (state.song?.mode !== 'compose' || state.song.failed || job.source_audio_path || state.prepared) return null;
+        if (!['compose', 'recording'].includes(state.song?.mode) || state.song.failed || job.source_audio_path || state.prepared) return null;
+        const recording = state.song.mode === 'recording';
         const fail = async (reason: string) => {
             // The job still renders, with each scene's own generated audio.
             state.song.failed = sanitizeVideoWorkerText(reason, 'Song composition failed.', 500);
             await persist();
+            if (recording) throw new RecoveryStoppedError(`Could not retrieve the requested song: ${state.song.failed} Attach the recording and try again.`);
             console.warn(`Composed song for ${job.public_id} was not used: ${state.song.failed}`);
             return { ok: true, composed: false };
         };
@@ -5609,28 +5617,39 @@ export class VideoBroker {
         if (audio.length < 1024 || audio.length > 12 * 1024 * 1024) return fail('The composed song upload was invalid.');
         const directory = resolve(this.options.resultsDir, job.public_id);
         mkdirSync(directory, { recursive: true });
-        const upload = join(directory, 'composed-song.flac');
+        const upload = join(directory, recording ? 'downloaded-song.mp3' : 'composed-song.flac');
         let song: StoredVideoSourceAudio;
         try {
             writeFileSync(upload, audio);
-            song = await normalizeVideoSourceAudio(upload, join(directory, 'source-audio.wav'));
+            song = await normalizeVideoSourceAudio(upload, join(directory, recording ? 'song-full.wav' : 'source-audio.wav'));
         } catch (error) {
             return fail(error instanceof Error ? error.message : String(error));
         } finally {
             rmSync(upload, { force: true });
         }
-        if (song.duration < 8 || song.duration > 75) {
+        if (song.duration < 8 || (!recording && song.duration > 75)) {
             rmSync(song.path, { force: true });
             return fail(`The composed song lasted ${song.duration.toFixed(1)} seconds.`);
         }
-        const lyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, this.providerHooks(job))
+        let lyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, this.providerHooks(job))
             .catch(error => {
                 console.warn(`Could not transcribe the composed song for ${job.public_id}; planning without lyric timing.`, error);
                 return null;
             });
+        let excerpt: VideoSourceExcerpt | null = null;
+        if (recording) {
+            if (!lyrics) return fail('Could not identify the requested section of the recording.');
+            const range = extractVideoSourceRange(job.prompt).range;
+            excerpt = await (this.options.sourceAudioExcerptSelector || selectVideoSourceAudioExcerpt)(
+                { prompt: job.prompt, lyrics, seconds: song.duration, range: videoSourceRange(range) }, this.providerHooks(job));
+            song = await (this.options.sourceAudioCutter || cutVideoSourceAudio)(song, excerpt, directory);
+            lyrics = excerptVideoSourceAudioLyrics(lyrics, excerpt);
+            state.song.source = body.recording || state.song.recording;
+        }
         await this.run(`UPDATE video_jobs SET source_audio_path=?, source_audio_seconds=?, source_audio_lyrics_json=?,
-            source_audio_origin='composed', updated_at=? WHERE public_id=?`,
-            [song.path, song.duration, lyrics ? JSON.stringify(lyrics) : null, nowSeconds(), job.public_id]);
+            source_audio_origin=?, source_excerpt_json=?, updated_at=? WHERE public_id=?`,
+            [song.path, song.duration, lyrics ? JSON.stringify(lyrics) : null, recording ? 'recording' : 'composed',
+                excerpt ? JSON.stringify(excerpt) : null, nowSeconds(), job.public_id]);
         state.song.composed_seconds = song.duration;
         await persist();
         return { ok: true, composed: true, seconds: song.duration, lyric_lines: lyrics?.lines.length || 0 };

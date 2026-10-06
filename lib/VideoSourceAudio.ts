@@ -208,9 +208,10 @@ const COMPOSED_SONG_OPENING = 'An original song composed for this request is the
  * A composed song gets the same rules; only who supplied it differs.
  */
 export function videoSourceAudioPlannerGuidance(lyrics: VideoSourceAudioLyrics | null, seconds: number,
-    origin: 'upload' | 'composed' = 'upload'): string {
+    origin: 'upload' | 'composed' | 'recording' = 'upload'): string {
     const guidance = videoSourceAudioTimelineGuidance(lyrics, seconds);
-    return origin === 'composed' ? guidance.replace(UPLOADED_SONG_OPENING, COMPOSED_SONG_OPENING) : guidance;
+    return origin === 'composed' ? guidance.replace(UPLOADED_SONG_OPENING, COMPOSED_SONG_OPENING)
+        : origin === 'recording' ? guidance.replace(UPLOADED_SONG_OPENING, 'The requested song recording is the fixed soundtrack; preserve its original recorded vocals.') : guidance;
 }
 
 function videoSourceAudioTimelineGuidance(lyrics: VideoSourceAudioLyrics | null, seconds: number): string {
