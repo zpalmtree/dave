@@ -10,10 +10,10 @@ import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedL
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole,
     validateContinuityDecision, validateOpeningIdentityDecision } from './VideoCharacterContinuity.js';
-import { createHash, randomUUID, timingSafeEqual } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { execFile } from 'child_process';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -61,6 +61,7 @@ import {
     sanitizeVideoWorkerText,
 } from './VideoProtocol.js';
 import { loadVideoSettings } from './VideoSettings.js';
+import { bearer, readImageBody, readJson, safeToken, writeImage, writeJson } from './VideoBrokerHttp.js';
 import {
     FrontierPlannerRejectedError,
     VIDEO_PLANNER_MODEL,
@@ -569,42 +570,6 @@ function experimentLabel(value: unknown, fallback: string | null): string | null
 
 function statusPlaceholders(values: readonly string[]): string {
     return values.map(() => '?').join(',');
-}
-
-function safeToken(actual: string, expected: string): boolean {
-    if (!actual || !expected) return false;
-    const actualBuffer = Buffer.from(actual);
-    const expectedBuffer = Buffer.from(expected);
-    return actualBuffer.length === expectedBuffer.length
-        && timingSafeEqual(actualBuffer, expectedBuffer);
-}
-
-function bearer(req: IncomingMessage): string {
-    const header = req.headers.authorization || '';
-    return header.startsWith('Bearer ') ? header.slice(7) : '';
-}
-
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-    const payload = Buffer.from(JSON.stringify(body));
-    res.writeHead(status, {
-        'content-type': 'application/json',
-        'content-length': payload.length,
-        'cache-control': 'no-store',
-    });
-    res.end(payload);
-}
-
-async function readJson(req: IncomingMessage, maxBytes = 256 * 1024): Promise<any> {
-    const chunks: Buffer[] = [];
-    let length = 0;
-    for await (const chunk of req) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        length += buffer.length;
-        if (length > maxBytes) throw new Error('Request body is too large.');
-        chunks.push(buffer);
-    }
-    if (length === 0) return {};
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 function boundedNumber(
@@ -1462,29 +1427,6 @@ function storeCompositedSourceImage(
 /** VIDEO_EDIT_REPAINT=0 keeps every replace edit on the H3 path. */
 function videoEditRepaintEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
     return environment.VIDEO_EDIT_REPAINT !== '0';
-}
-
-async function readImageBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    let length = 0;
-    for await (const chunk of req) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        length += buffer.length;
-        if (length > maxBytes) throw new Error('The frame is too large.');
-        chunks.push(buffer);
-    }
-    return Buffer.concat(chunks);
-}
-
-function writeImage(res: ServerResponse, path: string, mimeType: string, headers: Record<string, string>): void {
-    const size = statSync(path).size;
-    res.writeHead(200, {
-        'content-type': mimeType,
-        'content-length': size,
-        'cache-control': 'no-store',
-        ...headers,
-    });
-    createReadStream(path).pipe(res);
 }
 
 export class VideoBroker {
