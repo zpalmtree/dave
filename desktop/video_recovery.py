@@ -60,11 +60,25 @@ def duration(path: Path) -> float:
     return float(result)
 
 
+def image_rgb(image):
+    """Flatten alpha before RGB conversion, including palette transparency.
+
+    Hidden RGB is not a background. A white matte matches the neutral image
+    presentation used by the planner and retains partially transparent edges.
+    Opaque photographs keep their actual backgrounds, including black ones.
+    """
+    from PIL import Image
+    if 'A' in image.getbands() or 'transparency' in image.info:
+        rgba = image.convert('RGBA')
+        return Image.alpha_composite(Image.new('RGBA', rgba.size, 'white'), rgba).convert('RGB')
+    return image.convert('RGB')
+
+
 def data_image(path: Path) -> str:
     from PIL import Image
     import io
     with Image.open(path) as source:
-        source = source.convert('RGB')
+        source = image_rgb(source)
         source.thumbnail((960, 960))
         output = io.BytesIO()
         source.save(output, format='JPEG', quality=85)
@@ -80,7 +94,7 @@ def save_image(data: str, path: Path) -> None:
     if len(raw) > 25 * 1024 * 1024:
         raise ValueError('Image exceeds the limit.')
     with Image.open(io.BytesIO(raw)) as image:
-        image.convert('RGB').save(path, format='PNG')
+        image_rgb(image).save(path, format='PNG')
 
 
 def join_clips(clips: list[Path], destination: Path) -> Path:
