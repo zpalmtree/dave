@@ -1966,6 +1966,27 @@ export class VideoBroker {
             recorded_at INTEGER NOT NULL,
             PRIMARY KEY(job_public_id, stage, provider, model, attempt)
         )`);
+        const attemptColumns = await this.all<{ name: string }>('PRAGMA table_info(video_provider_attempt_metrics)');
+        if (!attemptColumns.some(column => column.name === 'invocation_id')) {
+            await this.run('BEGIN IMMEDIATE');
+            try {
+                await this.run('ALTER TABLE video_provider_attempt_metrics RENAME TO video_provider_attempt_metrics_old');
+                await this.run(`CREATE TABLE video_provider_attempt_metrics (
+                    job_public_id TEXT NOT NULL, stage TEXT NOT NULL, provider TEXT NOT NULL,
+                    model TEXT NOT NULL, attempt INTEGER NOT NULL, outcome TEXT NOT NULL,
+                    service_tier TEXT, duration_seconds REAL NOT NULL, detail TEXT, recorded_at INTEGER NOT NULL,
+                    invocation_id TEXT NOT NULL DEFAULT 'legacy',
+                    PRIMARY KEY(job_public_id, stage, provider, model, attempt, invocation_id)
+                )`);
+                await this.run(`INSERT INTO video_provider_attempt_metrics
+                    SELECT *, 'legacy' FROM video_provider_attempt_metrics_old`);
+                await this.run('DROP TABLE video_provider_attempt_metrics_old');
+                await this.run('COMMIT');
+            } catch (error) {
+                await this.run('ROLLBACK');
+                throw error;
+            }
+        }
         await this.run(`CREATE INDEX IF NOT EXISTS video_provider_attempt_metrics_job_idx
             ON video_provider_attempt_metrics(job_public_id, recorded_at)`);
         await this.run(`CREATE TABLE IF NOT EXISTS video_usage_events (
@@ -3388,7 +3409,18 @@ export class VideoBroker {
                     nowSeconds(),
                 ],
             );
-            for (const span of metrics.spans) await this.recordMetricSpan(job.public_id, span);
+            // Repeated admissions have the same key. Sum within this snapshot, then upsert
+            // the total so retransmitting the snapshot cannot double-count it.
+            const spans = new Map<string, VideoMetricSpan>();
+            for (const span of metrics.spans) {
+                const key = JSON.stringify([span.source, span.name, span.segment_index ?? -1]);
+                const prior = spans.get(key);
+                spans.set(key, { ...span, duration_seconds: (prior?.duration_seconds || 0) + span.duration_seconds });
+            }
+            for (const span of spans.values()) await this.recordMetricSpan(job.public_id, span);
+            const gpuWait = [...spans.values()].filter(span => span.source === 'worker' && span.name === 'gpu_queue_wait');
+            if (gpuWait.length) await this.run('UPDATE video_jobs SET gpu_queue_wait_seconds=? WHERE public_id=?',
+                [gpuWait.reduce((sum, span) => sum + span.duration_seconds, 0), job.public_id]);
             await this.run(
                 `UPDATE video_job_metrics SET generated_duration_seconds = ? WHERE job_public_id = ?`,
                 [output.generated_duration_seconds ?? null, job.public_id],
@@ -3541,6 +3573,7 @@ export class VideoBroker {
     }
 
     private providerHooks(job: Pick<JobRow, 'public_id' | 'origin_bot_id' | 'requester_id' | 'channel_id' | 'guild_id' | 'model' | 'command_variant'>): VideoProviderHooks {
+        const invocationId = randomUUID();
         return {
             onUsage: async (usage: VideoProviderUsage) => {
                 let cost = 0;
@@ -3598,9 +3631,9 @@ export class VideoBroker {
                 await this.run(
                     `INSERT INTO video_provider_attempt_metrics(
                         job_public_id, stage, provider, model, attempt, outcome,
-                        service_tier, duration_seconds, detail, recorded_at
-                     ) VALUES(?,?,?,?,?,?,?,?,?,?)
-                     ON CONFLICT(job_public_id, stage, provider, model, attempt) DO UPDATE SET
+                        service_tier, duration_seconds, detail, recorded_at, invocation_id
+                     ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                     ON CONFLICT(job_public_id, stage, provider, model, attempt, invocation_id) DO UPDATE SET
                         outcome = excluded.outcome,
                         service_tier = excluded.service_tier,
                         duration_seconds = excluded.duration_seconds,
@@ -3616,7 +3649,7 @@ export class VideoBroker {
                         attempt.serviceTier || null,
                         Math.max(0, attempt.durationSeconds),
                         attempt.detail ? sanitizeVideoWorkerText(attempt.detail, '', 1000) : null,
-                        nowSeconds(),
+                        nowSeconds(), invocationId,
                     ],
                 ).catch((error) => {
                     console.warn(`Could not persist provider attempt timing for ${job.public_id}`, error);
@@ -4379,6 +4412,10 @@ export class VideoBroker {
     }
 
     private preparationComplete(job: JobRow): boolean {
+        if (this.options.recoveryEnabled) {
+            const state = job.recovery_json ? JSON.parse(job.recovery_json) : {};
+            return Boolean(state.prepared || state.local_plan || state.song);
+        }
         if (cachedFrontierRejection(job.planner_model)) return true;
         if (!job.planner_json || !job.estimate_ready) return false;
         if (job.source_image_path || (job.keyframe_path && job.keyframe_mime)) return true;
@@ -4390,7 +4427,6 @@ export class VideoBroker {
     }
 
     private schedulePreparation(publicId: string, criticalPath: boolean): void {
-        if (this.options.recoveryEnabled) return;
         if (!this.options.preplanQueuedJobs
             || this.preparationQueued.has(publicId) || this.preparationAttempted.has(publicId)
             || this.preparationQueued.size >= 1) return;
@@ -4399,6 +4435,11 @@ export class VideoBroker {
             try {
                 const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
                 if (!job || job.status !== 'queued') return;
+                if (this.options.recoveryEnabled) {
+                    const state = await this.prepareRecoveryJob(job, criticalPath);
+                    if (state.prepared) await this.storePlanEstimate(job, state.prepared.plan);
+                    return;
+                }
                 const { plan } = await this.ensurePlan(job, criticalPath);
                 await this.storePlanEstimate(job, plan);
                 const refreshed = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
@@ -5652,6 +5693,84 @@ export class VideoBroker {
         return { ok: true, composed: true, seconds: song.duration, lyric_lines: lyrics?.lines.length || 0 };
     }
 
+    private recoveryPlanning = new Map<string, Promise<any>>();
+
+    private recoveryPersister(id: string, state: any): () => Promise<void> {
+        let saved = structuredClone(state);
+        return async () => {
+            await this.withWriteLock(async () => {
+                const row = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [id]);
+                if (!row || ['cancelled', 'failed', 'delivered'].includes(row.status)) return;
+                const latest = row.recovery_json ? JSON.parse(row.recovery_json) : {};
+                for (const key of Object.keys(state)) {
+                    if (JSON.stringify(state[key]) !== JSON.stringify(saved[key])) latest[key] = state[key];
+                }
+                await this.run('UPDATE video_jobs SET recovery_json=?, updated_at=? WHERE public_id=?',
+                    [JSON.stringify(latest), nowSeconds(), id]);
+                saved = structuredClone(state);
+            });
+        };
+    }
+
+    private async prepareRecoveryJob(job: JobRow, criticalPath: boolean): Promise<any> {
+        const pending = this.recoveryPlanning.get(job.public_id);
+        if (pending) return pending;
+        const task = this.prepareRecoveryJobUnlocked(job, criticalPath);
+        this.recoveryPlanning.set(job.public_id, task);
+        try { return await task; }
+        finally { this.recoveryPlanning.delete(job.public_id); }
+    }
+
+    private async prepareRecoveryJobUnlocked(job: JobRow, criticalPath: boolean): Promise<any> {
+        // Re-read after joining queued preparation; the worker uses exactly that saved contract.
+        job = (await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [job.public_id]))!;
+        const id = job.public_id;
+        const state = job.recovery_json ? JSON.parse(job.recovery_json) : {};
+        const persist = this.recoveryPersister(id, state);
+        const sources = this.recoverySources(job);
+        const options = this.frontierOptions(job, criticalPath);
+        const sourceRequired = job.command_variant === 'oalgo' || job.command_variant === 'oalgofast';
+        const originalFrameRequired = sourceRequired && !job.source_image_composite_path;
+        if (sourceRequired && (!job.source_image_path || !existsSync(job.source_image_path))) {
+            throw new RecoveryStoppedError('The required original Meximutt reference is missing.');
+        }
+        const song = await this.composedSongDirective(job, state, sources, options, persist);
+        if (song) return state; // The desktop must compose the soundtrack before planning.
+        if (!state.prepared && !state.local_plan) {
+            try {
+                state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
+                    prompt: job.prompt, model: job.model, requester: job.requester_id,
+                    sources, options, planner: this.options.frontierPlanner,
+                    sourceAudioSeconds: job.source_audio_seconds || undefined,
+                    sourceAudioLyrics: parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
+                    requireSourceIdentity: sourceRequired,
+                    requireOriginalFirstFrame: originalFrameRequired,
+                });
+            } catch (error) {
+                if (!(error instanceof RecoveryLocalPlanRequired)) throw error;
+                // Persist the routing decision so a resumed job never asks Sol again.
+                state.local_plan = { reason_code: error.reasonCode, prompt_analysis: error.promptAnalysis,
+                    detail: sanitizeVideoWorkerText(error.message, '', 1000) };
+                await this.run('UPDATE video_jobs SET planner_model=?, frontier_analysis_json=? WHERE public_id=?',
+                    [`${FRONTIER_REJECTION_PREFIX}${error.reasonCode}`,
+                        error.promptAnalysis ? JSON.stringify(error.promptAnalysis) : null, id]);
+                await persist();
+                console.log(`Frontier planner routed recovery job ${id} to the local planner (${error.reasonCode}).`);
+            }
+            if (state.prepared) {
+                state.prepared.plan.generation_notice = state.prepared.notice;
+                await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
+                    [JSON.stringify(state.prepared.plan),
+                        typeof state.prepared.plan._planner_model === 'string'
+                            ? state.prepared.plan._planner_model
+                            : options.plannerModel || VIDEO_PLANNER_MODEL,
+                        JSON.stringify(state.prepared.contract.analysis), id]);
+                await persist();
+            }
+        }
+        return state;
+    }
+
     private async handleRecovery(req: IncomingMessage, res: ServerResponse, id: string, operation: string): Promise<void> {
         const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id=?', [id]);
         if (!job || !job.recovery_version || job.worker_id !== this.worker?.id
@@ -5661,10 +5780,7 @@ export class VideoBroker {
         }
         const body = await readJson(req, 18 * 1024 * 1024);
         const state = job.recovery_json ? JSON.parse(job.recovery_json) : {};
-        const persist = async () => {
-            await this.run('UPDATE video_jobs SET recovery_json=?, updated_at=? WHERE public_id=?',
-                [JSON.stringify(state), nowSeconds(), id]);
-        };
+        const persist = this.recoveryPersister(id, state);
         const sources = this.recoverySources(job);
         const options = this.frontierOptions(job, true);
         const sourceRequired = job.command_variant === 'oalgo' || job.command_variant === 'oalgofast';
@@ -5706,42 +5822,11 @@ export class VideoBroker {
         try {
             validateReferences();
             if (operation === 'plan') {
+                Object.assign(state, await this.prepareRecoveryJob(job, true));
                 const song = await this.composedSongDirective(job, state, sources, options, persist);
                 if (song) {
                     writeJson(res, 200, { compose_song: song, checkpoint: state.checkpoint || {} });
                     return;
-                }
-                if (!state.prepared && !state.local_plan) {
-                    try {
-                        state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
-                            prompt: job.prompt, model: job.model, requester: job.requester_id,
-                            sources, options, planner: this.options.frontierPlanner,
-                            sourceAudioSeconds: job.source_audio_seconds || undefined,
-                            sourceAudioLyrics: parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
-                            requireSourceIdentity: sourceRequired,
-                            requireOriginalFirstFrame: originalFrameRequired,
-                        });
-                    } catch (error) {
-                        if (!(error instanceof RecoveryLocalPlanRequired)) throw error;
-                        // Persist the routing decision so a resumed job never asks Sol again.
-                        state.local_plan = { reason_code: error.reasonCode, prompt_analysis: error.promptAnalysis,
-                            detail: sanitizeVideoWorkerText(error.message, '', 1000) };
-                        await this.run('UPDATE video_jobs SET planner_model=?, frontier_analysis_json=? WHERE public_id=?',
-                            [`${FRONTIER_REJECTION_PREFIX}${error.reasonCode}`,
-                                error.promptAnalysis ? JSON.stringify(error.promptAnalysis) : null, id]);
-                        await persist();
-                        console.log(`Frontier planner routed recovery job ${id} to the local planner (${error.reasonCode}).`);
-                    }
-                    if (state.prepared) {
-                        state.prepared.plan.generation_notice = state.prepared.notice;
-                        await this.run('UPDATE video_jobs SET planner_json=?, planner_model=?, frontier_analysis_json=? WHERE public_id=?',
-                            [JSON.stringify(state.prepared.plan),
-                                typeof state.prepared.plan._planner_model === 'string'
-                                    ? state.prepared.plan._planner_model
-                                    : options.plannerModel || VIDEO_PLANNER_MODEL,
-                                JSON.stringify(state.prepared.contract.analysis), id]);
-                        await persist();
-                    }
                 }
                 validateReferences();
                 if (!state.prepared) {
