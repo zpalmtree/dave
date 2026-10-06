@@ -114,6 +114,28 @@ class SongTests(unittest.TestCase):
 
 
 class SongAssemblyTests(unittest.TestCase):
+    def test_single_scene_discards_h3_padding_before_muxing_original_song(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'render.mp4'
+            # The failing recovery scene wanted 123 frames; H3 generated 124.
+            audio.run_media('ffmpeg', ['-f', 'lavfi', '-i', 'testsrc2=s=64x64:r=24',
+                '-frames:v', 124, '-c:v', 'libx264', '-bf', 3, source])
+            song = root / 'song.wav'
+            audio.run_media('ffmpeg', ['-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=7', song])
+            for frames in (123, 120, 124):
+                with self.subTest(frames=frames):
+                    final = audio.finalize_song_video('ffmpeg', [source],
+                        [{'source_audio_frames': frames, 'source_audio_start_seconds': 1.0}],
+                        song, root / f'final-{frames}.mp4')
+                    result = subprocess.check_output(['ffprobe', '-v', 'error', '-count_frames',
+                        '-show_streams', '-of', 'json', str(final)])
+                    streams = json.loads(result)['streams']
+                    video = next(s for s in streams if s['codec_type'] == 'video')
+                    self.assertEqual(int(video['nb_read_frames']), frames)
+                    self.assertAlmostEqual(float(video['duration']), frames / 24, places=5)
+                    self.assertTrue(any(s['codec_type'] == 'audio' for s in streams))
+
     def test_non_round_scene_lengths_join_without_audio_padding_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1,0 +1,30 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -9214,10 +9214,10 @@
+                 print(f"Completed segment: {output}", flush=True)
+ 
+             transitions = [str(segment["transition"]) for segment in prepared]
+-            if args.source_audio and len(segment_paths) > 1:
+-                from video_source_audio import assemble_song_video
+-                final_output = assemble_song_video(ffmpeg_executable(), segment_paths, prepared,
+-                    run_root / model / "song-video.mp4")
++            if args.source_audio:
++                from video_source_audio import finalize_song_video
++                final_output = finalize_song_video(ffmpeg_executable(), segment_paths, prepared,
++                    args.source_audio, run_root / model / "song-final.mp4")
+                 final_validation = validate_video(final_output)
+             elif len(segment_paths) > 1:
+                 final_output = run_root / model / f"{model}_final.mp4"
+@@ -9232,12 +9232,6 @@
+                 final_output = segment_paths[0]
+                 final_validation = validations[0]
+             if args.source_audio:
+-                from video_source_audio import mux_original_song
+-                final_output = mux_original_song(ffmpeg_executable(), final_output,
+-                    args.source_audio, run_root / model / "song-final.mp4",
+-                    prepared[0]["source_audio_start_seconds"],
+-                    sum(item["source_audio_frames"] for item in prepared))
+-                final_validation = validate_video(final_output)
+                 if final_validation.get("decoded_video_frames") != sum(item["source_audio_frames"] for item in prepared):
+                     raise VideoGenError("Song video frame count no longer matches the original audio timeline")
+             loop_optimization: dict[str, Any] | None = None

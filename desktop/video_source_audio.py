@@ -124,3 +124,17 @@ def assemble_song_video(ffmpeg, paths, prepared, destination):
     run_media(ffmpeg, [*inputs, '-filter_complex', ';'.join(filters), '-map', '[video]',
                       '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p', destination])
     return Path(destination)
+
+
+def finalize_song_video(ffmpeg, paths, prepared, song, destination):
+    """Trim decoded frames even for one scene before stream-copying the soundtrack.
+
+    H3 rounds generation up to 17k+5 frames. Packet-level -t alone can retain
+    extra B-frames, so a one-scene recovery render needs the same trim as a join.
+    """
+    destination = Path(destination)
+    trimmed = destination.with_name(destination.stem + '-trimmed.mp4')
+    assemble_song_video(ffmpeg, paths, prepared, trimmed)
+    return mux_original_song(ffmpeg, trimmed, song, destination,
+                             prepared[0]['source_audio_start_seconds'],
+                             sum(item['source_audio_frames'] for item in prepared))
