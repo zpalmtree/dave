@@ -71,6 +71,7 @@ import {
     workerProgressFields,
     workerScheduler,
 } from './VideoWorkerPayloads.js';
+import { imageExtension } from './VideoImageMime.js';
 import { average, maximum, median, minimum, percentile, projectedVideoFinishAt, videoPlanRuntimeScale } from './VideoRuntimeStats.js';
 import {
     FrontierPlannerRejectedError,
@@ -551,12 +552,6 @@ function experimentLabel(value: unknown, fallback: string | null): string | null
 
 function statusPlaceholders(values: readonly string[]): string {
     return values.map(() => '?').join(',');
-}
-
-function imageExtension(mimeType: string): string {
-    if (mimeType === 'image/jpeg') return 'jpg';
-    if (mimeType === 'image/webp') return 'webp';
-    return 'png';
 }
 
 function segmentKeyframePlanIdentity(plan: Record<string, any>): string {

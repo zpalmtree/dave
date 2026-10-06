@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 
 import { config } from './Config.js';
 import { VideoProviderHooks, VideoUsagePersistenceError, videoRequestInputTokenBound } from './VideoUsage.js';
+import { imageExtension, mimeTypeForExtension } from './VideoImageMime.js';
 import {
     ImageSearchResult,
     DownloadedImage,
@@ -232,18 +233,6 @@ async function validateAmbiguousVideoKeyframeReference(
     }
 }
 
-function mimeTypeForExtension(extension: string): VideoKeyframeReference['mimeType'] {
-    if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
-    if (extension === 'webp') return 'image/webp';
-    return 'image/png';
-}
-
-function extensionForMimeType(mimeType: VideoKeyframeReference['mimeType']): string {
-    if (mimeType === 'image/jpeg') return 'jpg';
-    if (mimeType === 'image/webp') return 'webp';
-    return 'png';
-}
-
 function requirementsDigest(requirements: VideoKeyframeReferenceRequirement[]): string {
     return createHash('sha256').update(JSON.stringify(requirements)).digest('hex');
 }
@@ -409,7 +398,7 @@ export async function resolveVideoKeyframeReferences(
         if (!downloaded) continue;
         try {
             const mimeType = mimeTypeForExtension(downloaded.extension);
-            const filename = `reference_${references.length + 1}.${extensionForMimeType(mimeType)}`;
+            const filename = `reference_${references.length + 1}.${imageExtension(mimeType)}`;
             writeFileSync(join(directory, filename), downloaded.data);
             references.push({
                 label: requirement.label,

@@ -13,7 +13,7 @@ export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
 export const VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS = 15;
 export const VIDEO_EDIT_MAX_SECONDS = VIDEO_MAX_TOTAL_DURATION_SECONDS;
 export const VIDEO_EDIT_MAX_BYTES = 100 * 1024 * 1024;
-const EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv']);
+export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv']);
 
 export interface SubmittedVideoSourceClip {
     clip_url: string;
@@ -45,7 +45,7 @@ export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | nul
     }
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();
-    if (!extension || !EXTENSIONS.has(extension)) {
+    if (!extension || !VIDEO_CLIP_EXTENSIONS.has(extension)) {
         throw new Error('The source video must be MP4, MOV, M4V, WebM, or MKV.');
     }
     const bytes = Number(value.bytes || 0);
