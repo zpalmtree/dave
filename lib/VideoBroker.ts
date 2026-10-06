@@ -4582,14 +4582,26 @@ export class VideoBroker {
         // later plan-aware estimates and actual GPU admission refine the same
         // timeline. Pauses with a known end anchor the projection there. An
         // offline worker, a dispatch drain, or unrelated gpuq work can move it
-        // later, and the Discord copy calls those assumptions out explicitly.
+        // later. An explicit GPU block has no known end, so it invalidates the
+        // projected timeline for that job and every job waiting behind it.
         let cursor = Math.max(now, control.paused_until || now);
+        let admissionBlocked = false;
         const projections = new Map<string, { position: number | null; start: number | null; finish: number | null }>();
         let pipelinePosition = 0;
         for (const row of allActive) {
             pipelinePosition += 1;
             if (row.status !== 'queued' && row.gpu_queue_position) {
                 pipelinePosition = Math.max(pipelinePosition, row.gpu_queue_position);
+            }
+            if ((row.gpu_queue_state === 'queued' || row.gpu_queue_state === 'submitting')
+                && row.gpu_queue_block_reason) admissionBlocked = true;
+            if (admissionBlocked) {
+                projections.set(row.public_id, {
+                    position: row.status === 'queued' ? pipelinePosition : null,
+                    start: null,
+                    finish: null,
+                });
+                continue;
             }
             const expectedRuntime = Math.max(
                 1,

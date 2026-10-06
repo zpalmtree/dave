@@ -132,17 +132,8 @@ function formatVideoReplyWithFullPrompt(
         ? sanitizeVideoWorkerText(job.prompt_tease, '', 120).trim()
         : '';
     const tease = promptTease ? `\n${promptTease}` : '';
-    const availablePrefixLength = DISCORD_MESSAGE_CONTENT_LIMIT
-        - separator.length
-        - direction.length
-        - tease.length;
-    if (availablePrefixLength > 0) {
-        return `${truncatePrompt(prefix, availablePrefixLength)}${tease}${separator}${direction}`;
-    }
-
-    // A replied-to Discord message can use the entire content allowance, leaving
-    // no room for even the quote separator. Keep the useful status text in that
-    // boundary case and trim the repeated prompt instead of exceeding the limit.
+    // Reserve the status before the repeated prompt: cutting status text can
+    // split a Discord timestamp or hide the reason a job is waiting.
     const availableBodyLength = DISCORD_MESSAGE_CONTENT_LIMIT - separator.length - tease.length;
     const displayedPrefix = truncatePrompt(prefix, Math.max(0, availableBodyLength - 1));
     const displayedDirection = truncatePrompt(
