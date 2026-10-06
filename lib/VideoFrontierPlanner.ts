@@ -10,6 +10,7 @@ import { VIDEO_IMAGE_ONLY_AUTO_PROMPT, VIDEO_MODELS, VideoModelId, requestedVide
 import {
     VideoFrontierCallOptions,
     VideoUsagePersistenceError,
+    geminiVideoUsage,
     openAIVideoUsage,
     videoRequestInputTokenBound,
     requestedOpenAIServiceTier,
@@ -1839,14 +1840,7 @@ async function requestGeminiPlannerResponse(
                 provider: 'google',
                 model: response.modelVersion || plannerModel,
                 serviceTier: 'default',
-                inputTokens: Math.max(
-                    0,
-                    Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0),
-                ),
-                outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
-                cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
-                rawUsage: usage as unknown as Record<string, unknown>,
-                usageMissing: !usage,
+                ...geminiVideoUsage(usage),
             });
             if (!outputText) throw new Error('Gemini Flash returned no structured planner output.');
             outcome = 'success';

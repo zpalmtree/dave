@@ -229,6 +229,25 @@ export function openAIVideoUsage(body: any): Pick<VideoProviderUsage,
     };
 }
 
+interface GeminiUsageMetadata {
+    promptTokenCount?: number;
+    cachedContentTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+}
+
+/** Gemini's prompt count includes cached tokens, and thinking is billed as output. */
+export function geminiVideoUsage(usage: GeminiUsageMetadata | undefined): Pick<VideoProviderUsage,
+    'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'rawUsage' | 'usageMissing'> {
+    return {
+        inputTokens: Math.max(0, Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0)),
+        outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
+        cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
+        rawUsage: usage as unknown as Record<string, unknown>,
+        usageMissing: !usage,
+    };
+}
+
 export function requestedOpenAIServiceTier(tier: VideoServiceTier | undefined): string | undefined {
     if (tier === 'fast') return 'priority';
     if (tier === 'flex') return 'flex';

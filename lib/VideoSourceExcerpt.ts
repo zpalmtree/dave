@@ -3,7 +3,7 @@ import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
 import type { VideoSourceAudioLyrics, VideoSourceAudioWord } from './VideoSourceAudio.js';
-import { VideoProviderHooks, videoRequestInputTokenBound } from './VideoUsage.js';
+import { VideoProviderHooks, geminiVideoUsage, videoRequestInputTokenBound } from './VideoUsage.js';
 
 /** Longest song or source video accepted before an excerpt is cut from it. */
 export const VIDEO_SOURCE_INPUT_MAX_SECONDS = 10 * 60;
@@ -147,10 +147,7 @@ export const pickSongExcerptWithGemini: SongExcerptPicker = async (prompt, lyric
         const usage = response.usageMetadata;
         await hooks.onUsage?.({ stage, attempt: 1, outcome: 'success', provider: 'google',
             model: response.modelVersion || model, serviceTier: 'default',
-            inputTokens: Math.max(0, Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0)),
-            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
-            cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
-            rawUsage: usage as unknown as Record<string, unknown>, usageMissing: !usage });
+            ...geminiVideoUsage(usage) });
         const value = JSON.parse(String(response.text || ''));
         outcome = 'success';
         return value;

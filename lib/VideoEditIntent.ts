@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { GoogleGenAI, MediaResolution, ThinkingLevel } from '@google/genai';
 import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
-import { VideoProviderHooks, videoRequestInputTokenBound } from './VideoUsage.js';
+import { VideoProviderHooks, geminiVideoUsage, videoRequestInputTokenBound } from './VideoUsage.js';
 import { StoredVideoSourceClip } from './VideoSourceClip.js';
 
 export type VideoEditMode = 'replace' | 'add';
@@ -109,10 +109,7 @@ async function interpret(instruction: string, parts: any[], intent: boolean, hoo
         const usage = response.usageMetadata;
         await hooks.onUsage?.({ stage, attempt: 1, outcome: 'success', provider: 'google',
             model: response.modelVersion || model, serviceTier: 'default',
-            inputTokens: Math.max(0, Number(usage?.promptTokenCount || 0) - Number(usage?.cachedContentTokenCount || 0)),
-            outputTokens: Number(usage?.candidatesTokenCount || 0) + Number(usage?.thoughtsTokenCount || 0),
-            cacheReadTokens: Number(usage?.cachedContentTokenCount || 0),
-            rawUsage: usage as unknown as Record<string, unknown>, usageMissing: !usage });
+            ...geminiVideoUsage(usage) });
         let value: unknown;
         try { value = JSON.parse(String(response.text || '')); }
         catch { throw new Error('Could not interpret the video edit reliably. Please describe what should change.'); }
