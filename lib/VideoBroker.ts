@@ -23,6 +23,7 @@ import sqlite3 from 'sqlite3';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { configuredVideoOptimization, type VideoOptimizationSelection } from './VideoOptimizationRollout.js';
+import { VideoStickerSourceImage, videoStickerSourceImage, videoStickerFrameUrl } from './VideoSticker.js';
 import {
     ACTIVE_VIDEO_STATUSES,
     QWEN_IMAGE_ASPECTS,
@@ -145,6 +146,7 @@ interface VideoClipSourceImageDescriptor {
 
 type VideoSourceImageDescriptor =
     | VideoAttachmentSourceImageDescriptor
+    | VideoStickerSourceImage
     | VideoPresetSourceImageDescriptor
     | VideoClipSourceImageDescriptor;
 
@@ -1065,6 +1067,7 @@ export function derivedSegmentKeyframePlan(plan: Record<string, any>, segmentInd
 function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object') throw new Error('Invalid starting-image metadata.');
+    if (value.sticker_id !== undefined) return videoStickerSourceImage(value);
     if (value.preset !== undefined) {
         if (!['meximutt', 'oalgo'].includes(value.preset)) throw new Error('Unknown starting-image preset.');
         return { preset: 'meximutt' };
@@ -1113,7 +1116,8 @@ function isDiscordAttachmentUrl(value: string): boolean {
 }
 
 async function downloadDiscordSourceImage(
-    descriptor: VideoAttachmentSourceImageDescriptor,
+    descriptor: Pick<VideoAttachmentSourceImageDescriptor, 'url' | 'mime_type'>
+        & Partial<Pick<VideoAttachmentSourceImageDescriptor, 'bytes' | 'name'>>,
     directory: string,
 ): Promise<StoredVideoSourceImage> {
     if (!isDiscordAttachmentUrl(descriptor.url)) {
@@ -1275,6 +1279,9 @@ async function storeVideoSourceImage(
     descriptor: VideoSourceImageDescriptor,
     directory: string,
 ): Promise<StoredVideoSourceImage> {
+    if ('sticker_id' in descriptor) {
+        return downloadDiscordSourceImage({ url: videoStickerFrameUrl(descriptor), mime_type: 'image/png' }, directory);
+    }
     if (isClipSourceImage(descriptor)) {
         return extractVideoClipSourceImage(descriptor, directory);
     }
