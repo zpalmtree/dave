@@ -5101,11 +5101,14 @@ export class VideoBroker {
                 const blockDetail = blockReason
                     ? sanitizeVideoWorkerText(message.block_detail, '', 600) || null
                     : null;
+                // Each scene can acquire a fresh reservation. Queue timing describes
+                // that reservation; retaining an earlier submission counts rendering
+                // time as a stall. Only the first admission anchors the whole-job ETA.
                 await this.run(
                     `UPDATE video_jobs SET gpu_queue_state = ?,
-                     gpu_queue_submitted_at = COALESCE(gpu_queue_submitted_at, ?),
+                     gpu_queue_submitted_at = ?,
                      gpu_admitted_at = COALESCE(gpu_admitted_at, ?),
-                     gpu_queue_wait_seconds = COALESCE(gpu_queue_wait_seconds, ?),
+                     gpu_queue_wait_seconds = ?,
                      gpu_queue_position = ?, gpu_queue_jobs_ahead = ?,
                      gpu_estimated_admission_low_at = ?, gpu_estimated_admission_high_at = ?,
                      gpu_queue_block_reason = ?, gpu_queue_block_detail = ?,

@@ -22,6 +22,7 @@ import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtocol.js';
 import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
+import { VideoStallMonitor } from '../dist/VideoStallAlerts.js';
 
 test('authenticated owner submissions bypass the personal limit but retain the global cap', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-owner-limit-'));
@@ -272,6 +273,111 @@ test('broker projects a rough ETA immediately and includes earlier queued work',
         assert.equal(second.expected_start_at, first.expected_finish_at);
         assert.equal(second.expected_finish_at - second.expected_start_at, 1200);
     } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('scene GPU reservations reset stall timing while preserving the job ETA anchor', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-reservation-timing-'));
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+    });
+    await broker.start();
+    const base = `http://127.0.0.1:${broker.listeningPort()}`;
+    const headers = { authorization: 'Bearer bot-secret', 'content-type': 'application/json' };
+    let socket;
+    try {
+        const response = await fetch(`${base}/v1/jobs`, {
+            method: 'POST', headers,
+            body: JSON.stringify({
+                model: 'minimax', prompt: 'A cat sings across multiple scenes.',
+                requester_id: 'reservation-user', origin_bot_id: 'bot-1', channel_id: 'channel-1',
+                command_message_id: 'reservation-message', status_message_id: 'reservation-status',
+            }),
+        });
+        assert.equal(response.status, 201);
+        socket = new WebSocket(base.replace('http:', 'ws:') + '/v1/worker', {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => {
+            socket.once('open', resolve);
+            socket.once('error', reject);
+        });
+        socket.send(JSON.stringify({
+            type: 'hello', protocol: 1, worker_id: 'reservation-worker',
+            capabilities: ['minimax'], current_job: null,
+        }));
+        await take(value => value.type === 'hello_ack');
+        const lease = await take(value => value.type === 'job');
+        let sequence = 0;
+        const report = async fields => {
+            const stage = `Reservation event ${++sequence}`;
+            socket.send(JSON.stringify({
+                type: 'event', event: 'gpu_queue', job_id: lease.job.id, stage, ...fields,
+            }));
+            return eventually(async () => {
+                const result = await fetch(`${base}/v1/users/reservation-user/jobs`, { headers });
+                return (await result.json()).jobs[0];
+            }, job => job.stage === stage);
+        };
+        const now = Math.floor(Date.now() / 1000);
+        const firstAdmission = now - 1000;
+        const secondSubmission = now - 500;
+        const monitor = new VideoStallMonitor();
+        const thresholds = { alertAfterSeconds: 120, realertSeconds: 3600 };
+        const first = await report({
+            state: 'admitted', submitted_at: firstAdmission, admitted_at: firstAdmission,
+            queue_wait_seconds: 0,
+        });
+        assert.deepEqual(monitor.observe([first], firstAdmission, thresholds), []);
+
+        const waiting = await report({ state: 'queued', submitted_at: secondSubmission, jobs_ahead: 0 });
+        assert.deepEqual(monitor.observe([waiting], secondSubmission + 1, thresholds), [],
+            'Rendering the previous scene must not count as waiting for GPU admission.');
+        assert.equal(waiting.gpu_queue_submitted_at, secondSubmission);
+        assert.equal(waiting.gpu_queue_wait_seconds, null);
+        assert.equal(waiting.gpu_admitted_at, firstAdmission);
+        assert.equal(waiting.expected_start_at, firstAdmission);
+        const repeated = await report({ state: 'queued', submitted_at: secondSubmission, jobs_ahead: 0 });
+        assert.equal(repeated.gpu_queue_submitted_at, secondSubmission);
+        const stalled = monitor.observe([repeated], secondSubmission + 130, thresholds);
+        assert.equal(stalled.length, 1);
+        assert.equal(stalled[0].kind, 'stalled');
+        assert.equal(stalled[0].waitedSeconds, 130);
+
+        const admitted = await report({
+            state: 'admitted', submitted_at: secondSubmission,
+            admitted_at: secondSubmission + 140, queue_wait_seconds: 140,
+        });
+        const recovered = monitor.observe([admitted], secondSubmission + 141, thresholds);
+        assert.equal(recovered.length, 1);
+        assert.equal(recovered[0].kind, 'recovered');
+        assert.equal(recovered[0].waitedSeconds, 140, 'Recovery must not reuse the first zero-second wait.');
+        assert.equal(admitted.expected_start_at, firstAdmission);
+
+        const third = await report({ state: 'queued', submitted_at: now - 1, jobs_ahead: 0 });
+        assert.equal(third.gpu_queue_wait_seconds, null);
+        assert.deepEqual(monitor.observe([third], now, thresholds), []);
+        const thirdAdmitted = await report({
+            state: 'admitted', submitted_at: now - 1, admitted_at: now, queue_wait_seconds: 1,
+        });
+        assert.equal(thirdAdmitted.gpu_queue_wait_seconds, 1);
+        assert.deepEqual(monitor.observe([thirdAdmitted], now, thresholds), []);
+
+        // An immediately admitted reservation may never report a queued state.
+        const direct = await report({
+            state: 'admitted', submitted_at: now, admitted_at: now, queue_wait_seconds: 0,
+        });
+        assert.equal(direct.gpu_queue_submitted_at, now);
+        assert.equal(direct.gpu_queue_wait_seconds, 0);
+        assert.equal(direct.gpu_admitted_at, firstAdmission);
+        assert.equal(direct.expected_start_at, firstAdmission);
+    } finally {
+        socket?.terminate();
         await broker.stop();
         rmSync(directory, { recursive: true, force: true });
     }
