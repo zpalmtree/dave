@@ -48,10 +48,25 @@ export function recoveryDialogue(plan: any): any[] {
 
 export class UnapprovedLocalRecoveryPlanError extends Error {}
 
-function requireProtectedRecoveryDialogue(plan: any, analyses: any[]): void {
+/** A policy refusal may replace requested speech with placeholders or a rewritten line.
+ * Only its verbatim text actually present in the request can bind local fulfillment.
+ * The local analysis and fidelity check remain responsible for the complete request.
+ */
+function localRecoveryDialogueAnalysis(analysis: any, prompt: string): any {
+    const handling = analysis?.frontier_handling;
+    if (handling?.disposition !== 'reject' || handling?.reason_code !== 'provider_policy') return analysis;
+    const brief = ` ${normalizedRecoverySpeech(prompt)} `;
+    const lines = (analysis.dialogue_contract?.lines || []).filter((line: any) => {
+        const text = normalizedRecoverySpeech(line?.text);
+        return line?.verbatim && text && brief.includes(` ${text} `);
+    });
+    return { dialogue_contract: { mode: lines.length ? 'verbatim' : 'none', lines } };
+}
+
+function requireProtectedRecoveryDialogue(plan: any, analyses: any[], prompt: string): void {
     const actual = normalizedRecoverySpeech(recoveryDialogue(plan).map(line => line.text).join(' '));
     for (const analysis of analyses) {
-        const contract = analysis?.dialogue_contract;
+        const contract = localRecoveryDialogueAnalysis(analysis, prompt)?.dialogue_contract;
         if (!contract || contract.mode === 'none') continue;
         if (!actual) throw new UnapprovedLocalRecoveryPlanError('Required dialogue is missing from the local screenplay.');
         let cursor = 0;
@@ -253,7 +268,7 @@ export function approvedLocalRecoveryContract(plan: any, prompt: string, reason:
             + (Number.isInteger(attempts) && attempts > 0 ? ` after ${attempts} screenplay attempts` : '')
             + (issues ? `: ${issues}.` : '.') + ' No video was rendered.');
     }
-    requireProtectedRecoveryDialogue(plan, [frontierAnalysis, plan.prompt_analysis, plan.semantic_analysis]);
+    requireProtectedRecoveryDialogue(plan, [frontierAnalysis, plan.prompt_analysis, plan.semantic_analysis], prompt);
     let linkedScenes = 0;
     for (const segment of plan.segments) {
         linkedScenes = segment.transition === 'continue' ? linkedScenes + 1 : 1;
