@@ -331,7 +331,7 @@ async function generateGeminiKeyframe(
     const generationTimeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
     try {
         await options.beforeRequest?.({ stage: 'keyframe_candidate_gemini', attempt, provider: 'google',
-            model: geminiModel, maxInputTokens: videoRequestInputTokenBound({ prompt, references: references.map(reference => ({ type: 'input_image' })) }),
+            model: geminiModel, maxInputTokens: videoRequestInputTokenBound({ prompt, references: references.map(() => ({ type: 'input_image' })) }),
             maxOutputTokens: 32768, maxImages: 1 });
         const generation = client.models.generateContent({
             model: geminiModel,

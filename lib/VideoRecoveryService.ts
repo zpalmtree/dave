@@ -38,7 +38,7 @@ export async function prepareRecoveryPlan(input: {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             const plan: any = await planner(prompt, input.model, input.requester,
-                useSources ? input.sources : undefined, {
+                input.sources, {
                     ...input.options,
                     plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. The requested total runtime is binding; preserve every requested scene and line, and never extend the runtime without authorization. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`
                         + (input.requireSourceIdentity ? '\nThe supplied character identity is required. Do not invent a replacement person or change their anatomy, body proportions, hair, or clothing.' : '')

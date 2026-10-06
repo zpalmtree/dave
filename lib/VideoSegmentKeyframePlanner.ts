@@ -3,7 +3,7 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { AI_MODELS } from './AIModels.js';
 import { config } from './Config.js';
 import { geminiCompatibleResponseSchema } from './VideoFrontierPlanner.js';
-import { VideoProviderHooks, VideoUsagePersistenceError, geminiVideoUsage, videoRequestInputTokenBound } from './VideoUsage.js';
+import { VideoProviderHooks, geminiVideoUsage, videoRequestInputTokenBound } from './VideoUsage.js';
 
 export const VIDEO_SEGMENT_KEYFRAME_PLANNER_MODEL = AI_MODELS.geminiChat;
 
@@ -152,7 +152,6 @@ export async function createVideoSegmentKeyframeContracts(
         return contracts;
     } catch (error) {
         detail = error instanceof Error ? error.message : String(error);
-        if (error instanceof VideoUsagePersistenceError) throw error;
         throw error;
     } finally {
         clearTimeout(timeout);
