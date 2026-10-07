@@ -601,6 +601,18 @@ export function formatVideoStatusPost(job: VideoJobView): string {
     return formatVideoReplyWithFullPrompt(formatVideoJob(job), job);
 }
 
+function hasDiscordDeliveryIdentity(job: VideoJobView): boolean {
+    return [job.requester_id, job.origin_bot_id, job.channel_id,
+        job.command_message_id, job.status_message_id].every(id => /^\d+$/.test(id));
+}
+
+function visibleVideoQueueJobs(jobs: VideoJobView[]): VideoJobView[] {
+    // Internal renders share the worker, so active ones still explain queue waits.
+    // Their completed outputs have no Discord destination and never need delivery.
+    return jobs.filter(job => !['delivered', 'failed', 'cancelled'].includes(job.status)
+        && (job.status !== 'ready' || hasDiscordDeliveryIdentity(job)));
+}
+
 export function formatGlobalVideoQueueJob(
     job: VideoJobView,
     viewerGuildId: string | null,
@@ -611,7 +623,7 @@ export function formatGlobalVideoQueueJob(
     const mayIdentifyRequester = sameServer || revealAllRequesters;
     const requester = mayIdentifyRequester && /^\d+$/.test(job.requester_id)
         ? `<@${job.requester_id}>`
-        : mayIdentifyRequester ? 'unknown requester' : 'requester hidden';
+        : mayIdentifyRequester ? 'internal job' : 'requester hidden';
     const direction = videoJobDirection(job).replace(/\s+/g, ' ').trim();
     const displayedDirection = promptLength === undefined
         ? direction
@@ -649,7 +661,7 @@ export function formatGlobalVideoQueueJob(
             : '';
         status = progress ? `Making video · ${progress}${segment}` : `Making video${segment}`;
     } else if (job.status === 'ready') {
-        status = 'Sending';
+        status = 'Ready for delivery';
     } else if (job.status === 'delivered') {
         status = 'Sent';
     } else if (job.status === 'cancelled') {
@@ -676,6 +688,7 @@ export function globalVideoQueueChunks(
     limit = 3900,
     revealAllRequesters = false,
 ): string[] {
+    jobs = visibleVideoQueueJobs(jobs);
     if (!jobs.length) return ['The server video queue is empty.'];
     const chunks: string[] = [];
     let current = '';
@@ -711,6 +724,7 @@ export function globalVideoQueueEmbeds(
     revealAllRequesters = false,
     dispatchPaused = false,
 ): Array<{ title: string; description: string; color: number; footer?: { text: string }; timestamp: string }> {
+    jobs = visibleVideoQueueJobs(jobs);
     if (!jobs.length) return [];
     const chunks = globalVideoQueueChunks(jobs, viewerGuildId, limit, revealAllRequesters);
     const title = `Video queue · ${jobs.length} job${jobs.length === 1 ? '' : 's'}`;
@@ -1427,7 +1441,7 @@ export async function handleVideoQueue(msg: Message, args: string): Promise<void
         await msg.reply(result.ok ? `Cancelling video **${shortJobId(matches[0].id)}**.` : result.error || 'Couldn’t cancel that video.');
         return;
     }
-    const unfinished = response.jobs.filter(job => !['delivered', 'failed', 'cancelled'].includes(job.status));
+    const unfinished = visibleVideoQueueJobs(response.jobs);
     if (!unfinished.length) {
         await msg.reply(`The server video queue is empty.${pauseText(response.state.paused_until)}`);
         return;
