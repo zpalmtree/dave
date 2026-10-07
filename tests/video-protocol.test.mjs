@@ -1385,7 +1385,7 @@ test('Anthropic hybrid single pass validates serialized analysis and structured 
         assert.equal(requests[0].output_config.effort, 'medium');
         assert.deepEqual(Object.keys(requests[0].output_config.format.schema.properties),
             ['prompt_analysis_json', 'plan']);
-        assert.equal(requests[0].system[0].cache_control.type, 'ephemeral');
+        assert.equal('cache_control' in requests[0].system[0], false);
         assert.equal(result._planner_configuration.strategy, 'hybrid-single-pass');
         assert.equal(result.planner_metrics.single_pass, true);
         assert.deepEqual(result.prompt_analysis, frontierAnalysis());

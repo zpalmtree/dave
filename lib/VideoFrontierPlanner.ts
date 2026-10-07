@@ -2198,11 +2198,9 @@ async function requestAnthropicPlannerResponse(
                 body: JSON.stringify({
                     model: plannerModel,
                     max_tokens: maxTokens,
-                    system: [{
-                        type: 'text',
-                        text: String(payload.instructions || ''),
-                        cache_control: { type: 'ephemeral' },
-                    }],
+                    // Planner calls are usually more than five minutes apart, so a
+                    // cache write (1.25x input) is almost never read back.
+                    system: [{ type: 'text', text: String(payload.instructions || '') }],
                     messages: anthropicPlannerMessages(payload.input),
                     output_config: {
                         effort: String(payload.reasoning?.effort || 'medium'),
