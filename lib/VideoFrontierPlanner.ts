@@ -944,6 +944,12 @@ function promptExplicitlyDelaysDialogue(prompt: string): boolean {
     const speech = prompt.search(/\b(?:says?|speaks?|asks?|shouts?|whispers?|replies?)\b/i);
     if (speech < 0) return false;
     const leadIn = prompt.slice(0, speech);
+    // Structured shot lists explicitly sequence speech too, including H3's
+    // "[Shot 2] At 00:04.500" notation. Keep the opening shot silent.
+    if ([...leadIn.matchAll(/\[(?:shot|scene|beat)\s+(\d+)\]/gi)]
+        .some(match => Number(match[1]) > 1)) return true;
+    if ([...leadIn.matchAll(/\bat\s+(\d{1,2}):([0-5]\d(?:\.\d+)?)\b/gi)]
+        .some(match => Number(match[1]) * 60 + Number(match[2]) > 0)) return true;
     return /[,;.]\s*[^,;.]*$/.test(leadIn)
         && /\b(?:walks?|approaches?|arrives?|enters?|stands? up|sits? down|turns?|reaches?|close[- ]?up)\b/i.test(leadIn)
         && !/\b(?:while|as)\b/i.test(leadIn);
