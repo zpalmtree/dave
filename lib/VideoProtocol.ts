@@ -416,9 +416,11 @@ export function videoPromptContentNumbers(prompt: string): string[] {
         quote => ' '.repeat(quote.length));
     for (const pattern of [
         /^\s*(?:[-*]\s*)?(?:scene|shot|beat)\s+\d+\s*(?:[:.)\-–—]|$)/gim,
+        /\[(?:scene|shot|beat)\s+\d+\]/gi,
         /^\s*\d+[.)]\s+/gm,
         /\b\d+\s+(?:scenes?|shots?|beats?)\b/gi,
         /\b\d{1,2}:[0-5]\d(?:\.\d+)?\s*[-–—]\s*\d{1,2}:[0-5]\d(?:\.\d+)?\b/g,
+        /\bat\s+\d{1,2}:[0-5]\d(?:\.\d+)?\b/gi,
     ]) content = content.replace(pattern, match => ' '.repeat(match.length));
     for (const quote of quotes) {
         content = content.slice(0, quote.index!) + quote[0] + content.slice(quote.index! + quote[0].length);

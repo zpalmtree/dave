@@ -2209,16 +2209,31 @@ test('broker validation requires one short verbatim H3 line in the first shot', 
     for (const prompt of [
         'A racer walks to the car, close up to the face, racer says "Not today!"',
         'A racer enters the cockpit; racer says "Not today!"',
+        '[Shot 1] The racer waits. [Shot 2] At 00:04.500, the racer says "Not today!"',
+        '[Shot 1] The racer waits. [Shot 2] The racer says "Not today!"',
+        'At 00:04.500, the racer says "Not today!"',
     ]) assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', prompt));
     for (const prompt of [
         'A racer walks while he says "Not today!"',
         'A racer, wearing a red suit, says "Not today!"',
+        '[Shot 1] At 00:00.000, the racer says "Not today!"',
     ]) assert.throws(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax', prompt), /move it to the beginning/);
     analysis.dialogue_contract.lines[0].text = 'mae Luis libereme, necesito cotizar mae, saqueme de aqui';
     plan.segments[0].shots[1].dialogue[0].text = analysis.dialogue_contract.lines[0].text;
     assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimax',
         'bot is in cell close, walks to the cell bars, close up to the face, bot says mae Luis libereme, necesito cotizar mae, saqueme de aqui'));
 
+});
+
+test('shot labels and cue timestamps are structure while story and quoted numbers remain content', () => {
+    assert.deepEqual(videoPromptContentNumbers(
+        'integrated_multimodal_description: [Shot 1] 3D CG, 7 dogs. '
+        + '[Shot 2] At 00:04.500, a dog speaks. [Shot 3] At 00:09.000, it turns. '
+        + '[Shot 4] At 00:13.000, 42 UFOs appear.'), ['7', '42']);
+    assert.deepEqual(videoPromptContentNumbers(
+        '[Shot 1] At 00:01.500, show "At 00:04.500 [Shot 9]" on a clock.'),
+    ['00', '04.500', '9']);
+    assert.deepEqual(videoPromptContentNumbers('Show 4 dogs and a sign saying "Shot 2".'), ['4', '2']);
 });
 
 test('image-only jobs show the inferred direction instead of an internal fallback prompt', () => {
