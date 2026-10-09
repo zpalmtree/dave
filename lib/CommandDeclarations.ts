@@ -599,7 +599,7 @@ const sharedCommands: Command[] = [
             argsFormat: Args.Split,
             implementation: handleTimer,
             description: 'Set a timer to remind you of something',
-            helpDescription: 'Set a timer to remind you of something. Available time units: `y` (year), `mm` (month), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second)',
+            helpDescription: 'Set a timer using a duration or a future date, followed by an optional description. Time units: `y` (year), `M` (month; legacy `mm` also works), `w` (week), `d` (day), `h` (hour), `m` (minute), `s` (second). Dates: `YYYY-MM-DD`, optionally followed by `HH:mm` or `HH:mm:ss` (a space or `T` separates date and time). Dates without a time use midnight UTC; times without a timezone use UTC. Append `Z` or a numeric offset such as `-05:00` to the time to specify its timezone.',
             needDb: true,
             examples: [
                 {
@@ -612,7 +612,15 @@ const sharedCommands: Command[] = [
                 },
                 {
                     name: 'Set a super long timer',
-                    value: 'timer 1y2w3d4h5m6s',
+                    value: 'timer 1y2M3w4d5h6m7s',
+                },
+                {
+                    name: 'Remind me on a specific date (midnight UTC)',
+                    value: 'reminder 2030-12-25 Christmas',
+                },
+                {
+                    name: 'Remind me at a specific date and time with a timezone',
+                    value: 'timer 2030-12-25 09:00-05:00 open presents',
                 },
             ],
         },

@@ -22,11 +22,11 @@ import {
 
 import {
     getUsername,
-    monthDurationToSeconds
 } from './Utilities.js';
 
 import { config } from './Config.js';
 import { formatDiscordDateAndRelative } from './DiscordTime.js';
+import { parseTimerInput } from './TimerInput.js';
 
 export type TimerPlatform = 'discord' | 'uproar';
 
@@ -84,46 +84,12 @@ export async function deleteTimer(msg: Message, args: string[], db: Database) {
 }
 
 export async function handleTimer(msg: Message, args: string[], db: Database) {
-    const regex = /^(?:([0-9\.]+)y)?(?:([0-9\.]+)mm)?(?:([0-9\.]+)w)?(?:([0-9\.]+)d)?(?:([0-9\.]+)h)?(?:([0-9\.]+)m)?(?:([0-9\.]+)s)?(?: (.+))?$/;
-
-    const results = regex.exec(args.join(' '));
-
-    if (!results) {
-        msg.reply(`Failed to parse input, try \`${config.prefix}help timer\``);
+    const parsed = parseTimerInput(args.join(' '));
+    if ('error' in parsed) {
+        await msg.reply(`${parsed.error} Try \`${config.prefix}help timer\``);
         return;
     }
-
-    const [
-        ,
-        years=0,
-        months='0',
-        weeks=0,
-        days=0,
-        hours=0,
-        minutes=0,
-        seconds=0,
-        description
-    ] = results;
-
-    const totalTimeSeconds = Number(seconds)
-                           + Number(minutes) * 60
-                           + Number(hours) * 60 * 60
-                           + Number(days) * 60 * 60 * 24
-                           + Number(weeks) * 60 * 60 * 24 * 7
-                           + monthDurationToSeconds(months)
-                           + Number(years) * 60 * 60 * 24 * 365;
-
-    if (totalTimeSeconds > 60 * 60 * 24 * 365 * 100) {
-        msg.reply('Timers longer than 100 years are not supported.');
-        return;
-    }
-
-    if (totalTimeSeconds <= 0) {
-        msg.reply(`Invalid or no time duration given, try \`${config.prefix}help timer\``);
-        return;
-    }
-
-    const time = moment.utc().add(totalTimeSeconds, 'seconds');
+    const { time, description } = parsed;
 
     const timerID = await insertQuery(
         `INSERT INTO timer
@@ -142,7 +108,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
 
     sendTimer(
         msg.channel as TextChannel,
-        totalTimeSeconds * 1000,
+        Math.max(0, time.valueOf() - Date.now()),
         timerID,
         msg.author.id,
         description
