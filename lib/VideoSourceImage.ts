@@ -11,8 +11,7 @@ import { VideoStickerSourceImage, videoStickerSourceImage, videoStickerFrameUrl 
 import { isVideoSourceClipUrl } from './VideoSourceClip.js';
 import { imageExtension } from './VideoImageMime.js';
 import type { VideoKeyframeResult } from './VideoKeyframeProvider.js';
-
-const OALGO_VIDEO_PRESET_PATH = fileURLToPath(new URL('../images/oalgo.png', import.meta.url));
+import { videoCharacterForPreset } from './VideoCharacters.js';
 
 export interface VideoAttachmentSourceImageDescriptor {
     url: string;
@@ -22,7 +21,8 @@ export interface VideoAttachmentSourceImageDescriptor {
 }
 
 export interface VideoPresetSourceImageDescriptor {
-    preset: 'meximutt' | 'oalgo';
+    /** A built-in character's id. */
+    preset: string;
 }
 
 export interface VideoClipSourceImageDescriptor {
@@ -47,8 +47,9 @@ export function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | 
     if (!value || typeof value !== 'object') throw new Error('Invalid starting-image metadata.');
     if (value.sticker_id !== undefined) return videoStickerSourceImage(value);
     if (value.preset !== undefined) {
-        if (!['meximutt', 'oalgo'].includes(value.preset)) throw new Error('Unknown starting-image preset.');
-        return { preset: 'meximutt' };
+        const character = videoCharacterForPreset(value.preset);
+        if (!character) throw new Error('Unknown starting-image preset.');
+        return { preset: character.id };
     }
     if (value.clip_url !== undefined) {
         const clipUrl = String(value.clip_url);
@@ -266,17 +267,20 @@ export async function storeVideoSourceImage(
     if (!isPresetSourceImage(descriptor)) {
         return downloadDiscordSourceImage(descriptor, directory);
     }
-    if (!existsSync(OALGO_VIDEO_PRESET_PATH) || !statSync(OALGO_VIDEO_PRESET_PATH).isFile()) {
-        throw new Error('The Meximutt starting-image preset is unavailable.');
+    const character = videoCharacterForPreset(descriptor.preset);
+    if (!character) throw new Error('Unknown starting-image preset.');
+    const presetPath = fileURLToPath(new URL(`../images/${character.image}`, import.meta.url));
+    if (!existsSync(presetPath) || !statSync(presetPath).isFile()) {
+        throw new Error(`The ${character.name} starting-image preset is unavailable.`);
     }
-    const bytes = statSync(OALGO_VIDEO_PRESET_PATH).size;
+    const bytes = statSync(presetPath).size;
     if (!bytes || bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
-        throw new Error('The Meximutt starting-image preset is empty or too large.');
+        throw new Error(`The ${character.name} starting-image preset is empty or too large.`);
     }
     mkdirSync(directory, { recursive: true });
     const destination = join(directory, 'source.png');
     rmSync(destination, { force: true });
-    copyFileSync(OALGO_VIDEO_PRESET_PATH, destination);
+    copyFileSync(presetPath, destination);
     return { path: destination, mimeType: 'image/png', bytes };
 }
 

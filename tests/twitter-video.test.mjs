@@ -4,6 +4,7 @@ import { Response } from 'node-fetch';
 import { twitterVideoFromMessage, stripTwitterPostLinks, isTwitterVideoUrl } from '../dist/TwitterVideo.js';
 import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
 import { videoSourcesFromMessages, videoPromptFromMessages, videoReplacementUsesPreset } from '../dist/VideoGeneration.js';
+import { ARGENMUTT, MEXIMUTT } from '../dist/VideoCharacters.js';
 
 const post = 'https://fxtwitter.com/juhrafftrades/status/2103886182404772256';
 const mp4 = 'https://video.twimg.com/amplify_video/123/vid/1280x720/example.mp4?tag=14';
@@ -98,8 +99,11 @@ test('post URLs are removed from planner instructions and explicit replacements 
     assert.equal(stripTwitterPostLinks(`<${post}>`), '');
     assert.equal(stripTwitterPostLinks(`[this clip](${post})`), 'this clip');
     assert.equal(videoPromptFromMessages('slugs', { content: post }), 'slugs');
-    assert.equal(videoReplacementUsesPreset('slugs'), false);
-    assert.equal(videoReplacementUsesPreset('a robot'), false);
-    assert.equal(videoReplacementUsesPreset('Meximutt, keeping the moves'), true);
-    assert.equal(videoReplacementUsesPreset(''), true);
+    assert.equal(videoReplacementUsesPreset('slugs', MEXIMUTT), false);
+    assert.equal(videoReplacementUsesPreset('a robot', MEXIMUTT), false);
+    assert.equal(videoReplacementUsesPreset('Meximutt, keeping the moves', MEXIMUTT), true);
+    assert.equal(videoReplacementUsesPreset('', MEXIMUTT), true);
+    assert.equal(videoReplacementUsesPreset('Argenmutt, keeping the moves', ARGENMUTT), true);
+    assert.equal(videoReplacementUsesPreset('Meximutt, keeping the moves', ARGENMUTT), false,
+        'Another character named as the replacement is a description, not this command\'s preset.');
 });

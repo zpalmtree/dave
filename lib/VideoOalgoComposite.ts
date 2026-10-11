@@ -5,21 +5,23 @@ import { VideoKeyframeError, VideoKeyframeResult, createFrontierVideoKeyframe } 
 import { VideoKeyframeReference } from './VideoKeyframeReferences.js';
 import { VideoProviderHooks, VideoUsagePersistenceError } from './VideoUsage.js';
 import { StoredVideoSourceImage } from './VideoSourceImage.js';
+import { MEXIMUTT, VideoCharacter } from './VideoCharacters.js';
 
-export function oalgoSourceImageCompositePlan(prompt: string): Record<string, unknown> {
+export function oalgoSourceImageCompositePlan(prompt: string, character: VideoCharacter = MEXIMUTT): Record<string, unknown> {
+    const { name } = character;
     const requestedAction = prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT
-        ? 'Add Meximutt to the attached situation. Preserve its existing subjects and action; a later screenplay will plan the motion.'
+        ? `Add ${name} to the attached situation. Preserve its existing subjects and action; a later screenplay will plan the motion.`
         : `Stage the combined image so it can naturally begin this requested video: ${prompt}`;
     return {
         intent: requestedAction,
         keyframe: {
             recommended: true,
-            reason: 'Combine the built-in Meximutt art with the user-supplied visual reference.',
+            reason: `Combine the built-in ${name} art with the user-supplied visual reference.`,
             prompt: [
-                'Edit the scene in Reference 2 by adding Meximutt from Reference 1 as one additional, separate person.',
-                'Keep every main subject from Reference 2 visible and recognizable, keeping their own clothing, equipment, and story-defining props with their original owners. Meximutt joins them; he does not replace, merge with, or dress as any existing subject.',
-                'Use the Meximutt base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.',
-                'Keep the attached setting and the relationships between its subjects. Make room beside them for Meximutt, widening the view only as needed. Keep his face large enough to recognize and the attached subjects unobscured.',
+                `Edit the scene in Reference 2 by adding ${name} from Reference 1 as one additional, separate person.`,
+                `Keep every main subject from Reference 2 visible and recognizable, keeping their own clothing, equipment, and story-defining props with their original owners. ${name} joins them; he does not replace, merge with, or dress as any existing subject.`,
+                `Use the ${name} base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and ${character.clothing}. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.`,
+                `Keep the attached setting and the relationships between its subjects. Make room beside them for ${name}, widening the view only as needed. Keep his face large enough to recognize and the attached subjects unobscured.`,
                 'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
                 requestedAction,
             ].join(' '),
@@ -28,7 +30,7 @@ export function oalgoSourceImageCompositePlan(prompt: string): Record<string, un
                 subject_orientation: 'Keep all subjects oriented for the opening action.',
                 gaze_direction: 'Direct each visible gaze toward the opening action or another subject.',
                 travel_direction: 'Give moving subjects clear space in their intended direction.',
-                camera_relation: 'Use a coherent single camera view wide enough to show recognizable Meximutt, the attached subjects, and their story-defining props with clear sightlines for interaction.',
+                camera_relation: `Use a coherent single camera view wide enough to show recognizable ${name}, the attached subjects, and their story-defining props with clear sightlines for interaction.`,
                 first_second_action: requestedAction,
             },
         },
@@ -42,25 +44,27 @@ export async function composeOalgoSourceImages(
     prompt: string,
     hooks: VideoProviderHooks,
     provider: VideoSourceCompositeProvider = 'sunburst',
+    character: VideoCharacter = MEXIMUTT,
 ): Promise<VideoKeyframeResult> {
+    const { name } = character;
     if (provider !== 'sunburst' && provider !== 'grok') throw new Error('Unknown source image provider.');
     const references: VideoKeyframeReference[] = [
         {
-            label: 'Meximutt base image',
+            label: `${name} base image`,
             // identity, not style: only an identity reference makes the supplied image the
             // authority for face and body. Declared as style, the composite kept the shirt
-            // and palette and replaced Meximutt with a generic man.
+            // and palette and replaced the character with a generic man.
             kind: 'identity',
-            visualFactsToPreserve: 'This image is the authority for who Meximutt is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with the Mexican flag clothing and emblem, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so Meximutt can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.',
+            visualFactsToPreserve: `This image is the authority for who ${name} is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with ${character.clothingAndEmblem}, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so ${name} can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.`,
             bytes: readFileSync(base.path),
             mimeType: base.mimeType,
-            sourceUrl: 'built-in:meximutt',
-            contextUrl: 'built-in:meximutt',
+            sourceUrl: `built-in:${character.id}`,
+            contextUrl: `built-in:${character.id}`,
         },
         {
             label: 'User-attached image',
             kind: 'object',
-            visualFactsToPreserve: 'Preserve the main depicted subjects, their recognizable appearance and relevant pose, and their relationships to story-defining props. Keep prominent people or animals visible rather than substituting a nearby object. Integrate Meximutt into this visual situation with room for interaction.',
+            visualFactsToPreserve: `Preserve the main depicted subjects, their recognizable appearance and relevant pose, and their relationships to story-defining props. Keep prominent people or animals visible rather than substituting a nearby object. Integrate ${name} into this visual situation with room for interaction.`,
             bytes: readFileSync(attached.path),
             mimeType: attached.mimeType,
             sourceUrl: 'discord-attachment',
@@ -73,7 +77,7 @@ export async function composeOalgoSourceImages(
     const timeout = setTimeout(() => controller.abort(), VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS);
     try {
         return await createFrontierVideoKeyframe(
-            oalgoSourceImageCompositePlan(prompt),
+            oalgoSourceImageCompositePlan(prompt, character),
             references,
             {
                 ...hooks,
@@ -87,7 +91,7 @@ export async function composeOalgoSourceImages(
     } catch (error) {
         if (error instanceof VideoUsagePersistenceError) throw error;
         if (controller.signal.aborted) {
-            throw new VideoKeyframeError('timeout', 'Meximutt image composition exceeded its time limit.');
+            throw new VideoKeyframeError('timeout', `${name} image composition exceeded its time limit.`);
         }
         throw error;
     } finally {

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OALGO_PHOTOREAL_KEYFRAME, VideoBroker } from '../dist/VideoBroker.js';
+import { VIDEO_CHARACTERS, videoCharacterPhotorealKeyframe } from '../dist/VideoCharacters.js';
 import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash,
     repairVideoTiming, recoveryLimitReached, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
@@ -494,7 +495,7 @@ test('broker persists recovery and requires every recorded scene for the matchin
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-for (const [model, variant] of [['minimax', 'oalgo'], ['minimaxfast', 'oalgofast']])
+for (const character of VIDEO_CHARACTERS) for (const [model, { variant }] of Object.entries(character.commands))
 test(`${variant} recovery preserves identity and openings and routes refusals locally`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-recovery-identity-'));
     const portrait = join(directory, 'portrait.png');
@@ -591,8 +592,10 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
         } } } })).status, 200, 'A render already active before deployment can finish.');
         await reset({ prepared });
         assert.equal((await request('image', { segment_index: 1 })).status, 200);
-        assert.ok(scenePrompts.at(-1).includes(OALGO_PHOTOREAL_KEYFRAME), 'Later Meximutt openings stay photographic.');
-        assert.doesNotMatch(OALGO_PHOTOREAL_KEYFRAME, /cartoon|anim|3D|CG|Pixar|not |never/i,
+        const photoreal = videoCharacterPhotorealKeyframe(character);
+        assert.ok(photoreal.includes(`the original ${character.name} portrait`));
+        assert.ok(scenePrompts.at(-1).includes(photoreal), 'Later character openings stay photographic.');
+        assert.doesNotMatch(photoreal, /cartoon|anim|3D|CG|Pixar|not |never/i,
             'The image models draw styles they are told to avoid.');
         await reset(); refusal = true;
         const routed = await request('plan');

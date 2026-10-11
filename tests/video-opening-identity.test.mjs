@@ -7,6 +7,7 @@ import { VideoBroker } from '../dist/VideoBroker.js';
 import { VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 import { approvedRecoveryContract, recoveryHash, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { decodeContinuityImage, validateOpeningIdentityDecision } from '../dist/VideoCharacterContinuity.js';
+import { VIDEO_CHARACTERS } from '../dist/VideoCharacters.js';
 
 const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=';
 
@@ -19,10 +20,10 @@ test('opening identity requires a usable bounded correction only on rejection', 
         { acceptable: true, correction: '' });
 });
 
-async function fixture(run, { generatedAnchor = false, outage = false, oalgo = false } = {}) {
+async function fixture(run, { generatedAnchor = false, outage = false, character = null } = {}) {
     const directory = mkdtempSync(join(tmpdir(), 'opening-identity-'));
-    const plan = { intent: 'An explorer enters a cartoon room.', continuity_bible: oalgo
-            ? "Meximutt stands by the purple door in Meximutt's flag shirt." : 'The same blonde explorer in a red coat.',
+    const plan = { intent: 'An explorer enters a cartoon room.', continuity_bible: character
+            ? `${character.name} stands by the purple door in ${character.name}'s flag shirt.` : 'The same blonde explorer in a red coat.',
         keyframe: { recommended: true, prompt: 'Explorer by a lake' },
         prompt_analysis: { frontier_handling: { disposition: 'fulfill' }, dialogue_contract: { mode: 'none', lines: [] } },
         segments: Array.from({ length: 3 }, (_, index) => ({ title: 'Explorer', transition: index ? 'cut' : 'start',
@@ -44,7 +45,7 @@ async function fixture(run, { generatedAnchor = false, outage = false, oalgo = f
                 provider: 'google', model: 'gemini-3.8-flash', inputTokens: 2100, outputTokens: 100 });
             return checks.length === 2
                 ? { acceptable: true, correction: '' }
-                : { acceptable: false, correction: oalgo ? 'Show Meximutt as the human man standing by the purple door.'
+                : { acceptable: false, correction: character ? `Show ${character.name} as the human man standing by the purple door.`
                     : 'Restore the original human face and body, replacing the fox.' };
         },
         keyframeGenerator: async (actualPlan, references) => {
@@ -63,7 +64,7 @@ async function fixture(run, { generatedAnchor = false, outage = false, oalgo = f
             capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
             scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
         await broker.run("UPDATE video_jobs SET status='running', worker_id='worker', lease_token='lease', recovery_version=? WHERE public_id=?", [VIDEO_RECOVERY_VERSION, id]);
-        if (oalgo) await broker.run("UPDATE video_jobs SET command_variant='oalgo' WHERE public_id=?", [id]);
+        if (character) await broker.run('UPDATE video_jobs SET command_variant=? WHERE public_id=?', [character.commands.minimax.variant, id]);
         if (!generatedAnchor) {
             const source = join(directory, 'original.png');
             writeFileSync(source, decodeContinuityImage(image).data);
@@ -128,17 +129,18 @@ for (const generatedAnchor of [false, true]) test(`local opening guard caches de
     }, { generatedAnchor });
 });
 
-test('a local Meximutt opening names him only through Picture 1', async () => {
+for (const character of VIDEO_CHARACTERS)
+test(`a local ${character.name} opening names him only through Picture 1`, async () => {
     // 61af9651: Qwen read the unknown name as a creature and drew a mascot in his shirt.
     await fixture(async ({ request }) => {
         const directive = await request('image', { segment_index: 1 });
         const local = [directive.body.keyframe.prompt, ...Object.values(directive.body.keyframe.motion_contract)].join(' ');
-        assert.doesNotMatch(local, /Meximutt/);
+        assert.doesNotMatch(local, new RegExp(character.name));
         assert.match(local, /the man in Picture 1 stands by the purple door in the Picture 1 man's flag shirt/);
         assert.match(local, /camera realism of Picture 1:/);
         const rejected = await request('review', { segment_index: 1, kind: 'image', artifact_sha256: 'a'.repeat(64), frame: image });
         assert.deepEqual(rejected.body.issues, ['Show the man in Picture 1 as the human man standing by the purple door.']);
-    }, { oalgo: true });
+    }, { character });
 });
 
 test('identity service outages preserve the candidate and cap billed calls across requests', async () => {

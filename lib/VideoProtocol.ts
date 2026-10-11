@@ -11,6 +11,8 @@ export const VIDEO_SOURCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 // Allow two three-minute image attempts and their 75-second visual reviews.
 export const VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS = 9 * 60 * 1000;
+// Holds a character's guidance plus the clip-frame and reply-chain context sent with it.
+export const VIDEO_PLANNER_GUIDANCE_MAX_CHARS = 10_000;
 // Include both source downloads and time to return the broker's result.
 // Long songs add transcription and excerpt selection before any image composition.
 export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS + 6 * 60 * 1000;

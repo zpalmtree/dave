@@ -46,10 +46,10 @@ instead of a newly generated image. Every local step (planning and each opening 
 its own `gpuq` reservation on the `video-h3` profile and releases it afterward,
 like a scene render.
 Saved plans that silently rewrote the request are rejected on resume.
-For oalgo, the original Meximutt reference is mandatory. If it is missing or
-excluded, the job stops before rendering. For portrait-only oalgo requests,
-the original portrait is also the required opening frame; a generated
-replacement keyframe is rejected.
+For a character command such as oalgo, the character's original portrait
+reference is mandatory. If it is missing or excluded, the job stops before
+rendering. For portrait-only character requests, the original portrait is also
+the required opening frame; a generated replacement keyframe is rejected.
 
 Each scene gets an opening image. When the approved plan calls for the original
 portrait at frame zero, the worker uses that image directly. Continuing scenes
