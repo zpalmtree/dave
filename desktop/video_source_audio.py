@@ -110,7 +110,7 @@ def mux_original_song(ffmpeg, video, song, destination, start, frames):
     run_media(ffmpeg, ['-i', video, '-ss', f'{start:.9f}', '-i', song,
                       '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-af', 'apad',
                       '-c:a', 'aac', '-b:a', '192k', '-t', f'{frames / 24:.9f}',
-                      '-movflags', '+faststart', destination])
+                      '-movflags', '+faststart+use_metadata_tags', destination])
     return Path(destination)
 
 
@@ -122,7 +122,10 @@ def assemble_song_video(ffmpeg, paths, prepared, destination):
         labels.append(f"[v{index}]")
     filters.append(''.join(labels) + f'concat=n={len(paths)}:v=1:a=0[video]')
     run_media(ffmpeg, [*inputs, '-filter_complex', ';'.join(filters), '-map', '[video]',
-                      '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p', destination])
+                      '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
+                      '-movflags', '+faststart+use_metadata_tags', destination])
+    from video_metadata import preserve_joined_workflows
+    preserve_joined_workflows(paths, destination, ffmpeg)
     return Path(destination)
 
 

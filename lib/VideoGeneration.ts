@@ -6,6 +6,7 @@ import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
+import { videoWorkflowAttachments } from './VideoWorkflow.js';
 import fetch, { RequestInit, Response } from 'node-fetch';
 import { Client, cleanContent, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
 
@@ -883,12 +884,22 @@ export class VideoGenerationService {
 
     private async postDelivery(job: VideoJobView, statusMessage: any): Promise<any> {
         const channel = statusMessage.channel;
+        const existing = await this.existingDelivery(job, channel);
+        if (existing && (job.delivery_revision || 0) <= (job.delivered_revision || 0)) return existing;
+        const name = completedVideoAttachmentName(job);
+        let workflows: Array<{ attachment: Buffer; name: string }> = [];
+        if (job.result_path && existsSync(job.result_path)) {
+            try {
+                workflows = await videoWorkflowAttachments(job.result_path, name);
+            } catch (error) {
+                console.warn(`[Video] Could not extract workflow for ${job.id}: ${String(error)}`);
+            }
+        }
         const payload = {
             content: completedVideoPost(job),
-            files: [{ attachment: job.result_path, name: completedVideoAttachmentName(job) }],
+            files: [{ attachment: job.result_path, name }, ...workflows],
             allowedMentions: { repliedUser: true },
         };
-        const existing = await this.existingDelivery(job, channel);
         if (existing) {
             if ((job.delivery_revision || 0) > (job.delivered_revision || 0)) {
                 return existing.edit({ ...payload, attachments: [], allowedMentions: { parse: [] } });

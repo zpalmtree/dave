@@ -101,7 +101,9 @@ def join_clips(clips: list[Path], destination: Path) -> Path:
     # All paths are generated filenames in task-owned directories, never prompt text.
     manifest = destination.with_suffix('.concat.txt')
     manifest.write_text(''.join("file '" + str(path.resolve()).replace('\\', '/').replace("'", "'\\''") + "'\n" for path in clips), encoding='utf-8')
-    media_command(['-f', 'concat', '-safe', '0', '-i', str(manifest), '-c', 'copy', '-movflags', '+faststart', str(destination)])
+    media_command(['-f', 'concat', '-safe', '0', '-i', str(manifest), '-i', str(clips[0]), '-map', '0', '-map_metadata', '1', '-c', 'copy', '-movflags', '+faststart+use_metadata_tags', str(destination)])
+    from video_metadata import preserve_joined_workflows
+    preserve_joined_workflows(clips, destination, ffmpeg())
     duration(destination)
     return destination
 
@@ -117,7 +119,8 @@ def normalize_clip(source: Path, destination: Path) -> Path:
     media_command([*inputs, '-map', '0:v:0', '-map', '0:a:0' if has_audio else '1:a:0',
         '-vf', 'scale=960:720:force_original_aspect_ratio=decrease,pad=960:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24',
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest', str(destination)])
+        '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest',
+        '-movflags', '+faststart+use_metadata_tags', str(destination)])
     duration(destination)
     return destination
 
