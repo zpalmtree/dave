@@ -5,19 +5,27 @@ finishing, audio normalization, Discord compression, song trimming, and recovery
 assembly. FFmpeg's MP4 muxer requires `use_metadata_tags` to retain these custom
 tags; its default metadata handling silently drops them.
 
-The bot also extracts the graphs before upload and attaches `.workflow.json`
-files beside the video. Download a JSON attachment and open or drop it into
-ComfyUI. This provides a separate copy even when a Discord media preview or a
-later re-upload loses the video's embedded metadata. Graphs still require the
-referenced models, custom nodes, and input images/audio on the importing machine.
+The bot uploads only the video, without automatic JSON attachments or their
+large Discord previews. The workflows remain embedded in the MP4. Graphs still
+require the referenced models, custom nodes, and input images/audio on the
+importing machine.
 
 For multiple scenes, the MP4's standard tags describe the first available graph,
-and `dave_workflows` holds all scene graphs in order. The bot exports each scene
-separately for up to nine graphs. Larger collections use one `.workflows.json`
-bundle; save a graph from its `workflows` array as a JSON file to import it.
-Metadata-free videos remain deliverable without an extra attachment. Malformed
-or oversized graph data is omitted; extraction failures are logged without
-blocking video delivery.
+and `dave_workflows` holds all scene graphs in order. ComfyUI's standard import
+uses the first graph; the custom collection is an archive, not one combined
+workflow that renders the entire movie. To import another scene, extract its
+`workflow` (or API `prompt`) object from the collection and save it as JSON.
+The `videoWorkflowAttachments` utility in `lib/VideoWorkflow.ts` remains available
+for explicit extraction, but is not called during Discord delivery. For example,
+inspect the embedded collection locally with:
+
+```sh
+ffprobe -v error -show_entries format_tags=prompt,workflow,dave_workflows -of json video.mp4
+```
+
+Download the original attachment to retain its metadata; a processed preview or
+later re-upload may not retain it. Previously posted JSON attachments are not
+automatically removed by this change.
 
 This affects new deliveries. Already uploaded videos with missing metadata do
 not gain it retroactively; recovering those requires the original render.
