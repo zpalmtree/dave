@@ -31,13 +31,16 @@ test('preserves each scene and stays within Discord attachment and size limits',
     assert.deepEqual(workflowAttachments({ prompt: { '1': { class_type: 'Text', inputs: { text: 'a'.repeat(8 * 1024 * 1024) } } } }, 'duck.mp4'), []);
 });
 
-test('reads actual MP4 metadata and includes it on initial delivery and regeneration', async () => {
+test('delivers only the MP4 on initial delivery and regeneration, retaining all embedded scene workflows', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-workflow-'));
     try {
         const path = join(directory, 'test.mp4');
+        const scenes = [prompt, workflow, prompt];
         execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=s=32x32:d=0.1',
-            '-metadata', `prompt=${JSON.stringify(prompt)}`, '-movflags', '+use_metadata_tags', path]);
-        assert.deepEqual(decode((await videoWorkflowAttachments(path, 'test.mp4'))[0]), prompt);
+            '-metadata', `prompt=${JSON.stringify(prompt)}`,
+            '-metadata', `dave_workflows=${JSON.stringify([{ prompt }, { workflow }, { prompt }])}`,
+            '-movflags', '+use_metadata_tags', path]);
+        assert.deepEqual((await videoWorkflowAttachments(path, 'test.mp4')).map(decode), scenes);
         const service = new VideoGenerationService({ user: { id: 'bot' } });
         const job = { id: 'd8572423-test', model: 'minimax', prompt: 'A duck waves.', result_path: path,
             command_message_id: 'command', delivery_revision: 0, delivered_revision: 0 };
@@ -46,10 +49,12 @@ test('reads actual MP4 metadata and includes it on initial delivery and regenera
         const channel = { messages: { fetch: async id => typeof id === 'object' ? [] : id === 'command'
             ? { reply: async payload => { sent = payload; return existing; } } : existing } };
         await service.postDelivery(job, { channel });
-        assert.equal(sent.files.length, 2);
-        assert.deepEqual(decode(sent.files[1]), prompt);
+        assert.equal(sent.files.length, 1);
+        assert.equal(sent.files[0].attachment, path);
         await service.postDelivery({ ...job, delivery_message_id: 'original', delivery_revision: 1 }, { channel });
         assert.deepEqual(sent.attachments, []);
-        assert.deepEqual(decode(sent.files[1]), prompt);
+        assert.equal(sent.files.length, 1);
+        assert.equal(sent.files[0].attachment, path);
+        assert.deepEqual((await videoWorkflowAttachments(path, 'test.mp4')).map(decode), scenes);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });
