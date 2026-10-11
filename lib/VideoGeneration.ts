@@ -13,6 +13,7 @@ import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
+import { videoWorkflowArchive } from './VideoWorkflow.js';
 import fetch, { RequestInit, Response } from 'node-fetch';
 import { Client, cleanContent, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
 
@@ -894,9 +895,17 @@ export class VideoGenerationService {
         const existing = await this.existingDelivery(job, channel);
         if (existing && (job.delivery_revision || 0) <= (job.delivered_revision || 0)) return existing;
         const name = completedVideoAttachmentName(job);
+        let workflows: { attachment: Buffer; name: string } | null = null;
+        if (job.result_path && existsSync(job.result_path)) {
+            try {
+                workflows = await videoWorkflowArchive(job.result_path, name);
+            } catch (error) {
+                console.warn(`[Video] Could not archive workflows for ${job.id}: ${String(error)}`);
+            }
+        }
         const payload = {
             content: completedVideoPost(job),
-            files: [{ attachment: job.result_path, name }],
+            files: [{ attachment: job.result_path, name }, ...(workflows ? [workflows] : [])],
             allowedMentions: { repliedUser: true },
         };
         if (existing) {

@@ -4,12 +4,15 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { workflowAttachments, videoWorkflowAttachments } from '../dist/VideoWorkflow.js';
+import { workflowAttachments, videoWorkflowAttachments, workflowArchive } from '../dist/VideoWorkflow.js';
 import { VideoGenerationService } from '../dist/VideoGeneration.js';
 
 const prompt = { '1': { class_type: 'CLIPTextEncode', inputs: { text: 'A duck = 🦆; #hello\nline two' } } };
 const workflow = { nodes: [], links: [], version: 0.4 };
 const decode = file => JSON.parse(file.attachment.toString());
+const unzip = archive => JSON.parse(execFileSync('python3', ['-c',
+    'import sys,io,json,zipfile; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); assert z.testzip() is None; print(json.dumps({n:json.loads(z.read(n)) for n in z.namelist()}))'],
+    { input: archive.attachment, encoding: 'utf8' }));
 
 test('exports directly loadable graphs, prefers UI workflows and ignores unrelated metadata', () => {
     assert.deepEqual(decode(workflowAttachments({ prompt: JSON.stringify(prompt) }, 'duck.mp4')[0]), prompt);
@@ -21,17 +24,21 @@ test('exports directly loadable graphs, prefers UI workflows and ignores unrelat
     }
 });
 
-test('preserves each scene and stays within Discord attachment and size limits', () => {
+test('archives every scene in one standard ZIP without JSON previews or attachment-count limits', () => {
     const files = workflowAttachments({ dave_workflows: JSON.stringify([{ prompt }, { workflow }]) }, 'duck.mp4');
     assert.deepEqual(files.map(decode), [prompt, workflow]);
     assert.equal(files[1].name, 'duck-scene-2.workflow.json');
     const many = workflowAttachments({ dave_workflows: JSON.stringify(Array(10).fill({ prompt })) }, 'duck.mp4');
-    assert.equal(many.length, 1);
-    assert.deepEqual(decode(many[0]).workflows, Array(10).fill(prompt));
+    assert.equal(many.length, 10);
+    const archive = workflowArchive(many, 'duck.mp4');
+    assert.equal(archive.name, 'duck.workflows.zip');
+    assert.deepEqual(Object.values(unzip(archive)), Array(10).fill(prompt));
+    assert.deepEqual(unzip(workflowArchive(workflowAttachments({ prompt }, '🦆.mp4'), '🦆.mp4')), { '🦆.workflow.json': prompt });
+    assert.equal(workflowArchive([], 'duck.mp4'), null);
     assert.deepEqual(workflowAttachments({ prompt: { '1': { class_type: 'Text', inputs: { text: 'a'.repeat(8 * 1024 * 1024) } } } }, 'duck.mp4'), []);
 });
 
-test('delivers only the MP4 on initial delivery and regeneration, retaining all embedded scene workflows', async () => {
+test('delivers the MP4 and one ZIP on initial delivery and regeneration, retaining all three scene workflows', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-workflow-'));
     try {
         const path = join(directory, 'test.mp4');
@@ -49,12 +56,15 @@ test('delivers only the MP4 on initial delivery and regeneration, retaining all 
         const channel = { messages: { fetch: async id => typeof id === 'object' ? [] : id === 'command'
             ? { reply: async payload => { sent = payload; return existing; } } : existing } };
         await service.postDelivery(job, { channel });
-        assert.equal(sent.files.length, 1);
+        assert.equal(sent.files.length, 2);
         assert.equal(sent.files[0].attachment, path);
+        assert.ok(sent.files[1].name.endsWith('.workflows.zip'));
+        assert.deepEqual(Object.values(unzip(sent.files[1])), scenes);
         await service.postDelivery({ ...job, delivery_message_id: 'original', delivery_revision: 1 }, { channel });
         assert.deepEqual(sent.attachments, []);
-        assert.equal(sent.files.length, 1);
+        assert.equal(sent.files.length, 2);
         assert.equal(sent.files[0].attachment, path);
+        assert.deepEqual(Object.values(unzip(sent.files[1])), scenes);
         assert.deepEqual((await videoWorkflowAttachments(path, 'test.mp4')).map(decode), scenes);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });
