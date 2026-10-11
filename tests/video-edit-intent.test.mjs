@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateVideoEditDecision, sampleVideoEditFrames, videoEditSampleTimes } from '../dist/VideoEditIntent.js';
 import { resolveVideoEditRequest } from '../dist/VideoGeneration.js';
+import { ARGENMUTT, MEXIMUTT } from '../dist/VideoCharacters.js';
 
 const clip = { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4' };
 const image = { url: 'https://cdn.discordapp.com/attachments/1/2/image.png', name: 'image.png' };
@@ -13,19 +14,20 @@ const message = { attachments: new Map() };
 const sources = async (_command, _reply, edit) => edit ? { image, clip } : { image: clip, clip: null };
 
 test('conversational requests keep source target, replacement, image and reply context separate', async () => {
-    const result = await resolveVideoEditRequest('make him a robot lol', message, null, 'earlier: the dancer', false,
+    const result = await resolveVideoEditRequest('make him a robot lol', message, null, 'earlier: the dancer', null,
         async input => {
             assert.equal(input.request, 'make him a robot lol');
             assert.equal(input.context, 'earlier: the dancer');
             assert.equal(input.hasReplacementImage, true);
             assert.equal(input.hasPreset, false);
+            assert.equal(input.presetName, undefined);
             return { action: 'replace', target: 'the dancer', replacement: 'a robot', clarification: '' };
         }, sources);
     assert.deepEqual(result, { replacement: { target: 'the dancer', prompt: 'a robot', mode: 'replace' }, sources: { image, clip } });
 });
 
 test('additions keep the source clip and name the anchor subject they join', async () => {
-    const result = await resolveVideoEditRequest('needs more squid girls', message, null, 'reply: Splatoon Tahoe', false,
+    const result = await resolveVideoEditRequest('needs more squid girls', message, null, 'reply: Splatoon Tahoe', null,
         async () => ({ action: 'add', target: 'the purple truck', replacement: 'more Splatoon squid girls', clarification: '' }),
         sources);
     assert.deepEqual(result, { replacement: { target: 'the purple truck', prompt: 'more Splatoon squid girls', mode: 'add' },
@@ -33,23 +35,25 @@ test('additions keep the source clip and name the anchor subject they join', asy
 });
 
 test('explicit replacement syntax bypasses intent classification, still retaining clip for visual grounding', async () => {
-    const result = await resolveVideoEditRequest('replace Captain with slugs', message, null, '', true,
+    const result = await resolveVideoEditRequest('replace Captain with slugs', message, null, '', MEXIMUTT,
         async () => { throw new Error('should not classify'); }, sources);
     assert.equal(result.replacement.target, 'Captain');
     assert.equal(result.sources.clip, clip);
 });
 
-test('bare oalgo clips expose their preset to interpretation', async () => {
-    const result = await resolveVideoEditRequest('', message, null, '', true, async input => {
+for (const character of [MEXIMUTT, ARGENMUTT])
+test(`bare ${character.name} clips expose their preset to interpretation`, async () => {
+    const result = await resolveVideoEditRequest('', message, null, '', character, async input => {
         assert.equal(input.hasPreset, true);
+        assert.equal(input.presetName, character.name);
         assert.equal(input.hasReplacementImage, false);
-        return { action: 'replace', target: 'main subject', replacement: 'Meximutt', clarification: '' };
+        return { action: 'replace', target: 'main subject', replacement: character.name, clarification: '' };
     }, async () => ({ image: null, clip }));
-    assert.equal(result.replacement.prompt, 'Meximutt');
+    assert.equal(result.replacement.prompt, character.name);
 });
 
 test('new-video requests retain clip-frame behavior rather than becoming edits', async () => {
-    const result = await resolveVideoEditRequest('react to this', message, null, '', true,
+    const result = await resolveVideoEditRequest('react to this', message, null, '', MEXIMUTT,
         async () => ({ action: 'generate', target: '', replacement: '', clarification: '' }), sources);
     assert.equal(result.replacement, null);
     assert.equal(result.sources.clip, null);
@@ -59,7 +63,7 @@ test('new-video requests retain clip-frame behavior rather than becoming edits',
 test('generation routing preserves command-link precedence over a replied attachment', async () => {
     const calls = [];
     const commandClip = { ...clip, clip_url: 'https://video.twimg.com/command.mp4' };
-    const result = await resolveVideoEditRequest('continue this', message, message, '', false,
+    const result = await resolveVideoEditRequest('continue this', message, message, '', null,
         async () => ({ action: 'generate', target: '', replacement: '', clarification: '' }),
         async (_command, _reply, edit) => {
             calls.push(edit);

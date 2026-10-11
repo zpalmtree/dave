@@ -2,6 +2,13 @@ import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVid
 import { VideoStickerSourceImage, videoStickerSourceImage } from './VideoSticker.js';
 import { describeVideoSourceExcerpt, extractVideoSourceRange, videoSourceRange, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { classifyVideoEditIntent, VideoEditMode } from './VideoEditIntent.js';
+import {
+    MEXIMUTT,
+    VideoCharacter,
+    videoCharacterCommandLabel,
+    videoCharacterForCommand,
+    videoCharacterPlannerGuidance,
+} from './VideoCharacters.js';
 import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
@@ -203,20 +210,19 @@ function videoModelDisplayName(model: unknown): string {
 }
 
 function videoJobDisplayName(job: Pick<VideoJobView, 'model' | 'command_variant'>): string {
-    if (job.command_variant === 'oalgo') return 'Oalgo';
-    if (job.command_variant === 'oalgofast') return 'Oalgo Fast';
-    return videoModelDisplayName(job.model);
+    return videoCharacterCommandLabel(job.command_variant) || videoModelDisplayName(job.model);
 }
 
-export function videoSourceDescription(job: Pick<VideoJobView,
-    'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio' | 'composed_song' | 'source_excerpt'>, rangeHint = false): string {
+export function videoSourceDescription(job: Pick<VideoJobView, 'command_variant'
+    | 'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio' | 'composed_song' | 'source_excerpt'>, rangeHint = false): string {
+    const star = (videoCharacterForCommand(job.command_variant) || MEXIMUTT).name;
     const descriptions: Record<string, string> = {
         video_edit: 'Editing your video',
         video_frame: 'Using a frame from your video',
         image: 'Using your image',
-        preset: 'Starring Meximutt',
-        preset_image: 'Combining Meximutt with your image',
-        preset_video_frame: 'Combining Meximutt with a frame from your video',
+        preset: `Starring ${star}`,
+        preset_image: `Combining ${star} with your image`,
+        preset_video_frame: `Combining ${star} with a frame from your video`,
     };
     const excerpt = job.source_excerpt;
     const source = job.has_source_video
@@ -290,7 +296,8 @@ export interface SubmittedVideoAttachmentSourceImage {
 }
 
 export interface SubmittedVideoPresetSourceImage {
-    preset: 'meximutt' | 'oalgo';
+    /** A built-in character's id. */
+    preset: string;
 }
 
 export interface SubmittedVideoClipSourceImage {
@@ -421,8 +428,9 @@ export async function videoSourcesFromMessages(
     return { image, clip: null };
 }
 
-export function videoReplacementUsesPreset(prompt: string): boolean {
-    return !prompt.trim() || /^(?:meximutt|oalgo)\b/i.test(prompt.trim());
+export function videoReplacementUsesPreset(prompt: string, character: VideoCharacter): boolean {
+    const names = [character.id, ...(character.presetAliases || [])];
+    return !prompt.trim() || new RegExp(`^(?:${names.join('|')})\\b`, 'i').test(prompt.trim());
 }
 
 export function isVideoClipSourceImage(
@@ -1162,11 +1170,10 @@ export function ownerOnlyVideoGate(msg: Message): { canAccess: boolean; error?: 
 }
 
 interface VideoRequestOptions {
-    commandVariant?: 'meximutt' | 'oalgo' | 'oalgofast';
-    presetSourceImage?: SubmittedVideoPresetSourceImage['preset'];
+    /** Star this built-in character: his portrait, persona, and command name. */
+    character?: VideoCharacter;
     compositeAttachedImage?: boolean;
     compositeProvider?: VideoSourceCompositeProvider;
-    plannerGuidance?: string;
 }
 
 export function parseVideoReplacement(prompt: string): { target: string; prompt: string; mode: VideoEditMode } | null {
@@ -1182,7 +1189,7 @@ export function parseVideoReplacement(prompt: string): { target: string; prompt:
 /** Keep exact edit syntax cheap; interpret conversational requests only when a clip is present. */
 export async function resolveVideoEditRequest(
     prompt: string, commandMessage: Message, referencedMessage: Message | null,
-    context: string, hasPreset: boolean, classify = classifyVideoEditIntent,
+    context: string, preset: VideoCharacter | null, classify = classifyVideoEditIntent,
     resolveSources = videoSourcesFromMessages,
 ): Promise<{ replacement: ReturnType<typeof parseVideoReplacement>;
     sources: Awaited<ReturnType<typeof videoSourcesFromMessages>> }> {
@@ -1195,7 +1202,7 @@ export async function resolveVideoEditRequest(
     const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink);
     if (!replacement && candidates.clip) {
         const intent = await classify({ request: prompt, context,
-            hasReplacementImage: Boolean(candidates.image), hasPreset }, {
+            hasReplacementImage: Boolean(candidates.image), hasPreset: Boolean(preset), presetName: preset?.name }, {
             onUsage: usage => { recordTokenSpend(usage); },
         });
         if (intent.action === 'clarify') throw new Error(intent.clarification);
@@ -1208,28 +1215,8 @@ export async function resolveVideoEditRequest(
     return { replacement: null, sources: await resolveSources(commandMessage, referencedMessage, false, resolveLink) };
 }
 
-// Preferred in the blinded Stargate accent comparison; keep this wording as
-// the default delivery while allowing a scene's explicitly requested emotion.
-export const OALGO_DIALOGUE_DELIVERY = 'boastful and conversational adult male, with a low, chest-resonant voice and a strong Mexican Spanish accent on every English phrase, using full vowels, a lightly tapped r, crisp consonants, and animated rise-and-fall intonation';
-
-export const OALGO_VIDEO_PLANNER_GUIDANCE = [
-    'Meximutt is the recurring character in an enacted visual story. Treat the supplied portrait as his identity and opening frame, not as a requirement to hold its crop, background, or pose for the entire video.',
-    'Resolve spoken wording and visual subject matter independently. When the prompt is a boast, rant, or other utterance about concrete projects, places, objects, transformations, or game mechanics, preserve the appropriate spoken wording while visibly staging its distinctive ideas as actions with consequences. Put those visible beats in the analysis actions and inferred_staging, then realize them in shot.visual; mentioning them only in dialogue, intent, or eyebrow gestures does not cover them.',
-    'Meximutt is a real man in photorealistic live-action footage. Keep fantastical or mythic scenes in that photographic realism, with real, physically present places, creatures, and props, and his own narrow eyes and facial proportions, unless the user asks for another rendering style.',
-    'After honoring frame zero, use motivated camera reveals, interactions, transformations, or later cuts to develop the premise around the recognizable Meximutt character. Keep his face and mouth readable while he speaks, but allow a wider composition and changing surroundings. Preserve his Mexican-flag clothing while showing any separately requested national symbols in the scene.',
-    'For a reaction to an attached image, identify the main depicted subject and the props or relationships that explain the situation. Keep that subject recognizable and visibly connect Meximutt to it. In shot.visual, name the target of each purposeful glance or head turn and when it happens relative to his speech and reaction; choose the subject and any story-defining prop that he would naturally notice, rather than merely listing them as background scenery. Make the look legible through a clear directional head turn and a useful camera view of both observer and target; a tiny eye shift or downward nod in a distant composition is insufficient.',
-    'Make expressions develop in response to what he notices, using readable changes in eyes, brows, mouth, or posture appropriate to the requested emotion. Preserve facial identity without freezing his face or body. A request to look into the camera describes that action beat, not a permanent gaze lock; leave room for a motivated look toward the scene while preserving the user\'s action order and exact words. If the user explicitly requires continuous eye contact, stillness, or a specific expression sequence, honor that restriction and use only compatible reactions.',
-    'When a spoken beat and a separate physical reaction must happen in order, place them in successive shots with dialogue attached only to the speaking shot. Use a dialogue-free reaction shot to make the action readable, instead of packing a long sequence of timestamps into one shot.visual and placing its dialogue after the whole sequence. Keep the same viewpoint if the user explicitly locks the camera; separate beats need not add locations, segments, or runtime. For actions intended to accompany speech, keep them together in the speaking shot.',
-    'Develop the visual beats alongside the corresponding spoken phrases instead of reciting the whole monologue first and adding a long silent reenactment afterward. A short utterance with linked ideas normally needs its natural speaking time plus a brief setup and payoff, not a separate segment for each noun. Split long supplied speech at natural clause boundaries across shots or segments while preserving every word and its order. Add runtime only when a required action needs it to remain legible or the user requests it.',
-    'Use a static talking head only when the user requests that presentation or the brief is a simple greeting or performance with no visual story to enact. Do not invent a ban on new props, graphics, scene changes, or camera movement merely because dialogue is supplied verbatim. Respect actual user restrictions on text, motion, camera, or presentation.',
-    `Use this default Meximutt voice description in dialogue.delivery: "${OALGO_DIALOGUE_DELIVERY}". Copy it in full for his ordinary boastful or conversational delivery, including English-only lines and dialogue supplied verbatim by the user.`,
-    'For a different requested emotion, adapt the performance while retaining the low, chest-resonant adult male voice and strong Mexican Spanish accent through complaints, shouts, and emotional changes. Keep the voice description outside dialogue.text and language; never recite these instructions or phonetically respell the supplied words. Avoid a neutral American narrator or flat text-to-speech delivery.',
-    'When the requested action or source image supports dialogue, give the Meximutt character playful Mexican-American slang and code-switching.',
-    'Meximutt is the recurring character\'s cast name. The separate slang phrase "o algo" is pronounced as Spanish words, never as individual letters. Keep speaker IDs and user-supplied dialogue.text unchanged; specify this pronunciation in dialogue.delivery when the name or phrase occurs in spoken wording. A speaker name is a cast label, not extra dialogue: never announce it unless it belongs to the requested line.',
-    'Season nearly every new Meximutt line with slang such as “o algo,” “mayne,” “wey,” “puta pinche,” and “no mames wey”; vary which phrases appear across lines rather than repeating one, and let the slang land on the punchline.',
-    'Play Meximutt as a comedic character, not a narrator: he is supremely and boastfully confident, treats his own schemes and hot takes as genius, never admits he is wrong, and meets disaster with huge indignation before doubling down, making an excuse, or blaming something else. His generated lines react to what is happening in the shot—bragging, complaining, justifying, or escalating—instead of describing the premise the viewer can already see.',
-    'Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable Meximutt wording, but always retain the Spanglish accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.',
-].join(' ');
+// Meximutt's guidance under the name the benchmarks and tests know it by.
+export const OALGO_VIDEO_PLANNER_GUIDANCE = videoCharacterPlannerGuidance(MEXIMUTT);
 
 export async function handleVideoRequest(
     model: VideoModelId,
@@ -1237,6 +1224,8 @@ export async function handleVideoRequest(
     prompt: string,
     options: VideoRequestOptions = {},
 ): Promise<void> {
+    const character = options.character || null;
+    const commandVariant = character?.commands[model]?.variant;
     const referencedMessage = await fetchReferencedVideoMessage(msg);
     const earlierReplyChain = fetchEarlierVideoReplyChain(referencedMessage);
     let attachedSourceImage: SubmittedVideoAttachmentOrClipSourceImage | null;
@@ -1254,7 +1243,7 @@ export async function handleVideoRequest(
         earlier: videoReplyChainGuidance(await earlierReplyChain) }).slice(0, 6000);
     try {
         const resolved = model === 'minimax'
-            ? await withTyping(msg.channel, () => resolveVideoEditRequest(prompt, msg, referencedMessage, editContext, Boolean(options.presetSourceImage)))
+            ? await withTyping(msg.channel, () => resolveVideoEditRequest(prompt, msg, referencedMessage, editContext, character))
             : { replacement: null, sources: { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null } };
         replacement = resolved.replacement;
         const sources = resolved.sources;
@@ -1265,7 +1254,7 @@ export async function handleVideoRequest(
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
         if (replacement && sourceAudio) throw new Error('This edit keeps your video’s soundtrack. Please remove the separate song attachment.');
         sourceRange = sourceAudio || replacement ? videoSourceRange(extracted.range) : null;
-        if (replacement && !attachedSourceImage && !options.presetSourceImage && !replacement.prompt) {
+        if (replacement && !attachedSourceImage && !character && !replacement.prompt) {
             throw new Error('Attach a replacement image or describe the replacement: replace the character with slugs.');
         }
     } catch (error) {
@@ -1274,12 +1263,12 @@ export async function handleVideoRequest(
     }
     // Without a song or edited clip, the times belong to the user's idea.
     if (!sourceRange) prompt = promptWithRange;
-    const sourceImage: SubmittedVideoSourceImage | null = options.presetSourceImage && !replacement
-        ? { preset: options.presetSourceImage }
-        : attachedSourceImage || (replacement && options.presetSourceImage && videoReplacementUsesPreset(replacement.prompt)
-            ? { preset: options.presetSourceImage } : null);
+    const sourceImage: SubmittedVideoSourceImage | null = character && !replacement
+        ? { preset: character.id }
+        : attachedSourceImage || (replacement && character && videoReplacementUsesPreset(replacement.prompt, character)
+            ? { preset: character.id } : null);
     const replacementImagePrompt = replacement && !sourceImage ? replacement.prompt : null;
-    const compositeSourceImage = !replacement && options.presetSourceImage && options.compositeAttachedImage
+    const compositeSourceImage = !replacement && character && options.compositeAttachedImage
         ? attachedSourceImage
         : null;
     if (replacement && options.compositeProvider) {
@@ -1287,7 +1276,7 @@ export async function handleVideoRequest(
         return;
     }
     if (options.compositeProvider && !compositeSourceImage) {
-        await msg.reply('Attach an image or video, or reply to one, to combine it with Meximutt using --image-provider.');
+        await msg.reply(`Attach an image or video, or reply to one, to combine it with ${character?.name || 'the character'} using --image-provider.`);
         return;
     }
     prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel);
@@ -1297,7 +1286,7 @@ export async function handleVideoRequest(
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
     }
     if (!prompt) {
-        await msg.reply(`Usage: \`${config.prefix}${options.commandVariant || VIDEO_MODELS[model].command} <idea>\` — describe a video, attach an image or clip, or reply to a message.`);
+        await msg.reply(`Usage: \`${config.prefix}${commandVariant || VIDEO_MODELS[model].command} <idea>\` — describe a video, attach an image or clip, or reply to a message.`);
         return;
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
@@ -1305,9 +1294,9 @@ export async function handleVideoRequest(
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(replacementImagePrompt
         ? `Getting your video ready and creating ${replacement?.mode === 'add' ? 'what to add' : 'the replacement'} from your description…`
-        : initialVideoRequestStatus(model, options.commandVariant));
+        : initialVideoRequestStatus(model, commandVariant));
     const plannerGuidance = [
-        sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement ? '' : options.plannerGuidance,
+        sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement || !character ? '' : videoCharacterPlannerGuidance(character),
         isVideoClipSourceImage(sourceImage) ? VIDEO_CLIP_FRAME_PLANNER_GUIDANCE : '',
         videoReplyChainGuidance(await earlierReplyChain),
     ]
@@ -1320,7 +1309,7 @@ export async function handleVideoRequest(
             body: JSON.stringify({
                 model,
                 prompt,
-                command_variant: options.commandVariant || VIDEO_MODELS[model].command,
+                command_variant: commandVariant || VIDEO_MODELS[model].command,
                 requested_at: msg.createdTimestamp / 1000,
                 requester_id: msg.author.id,
                 is_admin: msg.author.id === config.god,
@@ -1400,25 +1389,18 @@ export function parseOalgoImageProvider(prompt: string): { prompt: string; provi
     return { prompt: remaining, provider };
 }
 
-export async function handleOalgoVideo(msg: Message, prompt: string): Promise<void> {
-    await handleOalgoVideoRequest('minimax', msg, prompt);
-}
-
-export async function handleOalgoFastVideo(msg: Message, prompt: string): Promise<void> {
-    await handleOalgoVideoRequest('minimaxfast', msg, prompt);
-}
-
-async function handleOalgoVideoRequest(model: 'minimax' | 'minimaxfast', msg: Message, prompt: string): Promise<void> {
-    let parsed: ReturnType<typeof parseOalgoImageProvider>;
-    try { parsed = parseOalgoImageProvider(prompt); }
-    catch (error) { await msg.reply(error instanceof Error ? error.message : String(error)); return; }
-    await handleVideoRequest(model, msg, parsed.prompt, {
-        commandVariant: model === 'minimaxfast' ? 'oalgofast' : 'oalgo',
-        presetSourceImage: 'meximutt',
-        compositeAttachedImage: true,
-        compositeProvider: parsed.provider,
-        plannerGuidance: OALGO_VIDEO_PLANNER_GUIDANCE,
-    });
+/** The handler for a built-in character's command on one renderer. */
+export function characterVideoHandler(character: VideoCharacter, model: VideoModelId) {
+    return async (msg: Message, prompt: string): Promise<void> => {
+        let parsed: ReturnType<typeof parseOalgoImageProvider>;
+        try { parsed = parseOalgoImageProvider(prompt); }
+        catch (error) { await msg.reply(error instanceof Error ? error.message : String(error)); return; }
+        await handleVideoRequest(model, msg, parsed.prompt, {
+            character,
+            compositeAttachedImage: true,
+            compositeProvider: parsed.provider,
+        });
+    };
 }
 
 export async function handleMinimaxFastVideo(msg: Message, prompt: string): Promise<void> {

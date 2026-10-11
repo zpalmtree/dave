@@ -116,11 +116,10 @@ import {
 import { config } from './Config.js';
 
 import {
+    characterVideoHandler,
     discordOnlyGate,
     handleMinimaxFastVideo,
     handleMinimaxVideo,
-    handleOalgoFastVideo,
-    handleOalgoVideo,
     handleVideoAdmin,
     handleVideoQueue,
     handleVideoStats,
@@ -128,10 +127,51 @@ import {
     singleVideoResponderGate,
 } from './VideoGeneration.js';
 
+import { VIDEO_CHARACTERS, VideoCharacter } from './VideoCharacters.js';
+
 import {
     handleQwenEdit,
     handleQwenImage,
 } from './QwenImage.js';
+
+/* Each built-in video character gets a command, plus a faster one where he offers it. */
+function characterVideoCommands(character: VideoCharacter): Command[] {
+    const { minimax, minimaxfast } = character.commands;
+    const costars = VIDEO_CHARACTERS.flatMap(other => other === character ? [] : other.commands.minimax?.variant || []);
+    const commands: Command[] = [];
+    if (minimax) {
+        commands.push({
+            aliases: [minimax.variant, ...(minimax.aliases || [])],
+            discordOnly: true,
+            primaryCommand: {
+                argsFormat: Args.Combined,
+                implementation: characterVideoHandler(character, 'minimax'),
+                description: `Make a video starring ${character.name}. Attach an image or clip for the scene, or use “replace” to edit someone in a video.`,
+                examples: [{ value: `${minimax.variant} ${character.example}` },
+                    { value: `${minimax.variant} --image-provider grok reacts to the attached image` },
+                    { value: `${minimax.variant} replace the dancer with ${character.name}, keeping the same moves` }],
+            },
+            relatedCommands: [...(minimaxfast ? [minimaxfast.variant] : []), ...costars, 'minimax', 'minimaxfast', 'videoqueue'],
+            commandGates: [discordOnlyGate, singleVideoResponderGate],
+        });
+    }
+    if (minimaxfast) {
+        commands.push({
+            aliases: [minimaxfast.variant, ...(minimaxfast.aliases || [])],
+            discordOnly: true,
+            primaryCommand: {
+                argsFormat: Args.Combined,
+                implementation: characterVideoHandler(character, 'minimaxfast'),
+                description: `Make a faster ${character.name} video from your idea, image, or a frame from a clip.`,
+                examples: [{ value: `${minimaxfast.variant} ${character.example}` },
+                    { value: `${minimaxfast.variant} --image-provider grok reacts to the attached image` }],
+            },
+            relatedCommands: [...(minimax ? [minimax.variant] : []), 'minimaxfast', 'videoqueue'],
+            commandGates: [discordOnlyGate, singleVideoResponderGate],
+        });
+    }
+    return commands;
+}
 
 /* Keep shared command order synchronized across deployment tracks. */
 const sharedCommands: Command[] = [
@@ -148,33 +188,7 @@ const sharedCommands: Command[] = [
         relatedCommands: ['minimaxfast', 'oalgo', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
-    {
-        aliases: ['oalgo', 'meximutt', 'minimutt'],
-        discordOnly: true,
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleOalgoVideo,
-            description: 'Make a video starring Meximutt. Attach an image or clip for the scene, or use “replace” to edit someone in a video.',
-            examples: [{ value: 'oalgo celebrates a championship victory' },
-                { value: 'oalgo --image-provider grok reacts to the attached image' },
-                { value: 'oalgo replace the dancer with Meximutt, keeping the same moves' }],
-        },
-        relatedCommands: ['oalgofast', 'minimax', 'minimaxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate, singleVideoResponderGate],
-    },
-    {
-        aliases: ['oalgofast'],
-        discordOnly: true,
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleOalgoFastVideo,
-            description: 'Make a faster Meximutt video from your idea, image, or a frame from a clip.',
-            examples: [{ value: 'oalgofast celebrates a championship victory' },
-                { value: 'oalgofast --image-provider grok reacts to the attached image' }],
-        },
-        relatedCommands: ['oalgo', 'minimaxfast', 'videoqueue'],
-        commandGates: [discordOnlyGate, singleVideoResponderGate],
-    },
+    ...VIDEO_CHARACTERS.flatMap(characterVideoCommands),
     {
         aliases: ['minimaxfast'],
         discordOnly: true,

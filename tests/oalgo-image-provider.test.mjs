@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { VideoBroker } from '../dist/VideoBroker.js';
 import { composeOalgoSourceImages } from '../dist/VideoOalgoComposite.js';
 import { createFrontierVideoKeyframe } from '../dist/VideoKeyframeProvider.js';
-import { parseOalgoImageProvider, handleOalgoVideo, handleOalgoFastVideo } from '../dist/VideoGeneration.js';
+import { parseOalgoImageProvider, characterVideoHandler } from '../dist/VideoGeneration.js';
+import { VIDEO_CHARACTERS } from '../dist/VideoCharacters.js';
 import { VideoUsagePersistenceError, videoUsageCost } from '../dist/VideoUsage.js';
 import { config } from '../dist/Config.js';
 
@@ -38,11 +39,11 @@ test('OALGO provider option is explicit, leading-only and removed from the creat
     for(const bad of ['--image-provider','--image-provider=','--image-provider other','--image-provider grok --image-provider sunburst'])assert.throws(()=>parseOalgoImageProvider(bad));
 });
 
-for (const handler of [handleOalgoVideo, handleOalgoFastVideo])
-test(`${handler.name}: explicit provider without an attachment gives an actionable error`,async()=>{
+for (const character of VIDEO_CHARACTERS) for (const [model, command] of Object.entries(character.commands))
+test(`${command.variant}: explicit provider without an attachment gives an actionable error`,async()=>{
     const replies=[];
-    await handler({attachments:new Map(),channel:{send:async()=>{},sendTyping:async()=>{}},reply:async text=>replies.push(text)},'--image-provider grok hello');
-    assert.equal(replies.length,1);assert.match(replies[0],/Attach an image or video, or reply to one/);
+    await characterVideoHandler(character,model)({attachments:new Map(),channel:{send:async()=>{},sendTyping:async()=>{}},reply:async text=>replies.push(text)},'--image-provider grok hello');
+    assert.equal(replies.length,1);assert.match(replies[0],new RegExp(`Attach an image or video, or reply to one, to combine it with ${character.name} `));
 });
 
 test('Grok repair preserves original authority, carries JPEG MIME, and records exact image charges',async()=>{

@@ -38,6 +38,7 @@ import {
     VIDEO_MAX_TOTAL_DURATION_SECONDS,
     VIDEO_MAX_USER_JOBS,
     VIDEO_MODELS,
+    VIDEO_PLANNER_GUIDANCE_MAX_CHARS,
     VIDEO_PROTOCOL_VERSION,
     VIDEO_RESULT_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
@@ -80,6 +81,14 @@ import {
     storeVideoSourceImage,
 } from './VideoSourceImage.js';
 import { composeOalgoSourceImages } from './VideoOalgoComposite.js';
+import {
+    MEXIMUTT,
+    VideoCharacter,
+    bindLocalPresetIdentity,
+    videoCharacterForCommand,
+    videoCharacterForPreset,
+    videoCharacterPhotorealKeyframe,
+} from './VideoCharacters.js';
 import { average, maximum, median, minimum, percentile, projectedVideoFinishAt, videoPlanRuntimeScale } from './VideoRuntimeStats.js';
 import {
     FrontierPlannerRejectedError,
@@ -132,19 +141,7 @@ import {
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LEASED_SQL = LEASED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
-// Generated scene openings for fantastical premises drift into a glossy CG look,
-// and H3 then keeps that medium and gives Meximutt cartoon eyes. State the
-// photographic medium positively; the image models draw negated styles too.
-export const OALGO_PHOTOREAL_KEYFRAME = 'Render this as a photorealistic live-action photograph with the camera realism of the original Meximutt portrait: real people with natural skin texture and pores, real fabric, natural lens optics and lighting, and Meximutt, wherever he appears, with his own narrow eyes at their true size, even in a fantastical setting, unless the request itself asks for a different art style.';
-
-// Local Qwen Image Edit has never heard of Meximutt. Read as a creature's name,
-// it drew a mascot in his flag shirt and gave his face to another cast member
-// (61af9651). Name him only through his reference picture.
-export function bindLocalPresetIdentity(text: string): string {
-    return text.replace(/\bthe original Meximutt portrait\b/g, 'Picture 1')
-        .replace(/\bMeximutt's\b/g, "the Picture 1 man's")
-        .replace(/\bMeximutt\b/g, 'the man in Picture 1');
-}
+export const OALGO_PHOTOREAL_KEYFRAME = videoCharacterPhotorealKeyframe(MEXIMUTT);
 
 interface BrokerOptions {
     videoEditGrounder?: typeof groundVideoEditTarget;
@@ -190,6 +187,7 @@ interface BrokerOptions {
         prompt: string,
         hooks: VideoProviderHooks,
         provider?: VideoSourceCompositeProvider,
+        character?: VideoCharacter,
     ) => Promise<VideoKeyframeResult>;
 }
 
@@ -1391,7 +1389,7 @@ export class VideoBroker {
                 writeJson(res, 409, { error: 'Only a finished job or an exhausted recovery can be regenerated.' });
                 return;
             }
-            const guidance = typeof body.planner_guidance === 'string' ? body.planner_guidance.slice(0, 8000) : row.planner_guidance;
+            const guidance = typeof body.planner_guidance === 'string' ? body.planner_guidance.slice(0, VIDEO_PLANNER_GUIDANCE_MAX_CHARS) : row.planner_guidance;
             await this.run(`UPDATE video_jobs SET status='queued', recovery_json=NULL, recovery_next_at=NULL,
                 planner_json=NULL, frontier_analysis_json=NULL, planner_guidance=?, error=NULL,
                 source_audio_path=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_path END,
@@ -1799,9 +1797,9 @@ export class VideoBroker {
         let plannerGuidance = sanitizeVideoWorkerText(
             body.planner_guidance,
             '',
-            // Meximutt combines visual-story and voice guidance. The old
+            // Character guidance combines visual-story and voice rules. The old
             // 2,000-character cap silently removed its trailing voice rules.
-            8000,
+            VIDEO_PLANNER_GUIDANCE_MAX_CHARS,
         ).trim() || null;
         const deliveryLimit = Number(
             body.delivery_limit_bytes ?? VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
@@ -1876,7 +1874,7 @@ export class VideoBroker {
             || isPresetSourceImage(compositeDescriptor))) {
             return {
                 status: 400,
-                body: { error: 'Image compositing requires the Meximutt preset and one Discord attachment.' },
+                body: { error: 'Image compositing requires a character preset and one Discord attachment.' },
             };
         }
         const compositeProvider: VideoSourceCompositeProvider = body.source_image_provider === undefined
@@ -1886,7 +1884,7 @@ export class VideoBroker {
         }
         if (body.source_image_provider !== undefined && (!compositeDescriptor
             || (body.model !== 'minimax' && body.model !== 'minimaxfast'))) {
-            return { status: 400, body: { error: 'Image provider selection requires a Meximutt image combination.' } };
+            return { status: 400, body: { error: 'Image provider selection requires a character image combination.' } };
         }
         const existingBeforeDownload = await this.get<JobRow>(
             'SELECT * FROM video_jobs WHERE idempotency_key = ?',
@@ -1918,16 +1916,22 @@ export class VideoBroker {
         const suppliedRequestedAt = Number(body.requested_at);
         const requestedAt = Number.isFinite(suppliedRequestedAt) && suppliedRequestedAt <= receivedAt
             && suppliedRequestedAt > receivedAt - 86400 ? suppliedRequestedAt : receivedAt;
-        const characterVariant = body.model === 'minimax' ? 'oalgo'
-            : body.model === 'minimaxfast' ? 'oalgofast' : null;
+        const presetCharacter = sourceDescriptor && isPresetSourceImage(sourceDescriptor)
+            ? videoCharacterForPreset(sourceDescriptor.preset) : null;
         const requestedCommandVariant = String(body.command_variant || (
-            sourceDescriptor && isPresetSourceImage(sourceDescriptor) ? characterVariant : VIDEO_MODELS[body.model as VideoModelId].command
+            presetCharacter ? presetCharacter.commands[body.model as VideoModelId]?.variant
+                : VIDEO_MODELS[body.model as VideoModelId].command
         ));
         // Older clients may still send an alias; share rollout selection and metrics.
         const commandVariant = ['meximutt', 'minimutt'].includes(requestedCommandVariant)
             ? 'oalgo' : requestedCommandVariant;
-        if (![VIDEO_MODELS[body.model as VideoModelId].command, characterVariant].includes(commandVariant)) {
+        const commandCharacter = videoCharacterForCommand(commandVariant);
+        if (commandVariant !== VIDEO_MODELS[body.model as VideoModelId].command
+            && commandCharacter?.commands[body.model as VideoModelId]?.variant !== commandVariant) {
             return { status: 400, body: { error: 'Invalid video command variant.' } };
+        }
+        if (presetCharacter && commandCharacter && presetCharacter !== commandCharacter) {
+            return { status: 400, body: { error: 'The starting-image preset belongs to another character command.' } };
         }
         const sourceMode = videoDescriptor ? 'video_edit' : compositeDescriptor ? 'preset_composite'
             : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset' : 'attachment') : 'generated';
@@ -2056,7 +2060,7 @@ export class VideoBroker {
                         } else {
                             const composed = await (
                                 this.options.sourceImageComposer || composeOalgoSourceImages
-                            )(base, attached, prompt, hooks, compositeProvider);
+                            )(base, attached, prompt, hooks, compositeProvider, presetCharacter || undefined);
                             sourceImage = storeCompositedSourceImage(composed, directory);
                             sourceImageComposition = 'generated';
                         }
@@ -2077,7 +2081,7 @@ export class VideoBroker {
                             ),
                         });
                         console.warn(
-                            '[Video] Meximutt source-image composition failed; queueing the local Qwen fallback.',
+                            `[Video] ${presetCharacter?.name} source-image composition failed; queueing the local Qwen fallback.`,
                             error,
                         );
                         sourceImage = base;
@@ -3350,9 +3354,8 @@ export class VideoBroker {
         plan = await this.enrichedSegmentKeyframePlan(job, plan);
         const derivedPlan = derivedSegmentKeyframePlan(plan, segmentIndex);
         if (!derivedPlan) return;
-        if (job.command_variant === 'oalgo' || job.command_variant === 'oalgofast') {
-            derivedPlan.keyframe.prompt += ` ${OALGO_PHOTOREAL_KEYFRAME}`;
-        }
+        const character = videoCharacterForCommand(job.command_variant);
+        if (character) derivedPlan.keyframe.prompt += ` ${videoCharacterPhotorealKeyframe(character)}`;
         const existing = await this.get<SegmentKeyframeRow>(
             'SELECT * FROM video_segment_keyframes WHERE job_public_id = ? AND segment_index = ?',
             [job.public_id, segmentIndex],
@@ -4870,10 +4873,11 @@ export class VideoBroker {
         const persist = this.recoveryPersister(id, state);
         const sources = this.recoverySources(job);
         const options = this.frontierOptions(job, criticalPath);
-        const sourceRequired = job.command_variant === 'oalgo' || job.command_variant === 'oalgofast';
+        const character = videoCharacterForCommand(job.command_variant);
+        const sourceRequired = Boolean(character);
         const originalFrameRequired = sourceRequired && !job.source_image_composite_path;
-        if (sourceRequired && (!job.source_image_path || !existsSync(job.source_image_path))) {
-            throw new RecoveryStoppedError('The required original Meximutt reference is missing.');
+        if (character && (!job.source_image_path || !existsSync(job.source_image_path))) {
+            throw new RecoveryStoppedError(`The required original ${character.name} reference is missing.`);
         }
         const song = await this.composedSongDirective(job, state, sources, options, persist);
         if (song) return state; // The desktop must compose the soundtrack before planning.
@@ -4924,12 +4928,13 @@ export class VideoBroker {
         const persist = this.recoveryPersister(id, state);
         const sources = this.recoverySources(job);
         const options = this.frontierOptions(job, true);
-        const sourceRequired = job.command_variant === 'oalgo' || job.command_variant === 'oalgofast';
+        const character = videoCharacterForCommand(job.command_variant);
+        const sourceRequired = Boolean(character);
         const originalFrameRequired = sourceRequired && !job.source_image_composite_path;
         const validateReferences = () => {
             if (state.terminal_error) throw new RecoveryStoppedError(state.terminal_error);
-            if (sourceRequired && (!job.source_image_path || !existsSync(job.source_image_path))) {
-                throw new RecoveryStoppedError('The required original Meximutt reference is missing.');
+            if (character && (!job.source_image_path || !existsSync(job.source_image_path))) {
+                throw new RecoveryStoppedError(`The required original ${character.name} reference is missing.`);
             }
             if (!state.prepared) return;
             if (state.prepared.contract?.planner === 'local') {
@@ -4948,9 +4953,9 @@ export class VideoBroker {
             if (state.prepared.prompt !== job.prompt || state.prepared.contract.prompt !== job.prompt) {
                 throw new RecoveryStoppedError('The saved plan rewrote the original request. Regenerate to plan the original request without an automatic rewrite.');
             }
-            if (!sourceRequired) return;
+            if (!character) return;
             if (!state.prepared.contract.use_source_images || !sources.length) {
-                throw new RecoveryStoppedError('The saved plan discarded the required Meximutt reference. Regenerate while retaining the original character.');
+                throw new RecoveryStoppedError(`The saved plan discarded the required ${character.name} reference. Regenerate while retaining the original character.`);
             }
             if (originalFrameRequired && state.prepared.plan.keyframe?.recommended !== false) {
                 throw new RecoveryStoppedError('The saved screenplay replaced the required original portrait opening. Regenerate while retaining the source frame.');
@@ -5082,7 +5087,7 @@ export class VideoBroker {
                 const segment = prepared.plan.segments[index];
                 if (operation === 'image') {
                     if (index === 0 && originalFrameRequired) {
-                        throw new RecoveryStoppedError('The original Meximutt portrait is required at frame zero; a generated replacement cannot be used.');
+                        throw new RecoveryStoppedError(`The original ${character?.name} portrait is required at frame zero; a generated replacement cannot be used.`);
                     }
                     const scenePlan = index === 0 ? prepared.plan : derivedSegmentKeyframePlan({
                         ...prepared.plan,
@@ -5092,7 +5097,7 @@ export class VideoBroker {
                     const continuity = state.continuity?.[index];
                     const keyframe = { ...scenePlan.keyframe, recommended: true,
                         prompt: `${scenePlan.keyframe?.prompt || segment.shots[0].visual} Create only this scene's opening instant; later actions and camera reveals need not already be visible. ${Array.isArray(body.correction) ? body.correction.slice(0, 5).map(String).join('; ').slice(0, 1000) : ''}` };
-                    if (sourceRequired) keyframe.prompt += ` ${OALGO_PHOTOREAL_KEYFRAME}`;
+                    if (character) keyframe.prompt += ` ${videoCharacterPhotorealKeyframe(character)}`;
                     if (continuity?.action === 'reanchor') {
                         keyframe.prompt += ` Restore the recurring cast from the permanent original references: ${continuity.identity_description}.`
                             + ' Stage the earliest recognizable instant of their return in this scene, preserving the planned setting and requested transformations.'
@@ -5124,7 +5129,7 @@ export class VideoBroker {
                     } catch (error) {
                         if (!frontierKeyframeDeclined(error)) throw error;
                         console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);
-                        const local = (text: string) => sourceRequired ? bindLocalPresetIdentity(text) : text;
+                        const local = (text: string) => character ? bindLocalPresetIdentity(text, character) : text;
                         const directive = { local_image_required: true,
                             keyframe: { prompt: local(keyframe.prompt), motion_contract: Object.fromEntries(
                                 Object.entries(keyframe.motion_contract || {}).map(([key, value]) => [key, local(String(value))])) },
@@ -5174,7 +5179,7 @@ export class VideoBroker {
                         if (repairAllowed) state.opening_identity_repair = key;
                         state.opening_identity[key] = { acceptable: decision.acceptable, permitted: true,
                             // The correction is appended to the local repair prompt.
-                            issues: decision.acceptable ? [] : [sourceRequired ? bindLocalPresetIdentity(decision.correction)
+                            issues: decision.acceptable ? [] : [character ? bindLocalPresetIdentity(decision.correction, character)
                                 : decision.correction], repair_allowed: repairAllowed };
                     }
                     const verdict = state.opening_identity[key];
