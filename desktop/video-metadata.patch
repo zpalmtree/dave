@@ -1,0 +1,141 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -7409,7 +7409,7 @@
+         "-b:a",
+         "192k",
+         "-movflags",
+-        "+faststart",
++        "+faststart+use_metadata_tags",
+         str(destination),
+     ]
+ 
+@@ -7515,7 +7515,7 @@
+         "-t",
+         f"{duration_seconds:.6f}",
+         "-movflags",
+-        "+faststart",
++        "+faststart+use_metadata_tags",
+         str(destination),
+     ]
+ 
+@@ -7670,7 +7670,7 @@
+         "-b:a",
+         "192k",
+         "-movflags",
+-        "+faststart",
++        "+faststart+use_metadata_tags",
+         str(destination),
+     ))
+     return command
+@@ -7949,7 +7949,7 @@
+                 "-b:a",
+                 "192k",
+                 "-movflags",
+-                "+faststart",
++                "+faststart+use_metadata_tags",
+                 str(destination),
+             ],
+             "could not encode natural loop trim",
+@@ -8106,7 +8106,7 @@
+             "-b:a",
+             "192k",
+             "-movflags",
+-            "+faststart",
++            "+faststart+use_metadata_tags",
+             str(destination),
+         )
+     )
+@@ -8114,6 +8114,8 @@
+     result = subprocess.run(command, capture_output=True, text=True, check=False)
+     if result.returncode != 0:
+         raise VideoGenError(f"FFmpeg assembly failed: {result.stderr.strip()}")
++    from video_metadata import preserve_joined_workflows
++    preserve_joined_workflows(paths, destination, ffmpeg_executable())
+     return validate_video(destination)
+ 
+ 
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -396,7 +396,7 @@
+         "-b:a",
+         str(audio_bitrate),
+         "-movflags",
+-        "+faststart",
++        "+faststart+use_metadata_tags",
+         str(destination),
+     ]
+ 
+@@ -3466,7 +3466,7 @@
+             "-b:a",
+             "160k",
+             "-movflags",
+-            "+faststart",
++            "+faststart+use_metadata_tags",
+             str(destination),
+             stdout=asyncio.subprocess.DEVNULL,
+             stderr=asyncio.subprocess.PIPE,
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -101,7 +101,9 @@
+     # All paths are generated filenames in task-owned directories, never prompt text.
+     manifest = destination.with_suffix('.concat.txt')
+     manifest.write_text(''.join("file '" + str(path.resolve()).replace('\\', '/').replace("'", "'\\''") + "'\n" for path in clips), encoding='utf-8')
+-    media_command(['-f', 'concat', '-safe', '0', '-i', str(manifest), '-c', 'copy', '-movflags', '+faststart', str(destination)])
++    media_command(['-f', 'concat', '-safe', '0', '-i', str(manifest), '-i', str(clips[0]), '-map', '0', '-map_metadata', '1', '-c', 'copy', '-movflags', '+faststart+use_metadata_tags', str(destination)])
++    from video_metadata import preserve_joined_workflows
++    preserve_joined_workflows(clips, destination, ffmpeg())
+     duration(destination)
+     return destination
+ 
+@@ -118,7 +120,8 @@
+         *(['-an', '-frames:v', str(song_frames)] if song_frames else ['-map', '0:a:0' if has_audio else '1:a:0']),
+         '-vf', 'scale=960:720:force_original_aspect_ratio=decrease,pad=960:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24',
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
+-        *([] if song_frames else ['-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest']), str(destination)])
++        *([] if song_frames else ['-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest']),
++        '-movflags', '+faststart+use_metadata_tags', str(destination)])
+     duration(destination)
+     if song_frames:
+         with av.open(str(destination)) as container:
+--- a/video_source_audio.py
++++ b/video_source_audio.py
+@@ -110,7 +110,7 @@
+     run_media(ffmpeg, ['-i', video, '-ss', f'{start:.9f}', '-i', song,
+                       '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-af', 'apad',
+                       '-c:a', 'aac', '-b:a', '192k', '-t', f'{frames / 24:.9f}',
+-                      '-movflags', '+faststart', destination])
++                      '-movflags', '+faststart+use_metadata_tags', destination])
+     return Path(destination)
+ 
+ 
+@@ -122,7 +122,10 @@
+         labels.append(f"[v{index}]")
+     filters.append(''.join(labels) + f'concat=n={len(paths)}:v=1:a=0[video]')
+     run_media(ffmpeg, [*inputs, '-filter_complex', ';'.join(filters), '-map', '[video]',
+-                      '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p', destination])
++                      '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
++                      '-movflags', '+faststart+use_metadata_tags', destination])
++    from video_metadata import preserve_joined_workflows
++    preserve_joined_workflows(paths, destination, ffmpeg)
+     return Path(destination)
+ 
+ 
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -3939,6 +3939,7 @@
+             mock.patch.object(video_gen, "ffmpeg_executable", return_value="ffmpeg"),
+             mock.patch.object(video_gen.subprocess, "run", return_value=result) as run,
+             mock.patch.object(video_gen, "validate_video", return_value={"duration_seconds": 9.5}),
++            mock.patch("video_metadata.preserve_joined_workflows") as preserve,
+         ):
+             video_gen.assemble_segments(
+                 [Path("one.mp4"), Path("two.mp4"), Path("three.mp4")],
+@@ -3946,6 +3947,8 @@
+                 ["start", "dissolve", "dissolve"],
+                 Path("joined.mp4"),
+             )
++        preserve.assert_called_once_with(
++            [Path("one.mp4"), Path("two.mp4"), Path("three.mp4")], Path("joined.mp4"), "ffmpeg")
+         command = run.call_args.args[0]
+         filters = command[command.index("-filter_complex") + 1]
+         self.assertIn("fps=24,settb=AVTB", filters)
