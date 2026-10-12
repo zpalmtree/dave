@@ -240,7 +240,11 @@ the escalation survives. A reaction after a spoken punchline gets its own
 dialogue-free shot with concrete non-speech audio, because H3 invents words in
 silence after speech. Binding contracts still take precedence. The `$oalgo`
 guidance gives Meximutt a consistent comedic personality and keeps his slang
-frequent.
+frequent. It asks for an ending built from each premise, because the earlier
+wording ("meets disaster with huge indignation before ... blaming something
+else") made about half of his sketches end on him blaming an object.
+`scripts/benchmark-video-rerender.mjs` replans and re-renders delivered jobs
+under alternative planners or guidance with the source image and seed held fixed.
 
 On September 26, twelve recent and holdout prompts were planned once each by
 the production Opus hybrid path with the previous and the new instructions, then
