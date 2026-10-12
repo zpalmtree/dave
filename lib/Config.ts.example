@@ -34,6 +34,8 @@ class Config {
 
     public geminiApiKey: string = 'enter gemini api key here';
 
+    public metaApiKey: string = 'enter meta model api key here';
+
     public grokApiKey: string = 'enter grok/xai api key here';
 
     public watchPollInterval: number = 10000;

@@ -177,6 +177,9 @@ export function videoUsageCost(usage: VideoProviderUsage): number {
     if (usage.model === 'claude-opus-5-5') {
         return (input * 4 + output * 20 + cacheRead * 0.2 + cacheWrite * 5) / 1_000_000;
     }
+    if (usage.model.startsWith('muse-wonder-1')) {
+        return (input * 4 + output * 20 + cacheRead * 0.2 + cacheWrite * 4) / 1_000_000;
+    }
     if (/^gemini-3\.[78]-flash(?:$|-)/.test(usage.model)) {
         const multiplier = (usage.pricingDate || new Date().toISOString().slice(0, 10)) >= '2027-01-01' ? 2 : 1;
         return multiplier * (input * 0.75 / 1_000_000
