@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { workflowAttachments, videoWorkflowAttachments, workflowArchive } from '../dist/VideoWorkflow.js';
 import { VideoGenerationService } from '../dist/VideoGeneration.js';
+import { handleWorkflowDownload } from '../dist/VideoWorkflowDownload.js';
 
 const prompt = { '1': { class_type: 'CLIPTextEncode', inputs: { text: 'A duck = 🦆; #hello\nline two' } } };
 const workflow = { nodes: [], links: [], version: 0.4 };
@@ -38,7 +39,7 @@ test('archives every scene in one standard ZIP without JSON previews or attachme
     assert.deepEqual(workflowAttachments({ prompt: { '1': { class_type: 'Text', inputs: { text: 'a'.repeat(8 * 1024 * 1024) } } } }, 'duck.mp4'), []);
 });
 
-test('delivers the MP4 and one ZIP on initial delivery and regeneration, retaining all three scene workflows', async () => {
+test('delivers only the MP4 publicly and provides all scenes privately across regeneration and render cleanup', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'video-workflow-'));
     try {
         const path = join(directory, 'test.mp4');
@@ -48,7 +49,8 @@ test('delivers the MP4 and one ZIP on initial delivery and regeneration, retaini
             '-metadata', `dave_workflows=${JSON.stringify([{ prompt }, { workflow }, { prompt }])}`,
             '-movflags', '+use_metadata_tags', path]);
         assert.deepEqual((await videoWorkflowAttachments(path, 'test.mp4')).map(decode), scenes);
-        const service = new VideoGenerationService({ user: { id: 'bot' } });
+        const downloads = join(directory, 'downloads');
+        const service = new VideoGenerationService({ user: { id: 'bot' } }, downloads);
         const job = { id: 'd8572423-test', model: 'minimax', prompt: 'A duck waves.', result_path: path,
             command_message_id: 'command', delivery_revision: 0, delivered_revision: 0 };
         let sent;
@@ -56,15 +58,43 @@ test('delivers the MP4 and one ZIP on initial delivery and regeneration, retaini
         const channel = { messages: { fetch: async id => typeof id === 'object' ? [] : id === 'command'
             ? { reply: async payload => { sent = payload; return existing; } } : existing } };
         await service.postDelivery(job, { channel });
-        assert.equal(sent.files.length, 2);
+        assert.equal(sent.files.length, 1);
         assert.equal(sent.files[0].attachment, path);
-        assert.ok(sent.files[1].name.endsWith('.workflows.zip'));
-        assert.deepEqual(Object.values(unzip(sent.files[1])), scenes);
+        const button = sent.components[0].toJSON().components[0];
+        assert.equal(button.label, 'Download workflows');
+        let privateReply;
+        const interaction = {
+            isButton: () => true, customId: button.custom_id,
+            message: { author: { id: 'bot' } }, client: { user: { id: 'bot' } },
+            deferReply: async options => assert.equal(options.ephemeral, true),
+            editReply: async payload => { privateReply = payload; },
+        };
+        await handleWorkflowDownload(interaction, downloads);
+        assert.deepEqual(Object.values(unzip(privateReply.files[0])), scenes);
+        execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=s=32x32:d=0.1',
+            '-metadata', `workflow=${JSON.stringify(workflow)}`, '-movflags', '+use_metadata_tags', path]);
         await service.postDelivery({ ...job, delivery_message_id: 'original', delivery_revision: 1 }, { channel });
         assert.deepEqual(sent.attachments, []);
-        assert.equal(sent.files.length, 2);
+        assert.equal(sent.files.length, 1);
         assert.equal(sent.files[0].attachment, path);
-        assert.deepEqual(Object.values(unzip(sent.files[1])), scenes);
-        assert.deepEqual((await videoWorkflowAttachments(path, 'test.mp4')).map(decode), scenes);
+        const regeneratedButton = sent.components[0].toJSON().components[0];
+        assert.notEqual(regeneratedButton.custom_id, button.custom_id);
+        await handleWorkflowDownload({ ...interaction, customId: regeneratedButton.custom_id }, downloads);
+        assert.deepEqual(Object.values(unzip(privateReply.files[0])), [workflow]);
+        execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=s=32x32:d=0.1', path]);
+        await service.postDelivery({ ...job, delivery_message_id: 'original', delivery_revision: 2 }, { channel });
+        assert.deepEqual(sent.components, []);
+        assert.equal(sent.files.length, 1);
+        rmSync(path);
+        // A fresh handler needs neither the render nor an in-memory collector.
+        await handleWorkflowDownload(interaction, downloads);
+        assert.deepEqual(Object.values(unzip(privateReply.files[0])), scenes);
+        await handleWorkflowDownload({ ...interaction, customId: 'video-workflows:../../private' }, downloads);
+        assert.match(privateReply, /unavailable/);
+        await handleWorkflowDownload({ ...interaction, customId: `video-workflows:${'0'.repeat(64)}` }, downloads);
+        assert.match(privateReply, /try again later/);
+        privateReply = undefined;
+        await handleWorkflowDownload({ ...interaction, message: { author: { id: 'other' } } }, downloads);
+        assert.equal(privateReply, undefined);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });

@@ -5,8 +5,9 @@ finishing, audio normalization, Discord compression, song trimming, and recovery
 assembly. FFmpeg's MP4 muxer requires `use_metadata_tags` to retain these custom
 tags; its default metadata handling silently drops them.
 
-The bot uploads the video and one compact `.workflows.zip` attachment, avoiding
-the large Discord previews produced by separate JSON files. Extract the ZIP and
+The bot uploads the video with a **Download workflows** button. Clicking it
+provides a ZIP in a private response visible only to the person clicking, keeping
+the public message free of workflow attachment cards. Extract the ZIP and
 drop the desired scene's `.workflow.json` into ComfyUI. Every scene has its own
 file, including videos with more than nine scenes. Graphs still require the
 referenced models, custom nodes, and input images/audio on the importing machine.
@@ -16,6 +17,12 @@ verified on job `1d6b0cdb`: the broker MP4 contained three graphs, while the MP4
 downloaded from the message attachment URL contained none. The ZIP is therefore
 the reliable way to share workflows through Discord; embedding alone is not
 sufficient.
+
+Workflow ZIPs are retained in `~/.local/share/dave/video-workflows` (override with
+`VIDEO_WORKFLOW_DOWNLOAD_DIR`), independently of the broker's 24-hour render
+cleanup. Keep this directory when moving or rebuilding the server: buttons use
+content hashes and continue working after bot restarts. Regeneration replaces
+the button with the new archive. Videos without workflow metadata have no button.
 
 For multiple scenes, the MP4's standard tags describe the first available graph,
 and `dave_workflows` holds all scene graphs in order. ComfyUI's standard import
@@ -28,7 +35,7 @@ For example, inspect the embedded collection in an original local MP4 with:
 ffprobe -v error -show_entries format_tags=prompt,workflow,dave_workflows -of json video.mp4
 ```
 
-Previously posted JSON attachments are not automatically removed by this change.
+Previously posted workflow attachments are not automatically removed by this change.
 
 This affects new deliveries. Already uploaded videos with missing metadata do
 not gain it retroactively; recovering those requires the original render.
