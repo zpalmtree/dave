@@ -257,6 +257,10 @@ judge rated renderability about one point lower, and total planned runtime rose
 - `VIDEO_EXPERIMENT_ID` and `VIDEO_PIPELINE_VARIANT` label a cohort.
 - `VIDEO_PLANNER_MODEL` overrides the Opus production default. Use
   `gpt-6-sol` for the Sol baseline or `gemini-3.8-flash` for the Flash adapter.
+  `muse-wonder-1.0` selects Meta's Model API through the same Responses request
+  path (key in `metaApiKey` or `MODEL_API_KEY`); it is off unless selected. On
+  six `$oalgo` prompts on October 12 it staged the request literally with little
+  added writing, at both medium and high effort, so it stays a benchmark arm.
 - `VIDEO_PLANNER_STRATEGY` accepts `hybrid-single-pass`, `two-pass`, or
   `single-pass`. By default Opus uses hybrid with two-pass fallback and Sol uses
   single-pass. Hybrid requires an Anthropic model; plain single-pass on Opus

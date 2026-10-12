@@ -1,7 +1,7 @@
 export type VideoReasoningEffort = 'low' | 'medium' | 'high';
 
 export interface VideoTextModelCapabilities {
-    provider: 'openai' | 'google' | 'anthropic';
+    provider: 'openai' | 'google' | 'anthropic' | 'meta';
     singlePass: boolean;
     streamingFirstFrame: boolean;
     efforts: readonly VideoReasoningEffort[];
@@ -20,6 +20,12 @@ const anthropic: VideoTextModelCapabilities = {
     efforts: ['low', 'medium', 'high'],
 };
 
+// Meta's Model API takes OpenAI Responses requests; no streamed first frame or OpenAI service tiers.
+const meta: VideoTextModelCapabilities = {
+    provider: 'meta', singlePass: true, streamingFirstFrame: false,
+    efforts: ['low', 'medium', 'high'],
+};
+
 /** Explicit API capabilities, verified against provider documentation and planner schemas on 2026-09-23. */
 export const VIDEO_TEXT_MODELS: Readonly<Record<string, VideoTextModelCapabilities>> = {
     'gpt-6-astra': openai,
@@ -30,6 +36,7 @@ export const VIDEO_TEXT_MODELS: Readonly<Record<string, VideoTextModelCapabiliti
     'gemini-3.7-flash': google,
     'gemini-3.8-flash': google,
     'claude-opus-5-5': anthropic,
+    'muse-wonder-1.0': meta,
 };
 
 export function videoTextModelCapabilities(model: string): VideoTextModelCapabilities {

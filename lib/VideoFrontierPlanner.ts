@@ -1741,6 +1741,13 @@ function extractOutputText(response: any): string {
     throw new Error(response?.error?.message || 'Video planner returned no screenplay.');
 }
 
+/** Optional so configs deployed before the Muse experiment still build. */
+function metaModelApiKey(): string {
+    const key = (config as { metaApiKey?: string }).metaApiKey || process.env.MODEL_API_KEY;
+    if (!key || key.startsWith('enter ')) throw new Error('Meta Model API key is not configured.');
+    return key;
+}
+
 function openAIPolicyRefusal(status: number, body: any): boolean {
     if (status !== 400) return false;
     const code = String(body?.error?.code || '');
@@ -2040,7 +2047,12 @@ async function requestSolResponse(
     options: VideoFrontierCallOptions,
 ): Promise<any> {
     const plannerModel = String(payload.model || VIDEO_PLANNER_MODEL);
-    const requestedTier = requestedOpenAIServiceTier(options.serviceTier);
+    // Meta's Model API accepts the same Responses payload, without OpenAI's
+    // prompt-cache keys, service tiers, or the streamed provisional keyframe.
+    const meta = VIDEO_TEXT_MODELS[plannerModel]?.provider === 'meta';
+    const provider = meta ? 'meta' : 'openai';
+    const providerName = meta ? 'Meta' : 'OpenAI';
+    const requestedTier = meta ? undefined : requestedOpenAIServiceTier(options.serviceTier);
     const maxAttempts = options.maxRequestAttempts || 2;
     let lastError: unknown;
     let expandOutputBudget = false;
@@ -2055,21 +2067,22 @@ async function requestSolResponse(
             const attemptPayload = expandOutputBudget && baseMaximum > 0
                 ? { ...payload, max_output_tokens: Math.min(128_000, Math.max(12_000, baseMaximum * 2)) }
                 : payload;
-            const streamProvisionalKeyframe = stage === 'single_pass'
+            const streamProvisionalKeyframe = !meta && stage === 'single_pass'
                 && Boolean(options.onProvisionalKeyframe);
-            await options.beforeRequest?.({ stage, attempt, provider: 'openai', model: plannerModel,
+            await options.beforeRequest?.({ stage, attempt, provider, model: plannerModel,
                 serviceTier: requestedTier, maxInputTokens: videoRequestInputTokenBound(attemptPayload),
                 maxOutputTokens: Number(attemptPayload.max_output_tokens) });
-            const response = await fetch('https://api.openai.com/v1/responses', {
+            const response = await fetch(meta
+                ? 'https://api.meta.ai/v1/responses' : 'https://api.openai.com/v1/responses', {
                 method: 'POST',
                 signal,
                 headers: {
-                    authorization: `Bearer ${config.openaiApiKey}`,
+                    authorization: `Bearer ${meta ? metaModelApiKey() : config.openaiApiKey}`,
                     'content-type': 'application/json',
                 },
                 body: JSON.stringify({
                     ...attemptPayload,
-                    ...videoPlannerPromptCacheFields(stage),
+                    ...(meta ? {} : videoPlannerPromptCacheFields(stage)),
                     ...(requestedTier ? { service_tier: requestedTier } : {}),
                     ...(streamProvisionalKeyframe ? { stream: true } : {}),
                 }),
@@ -2077,7 +2090,7 @@ async function requestSolResponse(
             const body: any = streamProvisionalKeyframe && response.ok
                 ? await readStreamingSolResponse(response, options)
                 : await response.json();
-            serviceTier = resolvedOpenAIServiceTier(body, options.serviceTier);
+            serviceTier = meta ? 'default' : resolvedOpenAIServiceTier(body, options.serviceTier);
             const responseStatus = String(body?.status || 'completed');
             const incomplete = response.ok && responseStatus === 'incomplete';
             const unexpectedState = response.ok && responseStatus !== 'completed';
@@ -2088,14 +2101,14 @@ async function requestSolResponse(
                     stage,
                     attempt,
                     outcome: logicalSuccess ? 'success' : 'error',
-                    provider: 'openai',
+                    provider,
                     model: String(body.model || plannerModel),
                     serviceTier,
                     ...openAIVideoUsage(body),
                 });
             }
             if (!response.ok) {
-                detail = body?.error?.message || `OpenAI returned HTTP ${response.status}.`;
+                detail = body?.error?.message || `${providerName} returned HTTP ${response.status}.`;
                 // A moderation block is a refusal, not an outage: route it like one.
                 const error = openAIPolicyRefusal(response.status, body)
                     ? new FrontierPlannerRejectedError('provider_policy', detail)
@@ -2128,7 +2141,7 @@ async function requestSolResponse(
                 stage,
                 attempt,
                 outcome,
-                provider: 'openai',
+                provider,
                 model: plannerModel,
                 serviceTier,
                 durationSeconds: (Date.now() - started) / 1000,
@@ -2136,7 +2149,7 @@ async function requestSolResponse(
             });
         }
     }
-    throw lastError instanceof Error ? lastError : new Error('OpenAI request failed.');
+    throw lastError instanceof Error ? lastError : new Error(`${providerName} request failed.`);
 }
 
 function anthropicPlannerMessages(input: any): Array<{ role: 'user' | 'assistant'; content: any[] }> {
