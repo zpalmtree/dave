@@ -14,6 +14,7 @@ import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
 import { existsSync } from 'fs';
 import { videoWorkflowArchive } from './VideoWorkflow.js';
+import { handleWorkflowDownload, saveWorkflowDownload, workflowDownloadDirectory } from './VideoWorkflowDownload.js';
 import fetch, { RequestInit, Response } from 'node-fetch';
 import { Client, cleanContent, Message, MessageReaction, PermissionFlagsBits, User } from 'discord.js';
 
@@ -758,7 +759,7 @@ export class VideoGenerationService {
         ReturnType<Message['createReactionCollector']>
     >();
 
-    constructor(private readonly client: Client) {}
+    constructor(private readonly client: Client, private readonly workflowDirectory = workflowDownloadDirectory()) {}
 
     start(): void {
         if (this.timer) return;
@@ -905,7 +906,8 @@ export class VideoGenerationService {
         }
         const payload = {
             content: completedVideoPost(job),
-            files: [{ attachment: job.result_path, name }, ...(workflows ? [workflows] : [])],
+            files: [{ attachment: job.result_path, name }],
+            components: workflows ? [await saveWorkflowDownload(workflows, this.workflowDirectory)] : [],
             allowedMentions: { repliedUser: true },
         };
         if (existing) {
@@ -1120,6 +1122,11 @@ export function startVideoGenerationService(client: Client): void {
     if (!service) {
         service = new VideoGenerationService(client);
         services.set(client.user.id, service);
+        client.on('interactionCreate', interaction => {
+            void handleWorkflowDownload(interaction).catch(error => {
+                console.warn(`[Video] Workflow interaction failed: ${String(error)}`);
+            });
+        });
     }
     service.start();
 }
