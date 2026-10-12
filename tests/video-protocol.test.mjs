@@ -43,6 +43,7 @@ import {
     requestedVideoDurationSeconds,
     sanitizeVideoWorkerText,
     videoPromptContentNumbers,
+    VIDEO_PLANNER_GUIDANCE_MAX_CHARS,
 } from '../dist/VideoProtocol.js';
 import {
     VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS,
@@ -2547,7 +2548,7 @@ test('video reply-chain guidance is compact background that excludes blank messa
     const withOalgo = `${OALGO_VIDEO_PLANNER_GUIDANCE} ${videoReplyChainGuidance(
         Array.from({ length: 3 }, () => ({ content: 'y'.repeat(1000) })),
     )}`;
-    assert.ok(withOalgo.length <= 8000, `combined guidance is ${withOalgo.length} characters`);
+    assert.ok(withOalgo.length <= VIDEO_PLANNER_GUIDANCE_MAX_CHARS, `combined guidance is ${withOalgo.length} characters`);
 });
 
 test('frontier keyframe prompt binds frame-zero motion geometry', () => {
