@@ -6,6 +6,7 @@ import { pipeline } from 'stream/promises';
 import fetch from 'node-fetch';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
 import { isTwitterVideoUrl } from './TwitterVideo.js';
+import { isYoutubeVideoUrl } from './YoutubeVideo.js';
 import { rangeVideoSourceExcerpt, VIDEO_SOURCE_INPUT_MAX_SECONDS, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 
 export const VIDEO_EDIT_MIN_SECONDS = 0.5;
@@ -29,8 +30,11 @@ export interface StoredVideoSourceClip {
     excerpt?: VideoSourceExcerpt | null;
 }
 
+/** Fetches a YouTube video to a local file; the broker hands this to the desktop worker. */
+export type YoutubeVideoFetcher = (url: string, destination: string) => Promise<void>;
+
 export function isVideoSourceClipUrl(value: string): boolean {
-    if (isTwitterVideoUrl(value)) return true;
+    if (isTwitterVideoUrl(value) || isYoutubeVideoUrl(value)) return true;
     try {
         const url = new URL(value);
         return url.protocol === 'https:' && !url.port && !url.username && !url.password &&
@@ -41,7 +45,7 @@ export function isVideoSourceClipUrl(value: string): boolean {
 export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object' || !isVideoSourceClipUrl(String(value.clip_url || ''))) {
-        throw new Error('The source video must be a Discord attachment or a resolved Twitter/X MP4.');
+        throw new Error('The source video must be a Discord attachment, a resolved Twitter/X MP4, or a YouTube video link.');
     }
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();
@@ -98,7 +102,7 @@ export async function cutVideoSourceClip(input: string, output: string, excerpt:
 }
 
 export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, directory: string,
-    range: VideoSourceRange | null = null): Promise<StoredVideoSourceClip> {
+    range: VideoSourceRange | null = null, fetchYoutube?: YoutubeVideoFetcher): Promise<StoredVideoSourceClip> {
     source = sourceClipDescriptor(source)!;
     const extension = source.name.split('.').pop()!.toLowerCase();
     mkdirSync(directory, { recursive: true });
@@ -108,19 +112,27 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
     const timeout = setTimeout(() => controller.abort(), 120_000);
     rmSync(temporary, { force: true });
     try {
-        const response = await fetch(source.clip_url, { signal: controller.signal, redirect: 'manual' });
-        if (!response.ok || !response.body || !isVideoSourceClipUrl(response.url)) {
-            throw new Error(`Could not download the source video (HTTP ${response.status}).`);
-        }
-        if (Number(response.headers.get('content-length') || 0) > VIDEO_EDIT_MAX_BYTES) {
-            throw new Error('The source video exceeds 100 MiB.');
-        }
         let bytes = 0;
-        const meter = new Transform({ transform(chunk, _encoding, callback) {
-            bytes += chunk.length;
-            callback(bytes > VIDEO_EDIT_MAX_BYTES ? new Error('The source video exceeds 100 MiB.') : null, chunk);
-        } });
-        await pipeline(response.body, meter, createWriteStream(temporary, { flags: 'wx' }));
+        if (isYoutubeVideoUrl(source.clip_url)) {
+            // YouTube refuses the broker host's address, so the desktop downloads the video.
+            if (!fetchYoutube) throw new Error('YouTube links are not supported here. Attach the video directly.');
+            await fetchYoutube(source.clip_url, temporary);
+            bytes = statSync(temporary).size;
+            if (bytes > VIDEO_EDIT_MAX_BYTES) throw new Error('The source video exceeds 100 MiB.');
+        } else {
+            const response = await fetch(source.clip_url, { signal: controller.signal, redirect: 'manual' });
+            if (!response.ok || !response.body || !isVideoSourceClipUrl(response.url)) {
+                throw new Error(`Could not download the source video (HTTP ${response.status}).`);
+            }
+            if (Number(response.headers.get('content-length') || 0) > VIDEO_EDIT_MAX_BYTES) {
+                throw new Error('The source video exceeds 100 MiB.');
+            }
+            const meter = new Transform({ transform(chunk, _encoding, callback) {
+                bytes += chunk.length;
+                callback(bytes > VIDEO_EDIT_MAX_BYTES ? new Error('The source video exceeds 100 MiB.') : null, chunk);
+            } });
+            await pipeline(response.body, meter, createWriteStream(temporary, { flags: 'wx' }));
+        }
         if (!bytes) throw new Error('The source video is empty.');
         const duration = await probeDuration(temporary);
         const excerpt = videoSourceClipExcerpt(duration, range);
