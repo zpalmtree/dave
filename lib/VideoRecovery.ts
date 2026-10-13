@@ -153,7 +153,9 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
                 const authored = Number(shot.duration_seconds) || minimum;
                 const seconds = Math.max(0.5, Math.min(maximum, authored / batches.length), speechSeconds(batch));
                 const piece = { ...shot, duration_seconds: Math.min(maximum, seconds), dialogue: batch };
-                if (shotIndex > 0 && batchIndex === 0) authoredCuts.add(piece);
+                if (shotIndex > 0 && batchIndex === 0
+                    && (shot.camera_transition !== 'continuous'
+                        || shotLocation(shot) !== shotLocation(original.shots[shotIndex - 1]))) authoredCuts.add(piece);
                 pieces.push(piece);
             }
         }

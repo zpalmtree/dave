@@ -39,6 +39,17 @@ test('timing repair preserves long dialogue, beat order, keyframe indexes, and i
     assert.deepEqual(value, before);
 });
 
+test('timing repair continues an unbroken camera beat when splitting a long take', () => {
+    const value = plan();
+    const shot = value.segments[0].shots[0];
+    Object.assign(shot, { duration_seconds: 10, location: 'room', camera_transition: 'continuous', dialogue: [] });
+    value.segments[0].target_seconds = 20;
+    value.segments[0].shots.push({ ...structuredClone(shot), visual: 'The explorer waves in the same take.' });
+    repairVideoTiming(value, 15, 5);
+    assert.deepEqual(value.segments.map(segment => segment.transition), ['start', 'continue']);
+    assert.deepEqual(value.segments.map(segment => segment.shots[0].camera_transition), ['continuous', 'continuous']);
+});
+
 test('contract cannot approve omitted dialogue, bypassed quality, or policy rejection', () => {
     const value = plan();
     assert.doesNotThrow(() => approvedRecoveryContract(value, 'explorers return'));
