@@ -1,5 +1,6 @@
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
+import { describeVideoEditReference, validateVideoEditReference } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
     cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
@@ -145,6 +146,7 @@ const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 export const OALGO_PHOTOREAL_KEYFRAME = videoCharacterPhotorealKeyframe(MEXIMUTT);
 
 interface BrokerOptions {
+    videoEditReferenceDescriber?: typeof describeVideoEditReference;
     videoEditGrounder?: typeof groundVideoEditTarget;
     sourceVideoDownloader?: typeof storeVideoSourceClip;
     recoveryEnabled?: boolean;
@@ -4604,6 +4606,8 @@ export class VideoBroker {
                 video_edit_mode: row.video_edit_mode || 'replace',
                 // Jobs grounded before the field existed keep every tracked match.
                 video_edit_subjects: row.video_edit_subjects || null,
+                video_edit_describe_reference: this.worker.videoEditVersion >= 7
+                    && Boolean(row.source_video_path) && (row.video_edit_mode || 'replace') === 'replace',
                 video_replacement_reference_prompt: row.source_video_path && !row.source_image_path && row.video_replacement_prompt
                     ? videoReplacementReferencePrompt(row.video_replacement_prompt, row.video_edit_mode || 'replace') : null,
                 // Version 5 uses Viggle first; version 6 retains it as a Character Swap fallback.
@@ -5322,6 +5326,53 @@ export class VideoBroker {
         }
     }
 
+    /** Caption the actual replacement, including references drawn locally by the worker. */
+    private async handleVideoEditReference(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
+        const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+        if (!job || job.worker_id !== this.worker?.id || publicId !== this.worker.currentJob
+            || !this.workerLeaseMatches(req, job)) {
+            writeJson(res, 409, { error: 'Job is not leased to this worker.' });
+            return;
+        }
+        if (!job.source_video_path || (job.video_edit_mode || 'replace') !== 'replace') {
+            writeJson(res, 409, { error: 'This job is not a subject replacement.' });
+            return;
+        }
+        const mimeType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
+            writeJson(res, 400, { error: 'The reference must be a PNG, JPEG, or WebP image.' });
+            return;
+        }
+        let bytes: Buffer;
+        try { bytes = await readImageBody(req, VIDEO_KEYFRAME_MAX_BYTES); }
+        catch (error) {
+            writeJson(res, 413, { error: String(error) });
+            return;
+        }
+        if (!bytes.length) {
+            writeJson(res, 400, { error: 'The reference image is empty.' });
+            return;
+        }
+        const path = join(this.options.resultsDir, publicId, 'video-edit-reference.json');
+        const sha256 = createHash('sha256').update(bytes).digest('hex');
+        try {
+            if (existsSync(path)) {
+                const cached = JSON.parse(readFileSync(path, 'utf8'));
+                if (cached.sha256 === sha256) {
+                    writeJson(res, 200, { description: validateVideoEditReference(cached) });
+                    return;
+                }
+            }
+            const description = validateVideoEditReference({ description: await (
+                this.options.videoEditReferenceDescriber || describeVideoEditReference
+            )({ bytes, mimeType }, this.providerHooks(job)) });
+            writeFileSync(path, JSON.stringify({ sha256, description }, null, 2));
+            writeJson(res, 200, { description });
+        } catch (error) {
+            writeJson(res, 502, { error: sanitizeVideoWorkerText(String(error), 'Could not describe the replacement image.', 500) });
+        }
+    }
+
     /** Repaint the worker's chosen source-video frame with the replacement for Viggle-Animate. */
     private async handleVideoEditStill(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
         const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
@@ -5548,6 +5599,11 @@ export class VideoBroker {
             } else {
                 writeImage(res, job.source_audio_path, 'audio/wav', {});
             }
+            return;
+        }
+        const editReference = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-reference$/.exec(url.pathname);
+        if (editReference && req.method === 'POST') {
+            await this.handleVideoEditReference(req, res, editReference[1]);
             return;
         }
         const editStill = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-still$/.exec(url.pathname);

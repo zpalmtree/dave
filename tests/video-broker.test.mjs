@@ -1057,10 +1057,11 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
 });
 }
 
-for (const version of [4, 5, 6]) {
+for (const version of [4, 5, 6, 7]) {
 test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for version ${version} workers`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-still-'));
     const repaints = [];
+    const descriptions = [];
     let refuse = false;
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
@@ -1079,6 +1080,12 @@ test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for versi
             const path = join(target, 'replacement.png');
             writeFileSync(path, 'replacement');
             return { path, bytes: 11, mimeType: 'image/png' };
+        },
+        videoEditReferenceDescriber: async (reference, hooks) => {
+            descriptions.push(reference.bytes.toString());
+            await hooks.onUsage({ stage: 'video_edit_reference', attempt: 1, outcome: 'success',
+                provider: 'google', model: 'gemini-test', inputTokens: 10, outputTokens: 20 });
+            return 'a broad-faced man with short dark hair and red and green clothing';
         },
         videoEditStillGenerator: async (frame, replacement, target, request, options) => {
             repaints.push({ frame: frame.bytes.toString(), replacement: replacement.bytes.toString(), target, request });
@@ -1119,6 +1126,29 @@ test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for versi
             const lease = await take(value => value.type === 'job');
             assert.equal(lease.job.id, job.id);
             assert.equal(lease.job.video_edit_repaint, version >= 5);
+            assert.equal(lease.job.video_edit_describe_reference, version >= 7);
+            if (version >= 7) {
+                const describe = (body, headers = {}) => fetch(
+                    `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-reference`, {
+                        method: 'POST', body,
+                        headers: { authorization: 'Bearer worker-secret', 'x-video-lease': lease.job.lease_id,
+                            'content-type': 'image/png', ...headers },
+                    });
+                assert.equal((await describe('reference', { 'x-video-lease': 'stale' })).status, 409);
+                assert.equal((await describe('reference', { 'content-type': 'text/plain' })).status, 400);
+                assert.equal((await describe('')).status, 400);
+                const described = await describe('reference');
+                assert.equal(described.status, 200);
+                assert.match((await described.json()).description, /short dark hair/);
+                assert.equal((await describe('reference')).status, 200);
+                assert.deepEqual(descriptions, ['reference'], 'Identical reference retries reuse the description.');
+                assert.equal((await describe('locally generated reference')).status, 200);
+                assert.deepEqual(descriptions, ['reference', 'locally generated reference']);
+                const recorded = JSON.parse(readFileSync(join(directory, 'results', job.id, 'video-edit-reference.json')));
+                assert.match(recorded.sha256, /^[a-f0-9]{64}$/);
+                assert.match(recorded.description, /red and green/);
+            }
+
             assert.equal(lease.job.video_edit_subjects, 'primary');
             const still = (body, headers = {}) => fetch(
                 `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-still`, {
