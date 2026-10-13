@@ -1,5 +1,31 @@
 # Desktop video optimization changes
 
+## Native delivery canvas
+
+`video-native-canvas.patch` removes the fixed 960×720 recovery canvas. Assembly
+uses the first accepted render's native width and height for the whole video,
+rounding odd dimensions up to the next even pixel for H.264 compatibility.
+Later clips fit that canvas without cropping or stretching; padding appears
+only where their aspect ratios differ. Frame rate and audio normalization,
+picture/audio transitions, and exact song frame counts retain their behavior.
+Discord's existing upload-size compression can still resize an oversized video.
+
+The canvas is derived from the accepted original on each assembly attempt, so
+an upload retry makes the same choice without regenerating any scene. Old jobs
+can resume from their existing accepted originals; no checkpoint migration or
+new render rejection rule is required.
+
+Apply after the output-quality patch with
+`python3 scripts/apply-video-native-canvas-desktop.py --check`, then without
+`--check`. Reload the supervised worker while idle and deploy both bot tracks
+with `scripts/deploy-bots.sh --with-broker`.
+
+Run `python -m unittest test_video_canvas test_video_output_quality test_video_recovery`
+in the desktop Python environment. The canvas tests use real CPU FFmpeg output
+to cover native portrait/landscape/square sizes, mixed-aspect cuts and dissolves,
+odd dimensions, missing audio, and resumed regular/song delivery after an upload
+outage. They do not generate GPU video.
+
 ## Approved timing and final edits
 
 `video-output-quality.patch` preserves the action time in approved recovery
@@ -10,8 +36,8 @@ existing timing normalization.
 Recovery assembly now honors picture dissolves and the independent audio
 transition setting, using the existing assembler. Dissolves overlap adjacent
 clips by up to half a second; ordinary cuts retain their full duration. Song
-clips keep their exact external audio timeline. The 960×720 delivery canvas
-is unchanged.
+clips keep their exact external audio timeline. The later native-canvas patch
+above replaces this patch's original 960×720 delivery canvas.
 
 The planner supplies `shot.camera_transition`: `continuous` times another beat
 inside the same take, and `cut` starts another camera shot. Old plans remain
