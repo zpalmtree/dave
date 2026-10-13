@@ -1,0 +1,307 @@
+--- a/video_character_swap.py
++++ b/video_character_swap.py
+@@ -21,6 +21,7 @@
+ AUDIO_VAE = 'minimax_h3_audio_vae_fp32.safetensors'
+ TEXT_ENCODER = 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
+ MODEL_FRAMES = 124
++CONTINUATION_FRAMES = 22
+ 
+ 
+ def required_models():
+@@ -42,15 +43,15 @@
+ 
+ 
+ def segments_for_shots(shots):
+-    """Keep every 24 fps frame and never cross a detected shot boundary."""
++    """Return output start/count plus preceding rendered context; reset at cuts."""
+     result = []
+     for start, end in shots:
+-        count = math.ceil((end - start) / MODEL_FRAMES)
+-        common, extra = divmod(end - start, count)
+-        for index in range(count):
+-            length = common + (index < extra)
+-            result.append((start, length, MODEL_FRAMES))
++        overlap = 0
++        while start < end:
++            length = min(end - start, MODEL_FRAMES - overlap)
++            result.append((start, length, MODEL_FRAMES, overlap))
+             start += length
++            overlap = CONTINUATION_FRAMES
+     return result
+ 
+ 
+@@ -80,9 +81,10 @@
+ 
+ 
+ def render_graph(clip_name, reference_name, target, direction, subjects,
+-                 width, height, prefix, seed=46, *, reference_description):
++                 width, height, prefix, seed=46, *, reference_description, continuation_name=None,
++                 speech_name=None, performance_prompt=""):
+     n = edit.node
+-    return {
++    graph = {
+         'model': n('UNETLoader', unet_name=edit.REF_MODEL, weight_dtype='default'),
+         'swap': n('LoraLoaderModelOnly', model=['model', 0], lora_name=SWAP_LORA, strength_model=1.0),
+         'turbo': n('LoraLoaderModelOnly', model=['swap', 0], lora_name=TURBO_LORA, strength_model=1.0),
+@@ -94,7 +96,7 @@
+         'source': n('LoadVideo', file=clip_name),
+         'frames': n('GetVideoComponents', video=['source', 0]),
+         'cond': n('MiniMaxH3ReferenceToVideo', clip=['clip', 0], vae=['vae', 0], audio_vae=['audio_vae', 0],
+-                  prompt=swap_prompt(target, direction, subjects, reference_description), width=width, height=height,
++                  prompt=swap_prompt(target, direction, subjects, reference_description) + performance_prompt, width=width, height=height,
+                   length=MODEL_FRAMES, ref_image_size='match', **{'ref_images.ref_image_0': ['reference', 0]}),
+         'guide': n('MiniMaxH3AddGuide', positive=['cond', 0], latent=['cond', 1], vae=['vae', 0],
+                    image=['frames', 0], frame_idx=0),
+@@ -111,6 +113,30 @@
+         'save': n('SaveVideo', video=['video', 0], filename_prefix=prefix, format='auto', codec='auto'),
+     }
+ 
++    if continuation_name:
++        graph.update({
++            'initial_split': n('LTXVSeparateAVLatent', av_latent=['cond', 1]),
++            'continuation_load': n('LoadVideo', file=continuation_name),
++            'continuation_frames': n('GetVideoComponents', video=['continuation_load', 0]),
++            'continuation': n('LTXVImgToVideoInplace', vae=['vae', 0], image=['continuation_frames', 0],
++                              latent=['initial_split', 0], strength=1.0, bypass=False),
++            'conditioned': n('LTXVConcatAVLatent', video_latent=['continuation', 0],
++                             audio_latent=['initial_split', 1]),
++        })
++        graph['sample']['inputs']['latent_image'] = ['conditioned', 0]
++    if speech_name:
++        graph.update({
++            'speech': n('LoadAudio', audio=speech_name),
++            'speech_encode': n('VAEEncodeAudio', audio=['speech', 0], vae=['audio_vae', 0]),
++            'speech_zero': n('SolidMask', value=0.0, width=1, height=1),
++            'speech_freeze': n('SetLatentNoiseMask', samples=['speech_encode', 0], mask=['speech_zero', 0]),
++            'speech_conditioned': n('LTXVConcatAVLatent',
++                                    video_latent=graph['sample']['inputs']['latent_image'],
++                                    audio_latent=['speech_freeze', 0]),
++        })
++        graph['sample']['inputs']['latent_image'] = ['speech_conditioned', 0]
++    return graph
++
+ 
+ def validate_render(path, width, height):
+     info = json.loads(edit.command('ffprobe', '-v', 'error', '-select_streams', 'v:0',
+@@ -123,9 +149,51 @@
+         raise RuntimeError(f'Character Swap returned an invalid video timeline or canvas: {stream}')
+ 
+ 
++def read_speech_plan(path, duration):
++    """Only explicit, source-relative target intervals may drive mouth animation."""
++    if path is None:
++        return None
++    plan = json.loads(Path(path).read_text(encoding='utf-8'))
++    if not isinstance(plan, dict):
++        raise ValueError('Invalid target speech plan')
++    declared = plan.get('source_seconds')
++    if isinstance(declared, bool) or not isinstance(declared, (int, float)) or not math.isfinite(declared) or abs(declared - duration) > 0.05:
++        raise ValueError('Speech plan does not match the source duration')
++    spans = plan.get('target_speech')
++    if not isinstance(spans, list) or len(spans) > 1000:
++        raise ValueError('Invalid target speech intervals')
++    intervals, previous = [], 0.0
++    for span in spans:
++        if not isinstance(span, dict):
++            raise ValueError('Invalid target speech interval')
++        a, b = span.get('start'), span.get('end')
++        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in (a, b)) or not 0 <= previous <= a < b <= duration:
++            raise ValueError('Target speech intervals must be ordered, nonoverlapping and inside the source')
++        intervals.append((float(a), float(b)))
++        previous = b
++    return intervals
++
++
++def speech_window(source, destination, start, intervals):
++    local = [(max(0, a - start), min(MODEL_FRAMES / 24, b - start))
++             for a, b in intervals if b > start and a < start + MODEL_FRAMES / 24]
++    gate = '+'.join(f'between(t,{a:.6f},{b:.6f})' for a, b in local) or '0'
++    edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-ss', f'{start:.9f}', '-i', str(source),
++                 '-map', '0:a:0', '-af', f"volume='if(gt({gate},0),1,0)':eval=frame,apad",
++                 '-t', f'{MODEL_FRAMES / 24:.9f}', '-ac', '2', '-ar', '32000', '-c:a', 'pcm_s16le', str(destination))
++    spans = ', '.join(f'{a:.3f} to {b:.3f} seconds' for a, b in local)
++    return (' The audio conditioning contains only the selected subject\'s own speech. '
++            'Synchronize mouth shapes and syllables precisely to this recording. '
++            + (f'The subject speaks only at these times relative to this segment: {spans}. ' if local else
++               'The selected subject is silent throughout this segment. ')
++            + 'At all other times the subject listens with a relaxed, closed mouth while preserving '
++            'the guide head movement and gestures. Never mouth the other speaker\'s dialogue.')
++
++
+ def replace_clip(args):
+     required_models()
+     duration, source_w, source_h = edit.clip_details(args.clip)
++    intervals = read_speech_plan(getattr(args, 'speech_plan', None), duration)
+     width, height = canvas(source_w, source_h)
+     # ffprobe rounds 124/24 to 5.166667; that must not create a 125th frame
+     # and double the number of model windows for an already legal clip.
+@@ -138,7 +206,7 @@
+     manifest = {'backend': 'character_swap', 'status': 'running', 'source_seconds': duration,
+                 'width': width, 'height': height, 'target': args.target, 'subjects': args.subjects,
+                 'reference': str(args.image), 'reference_description': args.reference_description,
+-                'audio': 'original source soundtrack', 'segments': []}
++                'audio': 'original source soundtrack', 'target_speech': intervals, 'segments': []}
+     started = time.monotonic()
+     try:
+         reference.write_bytes(args.image.read_bytes())
+@@ -151,27 +219,40 @@
+             shots = [(start, min(end, total_frames)) for start, end in shots if start < total_frames]
+             segments = segments_for_shots(shots)
+             rendered_segments = []
+-            for index, (start, source_frames, model_frames) in enumerate(segments, start=1):
++            for index, (start, source_frames, model_frames, overlap) in enumerate(segments, start=1):
+                 clip = INPUT / f'character-swap-{run_id}-{index}.mp4'
++                continuation = INPUT / f'character-swap-{run_id}-{index}-context.mp4'
++                speech = INPUT / f'character-swap-{run_id}-{index}-speech.wav'
+                 try:
+                     print(f'Generating replacement segment {index}/{len(segments)} with Character Swap', flush=True)
+-                    edit.segment_clip(normalized, clip, start, source_frames, model_frames)
++                    edit.segment_clip(normalized, clip, start - overlap, source_frames + overlap, model_frames)
++                    if overlap:
++                        previous_frames = segments[index - 2][1]
++                        edit.segment_clip(rendered_segments[-1], continuation,
++                                          previous_frames - overlap, overlap, overlap)
++                    performance = speech_window(args.clip, speech, (start - overlap) / 24, intervals) if intervals is not None else ''
+                     graph = render_graph(clip.name, reference.name, args.target, args.prompt, args.subjects,
+                                          width, height, f'video/edits/{run_id}-{index}-character-swap', args.seed + index - 1,
+-                                         reference_description=args.reference_description)
+-                    record = {'start_frame': start, 'source_frames': source_frames, 'workflow': graph}
++                                         reference_description=args.reference_description,
++                                         continuation_name=continuation.name if overlap else None,
++                                         speech_name=speech.name if intervals is not None else None,
++                                         performance_prompt=performance)
++                    record = {'start_frame': start, 'source_frames': source_frames, 'context_frames': overlap, 'workflow': graph}
+                     manifest['segments'].append(record)
+                     manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                     rendered = edit.run_graph(args.server, graph, 'save', 7200)
+                     validate_render(rendered, width, height)
+                     segment = directory / f'segment-{index:02d}.mp4'
+                     edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', str(rendered),
++                                 '-vf', f'trim=start_frame={overlap}:end_frame={overlap + source_frames},setpts=PTS-STARTPTS',
+                                  '-frames:v', str(source_frames), '-an', '-c:v', 'libx264', '-crf', '18',
+                                  '-pix_fmt', 'yuv420p', str(segment))
+                     rendered_segments.append(segment)
+                     record['rendered'] = str(rendered)
+                 finally:
+                     clip.unlink(missing_ok=True)
++                    continuation.unlink(missing_ok=True)
++                    speech.unlink(missing_ok=True)
+             print('Joining edited segments and restoring original soundtrack', flush=True)
+             assembled = directory / 'edited.mp4'
+             edit.join_segments(rendered_segments, args.clip, assembled, duration, directory)
+@@ -198,6 +279,7 @@
+     parser.add_argument('--subjects', choices=('primary', 'group'), default='primary')
+     parser.add_argument('--prompt', required=True)
+     parser.add_argument('--reference-description', required=True)
++    parser.add_argument('--speech-plan', type=Path, help='Verified target speech intervals in source seconds')
+     parser.add_argument('--output', type=Path, required=True)
+     parser.add_argument('--error-file', type=Path)
+     parser.add_argument('--server', default='http://127.0.0.1:8188')
+--- a/test_video_character_swap.py
++++ b/test_video_character_swap.py
+@@ -63,14 +63,77 @@
+     def test_segments_preserve_all_frames_and_never_cross_shot_cuts(self):
+         shots = [(0, 109), (109, 401), (401, 2880)]
+         segments = swap.segments_for_shots(shots)
+-        self.assertEqual(sum(length for _, length, _ in segments), 2880)
++        self.assertEqual(sum(length for _, length, _, _ in segments), 2880)
+         cursor = 0
+-        for start, length, model_frames in segments:
++        for start, length, model_frames, overlap in segments:
+             self.assertEqual(start, cursor)
+-            self.assertTrue(0 < length <= 124)
++            self.assertTrue(0 < length <= 124 - overlap)
++            shot_start = next(a for a, b in shots if a <= start < b)
++            self.assertEqual(overlap, 0 if start == shot_start else 22)
++            self.assertGreaterEqual(start - overlap, shot_start)
+             self.assertEqual(model_frames, 124)
+             self.assertTrue(any(a <= start < start + length <= b for a, b in shots))
+             cursor += length
++
++    def test_continuation_and_speech_masks_reach_sampler_without_replacing_soundtrack(self):
++        graph = swap.render_graph('source.mp4', 'ref.png', 'the man', 'a robot',
++                                  'primary', 544, 640, 'test/swap', reference_description=DESCRIPTION,
++                                  continuation_name='previous.mp4', speech_name='target-only.wav')
++        self.assertEqual(graph['continuation_load']['inputs']['file'], 'previous.mp4')
++        self.assertEqual(graph['continuation']['inputs']['strength'], 1.0)
++        self.assertEqual(graph['continuation']['inputs']['latent'], ['initial_split', 0])
++        self.assertEqual(graph['speech']['inputs']['audio'], 'target-only.wav')
++        self.assertEqual(graph['speech_zero']['inputs']['value'], 0.0)
++        self.assertEqual(graph['speech_conditioned']['inputs']['video_latent'], ['conditioned', 0])
++        self.assertEqual(graph['sample']['inputs']['latent_image'], ['speech_conditioned', 0])
++        self.assertNotIn('audio', graph['video']['inputs'])
++
++    def test_speech_plan_rejects_wrong_source_and_invalid_intervals(self):
++        with tempfile.TemporaryDirectory() as directory:
++            path = Path(directory) / 'speech.json'
++            for plan in ({'source_seconds': 5, 'target_speech': []},
++                         {'source_seconds': 4, 'target_speech': [{'start': 2, 'end': 1}]},
++                         {'source_seconds': 4, 'target_speech': [{'start': -1, 'end': 1}]},
++                         {'source_seconds': 4, 'target_speech': [{'start': 2, 'end': 5}]},
++                         {'source_seconds': 4, 'target_speech': [{'start': 0, 'end': 2}, {'start': 1, 'end': 3}]},
++                         {'source_seconds': 4, 'target_speech': [{'start': True, 'end': 2}]},
++                         {'source_seconds': 4, 'target_speech': [None]}):
++                path.write_text(json.dumps(plan))
++                with self.assertRaises(ValueError):
++                    swap.read_speech_plan(path, 4)
++            path.write_text(json.dumps({'source_seconds': 4, 'target_speech': [{'start': 1, 'end': 2}]}))
++            self.assertEqual(swap.read_speech_plan(path, 4), [(1, 2)])
++            self.assertIsNone(swap.read_speech_plan(None, 4))
++
++    def test_real_speech_window_silences_other_turns_and_keeps_source_alignment(self):
++        import array
++        import wave
++        with tempfile.TemporaryDirectory() as directory:
++            source, output = Path(directory) / 'source.wav', Path(directory) / 'target.wav'
++            video_edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'lavfi',
++                               '-i', 'sine=frequency=440:sample_rate=32000', '-t', '8', str(source))
++            prompt = swap.speech_window(source, output, 2, [(2.5, 3.5), (5, 6)])
++            with wave.open(str(output)) as wav:
++                self.assertEqual(wav.getnframes(), round(124 / 24 * 32000))
++                samples = array.array('h', wav.readframes(wav.getnframes()))
++                def energy(start, end):
++                    chunk = samples[int(start * 64000):int(end * 64000)]
++                    return sum(abs(v) for v in chunk) / len(chunk)
++                for start, end in [(0.1, 0.4), (1.7, 2.7), (4.2, 5.0)]:
++                    self.assertEqual(energy(start, end), 0)
++                for start, end in [(0.6, 1.4), (3.1, 3.9)]:
++                    self.assertGreater(energy(start, end), 1000)
++            self.assertIn('0.500 to 1.500 seconds', prompt)
++            self.assertIn('3.000 to 4.000 seconds', prompt)
++
++    def test_short_shots_and_exact_window_lengths_do_not_duplicate_context(self):
++        for frames in (1, 22, 123, 124, 125, 226, 227, 447, 2880):
++            plan = swap.segments_for_shots([(0, frames), (frames, frames + 1)])
++            delivered = [frame for start, length, _, overlap in plan
++                         for frame in range(start, start + length)]
++            self.assertEqual(delivered, list(range(frames + 1)))
++            self.assertEqual(plan[-1], (frames, 1, 124, 0))
++            self.assertTrue(all(length + overlap <= 124 for _, length, _, overlap in plan))
+ 
+     def test_canvas_matches_reviewed_samples_and_limits_memory_without_upscaling(self):
+         self.assertEqual(swap.canvas(544, 640), (544, 640))
+@@ -111,11 +174,23 @@
+                 reference.write_bytes(b'not read by the mocked diffusion step')
+                 duration, _, _ = video_edit.clip_details(source)
+                 frames = math.ceil(duration * 24)
++                speech_plan = root / 'speech.json'
++                speech_plan.write_text(json.dumps({'source_seconds': duration, 'target_speech': [{'start': 0.5, 'end': 1.5}, {'start': 3, 'end': 4}]}))
+                 args = argparse.Namespace(clip=source, image=reference, target='the person', prompt='a robot',
+-                                          subjects='primary', output=output, server='test', seed=46, reference_description=DESCRIPTION)
++                                          subjects='primary', output=output, server='test', seed=46, reference_description=DESCRIPTION,
++                                          speech_plan=speech_plan if with_audio else None)
+                 # Return the real padded guide as a stand-in for diffusion, testing all actual
+                 # normalization, trim, concat and soundtrack operations around the model.
+                 def render(_server, graph, _node, _timeout):
++                    self.assertEqual('speech' in graph, with_audio)
++                    if with_audio:
++                        self.assertTrue((root / 'inputs' / graph['speech']['inputs']['audio']).is_file())
++                    if 'continuation_load' in graph:
++                        context = root / 'inputs' / graph['continuation_load']['inputs']['file']
++                        probe = json.loads(video_edit.command('ffprobe', '-v', 'error', '-count_frames',
++                            '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames',
++                            '-of', 'json', str(context)))
++                        self.assertEqual(int(probe['streams'][0]['nb_read_frames']), 22)
+                     return root / 'inputs' / graph['source']['inputs']['file']
+                 with mock.patch.object(swap, 'INPUT', root / 'inputs'), \
+                         mock.patch.object(swap, 'required_models'), \
