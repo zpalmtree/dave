@@ -98,6 +98,17 @@ the same command without `--check`. The hash-checked patch preserves the install
 source-audio and telemetry updates. Deploy the broker first, then reload an idle
 desktop worker. Older workers can finish their current leases.
 
+A continued scene opens on the previous clip's last frame, so facial drift
+compounds from clip to clip. In job `caf0356e` the first boundary landed on a
+blink and the subject's brown eyes came back blue. The checker therefore also
+returns `restore_face` when the character is recognizable but the eyes are shut
+or iris color, apparent age or skin has drifted. The broker then has gpt-image
+redraw the face from the original in the frame's own pose
+(`createVideoIdentityRestoreStill`, usage stage `continuity_restore`) and
+returns it as `restored_frame`; the worker opens the scene on it. A refusal or
+outage leaves the rendered frame in place. `VIDEO_CONTINUITY_RESTORE=0` turns
+the redraw off.
+
 ### Bounded identity check for local openings
 
 Recovery references now have explicit roles: Picture 1 defines the original
@@ -219,6 +230,11 @@ motion carry the performance. Song lyrics do not independently authorize body
 reveals, new props, confetti, or camera pullbacks. Explicit additional staging,
 music-video treatment, transformations, and narrative adaptations retain their
 own direction.
+
+A song job with a transcribed vocal timeline is the exception since job
+`caf0356e`, whose 31 s of one held portrait read as "just the original image":
+its guidance asks for a music video, with the source image as the first scene
+and a hard cut to a lyric-grounded scene for each later segment.
 
 Job `3ed9783e` exposed both over-staging and an overly permissive boundary check:
 the source dog acquired different eyes, muzzle proportions, and facial markings,

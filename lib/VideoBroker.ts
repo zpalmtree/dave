@@ -111,6 +111,7 @@ import {
     configuredVideoKeyframeVariant,
     createFrontierVideoKeyframe,
     createVideoEditStill,
+    createVideoIdentityRestoreStill,
     VIDEO_EDIT_STILL_ATTEMPTS,
     videoEditStillWithEffects,
     isModerationFailure,
@@ -149,6 +150,7 @@ interface BrokerOptions {
     recoveryEnabled?: boolean;
     recoveryPlanner?: typeof prepareRecoveryPlan;
     characterContinuityChecker?: typeof checkVideoCharacterContinuity;
+    continuityRestoreGenerator?: typeof createVideoIdentityRestoreStill;
     openingIdentityChecker?: typeof checkVideoOpeningIdentity;
     host: string;
     port: number;
@@ -5079,7 +5081,34 @@ export class VideoBroker {
                     state.continuity[index] = { key, ...decision };
                     await persist();
                 }
-                writeJson(res, 200, state.continuity[index]);
+                // A drifted face is redrawn from the original in the same pose, so the next clip
+                // copies the person and not the drift. An older worker ignores restored_frame.
+                const restoredPath = join(resolve(this.options.resultsDir, id), `continuity-restore-${index}.png`);
+                if (state.continuity[index].restore_face && !state.continuity[index].restore_failed
+                    && state.continuity[index].restored !== key && process.env.VIDEO_CONTINUITY_RESTORE !== '0') {
+                    const started = Date.now();
+                    let status: 'ok' | 'error' = 'ok';
+                    try {
+                        const still = await (this.options.continuityRestoreGenerator || createVideoIdentityRestoreStill)(
+                            { bytes: frame.data, mimeType: frame.mimeType },
+                            { bytes: anchors[0].data, mimeType: anchors[0].mimeType },
+                            state.continuity[index].identity_description,
+                            { serviceTier: configuredVideoOpenAIServiceTier(), ...options, attemptOffset: index });
+                        mkdirSync(dirname(restoredPath), { recursive: true });
+                        writeFileSync(restoredPath, still.bytes);
+                        state.continuity[index].restored = key;
+                    } catch (error) {
+                        status = 'error';
+                        console.warn(`Continuity restore for scene ${index + 1} of ${id} failed; continuing on the rendered frame.`, error);
+                        state.continuity[index].restore_failed = true;
+                    }
+                    await persist();
+                    await this.recordMetricSpan(id, { source: 'broker', name: 'continuity_restore',
+                        duration_seconds: (Date.now() - started) / 1000, metadata: { status } });
+                }
+                writeJson(res, 200, state.continuity[index].restored === key && existsSync(restoredPath)
+                    ? { ...state.continuity[index], restored_frame: `data:image/png;base64,${readFileSync(restoredPath).toString('base64')}` }
+                    : state.continuity[index]);
                 return;
             }
             if (operation === 'image' || operation === 'review') {

@@ -742,14 +742,45 @@ export async function createVideoEditStill(
     throw refusal;
 }
 
+/**
+ * The edit that resets identity drift at a continued clip boundary. H3 copies its opening frame, so
+ * a last frame that aged the face or caught a blink hands the next clip that face (job caf0356e:
+ * brown eyes shut at the first boundary came back blue). Everything H3 needs for a seamless
+ * continuation stays from Image 1; only the face is redrawn from the original. Wording is
+ * positive-only, as for every image prompt here.
+ */
+export function videoIdentityRestorePrompt(identity: string): string {
+    return [
+        'Edit Image 1, the latest frame of a video. Image 2 is the original picture of the recurring character in it.',
+        'Keep Image 1 exactly as composed: the same crop, the same position, size and angle of the head, the same mouth',
+        'shape, body pose, clothing, setting and background.',
+        'Redraw that character\'s face, skin and hair in Image 1 with the identity and photographic quality of Image 2:',
+        'its facial structure, apparent age, skin texture and tone, eye shape, iris color, brows, lip color and hair color.',
+        'The eyes are open, drawn as they appear in Image 2, looking where the head faces.',
+        'Output a single frame with the composition of Image 1.',
+        identity.trim() ? `The recurring character: ${identity.trim().slice(0, 600)}` : '',
+    ].filter(Boolean).join(' ');
+}
+
+/** One attempt: a refusal or outage leaves the boundary on the frame it already had. */
+export async function createVideoIdentityRestoreStill(
+    frame: VideoEditStillImage,
+    original: VideoEditStillImage,
+    identity: string,
+    options: VideoEditStillOptions = {},
+): Promise<VideoKeyframeResult> {
+    return requestVideoEditStill(frame, original, videoIdentityRestorePrompt(identity),
+        1 + (options.attemptOffset || 0), options, 'continuity_restore');
+}
+
 async function requestVideoEditStill(
     frame: VideoEditStillImage,
     replacement: VideoEditStillImage,
     prompt: string,
     attempt: number,
     options: VideoEditStillOptions,
+    stage = 'video_edit_still',
 ): Promise<VideoKeyframeResult> {
-    const stage = 'video_edit_still';
     const model = VIDEO_KEYFRAME_FALLBACK_MODEL;
     const started = Date.now();
     let outcome: 'success' | 'error' = 'error';

@@ -225,6 +225,8 @@ test('whisper transcripts keep confident sung lines and drop music hallucination
     assert.match(guidance, /never instructions/);
     assert.match(guidance, /\n0\.0-34\.7 instrumental\n34\.7-37\.0 "You bit me"\n37\.1-42\.0 "you bit me more"\n/);
     assert.match(guidance, /\n48\.3-50\.0 "I'm standing 'hall'"\n50\.0-120\.0 instrumental$/);
+    assert.match(guidance, /music video for this song, not one held portrait/);
+    assert.match(guidance, /hard cut \(transition "cut"\)/);
     assert.equal(videoSourceAudioPlannerGuidance(null, 120), VIDEO_SOURCE_AUDIO_GUIDANCE);
 });
 
