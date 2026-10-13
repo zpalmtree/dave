@@ -5,7 +5,7 @@ import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, Stor
     cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
-import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
+import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_MAX_BYTES, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole,
@@ -199,6 +199,7 @@ interface WorkerConnection {
     /** 1: composes a song request's soundtrack with MiniMax Music 3 before planning. */
     songComposeVersion: number;
     songDownloadVersion: number;
+    sourceVideoDownloadVersion: number;
     videoEditVersion: number;
     socket: WebSocket;
     id: string;
@@ -1956,7 +1957,8 @@ export class VideoBroker {
         let sourceExcerpt: VideoSourceExcerpt | null = null;
         if (videoDescriptor) {
             try {
-                sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory, sourceRange);
+                sourceVideo = await (this.options.sourceVideoDownloader || storeVideoSourceClip)(videoDescriptor, directory, sourceRange,
+                    (url, destination) => this.fetchWorkerSourceVideo(url, destination));
                 sourceExcerpt = sourceVideo.excerpt || null;
                 requestedDuration = sourceVideo.duration;
                 const grounding = validateVideoEditDecision(await (this.options.videoEditGrounder || groundVideoEditTarget)(
@@ -3860,6 +3862,7 @@ export class VideoBroker {
                         sourceAudioVersion: Number(hello.source_audio_version) || 0,
                         songComposeVersion: Number(hello.song_compose_version) || 0,
                         songDownloadVersion: Number(hello.song_download_version) || 0,
+                        sourceVideoDownloadVersion: Number(hello.source_video_download_version) || 0,
                         videoEditVersion: Number(hello.video_edit_version) || 0,
                         lastHeartbeat: Date.now(),
                         currentJob: hello.current_job,
@@ -4148,6 +4151,13 @@ export class VideoBroker {
         }
         if (message.type === 'image_event') {
             await this.handleImageWorkerMessage(message);
+            return;
+        }
+        if (message.type === 'source_video_event') {
+            if (message.event === 'failed') {
+                this.sourceVideoFetches.get(String(message.request_id))?.settle(new Error(
+                    `Could not download that YouTube video: ${sanitizeVideoWorkerText(message.error, 'the download failed.', 300)} Attach the video directly.`));
+            }
             return;
         }
         const jobId = String(message.job_id || '');
@@ -4647,6 +4657,62 @@ export class VideoBroker {
             this.sendWorker({ type: 'unload', reason: 'pause' });
             this.worker.warmModel = null;
         }
+    }
+
+    private sourceVideoFetches = new Map<string, { destination: string; settle: (error?: Error) => void }>();
+
+    /** Has the desktop download a YouTube video and upload it; YouTube refuses the broker host's address. */
+    private async fetchWorkerSourceVideo(url: string, destination: string): Promise<void> {
+        const worker = this.worker;
+        if (!worker || worker.socket.readyState !== WebSocket.OPEN || worker.sourceVideoDownloadVersion < 1) {
+            throw new Error('YouTube links need the video computer online. Try again later or attach the video directly.');
+        }
+        const requestId = randomUUID();
+        let timeout: NodeJS.Timeout | undefined;
+        let offline = () => {};
+        try {
+            await new Promise<void>((resolveFetch, reject) => {
+                const settle = (error?: Error) => error ? reject(error) : resolveFetch();
+                this.sourceVideoFetches.set(requestId, { destination, settle });
+                timeout = setTimeout(() => settle(new Error('Downloading that YouTube video took too long. Attach the video directly.')), 5 * 60 * 1000);
+                offline = () => settle(new Error('The video computer went offline while downloading that YouTube video. Try again.'));
+                worker.socket.once('close', offline);
+                worker.socket.send(JSON.stringify({ type: 'source_video_fetch', request_id: requestId, url }));
+            });
+        } finally {
+            clearTimeout(timeout);
+            worker.socket.off('close', offline);
+            this.sourceVideoFetches.delete(requestId);
+        }
+    }
+
+    private async receiveWorkerSourceVideo(req: IncomingMessage, res: ServerResponse, requestId: string): Promise<void> {
+        const pending = this.sourceVideoFetches.get(requestId);
+        if (!pending) {
+            writeJson(res, 404, { error: 'No source video is awaited.' });
+            return;
+        }
+        // A retried upload replaces a partial one.
+        rmSync(pending.destination, { force: true });
+        let bytes = 0;
+        const meter = new Transform({ transform(chunk, _encoding, callback) {
+            bytes += chunk.length;
+            callback(bytes > VIDEO_EDIT_MAX_BYTES ? new Error('The source video exceeds 100 MiB.') : null, chunk);
+        } });
+        try {
+            await pipeline(req, meter, createWriteStream(pending.destination, { flags: 'wx' }));
+        } catch (error) {
+            rmSync(pending.destination, { force: true });
+            writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+            return;
+        }
+        if (this.sourceVideoFetches.get(requestId) !== pending) {
+            rmSync(pending.destination, { force: true });
+            writeJson(res, 404, { error: 'No source video is awaited.' });
+            return;
+        }
+        pending.settle();
+        writeJson(res, 200, { ok: true, bytes });
     }
 
     private sendWorker(message: unknown): void {
@@ -5332,6 +5398,11 @@ export class VideoBroker {
 
     private async handleWorkerHttp(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
         if (await this.handleImageWorkerHttp(req, res, url)) return;
+        const fetchedVideo = /^\/v1\/worker\/source-videos\/([0-9a-f-]+)$/.exec(url.pathname);
+        if (fetchedVideo && req.method === 'PUT') {
+            await this.receiveWorkerSourceVideo(req, res, fetchedVideo[1]);
+            return;
+        }
         const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|soundtrack|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);

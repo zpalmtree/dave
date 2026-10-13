@@ -12,6 +12,7 @@ import {
 import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
+import { youtubeVideoFromMessage } from './YoutubeVideo.js';
 import { existsSync } from 'fs';
 import { videoWorkflowArchive } from './VideoWorkflow.js';
 import { handleWorkflowDownload, saveWorkflowDownload, workflowDownloadDirectory } from './VideoWorkflowDownload.js';
@@ -423,7 +424,9 @@ export async function videoSourcesFromMessages(
             const attachment = videoSourceImageFromMessage(message);
             if (attachment) return { image: attachment, clip: null };
         }
-        const clip = videoClipSourceImageFromMessage(message) || await resolveLink(message);
+        // A YouTube link is only an edit's source footage; elsewhere it can name a song to sing.
+        const clip = videoClipSourceImageFromMessage(message) || await resolveLink(message)
+            || (replacement ? youtubeVideoFromMessage(message) : null);
         if (clip) return replacement ? { image, clip } : { image: clip, clip: null };
     }
     return { image, clip: null };
@@ -1255,7 +1258,7 @@ export async function handleVideoRequest(
         replacement = resolved.replacement;
         const sources = resolved.sources;
         sourceVideo = sources.clip;
-        if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X video link to edit. You can also reply to a message containing one.');
+        if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X or YouTube video link to edit. You can also reply to a message containing one.');
         attachedSourceImage = sources.image;
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');

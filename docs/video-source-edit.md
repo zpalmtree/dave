@@ -68,6 +68,20 @@ media using `/video/1`, `/video/2`, etc. Private/deleted posts and API failures
 return an error asking you to retry or attach the video. For requests classified
 as new-video generation, a linked video supplies a representative starting frame,
 just like an attached clip.
+
+A YouTube video or Short link (`youtube.com/watch`, `/shorts/`, `youtu.be`) works
+the same way for edits: reply to a message containing one with
+`$oalgo replace this character with meximutt`. YouTube refuses the broker host's
+address, so the broker asks the desktop worker to download the video with `yt-dlp`
+(up to 1080p, ten minutes and 100 MiB; no playlists, live streams, cookies or
+authentication) and upload it when the edit is submitted. This is CPU/network work
+that runs beside a render. The usual length limits and time ranges then apply.
+The worker must be online and advertise `source_video_download_version: 1`;
+otherwise the request stops with an error asking for an attachment. A YouTube link
+is never used as a starting frame, so requests to sing a linked song are unchanged.
+Install the worker side with `python3 scripts/apply-video-youtube-source-desktop.py`
+(it reuses the `yt-dlp.exe` from [named-song setup](video-named-song.md)), reload
+the worker child while idle, then deploy the broker and bots.
 Quote the subject if its name includes “with,” for example
 `replace "the woman with a red coat" with the attached image`.
 

@@ -1,0 +1,87 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -935,6 +935,7 @@
+         self.current_job: dict[str, Any] | None = self.journal.get("job")
+         self.process: asyncio.subprocess.Process | None = None
+         self.render_task: asyncio.Task[None] | None = None
++        self.source_video_tasks: set[asyncio.Task[None]] = set()
+         self.cancel_reason: str | None = None
+         self.gpuq_job_id: str | None = (
+             str(self.journal.get("gpuq_job_id"))
+@@ -1535,6 +1536,8 @@
+                     # 1: composes a song request's soundtrack with MiniMax Music 3 (video_song.py).
+                     "song_compose_version": 1,
+                     "song_download_version": 1,
++                    # 1: downloads a linked YouTube video for the broker when an edit is submitted.
++                    "source_video_download_version": 1,
+                     # 6: replacements prefer Character Swap; Viggle/H3 remain fallbacks.
+                     "video_edit_version": 6,
+                     "recovery_version": 3,
+@@ -1833,6 +1836,11 @@
+                 return
+             self.image_job = job
+             self.image_task = asyncio.create_task(self.run_image_job(job))
++        elif kind == "source_video_fetch":
++            # CPU/network work only: it runs beside a render and holds no GPU reservation.
++            task = asyncio.create_task(self.fetch_source_video(message))
++            self.source_video_tasks.add(task)
++            task.add_done_callback(self.source_video_tasks.discard)
+         elif kind == "image_cancel" and self.image_job and message.get("job_id") == self.image_job.get("id"):
+             await self.cancel_image_job()
+         elif kind == "unload" and not self.current_job and not self.image_job:
+@@ -1844,6 +1852,55 @@
+                 return
+             await self.set_gpuq_gaming(enabled, request_id)
+ 
++    async def fetch_source_video(self, message: dict[str, Any]) -> None:
++        """Download a linked YouTube video and upload it; YouTube refuses the broker host's address."""
++        request_id = str(message.get("request_id") or "")
++        if not re.fullmatch(r"[0-9a-f-]{36}", request_id):
++            return
++        root = SCRIPT_DIR / "worker_video_edits" / f"download-{request_id}"
++        output = root / "source-video.mp4"
++        process = None
++        try:
++            ffmpeg = shutil.which("ffmpeg")
++            if not ffmpeg:
++                raise RuntimeError("ffmpeg is unavailable on the video computer.")
++            root.mkdir(parents=True, exist_ok=True)
++            process = await asyncio.create_subprocess_exec(
++                console_python_executable(), "-s", str(SCRIPT_DIR / "video_source_download.py"),
++                "--url", str(message.get("url") or ""), "--output", str(output), "--ffmpeg", ffmpeg,
++                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
++                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
++            try:
++                result, _ = await asyncio.wait_for(process.communicate(), timeout=200)
++            except asyncio.TimeoutError:
++                raise RuntimeError("the download took too long.") from None
++            if process.returncode:
++                raise RuntimeError(result.decode("utf-8", errors="replace").strip()[-300:] or "the download failed.")
++            url = re.sub(r"^wss://", "https://", self.broker_url)
++            url = re.sub(r"/v1/worker$", f"/v1/worker/source-videos/{request_id}", url)
++            if not self.http_session:
++                raise RuntimeError("Broker HTTP session is unavailable.")
++            with output.open("rb") as handle:
++                async with self.http_session.put(
++                    url, data=handle,
++                    headers={"Authorization": f"Bearer {self.token}", "Content-Type": "video/mp4"},
++                    timeout=aiohttp.ClientTimeout(total=90, connect=20),
++                ) as response:
++                    if response.status != 200:
++                        raise RuntimeError(f"the broker refused the upload ({response.status}).")
++            print(f"Uploaded a YouTube source video ({output.stat().st_size} bytes).", flush=True)
++        except Exception as error:
++            print(f"YouTube source video download failed: {error}", flush=True)
++            await self.send({"type": "source_video_event", "event": "failed", "request_id": request_id,
++                             "error": str(error)[-300:] or "the download failed."})
++        finally:
++            if process and process.returncode is None:
++                subprocess.run(["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
++                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
++                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
++                await process.wait()
++            shutil.rmtree(root, ignore_errors=True)
++
+     def image_url(self, job: dict[str, Any], operation: str) -> str:
+         url = re.sub(r"^wss://", "https://", self.broker_url)
+         return re.sub(r"/v1/worker$", f"/v1/worker/image-jobs/{job['id']}/{operation}", url)
