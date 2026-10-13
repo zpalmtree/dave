@@ -566,11 +566,11 @@ export function formatVideoJob(job: VideoJobView): string {
         const position = job.queue_position ? `**#${job.queue_position} in line.**` : '**In line.**';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)} Usually takes **${roughRuntimeRange(job)}** once it starts.`;
         if (job.dispatch_paused) return `${head}\n${position} Video creation is paused. Usually takes **${roughRuntimeRange(job)}** once it starts.`;
-        if (!job.worker_online) return `${head}\n${position} The video computer is offline. Your request is saved. Usually takes **${roughRuntimeRange(job)}** once it starts.`;
+        if (!job.worker_online) return `${head}\n${position} The GPU is offline. Your request is saved. Usually takes **${roughRuntimeRange(job)}** once it starts.`;
         return `${head}\n${position}${completionEstimate(job, true)} Estimates may change.`;
     }
     if (job.status === 'running_disconnected') {
-        return `${head}\nThe video computer lost its connection. Your request is saved and will resume or retry when it reconnects.`;
+        return `${head}\nThe GPU lost its connection. Your request is saved and will resume or retry when it reconnects.`;
     }
     // Controls take precedence over an old queue position or progress update.
     if (job.status === 'cancelling') return `${head}\nCancelling your video…`;
@@ -587,7 +587,7 @@ export function formatVideoJob(job: VideoJobView): string {
             const ahead = job.gpu_queue_jobs_ahead != null
                 ? ` **${job.gpu_queue_jobs_ahead}** ${job.gpu_queue_jobs_ahead === 1 ? 'task' : 'tasks'} ahead.`
                 : job.gpu_queue_position ? ` **#${job.gpu_queue_position} in line.**` : '';
-            return `${head}\n**Waiting for the video computer.**${ahead}${timing} The wait may change.${gpuBlockText(job)}`;
+            return `${head}\n**Waiting for the GPU.**${ahead}${timing} The wait may change.${gpuBlockText(job)}`;
         }
         if (job.status === 'planning') return `${head}\n**Planning your video.**${timing}`;
         const progress = percentage(job.progress);
@@ -604,10 +604,10 @@ export function formatVideoJob(job: VideoJobView): string {
 function gpuBlockText(job: VideoJobView): string {
     if (!job.gpu_queue_block_reason) return '';
     if (job.gpu_queue_block_reason === 'external_gpu_busy') {
-        return ' Other apps are using the graphics card. Your video will start when there’s room.';
+        return ' Other apps are using the GPU. Your video will start when there’s room.';
     }
     if (/gaming/i.test(job.gpu_queue_block_reason)) return ' Waiting for Gaming Mode to end.';
-    return ' The video computer isn’t ready yet. Your request is saved.';
+    return ' The GPU isn’t ready yet. Your request is saved.';
 }
 
 export function formatVideoStatusPost(job: VideoJobView): string {
@@ -662,7 +662,7 @@ export function formatGlobalVideoQueueJob(
         const ahead = job.gpu_queue_jobs_ahead !== null && job.gpu_queue_jobs_ahead !== undefined
             ? ` · ${job.gpu_queue_jobs_ahead} ahead`
             : '';
-        status = `Waiting for the video computer${gpuPosition}${ahead}`;
+        status = `Waiting for the GPU${gpuPosition}${ahead}`;
     } else if (job.status === 'planning') {
         status = 'Planning';
     } else if (job.status === 'uploading') {

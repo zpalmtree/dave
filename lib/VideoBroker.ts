@@ -4665,7 +4665,7 @@ export class VideoBroker {
     private async fetchWorkerSourceVideo(url: string, destination: string): Promise<void> {
         const worker = this.worker;
         if (!worker || worker.socket.readyState !== WebSocket.OPEN || worker.sourceVideoDownloadVersion < 1) {
-            throw new Error('YouTube links need the video computer online. Try again later or attach the video directly.');
+            throw new Error('YouTube links need the GPU online. Try again later or attach the video directly.');
         }
         const requestId = randomUUID();
         let timeout: NodeJS.Timeout | undefined;
@@ -4675,7 +4675,7 @@ export class VideoBroker {
                 const settle = (error?: Error) => error ? reject(error) : resolveFetch();
                 this.sourceVideoFetches.set(requestId, { destination, settle });
                 timeout = setTimeout(() => settle(new Error('Downloading that YouTube video took too long. Attach the video directly.')), 5 * 60 * 1000);
-                offline = () => settle(new Error('The video computer went offline while downloading that YouTube video. Try again.'));
+                offline = () => settle(new Error('The GPU went offline while downloading that YouTube video. Try again.'));
                 worker.socket.once('close', offline);
                 worker.socket.send(JSON.stringify({ type: 'source_video_fetch', request_id: requestId, url }));
             });
