@@ -1,0 +1,10 @@
+{
+  "video_character_swap.py": {
+    "before_sha256": "3843d6a9c88c78e9219f8250540e9ee7a2a62165abd93505ac64aaf5624f3a6a",
+    "after_sha256": "d7ed4e017805a2d94e9c218228f4bcd9c9d555b20888fd0318b48f8257a94dee"
+  },
+  "test_video_character_swap.py": {
+    "before_sha256": "be886abd698b9b4fde2c395656746817559aee3c895d2c2640d8587ebc6ee012",
+    "after_sha256": "4c70c68f18011df3757d36aba514b2d8dc223b89dfd64acb8a74dc1bace44801"
+  }
+}

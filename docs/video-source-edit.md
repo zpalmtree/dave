@@ -111,15 +111,19 @@ Ref2VA DMD accelerator to the H3 Ref2VA base model. The source frames enter
 conditioning as `<Picture 1>`, with a `body_swap:` prompt identifying the grounded
 target and whether one subject or the whole matching group should be replaced.
 Attached, preset, cloud-generated and locally generated replacement images all
-use this path. No per-shot repaint or lip-sync postprocessing is required.
+use this path. No per-shot repaint is required. Speech performance needs separate
+validation: the source guide alone does not guarantee accurate lip-sync or keep
+the replacement silent during another speaker's lines.
 
 The approved settings are eight Euler/simple steps, CFG 1, both LoRAs at strength
 1, video/audio sigma shifts 12/3, and the installed INT8 video VAE. Output stays
 within 0.5 megapixels on a 32-pixel grid without enlarging the source. The desktop
 normalizes to 24 fps, detects shot cuts, and partitions each shot into windows of
 at most 124 source frames. Shorter windows are padded to 124 frames for H3 and
-trimmed before joining, retaining every source frame. Windows render independently,
-so seams can occur within a long shot. The original soundtrack is muxed after
+trimmed before joining, retaining every source frame. After the performance patch,
+each continuation carries the preceding 22 rendered frames as frozen video
+latents and generates at most 102 new frames. The overlap is discarded from
+delivery, and context resets at shot cuts. The original soundtrack is muxed after
 assembly; it is not regenerated. AAC audio is copied, while other codecs are
 converted to AAC for delivery. Silent sources remain silent. Delivery may compress
 the result to meet the channel upload limit.
@@ -158,6 +162,33 @@ the description fix with `python3 scripts/apply-video-swap-description-desktop.p
 then without `--check`. Deploy the matching broker and reload the worker
 while idle. The renderer now requires `--reference-description`; an older worker
 cannot silently invoke it with the known failing generic prompt.
+
+For desktops with the description fix installed, apply
+`python3 scripts/apply-video-swap-performance-desktop.py --check`, then without
+`--check`. The renderer is a per-job subprocess, so new replacements pick up its
+continuation changes without reloading the worker. Existing renders are unaffected.
+
+The renderer also accepts `--speech-plan PATH` with source-relative intervals:
+
+```json
+{"source_seconds": 8.1, "target_speech": [{"start": 0.0, "end": 1.2}, {"start": 2.5, "end": 5.6}]}
+```
+
+Use intervals checked against the source speaker turns. The conditioning waveform
+retains only the selected subject's speech; all other times are silent. Each model
+window receives the aligned waveform as frozen audio latents and instructions to
+listen outside those intervals. The final output still uses the complete original
+soundtrack, including the other speakers. Empty intervals describe a silent target.
+Invalid, overlapping or out-of-range intervals, and a mismatched source duration,
+are rejected before rendering. The worker does not yet generate this optional
+speech plan automatically; an absent plan retains guide-only mouth animation.
+
+The 71683bd7 regression exposed an appearance jump at output frame 112. A bounded
+continuation test removed that visible jump and kept the replacement's mouth
+closed during the following off-screen reply. These observations do not establish
+perfect phoneme timing. Tests exercise real FFmpeg overlap trimming, source frame
+counts, shot-cut resets, original AAC preservation, and source-relative speech
+gating; run `python -m unittest test_video_character_swap` in the desktop environment.
 
 The [BFS Character Swap license](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/blob/main/LICENSE_CHARACTER_SWAP.md)
 restricts remote inference services. The operator confirmed separate author
