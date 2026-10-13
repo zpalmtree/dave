@@ -1057,8 +1057,8 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
 });
 }
 
-for (const version of [4, 5]) {
-test(`replace edits ask version ${version} workers ${version >= 5 ? 'to' : 'not to'} animate a broker-repainted frame`, async () => {
+for (const version of [4, 5, 6]) {
+test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for version ${version} workers`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-still-'));
     const repaints = [];
     let refuse = false;

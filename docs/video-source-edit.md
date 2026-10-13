@@ -27,10 +27,11 @@ character” never asks: grounding picks the most prominent fitting subject, and
 in a compilation that cuts between people it describes each shot's main subject
 by what they share, such as “the woman in the foreground”. Grounding also
 records whether the edit covers one subject or an explicit group (“the dancers”,
-“everyone”); for one subject the worker replaces only the most prominent tracked
-match in each shot, not every person fitting the description. Names are linked
-using visible appearance and supplied context, not passed straight to the
-tracker. If several subjects fit an explicit description, or a named subject is
+"everyone"); Character Swap is prompted to replace only the most prominent
+matching subject when the request is singular. The legacy SAM3 path selects one
+tracked match per shot. Names are resolved using visible appearance and supplied
+context before being passed to the renderer or tracker. If several subjects fit
+an explicit description, or a named subject is
 absent, the bot asks a short question using visible alternatives. Reissue the
 command on the source video with that distinction. Provider failures do not fall back to the original
 ungrounded target. No replacement reference or diffusion render is started for
@@ -40,8 +41,9 @@ The broker retains the original target, context, sample times, and resolved
 description in `video-edit-grounding.json` beside the downloaded clip. Visual
 grounding usage is recorded with the job's provider metrics. Each interpretation
 call is bounded to 45 seconds; source sampling adds a small amount of CPU work.
-This resolves user wording, but does not guarantee that the segmentation or
-replacement model will succeed; tracking validation remains mandatory.
+This resolves user wording, but does not guarantee that the replacement model will
+select the right subject. Character Swap uses the grounded description in its prompt;
+the legacy backends additionally validate SAM3 tracking.
 
 The clip and image may be attached to the command or to the message it replies
 to. The command message's attachment wins when both messages have the same kind
@@ -73,28 +75,74 @@ The source clip must be MP4, MOV, M4V, WebM, or MKV, 0.5 seconds to 10 minutes,
 and no larger than 100 MiB. A clip longer than two minutes keeps its first two
 minutes, and a range in the prompt such as `0:40-1:10` or `from 1:05` keeps that
 part instead (an open range runs up to two minutes). The broker re-encodes the
-excerpt so it starts on the requested frame. MiniMax H3 generates 5–15 seconds per run. Shorter clips are padded
-for generation and trimmed back to the source length. Longer clips are split
-into frame-aligned segments, edited in order, and joined with the original audio.
-The clip is downloaded to the broker before queueing so its media URL
-cannot expire while it waits. The desktop normalizes it to 24 fps, tracks the
-named subject with SAM3.1, and rejects an empty or nearly full-frame mask.
-Tracking validation counts selected pixels after decoding the mask, excluding
-padding frames. The subject must occupy at least 0.3% and no more than 85% of
-the frame on average, with a usable selection in at least half the source frames
-of each segment. Empty or mostly lost tracks stop before diffusion and return an
-error instead of delivering an effectively unchanged clip. The visual grounding
-pass describes the target's appearance and position for SAM3; a failed track
-still requires a clearer target or a more suitable source clip.
-MiniMax H3 Ref2VA receives the replacement image. Fun ControlNet receives the
-source video and inpaints an expanded box that follows the tracked subject. This
-gives a differently shaped replacement room to form. The final video composites
-that region over the source frames and muxes the original soundtrack. AAC source
-audio is copied; other codecs are converted to AAC for Discord delivery.
-Delivery may compress the result to meet the channel's upload limit.
+excerpt so it starts on the requested frame. The broker downloads the clip before
+queueing so its media URL cannot expire while waiting.
 
-Replace edits with a replacement image use Viggle-Animate when the desktop worker
-reports `video_edit_version` 5. Viggle-Animate is a finetune of the Ref2VA
+Replacement edits use Character Swap when the desktop worker advertises
+`video_edit_version` 6. It applies the primary Character Swap LoRA and the matching
+Ref2VA DMD accelerator to the H3 Ref2VA base model. The source frames enter
+`MiniMaxH3AddGuide` at frame zero; the replacement image enters native reference
+conditioning as `<Picture 1>`, with a `body_swap:` prompt identifying the grounded
+target and whether one subject or the whole matching group should be replaced.
+Attached, preset, cloud-generated and locally generated replacement images all
+use this path. No per-shot repaint or lip-sync postprocessing is required.
+
+The approved settings are eight Euler/simple steps, CFG 1, both LoRAs at strength
+1, video/audio sigma shifts 12/3, and the installed INT8 video VAE. Output stays
+within 0.5 megapixels on a 32-pixel grid without enlarging the source. The desktop
+normalizes to 24 fps, detects shot cuts, and partitions each shot into windows of
+at most 124 source frames. Shorter windows are padded to 124 frames for H3 and
+trimmed before joining, retaining every source frame. Windows render independently,
+so seams can occur within a long shot. The original soundtrack is muxed after
+assembly; it is not regenerated. AAC audio is copied, while other codecs are
+converted to AAC for delivery. Silent sources remain silent. Delivery may compress
+the result to meet the channel upload limit.
+
+This is the raw replacement behavior approved in the October 13, 2026 comparison:
+no SAM mask or source-background composite is applied. Facial performance improved
+in the reviewed close-ups, but the model can widen framing and redraw backgrounds.
+Target selection, especially with multiple people, is prompt-based rather than
+pixel-exact. Animal, object and long-clip replacements have not been validated by
+that two-clip comparison. Both tested clips retained the character and original
+soundtrack; the initial 544×640 render took 220 seconds including model loading,
+and the following 640×768 render took 145 seconds. These are observed run times,
+not a guaranteed latency or a matched speed comparison with the old renderer.
+
+The generator writes `edited.character-swap.json` next to the worker output with
+its backend, timings, segment frame ranges, workflow graphs and failure details.
+If Character Swap is unavailable, fails, or produces no usable output, the worker
+runs the existing Viggle/H3 path below. Cancellation never starts a fallback.
+Add-to-video edits continue to use H3 Fun ControlNet. Set
+`VIDEO_EDIT_CHARACTER_SWAP=0` on the desktop worker and reload it while idle to
+restore the legacy replacement flow. `VIDEO_EDIT_REPAINT=0` on the broker controls
+only whether the legacy fallback uses Viggle or goes directly to H3.
+
+Install the version-checked desktop changes with
+`python scripts/apply-video-character-swap-desktop.py --check`, then the same
+command without `--check`, and reload the supervised worker while idle. Required
+models and pinned download hashes are recorded in
+`desktop/video-character-swap-models.json`. The primary Character Swap LoRA is
+about 620 MB and the matching Ref2VA accelerator about 2.29 GB; the existing
+Ref2VA base, text encoder and VAEs are reused. Model files belong in ComfyUI's
+configured model directories, including `C:/AI/ComfyUI_fast_models` on this desktop.
+The installer does not download models.
+
+The [BFS Character Swap license](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/blob/main/LICENSE_CHARACTER_SWAP.md)
+restricts remote inference services. The operator confirmed separate author
+permission for this deployment. Other operators must obtain their own applicable
+permission; installing this integration does not grant rights to the model weights.
+
+## Legacy fallback
+
+The legacy H3 path tracks the named subject with SAM3.1 and rejects an empty or
+nearly full-frame mask. The selection must cover 0.3%–85% of the frame on average,
+with a usable track in at least half the source frames per segment. H3 Ref2VA and
+Fun ControlNet inpaint an expanded box around the subject. The result is composited
+over the source and joined with the original soundtrack. A tracking failure stops
+before diffusion.
+
+The legacy path uses Viggle-Animate for replacement images when the worker
+supports repainting (version 5 or later). Viggle-Animate is a finetune of the Ref2VA
 transformer that animates one repainted frame of the clip through the source
 motion. The worker tracks the target in every segment and sends the broker the
 frame where it is largest. The broker repaints the target in that frame with
@@ -116,9 +164,9 @@ on its head, so a clip that cuts to its subjects in hijabs still shows the
 replacement in one. Naming garments in that rule got frames of bareheaded real
 people refused, so it names none. The desktop README describes the cut detection. A refused or failed repaint, or a failed Viggle render,
 falls back to the H3 replacement. A tracking failure is final, since H3 would
-fail the same way. Add edits and replacements drawn locally by Qwen Image
-always use H3. Set `VIDEO_EDIT_REPAINT=0` on the broker to keep every replace
-edit on H3. The worker needs `minimax_h3_ref2va_viggle_pruned_int8_convrot`,
+fail the same way. Add edits and locally drawn references use H3 within this fallback. Set
+`VIDEO_EDIT_REPAINT=0` on the broker to send legacy replacement attempts directly
+to H3. The worker needs `minimax_h3_ref2va_viggle_pruned_int8_convrot`,
 `viggle_animate_dmd_lora_r64`, `models/text_cond/fixed_embed_fwd_anyframe`, and
 the `viggle_animate_h3` custom node pack in ComfyUI.
 
@@ -127,7 +175,7 @@ in body shape can confuse automatic tracking and replacement. Each segment track
 the target independently, so a visible seam can occur where two renders meet
 within one shot. A portrait
 reference may produce a cropped body in a full-body
-shot. The original video is retained outside the replacement region. The
+shot. The legacy paths retain the original video outside the replacement region. Their
 underlying H3 workflow uses the separate Ref2VA diffusion checkpoint, the Fun
 ControlNet Union 2.0 patch, and the SAM3.1 checkpoint on the Windows desktop.
 Union 2.0 needs the compatibility patch in `desktop/minimax-h3-fun-v2-compat.patch`

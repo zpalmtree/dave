@@ -1,0 +1,244 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -29,6 +29,7 @@
+ ROOT_DIR = SCRIPT_DIR.parent
+ GENERATOR = SCRIPT_DIR / "video_gen.py"
+ VIDEO_EDIT_GENERATOR = SCRIPT_DIR / "video_edit.py"
++CHARACTER_SWAP_GENERATOR = SCRIPT_DIR / "video_character_swap.py"
+ GPUQ = Path(os.environ.get("GPUQ_EXE", r"D:\AI\gpuq\gpuq.exe"))
+ CONFIG_PATH = Path(os.environ.get("DAVE_VIDEO_WORKER_CONFIG", SCRIPT_DIR / "video_worker.json"))
+ JOURNAL_PATH = SCRIPT_DIR / "video_worker.journal.json"
+@@ -1534,8 +1535,8 @@
+                     # 1: composes a song request's soundtrack with MiniMax Music 3 (video_song.py).
+                     "song_compose_version": 1,
+                     "song_download_version": 1,
+-                    # 5: replace edits can animate a broker-repainted frame with Viggle-Animate.
+-                    "video_edit_version": 5,
++                    # 6: replacements prefer Character Swap; Viggle/H3 remain fallbacks.
++                    "video_edit_version": 6,
+                     "recovery_version": 3,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+@@ -2184,8 +2185,28 @@
+                     if code == 0 and not replacement.is_file():
+                         code = 70
+                 render_started = time.monotonic()
++                swap_done = False
++                if code == 0 and not self.cancel_reason and not adding \
++                        and os.environ.get("VIDEO_EDIT_CHARACTER_SWAP", "1") != "0":
++                    await self.send({"type": "event", "event": "progress", "job_id": job_id,
++                                     "stage": "Replacing the character from the source performance"})
++                    output.unlink(missing_ok=True)
++                    swap_command = list(command)
++                    swap_command[2] = str(CHARACTER_SWAP_GENERATOR)
++                    swap_started = time.monotonic()
++                    swap_code = await self.run_reserved_command(swap_command)
++                    self.add_span("worker", "video_edit_character_swap", time.monotonic() - swap_started)
++                    if self.cancel_reason or (swap_code == 0 and output.is_file() and output.stat().st_size):
++                        swap_done = True
++                        code = swap_code
++                    else:
++                        reason = error_file.read_text(encoding="utf-8") if error_file.is_file() \
++                            else f"exit code {swap_code}, no usable output"
++                        print(f"WARNING: Character Swap failed ({reason[:300]}); using the legacy replacement.", flush=True)
++                        error_file.unlink(missing_ok=True)
++                        output.unlink(missing_ok=True)
+                 viggle_done = False
+-                if code == 0 and not self.cancel_reason and job.get("video_edit_repaint") \
++                if not swap_done and code == 0 and not self.cancel_reason and job.get("video_edit_repaint") \
+                         and not adding and not local_reference:
+                     viggle_code = await self.run_viggle_edit(job, source_video, output, error_file, output_dir)
+                     reason = error_file.read_text(encoding="utf-8") if error_file.is_file() else f"exit code {viggle_code}"
+@@ -2198,7 +2219,7 @@
+                         print(f"WARNING: Viggle-Animate replacement failed ({reason[:300]}); using H3.", flush=True)
+                         error_file.unlink(missing_ok=True)
+                         output.unlink(missing_ok=True)
+-                if viggle_done:
++                if swap_done or viggle_done:
+                     pass
+                 elif code == 0 and not self.cancel_reason:
+                     await self.send({"type": "event", "event": "progress", "job_id": job_id,
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -48,6 +48,12 @@
+ 
+ 
+ class PublicStageTests(unittest.TestCase):
++    def setUp(self):
++        # Existing replacement regressions exercise the retained legacy fallback.
++        patcher = mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "0"})
++        patcher.start()
++        self.addCleanup(patcher.stop)
++
+     def test_gpu_time_budget_failures_are_not_retried(self):
+         self.assertFalse(DesktopVideoWorker.is_retryable(
+             "estimated GPU time exceeds the per-video GPU time budget"
+@@ -616,7 +622,8 @@
+         worker.run_reserved_command = run_reserved
+         with tempfile.TemporaryDirectory() as directory, \
+                 mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
+-                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"):
++                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "1"}):
+             asyncio.run(worker.run_job(job))
+             spec = json.loads(Path(commands[0][commands[0].index("--image-job-input") + 1]).read_text(encoding="utf-8"))
+             reference = commands[0][commands[0].index("--image-job-output") + 1]
+@@ -627,6 +634,7 @@
+         self.assertEqual(spec["references"], [])
+         self.assertIn("a black axe", spec["prompt"])
+         self.assertEqual(len(commands), 2)
++        self.assertIn(str(video_worker.CHARACTER_SWAP_GENERATOR), commands[1])
+         self.assertEqual(commands[1][commands[1].index("--image") + 1], reference)
+         self.assertEqual(commands[1][commands[1].index("--mode") + 1], "replace")
+         worker.finish_gpuq_reservation.assert_awaited_once()
+@@ -659,7 +667,8 @@
+         worker.run_reserved_command = run_reserved
+         with tempfile.TemporaryDirectory() as directory, \
+                 mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
+-                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"):
++                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "1"}):
+             asyncio.run(worker.run_job(job))
+ 
+         worker.fail_current.assert_not_awaited()
+@@ -718,6 +727,105 @@
+         worker.run_reserved_command = run_reserved
+         worker.request_video_edit_still = mock.AsyncMock(side_effect=request_still)
+         return worker, commands
++
++    def test_character_swap_is_default_and_bypasses_repaint(self):
++        job = {"id": "swap-default", "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
++               "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++               "video_edit_target": "the man in red", "video_edit_repaint": True,
++               "video_edit_subjects": "primary"}
++        worker, commands = self.viggle_edit_worker(job)
++        with tempfile.TemporaryDirectory() as directory, \
++                mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
++                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                mock.patch.dict(video_worker.os.environ):
++            video_worker.os.environ.pop("VIDEO_EDIT_CHARACTER_SWAP", None)
++            asyncio.run(worker.run_job(job))
++        self.assertEqual(len(commands), 1)
++        self.assertIn(str(video_worker.CHARACTER_SWAP_GENERATOR), commands[0])
++        self.assertEqual(commands[0][commands[0].index("--subjects") + 1], "primary")
++        self.assertEqual(commands[0][commands[0].index("--target") + 1], "the man in red")
++        worker.request_video_edit_still.assert_not_awaited()
++        worker.finish_output.assert_awaited_once()
++        worker.finish_gpuq_reservation.assert_awaited_once()
++        worker.fail_current.assert_not_awaited()
++
++    def test_character_swap_error_or_missing_output_falls_back_to_viggle(self):
++        for exit_code in (0, 1):
++            with self.subTest(exit_code=exit_code):
++                job = {"id": "swap-fallback", "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
++                       "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++                       "video_edit_target": "the man", "video_edit_repaint": True}
++                worker, commands = self.viggle_edit_worker(job)
++                legacy = worker.run_reserved_command
++
++                async def run(command):
++                    if str(video_worker.CHARACTER_SWAP_GENERATOR) in command:
++                        commands.append(command)
++                        Path(command[command.index("--error-file") + 1]).write_text("Swap model failed")
++                        # An empty file must not be accepted even with an exit code of zero.
++                        Path(command[command.index("--output") + 1]).write_bytes(b"")
++                        return exit_code
++                    return await legacy(command)
++
++                worker.run_reserved_command = run
++                with tempfile.TemporaryDirectory() as directory, \
++                        mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
++                        mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                        mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "1"}):
++                    asyncio.run(worker.run_job(job))
++                self.assertEqual(len(commands), 3)
++                self.assertIn("--viggle-prepare", commands[1])
++                self.assertIn("--viggle-render", commands[2])
++                worker.finish_output.assert_awaited_once()
++                worker.fail_current.assert_not_awaited()
++
++    def test_character_swap_failure_without_repaint_falls_back_to_h3(self):
++        job = {"id": "swap-h3", "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
++               "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++               "video_edit_target": "the man"}
++        worker, commands = self.viggle_edit_worker(job)
++        legacy = worker.run_reserved_command
++
++        async def run(command):
++            if str(video_worker.CHARACTER_SWAP_GENERATOR) in command:
++                commands.append(command)
++                return 1
++            return await legacy(command)
++
++        worker.run_reserved_command = run
++        with tempfile.TemporaryDirectory() as directory, \
++                mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
++                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "1"}):
++            asyncio.run(worker.run_job(job))
++        self.assertEqual(len(commands), 2)
++        self.assertIn(str(video_worker.VIDEO_EDIT_GENERATOR), commands[1])
++        worker.request_video_edit_still.assert_not_awaited()
++        worker.finish_output.assert_awaited_once()
++
++    def test_character_swap_cancellation_does_not_run_fallback(self):
++        job = {"id": "swap-cancel", "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
++               "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++               "video_edit_target": "the man", "video_edit_repaint": True}
++        worker, commands = self.viggle_edit_worker(job)
++        worker.finish_cancelled_job = mock.AsyncMock()
++
++        async def run(command):
++            commands.append(command)
++            worker.cancel_reason = "user cancelled"
++            return 1
++
++        worker.run_reserved_command = run
++        with tempfile.TemporaryDirectory() as directory, \
++                mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
++                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "1"}):
++            asyncio.run(worker.run_job(job))
++        self.assertEqual(len(commands), 1)
++        worker.request_video_edit_still.assert_not_awaited()
++        worker.finish_output.assert_not_awaited()
++        worker.finish_cancelled_job.assert_awaited_once_with(job["id"])
++        worker.finish_gpuq_reservation.assert_awaited_once()
+ 
+     def test_repainted_replacement_is_animated_with_viggle(self):
+         job = {"id": "edit-4", "lease_id": "lease-4", "model": "minimax", "prompt": "Meximutt",
+--- a/README.md
++++ b/README.md
+@@ -225,3 +225,32 @@
+ and explicit plural targets (`group`), keep every tracked match. A segment where the subject
+ cannot be tracked stays source footage when the clip has more than one shot; the edit fails only
+ when no segment has the subject.
++
++
++## Character Swap replacements
++
++Version 6 workers use `video_character_swap.py` for replace edits before the
++Viggle/H3 fallback. The approved primary Character Swap and Ref2VA DMD LoRAs run
++at strength 1 with eight Euler/simple steps, CFG 1 and sigma shifts 12/3. Native
++H3 image-reference conditioning supplies the replacement, while Add Guide receives
++the original shot frames. Add edits stay on the existing Fun ControlNet path.
++
++The renderer keeps the source aspect within a 0.5 MP canvas, splits at detected
++cuts and limits windows to 124 frames. It pads short windows and trims them back
++before restoring the original soundtrack. It does not repaint a still, composite
++SAM masks, generate audio or run a lip-sync post-pass. This matches the approved
++local comparisons; wider framing, background changes and seams between independent
++windows remain possible. Selection of one subject or a group follows the broker's
++grounded target in the prompt.
++
++`edited.character-swap.json` records segment graphs, timings and failures.
++Missing models, render errors and empty output fall back to Viggle/H3; cancelling
++stops without fallback. Set `VIDEO_EDIT_CHARACTER_SWAP=0` in the worker environment
++and reload the idle worker to roll back. `VIDEO_EDIT_REPAINT=0` on the broker only
++controls repainting in the legacy fallback.
++
++The deployment operator confirmed author permission for remote use of the Character
++Swap weights. Other installations need their own applicable permission under the
++BFS Character Swap license. The repository's `desktop/video-character-swap-models.json`
++records exact weight revisions and SHA-256 hashes. Install code using
++`scripts/apply-video-character-swap-desktop.py` from the bot repository.
