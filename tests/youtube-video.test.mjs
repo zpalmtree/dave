@@ -74,7 +74,7 @@ test('the broker has the desktop download a YouTube source and stores its upload
     try {
         const offline = await submit('offline');
         assert.equal(offline.status, 400);
-        assert.match((await offline.json()).error, /video computer online/);
+        assert.match((await offline.json()).error, /GPU online/);
 
         const fetches = [];
         let reply = async request => {
@@ -96,7 +96,7 @@ test('the broker has the desktop download a YouTube source and stores its upload
             await acknowledged;
         };
         await connect({});
-        assert.match((await (await submit('old-worker')).json()).error, /video computer online/);
+        assert.match((await (await submit('old-worker')).json()).error, /GPU online/);
 
         await connect({ source_video_download_version: 1 });
         const accepted = await submit('accepted');

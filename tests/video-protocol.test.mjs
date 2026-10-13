@@ -807,7 +807,7 @@ test('active video status shows only rough progress and one completion ETA', () 
         gpu_estimated_admission_low_at: 2_000_000_120,
         gpu_estimated_admission_high_at: 2_000_000_240,
     });
-    assert.match(waiting, /Waiting for the video computer/);
+    assert.match(waiting, /Waiting for the GPU/);
     assert.match(waiting, /\*\*2\*\* tasks ahead/);
     assert.match(waiting, /Usually takes \*\*2m–5m\*\* once it starts/);
     assert.match(waiting, /The wait may change/);
@@ -862,8 +862,8 @@ test('GPU-blocked jobs tell the requester the desktop is holding the GPU', () =>
         gpu_queue_block_reason: 'external_gpu_busy',
         gpu_queue_block_detail: 'GPU admission requires 27952 MiB free; 26426 MiB available.',
     });
-    assert.match(blocked, /Waiting for the video computer/);
-    assert.match(blocked, /Other apps are using the graphics card/);
+    assert.match(blocked, /Waiting for the GPU/);
+    assert.match(blocked, /Other apps are using the GPU/);
     assert.match(blocked, /will start when there’s room/);
     assert.doesNotMatch(blocked, /27952/);
 
