@@ -33,6 +33,9 @@ for (const hasSource of [true, false]) test(`boundary recovery preserves ${hasSo
     let calls = 0;
     let fail = false;
     let generated;
+    let drifted = false;
+    let refuse = false;
+    let restores = 0;
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false, recoveryPlanner: async () => structuredClone(prepared),
@@ -44,7 +47,15 @@ for (const hasSource of [true, false]) test(`boundary recovery preserves ${hasSo
             assert.equal(anchors.length, 1);
             assert.deepEqual(anchors[0].data, decodeContinuityImage(image).data);
             assert.ok(frame.data.length);
-            return { action: 'reanchor', identity_description: 'Same blonde explorer, narrow face and red coat.', reason: 'Only fog is visible.' };
+            return drifted ? { action: 'continue', identity_description: 'Same blonde explorer.', reason: 'Eyes shut mid-blink.', restore_face: true }
+                : { action: 'reanchor', identity_description: 'Same blonde explorer, narrow face and red coat.', reason: 'Only fog is visible.' };
+        },
+        continuityRestoreGenerator: async (frame, original, identity) => {
+            restores++;
+            if (refuse) throw new Error('The image provider declined.');
+            assert.deepEqual(original.bytes, decodeContinuityImage(image).data);
+            assert.match(identity, /blonde explorer/);
+            return { bytes: decodeContinuityImage(image).data, mimeType: 'image/png', provider: 'test', model: 'test' };
         },
         keyframeGenerator: async (actualPlan, references) => {
             generated = { plan: actualPlan, references };
@@ -95,6 +106,24 @@ for (const hasSource of [true, false]) test(`boundary recovery preserves ${hasSo
         assert.equal(calls, 2);
         assert.deepEqual((await request('continuity', payload)).body, checked.body);
         assert.equal(calls, 2);
+        assert.equal(restores, 0, 'A reanchor never asks for a restored face.');
+        // A recognizable but drifted face comes back redrawn from the original, once.
+        fail = false;
+        drifted = true;
+        const frames = [1, 2].map(n => 'data:image/png;base64,' + Buffer.concat([decodeContinuityImage(image).data, Buffer.from(`drift${n}`)]).toString('base64'));
+        const restored = await request('continuity', { ...payload, frame: frames[0] });
+        assert.equal(restored.body.action, 'continue');
+        assert.equal(restored.body.restored_frame, image);
+        assert.deepEqual((await request('continuity', { ...payload, frame: frames[0] })).body, restored.body);
+        assert.equal(restores, 1);
+        // A refused redraw continues on the rendered frame and is not billed again.
+        refuse = true;
+        const declined = await request('continuity', { ...payload, frame: frames[1] });
+        assert.equal(declined.status, 200);
+        assert.equal(declined.body.action, 'continue');
+        assert.equal(declined.body.restored_frame, undefined);
+        assert.equal((await request('continuity', { ...payload, frame: frames[1] })).body.restored_frame, undefined);
+        assert.equal(restores, 2);
     } finally {
         broker.worker = null;
         await broker.stop();
