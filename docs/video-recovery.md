@@ -168,9 +168,15 @@ Actions explicitly preceding speech get their own timing so the remaining
 speaking window can hold the complete line.
 
 Completion requires approval for every scene and the exact uploaded file hash.
-Generated clips are normalized before concatenation and the final MP4 is fully
-decoded before upload. Discord delivery records the posted message ID before
-editing the progress message, so a cosmetic edit failure cannot trigger a render.
+Generated clips share the first accepted render's native canvas, with even
+dimensions for H.264. Later scenes fit without cropping, adding padding only
+when their aspect ratios differ. They retain the common frame rate and audio
+layout needed for cuts and dissolves; songs keep their exact frame timeline.
+Assembly retries derive the same canvas from the accepted original. Discord's
+existing size-limit compression can still downsize an oversized delivery.
+The final MP4 is fully decoded before upload. Discord delivery records the
+posted message ID before editing the progress message, so a cosmetic edit
+failure cannot trigger a render.
 Authorized regeneration increments a delivery revision and replaces attachments
 on the existing Discord message; stale delivery acknowledgments cannot complete
 the new revision.
