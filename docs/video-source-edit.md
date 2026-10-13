@@ -93,7 +93,19 @@ excerpt so it starts on the requested frame. The broker downloads the clip befor
 queueing so its media URL cannot expire while waiting.
 
 Replacement edits use Character Swap when the desktop worker advertises
-`video_edit_version` 6. It applies the primary Character Swap LoRA and the matching
+`video_edit_version` 7. Before rendering, the worker sends the actual replacement
+image to the broker for a bounded visual-description call. Its concrete face,
+hair/fur, proportions, colors and clothing description accompanies `<Picture 1>`
+in every segment's prompt. A character name alone is insufficient: job `71683bd7`
+retained the source man in three of four windows when this description was absent.
+The same opening window with the same seed and a concrete reference description
+established the replacement from its opening frame. Descriptions are cached by
+image hash and saved as `video-edit-reference.json` on the broker and
+`replacement-description.json` on the worker. Locally drawn references are
+described after generation. A failed description stops before Character Swap;
+it does not silently render with the old generic prompt.
+
+It applies the primary Character Swap LoRA and the matching
 Ref2VA DMD accelerator to the H3 Ref2VA base model. The source frames enter
 `MiniMaxH3AddGuide` at frame zero; the replacement image enters native reference
 conditioning as `<Picture 1>`, with a `body_swap:` prompt identifying the grounded
@@ -140,6 +152,12 @@ about 620 MB and the matching Ref2VA accelerator about 2.29 GB; the existing
 Ref2VA base, text encoder and VAEs are reused. Model files belong in ComfyUI's
 configured model directories, including `C:/AI/ComfyUI_fast_models` on this desktop.
 The installer does not download models.
+
+For desktops already running Character Swap and YouTube source downloads, apply
+the description fix with `python3 scripts/apply-video-swap-description-desktop.py --check`,
+then without `--check`. Deploy the matching broker and reload the worker
+while idle. The renderer now requires `--reference-description`; an older worker
+cannot silently invoke it with the known failing generic prompt.
 
 The [BFS Character Swap license](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/blob/main/LICENSE_CHARACTER_SWAP.md)
 restricts remote inference services. The operator confirmed separate author

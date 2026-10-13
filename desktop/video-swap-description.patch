@@ -1,0 +1,263 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -1538,8 +1538,8 @@
+                     "song_download_version": 1,
+                     # 1: downloads a linked YouTube video for the broker when an edit is submitted.
+                     "source_video_download_version": 1,
+-                    # 6: replacements prefer Character Swap; Viggle/H3 remain fallbacks.
+-                    "video_edit_version": 6,
++                    # 7: describe the replacement image before Character Swap; Viggle/H3 remain fallbacks.
++                    "video_edit_version": 7,
+                     "recovery_version": 3,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+@@ -2250,6 +2250,10 @@
+                     output.unlink(missing_ok=True)
+                     swap_command = list(command)
+                     swap_command[2] = str(CHARACTER_SWAP_GENERATOR)
++                    if job.get("video_edit_describe_reference"):
++                        description = await self.request_video_edit_reference(job, replacement)
++                        atomic_json(output_dir / "replacement-description.json", {"description": description})
++                        swap_command += ["--reference-description", description]
+                     swap_started = time.monotonic()
+                     swap_code = await self.run_reserved_command(swap_command)
+                     self.add_span("worker", "video_edit_character_swap", time.monotonic() - swap_started)
+@@ -2365,6 +2369,29 @@
+         if code == 0 and output.is_file():
+             shutil.rmtree(work, ignore_errors=True)
+         return code
++
++    async def request_video_edit_reference(self, job: dict[str, Any], reference: Path) -> str:
++        if not self.http_session:
++            raise RuntimeError("Broker HTTP session is unavailable.")
++        payload = reference.read_bytes()
++        if not payload or len(payload) > KEYFRAME_LIMIT:
++            raise RuntimeError("The replacement image is empty or too large.")
++        # Downloaded references may not retain a meaningful extension.
++        mime = "image/jpeg" if payload.startswith(b"\xff\xd8") else \
++            "image/webp" if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP" else "image/png"
++        url = re.sub(r"^wss://", "https://", self.broker_url)
++        url = re.sub(r"/v1/worker$", f"/v1/worker/jobs/{job['id']}/video-edit-reference", url)
++        async with self.http_session.post(
++            url, data=payload, headers={**self.worker_headers(), "Content-Type": mime},
++            timeout=aiohttp.ClientTimeout(total=60, connect=20),
++        ) as response:
++            body = await response.json()
++            if response.status != 200:
++                raise RuntimeError(str(body.get("error") or "Replacement image description failed.")[:500])
++        description = body.get("description")
++        if not isinstance(description, str) or not 20 <= len(description.strip()) <= 1000:
++            raise RuntimeError("The broker returned no usable replacement image description.")
++        return description.strip()
+ 
+     async def request_video_edit_still(self, job: dict[str, Any], frame: Path, destination: Path,
+                                        shot: int = 1) -> Path:
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -597,6 +597,7 @@
+             "has_source_image": False,
+             "source_image_composition": "local_qwen",
+             "video_edit_target": "his axe",
++            "video_edit_describe_reference": True,
+             "video_replacement_reference_prompt": "Depict the replacement requested by the user: a black axe",
+         }
+         worker.current_job = job
+@@ -611,6 +612,10 @@
+         worker.finish_gpuq_reservation = mock.AsyncMock()
+         worker.finish_output = mock.AsyncMock()
+         worker.fail_current = mock.AsyncMock()
++        async def describe(_job, image):
++            self.assertEqual(image.read_bytes(), b"result", "Caption the generated reference after it exists.")
++            return "a black axe with a curved metal blade and a dark wooden handle"
++        worker.request_video_edit_reference = mock.AsyncMock(side_effect=describe)
+         commands = []
+ 
+         async def run_reserved(command):
+@@ -633,6 +638,8 @@
+         self.assertEqual(spec["model"], "qwenimage")
+         self.assertEqual(spec["references"], [])
+         self.assertIn("a black axe", spec["prompt"])
++        worker.request_video_edit_reference.assert_awaited_once_with(job, Path(reference))
++        self.assertIn("--reference-description", commands[1])
+         self.assertEqual(len(commands), 2)
+         self.assertIn(str(video_worker.CHARACTER_SWAP_GENERATOR), commands[1])
+         self.assertEqual(commands[1][commands[1].index("--image") + 1], reference)
+@@ -726,10 +733,11 @@
+ 
+         worker.run_reserved_command = run_reserved
+         worker.request_video_edit_still = mock.AsyncMock(side_effect=request_still)
++        worker.request_video_edit_reference = mock.AsyncMock(return_value="a broad-faced man with short dark hair and red and green clothing")
+         return worker, commands
+ 
+     def test_character_swap_is_default_and_bypasses_repaint(self):
+-        job = {"id": "swap-default", "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
++        job = {"id": "swap-default", "video_edit_describe_reference": True, "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
+                "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
+                "video_edit_target": "the man in red", "video_edit_repaint": True,
+                "video_edit_subjects": "primary"}
+@@ -742,12 +750,31 @@
+             asyncio.run(worker.run_job(job))
+         self.assertEqual(len(commands), 1)
+         self.assertIn(str(video_worker.CHARACTER_SWAP_GENERATOR), commands[0])
++        self.assertEqual(commands[0][commands[0].index("--reference-description") + 1],
++                         worker.request_video_edit_reference.return_value)
++        worker.request_video_edit_reference.assert_awaited_once_with(job, Path("reference.png"))
+         self.assertEqual(commands[0][commands[0].index("--subjects") + 1], "primary")
+         self.assertEqual(commands[0][commands[0].index("--target") + 1], "the man in red")
+         worker.request_video_edit_still.assert_not_awaited()
+         worker.finish_output.assert_awaited_once()
+         worker.finish_gpuq_reservation.assert_awaited_once()
+         worker.fail_current.assert_not_awaited()
++
++    def test_reference_description_failure_stops_before_render_or_delivery(self):
++        job = {"id": "swap-description-failed", "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
++               "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++               "video_edit_target": "the man", "video_edit_describe_reference": True}
++        worker, commands = self.viggle_edit_worker(job)
++        worker.request_video_edit_reference.side_effect = RuntimeError("description unavailable")
++        with tempfile.TemporaryDirectory() as directory, \
++                mock.patch.object(video_worker, "SCRIPT_DIR", Path(directory)), \
++                mock.patch.object(video_worker, "LOG_DIR", Path(directory) / "logs"), \
++                mock.patch.dict(video_worker.os.environ, {"VIDEO_EDIT_CHARACTER_SWAP": "1"}):
++            asyncio.run(worker.run_job(job))
++        self.assertEqual(commands, [])
++        worker.finish_output.assert_not_awaited()
++        worker.fail_current.assert_awaited_once()
++        worker.finish_gpuq_reservation.assert_awaited_once()
+ 
+     def test_character_swap_error_or_missing_output_falls_back_to_viggle(self):
+         for exit_code in (0, 1):
+--- a/video_character_swap.py
++++ b/video_character_swap.py
+@@ -54,11 +54,13 @@
+     return result
+ 
+ 
+-def swap_prompt(target, direction, subjects):
++def swap_prompt(target, direction, subjects, reference_description):
++    if not 20 <= len(reference_description.strip()) <= 1000:
++        raise ValueError('Character Swap needs a concrete description of the replacement image')
+     selected = (f'the single most prominent subject matching "{target}"' if subjects == 'primary'
+                 else f'every subject matching "{target}"')
+     return (
+-        'body_swap: subject_definitions: <Subject 1> is the replacement character shown in '
++        f'body_swap: subject_definitions: <Subject 1> is {reference_description.strip()} shown in '
+         '<Picture 1>, whose identity, face, head, hair or fur, skin, body shape, proportions '
+         'and clothing define the character in the target video. The guide video provides '
+         'the scene and the performance: its background, environment, lighting, camera, '
+@@ -78,7 +80,7 @@
+ 
+ 
+ def render_graph(clip_name, reference_name, target, direction, subjects,
+-                 width, height, prefix, seed=46):
++                 width, height, prefix, seed=46, *, reference_description):
+     n = edit.node
+     return {
+         'model': n('UNETLoader', unet_name=edit.REF_MODEL, weight_dtype='default'),
+@@ -92,7 +94,7 @@
+         'source': n('LoadVideo', file=clip_name),
+         'frames': n('GetVideoComponents', video=['source', 0]),
+         'cond': n('MiniMaxH3ReferenceToVideo', clip=['clip', 0], vae=['vae', 0], audio_vae=['audio_vae', 0],
+-                  prompt=swap_prompt(target, direction, subjects), width=width, height=height,
++                  prompt=swap_prompt(target, direction, subjects, reference_description), width=width, height=height,
+                   length=MODEL_FRAMES, ref_image_size='match', **{'ref_images.ref_image_0': ['reference', 0]}),
+         'guide': n('MiniMaxH3AddGuide', positive=['cond', 0], latent=['cond', 1], vae=['vae', 0],
+                    image=['frames', 0], frame_idx=0),
+@@ -135,7 +137,8 @@
+     manifest_path = args.output.with_suffix('.character-swap.json')
+     manifest = {'backend': 'character_swap', 'status': 'running', 'source_seconds': duration,
+                 'width': width, 'height': height, 'target': args.target, 'subjects': args.subjects,
+-                'reference': str(args.image), 'audio': 'original source soundtrack', 'segments': []}
++                'reference': str(args.image), 'reference_description': args.reference_description,
++                'audio': 'original source soundtrack', 'segments': []}
+     started = time.monotonic()
+     try:
+         reference.write_bytes(args.image.read_bytes())
+@@ -154,7 +157,8 @@
+                     print(f'Generating replacement segment {index}/{len(segments)} with Character Swap', flush=True)
+                     edit.segment_clip(normalized, clip, start, source_frames, model_frames)
+                     graph = render_graph(clip.name, reference.name, args.target, args.prompt, args.subjects,
+-                                         width, height, f'video/edits/{run_id}-{index}-character-swap', args.seed + index - 1)
++                                         width, height, f'video/edits/{run_id}-{index}-character-swap', args.seed + index - 1,
++                                         reference_description=args.reference_description)
+                     record = {'start_frame': start, 'source_frames': source_frames, 'workflow': graph}
+                     manifest['segments'].append(record)
+                     manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+@@ -193,6 +197,7 @@
+     parser.add_argument('--mode', choices=('replace',), default='replace')
+     parser.add_argument('--subjects', choices=('primary', 'group'), default='primary')
+     parser.add_argument('--prompt', required=True)
++    parser.add_argument('--reference-description', required=True)
+     parser.add_argument('--output', type=Path, required=True)
+     parser.add_argument('--error-file', type=Path)
+     parser.add_argument('--server', default='http://127.0.0.1:8188')
+--- a/test_video_character_swap.py
++++ b/test_video_character_swap.py
+@@ -18,11 +18,13 @@
+ sys.path.insert(0, str(ROOT))
+ import video_character_swap as swap
+ 
++DESCRIPTION = 'a broad-faced man with short dark hair, full cheeks and red and green clothing'
++
+ 
+ class CharacterSwapTests(unittest.TestCase):
+     def test_graph_uses_aligned_source_and_native_reference_with_approved_sampling(self):
+         graph = swap.render_graph('source.mp4', 'ref.png', 'the woman in red', 'a robot',
+-                                  'primary', 544, 640, 'test/swap')
++                                  'primary', 544, 640, 'test/swap', reference_description=DESCRIPTION)
+         self.assertEqual(graph['source']['inputs']['file'], 'source.mp4')
+         self.assertEqual(graph['cond']['inputs']['ref_images.ref_image_0'], ['reference', 0])
+         self.assertEqual(graph['guide']['inputs']['image'], ['frames', 0])
+@@ -46,9 +48,13 @@
+                     self.assertIn(value[0], graph)
+ 
+     def test_prompt_preserves_grounded_target_and_single_or_group_selection(self):
+-        single = swap.swap_prompt('the woman in red', 'use the robot reference', 'primary')
+-        group = swap.swap_prompt('the dancers', 'use the robot reference', 'group')
++        single = swap.swap_prompt('the woman in red', 'use the robot reference', 'primary', DESCRIPTION)
++        group = swap.swap_prompt('the dancers', 'use the robot reference', 'group', DESCRIPTION)
+         self.assertTrue(single.startswith('body_swap:'))
++        self.assertIn(DESCRIPTION + ' shown in <Picture 1>', single)
++        for invalid in ('', 'Meximutt', 'x' * 1001):
++            with self.assertRaisesRegex(ValueError, 'concrete description'):
++                swap.swap_prompt('the man', 'Meximutt', 'primary', invalid)
+         self.assertIn('single most prominent subject matching "the woman in red"', single)
+         self.assertIn('every subject matching "the dancers"', group)
+         self.assertIn('Leave other subjects unchanged', single)
+@@ -106,7 +112,7 @@
+                 duration, _, _ = video_edit.clip_details(source)
+                 frames = math.ceil(duration * 24)
+                 args = argparse.Namespace(clip=source, image=reference, target='the person', prompt='a robot',
+-                                          subjects='primary', output=output, server='test', seed=46)
++                                          subjects='primary', output=output, server='test', seed=46, reference_description=DESCRIPTION)
+                 # Return the real padded guide as a stand-in for diffusion, testing all actual
+                 # normalization, trim, concat and soundtrack operations around the model.
+                 def render(_server, graph, _node, _timeout):
+@@ -132,6 +138,9 @@
+                 self.assertEqual(list((root / 'inputs').iterdir()), [])
+                 manifest = json.loads(output.with_suffix('.character-swap.json').read_text())
+                 self.assertEqual(manifest['status'], 'completed')
++                self.assertEqual(manifest['reference_description'], DESCRIPTION)
++                for record in manifest['segments']:
++                    self.assertIn(DESCRIPTION, record['workflow']['cond']['inputs']['prompt'])
+                 self.assertEqual(sum(s['source_frames'] for s in manifest['segments']), frames)
+ 
+     def test_failed_render_leaves_no_output_and_cleans_its_inputs(self):
+@@ -141,7 +150,7 @@
+             reference.write_bytes(b'ref')
+             args = argparse.Namespace(clip=root / 'source.mp4', image=reference, target='the person',
+                                       prompt='a robot', subjects='primary', output=root / 'edited.mp4',
+-                                      server='test', seed=46)
++                                      server='test', seed=46, reference_description=DESCRIPTION)
+             with mock.patch.object(swap, 'INPUT', root / 'input'), \
+                     mock.patch.object(swap, 'required_models'), \
+                     mock.patch.object(video_edit, 'clip_details', return_value=(1, 160, 96)), \
+@@ -162,7 +171,7 @@
+             reference.write_bytes(b'ref')
+             args = argparse.Namespace(clip=root / 'source.mp4', image=reference, target='the person',
+                                       prompt='a robot', subjects='primary', output=root / 'edited.mp4',
+-                                      server='test', seed=46)
++                                      server='test', seed=46, reference_description=DESCRIPTION)
+             with mock.patch.object(swap, 'INPUT', root / 'input'), \
+                     mock.patch.object(swap, 'required_models'), \
+                     mock.patch.object(video_edit, 'clip_details', return_value=(5.166667, 544, 640)), \
