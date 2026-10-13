@@ -1,5 +1,34 @@
 # Desktop video optimization changes
 
+## Approved timing and final edits
+
+`video-output-quality.patch` preserves the action time in approved recovery
+screenplays instead of treating time beyond a short line as dead air. It adds
+no render rejection or retry policy. Unapproved local drafts retain their
+existing timing normalization.
+
+Recovery assembly now honors picture dissolves and the independent audio
+transition setting, using the existing assembler. Dissolves overlap adjacent
+clips by up to half a second; ordinary cuts retain their full duration. Song
+clips keep their exact external audio timeline. The 960×720 delivery canvas
+is unchanged.
+
+The planner supplies `shot.camera_transition`: `continuous` times another beat
+inside the same take, and `cut` starts another camera shot. Old plans remain
+valid, including explicit no-cut camera directions. Non-speaking characters
+can perform the requested mouth actions while retaining their reference face;
+mouthless characters retain their existing anatomy rule.
+
+Apply with `python3 scripts/apply-video-output-quality-desktop.py --check`, then
+without `--check`. The hash-checked delta preserves the live desktop's prior
+changes. Reload the supervised worker while idle and deploy both bot tracks
+with `scripts/deploy-bots.sh --with-broker`.
+
+`test_video_output_quality.py` covers approved timing through loading and
+compilation, continuous-camera beats, silent mouth actions, real blended
+dissolve frames, audio seam attenuation, and song/single-clip assembly. Run it
+with the desktop Python environment, which supplies PyAV and FFmpeg.
+
 ## Recovery latency and timing
 
 `video-speed.patch` overlaps the next independent cut/dissolve opening with the

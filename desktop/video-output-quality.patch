@@ -1,0 +1,223 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -284,6 +284,7 @@
+                             "required": [
+                                 "duration_seconds",
+                                 "location",
++                                "camera_transition",
+                                 "visual",
+                                 "camera",
+                                 "audio",
+@@ -296,6 +297,7 @@
+                                     "maximum": 20.0,
+                                 },
+                                 "location": {"type": "string"},
++                                "camera_transition": {"type": "string", "enum": ["cut", "continuous"]},
+                                 "visual": {"type": "string"},
+                                 "camera": {"type": "string"},
+                                 "audio": {"type": "string"},
+@@ -455,6 +457,8 @@
+ 
+ INTENT_PLANNER_INSTRUCTION += '\n\nDefine speaker_profiles once for the whole video, with one speaker_id and voice_description for each speaking character. Keep speaker_id identical across scenes. voice_description fixes accent, habitual pitch range, resonance, texture, and cadence; respect any supplied character voice description. Keep momentary emotion and performance in dialogue.delivery, without changing that underlying identity. Use an empty array for no speech. Reuse the same environmental sound description across shots in a continuous location, allowing intentional changes in distance and acoustics. Keep requested music instrumentation, tempo, and key consistent across segments.\nChoose segment.audio_transition independently from the picture transition: auto uses short seam fades at cuts and an audio crossfade at a picture dissolve; cut preserves an intentional abrupt sound change; fade uses short seam fades even across a picture dissolve. These are edits of the combined audio, not separate ambience tracks. Never rely on them to continue a spoken sentence or music phrase across independently generated clips; finish spoken turns before a segment boundary.'
+ 
++INTENT_PLANNER_INSTRUCTION += '\n\nSet shot.camera_transition to continuous for the first beat of each segment. For later beats, use cut only for an actual edit to another shot, and continuous for successive actions, speech, pauses, or reactions in the same unbroken take. A locked-camera or uninterrupted-shot request uses continuous throughout; splitting speech and reaction into separately timed beats does not require a cut. Continuous camera motion also uses continuous, with the motion described in shot.camera.'
++
+ INTENT_PLANNER_INSTRUCTION += (
+     " For MiniMax H3, put a single short user-supplied line in the first shot of its segment "
+     "and reserve a clean 0.35-second visual lead-in before it begins: no human voice, mumbling, or "
+@@ -3014,6 +3018,7 @@
+     segment_max: float,
+     segment_min: float,
+     preferred_total: float | None = None,
++    preserve_timing: bool = False,
+ ) -> dict[str, Any]:
+     prompt_analysis = plan.get("prompt_analysis") if isinstance(plan, dict) else None
+     semantic_analysis = plan.get("semantic_analysis") if isinstance(plan, dict) else None
+@@ -3189,7 +3194,7 @@
+                         f"shot {index + 1}.{shot_index + 1}"
+                     )
+             shot["duration_seconds"] = max(0.5, float(shot.get("duration_seconds", 1.5)))
+-            if dialogue:
++            if dialogue and not preserve_timing:
+                 ceiling = dialogue_floor_seconds({"shots": [shot]}) + DIALOGUE_SHOT_SLACK_SECONDS
+                 dead_air += max(0.0, shot["duration_seconds"] - ceiling)
+                 shot["duration_seconds"] = min(shot["duration_seconds"], ceiling)
+@@ -5087,6 +5092,9 @@
+     plan = validate_plan_shape(
+         candidate, raw_prompt, None if song else requested_duration,
+         segment_max, 0.5 if song else segment_min,
++        # Recovery already budgeted action and speech together. Extra time in
++        # an approved speaking shot belongs to its action, not presumed dead air.
++        preserve_timing=bool(candidate.get("recovery_approved")),
+     )
+     if song:
+         if len(plan["segments"]) != len(candidate["segments"]):
+@@ -5528,8 +5536,9 @@
+         "Speech uses natural lip and jaw articulation while preserving that frame-zero lip width, "
+         "lip thickness, mouth-corner placement, teeth scale, jaw, and chin."
+         if has_dialogue else
+-        "The lips remain closed at the frame-zero mouth aperture with the teeth covered; subtle "
+-        "mouth-corner, cheek, and brow motion carries the expression."
++        "Non-speech actions and expressions use natural mouth and jaw movement as the screenplay "
++        "directs, preserving the frame-zero lip, teeth, jaw, and chin proportions. "
++        "A resting mouth keeps its natural reference pose without invented speech articulation."
+     )
+     return (
+         "Picture 1 is the sole visual authority for every face, overriding any generic emotion or "
+@@ -5550,7 +5559,8 @@
+     mouth_anchor = (
+         "Natural speech articulation retains the frame-zero lip, teeth, jaw, and chin proportions."
+         if has_dialogue else
+-        "The frame-zero mouth aperture stays closed and the teeth remain covered."
++        "Scripted non-speech actions and expressions may move the mouth and jaw while retaining "
++        "the frame-zero lip, teeth, jaw, and chin proportions."
+     )
+     return (
+         "The same face from <Picture 1> retains its exact frame-zero eye aperture and spacing, iris "
+@@ -5558,6 +5568,18 @@
+         f"silhouette. {mouth_anchor} This shot keeps the rendering medium, surface texture, and "
+         "lighting realism of <Picture 1>."
+     )
++
++
++def continuous_camera_beat(shot: dict[str, Any], segment: dict[str, Any]) -> bool:
++    transition = shot.get("camera_transition")
++    if transition in {"continuous", "cut"}:
++        return transition == "continuous"
++    # Saved plans predate the explicit field. Respect their clear single-take
++    # camera constraints without treating every static angle as one shared shot.
++    cameras = " ".join(str(beat.get("camera", "")) for beat in segment["shots"])
++    return bool(re.search(
++        r"\b(?:no (?:camera )?cuts?|without cuts?|do not cut|unbroken (?:take|shot)|"
++        r"(?:single|one) (?:continuous )?(?:take|shot))\b", cameras, re.I))
+ 
+ 
+ def compile_h3_prompt(
+@@ -5594,13 +5616,18 @@
+     description: list[str] = []
+     speaker_map: dict[str, str] = {}
+     elapsed = 0.0
++    camera_shot = 1
+     for index, shot in enumerate(segment["shots"]):
++        continuous = index > 0 and continuous_camera_beat(shot, segment)
+         if index == 0:
+             opening = "[Shot 1]"
++        elif continuous:
++            opening = f"At 00:{elapsed:06.3f}, within the same unbroken shot,"
+         else:
++            camera_shot += 1
+             # A re-anchored shot opens with its own "After the cut" sentence.
+             cut = "the camera cuts." if has_first_frame else "the camera cuts to"
+-            opening = f"[Shot {index + 1}] At 00:{elapsed:06.3f}, {cut}"
++            opening = f"[Shot {camera_shot}] At 00:{elapsed:06.3f}, {cut}"
+         visual = str(shot["visual"])
+         if shot.get("dialogue") and dialogue_lead_in > 0:
+             visual = sanitize_h3_dialogue_timing_text(visual)
+@@ -5615,16 +5642,24 @@
+                     f"{motion_contract_text(motion_contract, dialogue_lead_in if has_dialogue else 0.0)} "
+                     f"{h3_first_frame_face_identity_instruction(vocal_motion, mouthless)}"
+                 )
+-            else:
++            elif not continuous:
+                 image_anchor = (
+                     "After the cut, this remains the same subject from <Picture 1>. "
+                     f"{h3_first_frame_face_identity_reanchor(vocal_motion, mouthless)}"
+                 )
+-            visual = f"{image_anchor} {visual}"
++            else:
++                image_anchor = ""
++            visual = f"{image_anchor} {visual}".strip()
+         body = f"{opening} {visual.rstrip('.')} . {shot['camera'].rstrip('.')} ."
+         dialogue = shot_dialogue_h3(shot, speaker_map)
+         if dialogue:
+-            if dialogue_lead_in > 0:
++            if continuous:
++                # This is a later beat in the same shot, not a new shot at t=0.
++                # Keep any speech lead-in relative to this beat's timestamp.
++                lead_in = (f"After a {dialogue_lead_in:.2f}-second non-speech lead-in at this beat, "
++                           if dialogue_lead_in > 0 else "At this beat, ")
++                body += f" {lead_in}{dialogue}."
++            elif dialogue_lead_in > 0:
+                 body += (
+                     f" {h3_dialogue_lead_in_instruction(dialogue_lead_in)} "
+                     f"Immediately after this clean lead-in, {dialogue}."
+@@ -5635,7 +5670,7 @@
+             from video_source_audio import song_shot_performance
+             body += song_shot_performance(shot, elapsed)
+         else:
+-            body += " No speech occurs in this shot; character names and scene directions are not spoken."
++            body += " No speech occurs during this beat; character names and scene directions are not spoken."
+         body += f" {shot['audio'].rstrip('.')} ."
+         description.append(re.sub(r"\s+([.])", r"\1", body))
+         elapsed += float(shot["duration_seconds"])
+@@ -5644,7 +5679,8 @@
+             "Only the dialogue words inside the dialogue tags are voiced; speaker names, speaker tags, "
+             "language labels, and performance instructions are not spoken. "
+             "Before the first quoted line and after the final quoted line, no human speech, mumbling, "
+-            "or invented words are audible; speakers keep their mouths closed outside the dialogue."
++            "or invented words are audible. Outside dialogue, mouth movement follows only the "
++            "scripted physical actions and expressions, with no invented speech articulation."
+         )
+     if mouthless:
+         description = [value.replace("every speaker keeps their mouth closed", "every speaker remains vocally silent")
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -107,7 +107,22 @@
+     fitted.save(path)
+ 
+ 
+-def join_clips(clips: list[Path], destination: Path) -> Path:
++def join_clips(clips: list[Path], destination: Path, segments: list[dict] | None = None,
++               source_audio: bool = False) -> Path:
++    if segments and len(clips) > 1 and not source_audio:
++        from video_gen import assemble_segments
++        import av
++        timings = []
++        for path in clips:
++            with av.open(str(path)) as container:
++                stream = container.streams.video[0]
++                # AAC padding must not move a visual transition past its frame.
++                seconds = float(stream.duration * stream.time_base)
++            timings.append({'duration_seconds': seconds})
++        assemble_segments(clips, timings, [s.get('transition', 'cut') for s in segments],
++                          destination, [s.get('audio_transition', 'auto') for s in segments])
++        return destination
++    # Song clips are already pinned to an external soundtrack, without overlap.
+     # All paths are generated filenames in task-owned directories, never prompt text.
+     manifest = destination.with_suffix('.concat.txt')
+     manifest.write_text(''.join("file '" + str(path.resolve()).replace('\\', '/').replace("'", "'\\''") + "'\n" for path in clips), encoding='utf-8')
+@@ -706,7 +721,7 @@
+                 clips.append(await asyncio.to_thread(normalize_clip, original, scene_root / 'normalized.mp4', segment['source_audio_frames']))
+             else:
+                 clips.append(await asyncio.to_thread(normalize_clip, original, scene_root / 'normalized.mp4'))
+-        final = await asyncio.to_thread(join_clips, clips, root / 'final.mp4')
++        final = await asyncio.to_thread(join_clips, clips, root / 'final.mp4', plan['segments'], bool(song))
+         if song:
+             from video_source_audio import mux_original_song
+             final = await asyncio.to_thread(mux_original_song, ffmpeg(), final, song, root / 'song-final.mp4',
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -3834,11 +3834,11 @@
+         self.assertIn("location", shot["required"])
+         self.assertIn("shot.location", video_gen.INTENT_PLANNER_INSTRUCTION)
+ 
+-    def test_h3_silent_first_frame_keeps_mouth_closed_and_teeth_covered(self):
++    def test_h3_silent_first_frame_allows_natural_non_speech_mouth_actions(self):
+         segment = sample_plan()["segments"][0]
+         prompt = video_gen.compile_h3_prompt(segment, True)
+-        self.assertIn("lips remain closed at the frame-zero mouth aperture", prompt)
+-        self.assertIn("teeth covered", prompt)
++        self.assertIn("Non-speech actions and expressions use natural mouth and jaw movement", prompt)
++        self.assertNotIn("lips remain closed", prompt)
+         self.assertNotIn("Speech uses natural lip and jaw articulation", prompt)
+ 
+     def test_h3_without_first_frame_does_not_add_face_identity_lock(self):
+@@ -3902,7 +3902,7 @@
+         prompt = video_gen.prepare_model_segments(
+             "http://127.0.0.1:8188", silent, "h3", "input.png", {}, False, 10.0,
+         )[0]["prompt"]
+-        self.assertIn("lips remain closed at the frame-zero mouth aperture", prompt)
++        self.assertIn("Non-speech actions and expressions use natural mouth and jaw movement", prompt)
+ 
+     def test_ltx_is_chronological_prose(self):
+         segment = sample_plan("Hello.")["segments"][0]

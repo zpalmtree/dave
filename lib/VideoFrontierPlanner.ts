@@ -216,7 +216,7 @@ export const VIDEO_PLAN_SCHEMA = {
                         items: {
                             type: 'object',
                             additionalProperties: false,
-                            required: ['duration_seconds', 'location', 'visual', 'camera', 'audio', 'dialogue'],
+                            required: ['duration_seconds', 'location', 'camera_transition', 'visual', 'camera', 'audio', 'dialogue'],
                             properties: {
                                 duration_seconds: { type: 'number', minimum: 0.5, maximum: 20 },
                                 location: {
@@ -224,6 +224,10 @@ export const VIDEO_PLAN_SCHEMA = {
                                     description: 'Short name of the physical place visible in this shot, such as "bedroom desk" or "apartment front doorway". Repeat the identical name for every shot in the same place; a different room, doorway, exterior, or other place gets a different name and must begin a new segment.',
                                 },
                                 visual: { type: 'string' },
+                                camera_transition: {
+                                    type: 'string', enum: ['cut', 'continuous'],
+                                    description: 'How this beat follows the previous beat inside this segment: cut changes shots; continuous stays in the same unbroken take. Use continuous for the first beat and for every beat of a locked-camera or single-take request.',
+                                },
                                 camera: { type: 'string' },
                                 audio: { type: 'string' },
                                 dialogue: {
@@ -514,6 +518,8 @@ Treat every content-bearing word in the request as material. Preserve every expl
 Choose the shortest natural finished duration that makes the idea legible, capped by the supplied total and per-segment limits. A segment is one independently generated clip, while shots inside a segment are directions that one generative pass must perform itself. Keep ordinary camera-angle, framing, or lens changes within the same continuous location, cast, lighting, and action as shots in one segment. Every hard scene change involving a different location, time, cast, environment, independent action, or deliberately discontinuous visual state must begin a new segment even when the total duration fits one model generation. Name each shot's physical place in shot.location and keep one identical location within a segment: moving to another room, a doorway, an exterior, or any place the segment's opening frame does not show begins a new segment with transition=cut, because only a segment start receives its own rendered opening image. The pipeline splits a segment that mixes locations, padding each piece to the per-segment minimum. Use transition=continue only when the next segment should inherit the preceding final frame and can physically continue from it; use cut for a fresh scene and dissolve only for an intentional soft transition. Do not split a continuous action merely to add another camera angle. The sum of shot durations within each segment should equal target_seconds.
 
 ${VIDEO_DURATION_DISCIPLINE_INSTRUCTIONS}
+
+Set shot.camera_transition to continuous for the first beat of each segment. For later beats, use cut only for an actual edit to another shot, and continuous for successive actions, speech, pauses, or reactions in the same unbroken take. A locked-camera or uninterrupted-shot request uses continuous throughout; splitting speech and reaction into separately timed beats does not require a cut. Continuous camera motion also uses continuous, with the motion described in shot.camera.
 
 ${VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS}
 
