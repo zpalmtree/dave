@@ -1,0 +1,20 @@
+{
+  "patched": {
+    "video_worker.py": {
+      "before_sha256": "9c86b04d9922d6fcdfd2f7870f62ca2c5695d8158f6b03e5484c744ba7b8615d",
+      "after_sha256": "692c6a74196af2ba87b5a8094ba1da35db70ee1a950d356806bf5454fa30da48"
+    },
+    "test_video_worker.py": {
+      "before_sha256": "083fb3fda4d2a39aed049bd3b797081b2311bff55ca65301ac18e4aa793df8b7",
+      "after_sha256": "76c8633fed293a59136a8e0044e7c15dac6ef6e5104e3c9ef56ff67f5ab351d6"
+    },
+    "README.md": {
+      "before_sha256": "57dd31c66e3192b490bb6a98568b58decf25f4497854e9bdac5d8a54a5481ccd",
+      "after_sha256": "72fcbf6fac9e2306009986cb7eb46b68a7f9c0bffa2863f7f971a125950a6fb8"
+    }
+  },
+  "added": {
+    "video_character_swap.py": "6e7ff9fb6d109ec26232c06e6c7d8d55fd3424ec0f1c358d65ece489c511e3c1",
+    "test_video_character_swap.py": "afd848c61a23c4210761d584cc842def7dde16b63e3f9ec848a15147d7ba5c9e"
+  }
+}

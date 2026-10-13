@@ -1,0 +1,16 @@
+[
+  {
+    "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+    "revision": "d9ffebab204a9c722a4e9a65b966e2952fc6744f",
+    "file": "loras/minimax_h3_character_swap_v1.0_ref2va_r64_gl.safetensors",
+    "sha256": "643a3fe63646fee5aebb181a7e1c9f8a1feb5f472709f37e22eeec290cbb75e3",
+    "bytes": 620286056
+  },
+  {
+    "repo": "drbaph/MiniMax-H3-Turbo-Lora-ComfyUI",
+    "revision": "bb2bc497cbaca89dadd0bcf1856eed4f8275be20",
+    "file": "experimental/minimax_h3_dmd_ref2va_8step_turbo_pruned.safetensors",
+    "sha256": "693f41129785f31a820d32100b698cdcc42182c27c291f37f47d1ca5f38f5c20",
+    "bytes": 2285989092
+  }
+]

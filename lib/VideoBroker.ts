@@ -4596,7 +4596,7 @@ export class VideoBroker {
                 video_edit_subjects: row.video_edit_subjects || null,
                 video_replacement_reference_prompt: row.source_video_path && !row.source_image_path && row.video_replacement_prompt
                     ? videoReplacementReferencePrompt(row.video_replacement_prompt, row.video_edit_mode || 'replace') : null,
-                // Version 5 workers animate a repainted frame with Viggle-Animate and fall back to H3.
+                // Version 5 uses Viggle first; version 6 retains it as a Character Swap fallback.
                 video_edit_repaint: videoEditRepaintEnabled() && this.worker.videoEditVersion >= 5
                     && Boolean(row.source_video_path && row.source_image_path)
                     && (row.video_edit_mode || 'replace') === 'replace',
