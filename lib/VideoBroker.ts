@@ -3,7 +3,7 @@ import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoE
 import { describeVideoEditReference, validateVideoEditReference } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
-    cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio } from './VideoSourceAudio.js';
+    cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio, storeVideoSourceAudioFromClip } from './VideoSourceAudio.js';
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_MAX_BYTES, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
@@ -177,6 +177,7 @@ interface BrokerOptions {
         hooks?: VideoProviderHooks,
     ) => Promise<VideoKeyframeReference[]>;
     sourceAudioDownloader?: typeof storeVideoSourceAudio;
+    sourceAudioVideoDownloader?: typeof storeVideoSourceAudioFromClip;
     sourceAudioTranscriber?: typeof transcribeVideoSourceAudio;
     songWriter?: typeof writeVideoSong;
     sourceAudioExcerptSelector?: typeof selectVideoSourceAudioExcerpt;
@@ -1845,15 +1846,22 @@ export class VideoBroker {
         let sourceDescriptor: VideoSourceImageDescriptor | null;
         let videoDescriptor: SubmittedVideoSourceClip | null;
         let audioDescriptor: SubmittedVideoSourceAudio | null;
+        let audioVideoDescriptor: SubmittedVideoSourceClip | null;
         let compositeDescriptor: VideoSourceImageDescriptor | null;
         let sourceRange: VideoSourceRange | null;
         try {
             sourceRange = videoSourceRange(body.source_range);
             audioDescriptor = sourceAudioDescriptor(body.source_audio);
-            if (audioDescriptor && body.model !== 'minimax') throw new Error('Song lip-sync is supported by MiniMax and OALGO.');
+            audioVideoDescriptor = sourceClipDescriptor(body.source_audio_video);
+            if ((audioDescriptor || audioVideoDescriptor) && body.model !== 'minimax') throw new Error('Song lip-sync is supported by MiniMax and OALGO.');
             sourceDescriptor = sourceImageDescriptor(body.source_image);
             videoDescriptor = sourceClipDescriptor(body.source_video);
             compositeDescriptor = sourceImageDescriptor(body.source_image_composite);
+            if (audioVideoDescriptor && (audioDescriptor || videoDescriptor
+                || (sourceDescriptor && isClipSourceImage(sourceDescriptor))
+                || (compositeDescriptor && isClipSourceImage(compositeDescriptor)))) {
+                throw new Error('Use one soundtrack source and a separate image or character preset for a music video.');
+            }
         } catch (error) {
             return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
         }
@@ -1986,9 +1994,12 @@ export class VideoBroker {
         }
         let sourceAudio: StoredVideoSourceAudio | null = null;
         let sourceAudioLyrics: VideoSourceAudioLyrics | null = null;
-        if (audioDescriptor) {
+        if (audioDescriptor || audioVideoDescriptor) {
             try {
-                const song = await (this.options.sourceAudioDownloader || storeVideoSourceAudio)(audioDescriptor, directory);
+                const song = audioVideoDescriptor
+                    ? await (this.options.sourceAudioVideoDownloader || storeVideoSourceAudioFromClip)(audioVideoDescriptor, directory,
+                        (url, destination) => this.fetchWorkerSourceVideo(url, destination))
+                    : await (this.options.sourceAudioDownloader || storeVideoSourceAudio)(audioDescriptor!, directory);
                 // Lyric timing improves the plan, but a song without it still renders.
                 const songLyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, submissionHooks)
                     .catch(error => {

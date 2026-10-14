@@ -60,6 +60,21 @@ test('new-video requests retain clip-frame behavior rather than becoming edits',
     assert.equal(result.sources.image, clip);
 });
 
+test('music videos extract the soundtrack while keeping image and preset identity separate from clip frames', async () => {
+    for (const ownImage of [null, image]) {
+        const result = await resolveVideoEditRequest('make a music video for this song', message, null, '', MEXIMUTT,
+            async () => validateVideoEditDecision({ action: 'soundtrack', target: '', replacement: '', clarification: '' }, true),
+            async (_command, _reply, edit) => {
+                assert.equal(edit, true, 'must not fall back to extracting a video frame');
+                return { image: ownImage, clip };
+            });
+        assert.equal(result.replacement, null);
+        assert.equal(result.audioVideo, clip);
+        assert.deepEqual(result.sources, { image: ownImage, clip: null });
+    }
+    assert.throws(() => validateVideoEditDecision({ action: 'soundtrack', target: '', clarification: '' }, false), /interpret/);
+});
+
 test('generation routing preserves command-link precedence over a replied attachment', async () => {
     const calls = [];
     const commandClip = { ...clip, clip_url: 'https://video.twimg.com/command.mp4' };
