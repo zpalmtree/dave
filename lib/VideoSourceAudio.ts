@@ -10,6 +10,7 @@ import { config } from './Config.js';
 import { VideoProviderHooks, VideoProviderOutcome } from './VideoUsage.js';
 import { VIDEO_SOURCE_INPUT_MAX_SECONDS, VideoSourceExcerpt } from './VideoSourceExcerpt.js';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
+import { storeVideoSourceClip, SubmittedVideoSourceClip, YoutubeVideoFetcher } from './VideoSourceClip.js';
 
 export const VIDEO_SOURCE_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 export const VIDEO_LYRIC_VISUAL_INSTRUCTIONS = `When lyrics inform the visuals, interpret the passage as a whole before choosing scenery. Interpret idioms and culturally specific setting terms in their ordinary contextual meaning, rather than flattening them to a broad neutral synonym. Analyze the social and physical environment separately from the speaker's attitude and emotional trajectory, before choosing visual details. A shared word can serve very different meanings in different songs; do not translate it automatically into a decorative object, event, lighting scheme, or location.
@@ -74,7 +75,7 @@ const run = promisify(execFile);
 export async function normalizeVideoSourceAudio(input: string, output: string): Promise<StoredVideoSourceAudio> {
     try {
         await run('ffmpeg', ['-nostdin', '-v', 'error', '-y', '-protocol_whitelist', 'file,pipe',
-            '-format_whitelist', 'mp3,wav,flac,ogg,mov,aac', '-i', input, '-map', '0:a:0', '-vn',
+            '-format_whitelist', 'mp3,wav,flac,ogg,mov,aac,matroska,webm', '-i', input, '-map', '0:a:0', '-vn',
             '-t', String(VIDEO_SOURCE_INPUT_MAX_SECONDS + 1), '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', output], { timeout: 120_000 });
         const result = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', output], { timeout: 10_000 });
         const duration = Number(JSON.parse(result.stdout).format?.duration);
@@ -111,6 +112,22 @@ export async function storeVideoSourceAudio(source: SubmittedVideoSourceAudio, d
     } finally {
         clearTimeout(timeout);
         rmSync(input, { force: true });
+    }
+}
+
+/** Preserve the clip's original audio; never use its frames as music-video imagery. */
+export async function storeVideoSourceAudioFromClip(source: SubmittedVideoSourceClip, directory: string,
+    fetchYoutube?: YoutubeVideoFetcher): Promise<StoredVideoSourceAudio> {
+    const clipDirectory = join(directory, 'soundtrack-source');
+    try {
+        const clip = await storeVideoSourceClip(source, clipDirectory, null, fetchYoutube, { fullSource: true });
+        try {
+            return await normalizeVideoSourceAudio(clip.path, join(directory, 'song-full.wav'));
+        } catch {
+            throw new Error('The source video must contain a decodable soundtrack between 1 second and 10 minutes long.');
+        }
+    } finally {
+        rmSync(clipDirectory, { recursive: true, force: true });
     }
 }
 

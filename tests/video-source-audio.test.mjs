@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { videoSourceAudioFromMessages, sourceAudioDescriptor, pinVideoPlanToAudio, normalizeVideoSourceAudio,
-    songLyricsFromTranscription, resolveVideoSourceExcerptLyrics, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VIDEO_SOURCE_AUDIO_GUIDANCE } from '../dist/VideoSourceAudio.js';
+    songLyricsFromTranscription, resolveVideoSourceExcerptLyrics, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics,
+    storeVideoSourceAudioFromClip, VIDEO_SOURCE_AUDIO_GUIDANCE } from '../dist/VideoSourceAudio.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
 const descriptor = { url: 'https://cdn.discordapp.com/attachments/1/2/song.mp3', name: 'song.mp3', bytes: 1234 };
 const message = (...items) => ({ attachments: new Map(items.map((v, i) => [i, v])) });
@@ -118,6 +119,85 @@ test('broker persists decoded song duration, makes submissions idempotent, and r
         assert.equal((await submit())[0], 200);
         assert.equal(downloads, 1);
         assert.equal((await submit({ model: 'ltx', command_message_id: 'different' }))[0], 400);
+    } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('video soundtracks retain the full source for song excerpt selection and reject silent clips', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-soundtrack-'));
+    const source = { clip_url: 'https://www.youtube.com/watch?v=abcdefghijk', name: 'clip.mp4' };
+    const input = join(directory, 'input.mp4');
+    const output = join(directory, 'job');
+    const fetchClip = async (_url, destination) => copyFileSync(input, destination);
+    try {
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=size=32x32:rate=1:duration=130',
+            '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=8000:duration=130',
+            '-c:v', 'libx264', '-c:a', 'aac', '-shortest', input]);
+        const audio = await storeVideoSourceAudioFromClip(source, output, fetchClip);
+        assert.ok(audio.duration >= 130 && audio.duration < 131, 'must not apply the video-edit 120-second cap');
+        assert.ok(existsSync(audio.path));
+        assert.equal(existsSync(join(output, 'soundtrack-source')), false);
+        for (const extension of ['webm', 'mkv']) {
+            const container = join(directory, `input.${extension}`);
+            execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=size=32x32:rate=1:duration=2',
+                '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-c:v', 'libvpx-vp9', '-c:a', 'libopus', container]);
+            const decoded = await normalizeVideoSourceAudio(container, join(directory, `${extension}.wav`));
+            assert.ok(Math.abs(decoded.duration - 2) < 0.05);
+        }
+        execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=size=32x32:rate=1:duration=2',
+            '-c:v', 'libx264', input]);
+        await assert.rejects(storeVideoSourceAudioFromClip(source, output, fetchClip), /must contain a decodable soundtrack/);
+        assert.equal(existsSync(join(output, 'soundtrack-source')), false);
+        assert.equal(existsSync(join(output, 'song-full.wav')), false);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('broker routes video audio into fixed-song planning with the preset and requested excerpt', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-song-broker-'));
+    const clip = { clip_url: 'https://video.twimg.com/ext_tw_video/123/pu/vid/clip.mp4', name: 'clip.mp4' };
+    const range = { start_seconds: 125, end_seconds: 135 };
+    let downloads = 0;
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.db'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker', preplanQueuedJobs: false,
+        sourceAudioVideoDownloader: async source => {
+            assert.deepEqual(source, clip); downloads++;
+            return { path: join(directory, 'song.wav'), bytes: 123, duration: 150 };
+        },
+        sourceVideoDownloader: async () => { throw Error('must not edit the video'); },
+        sourceAudioTranscriber: async () => null,
+        sourceAudioExcerptSelector: async input => {
+            assert.deepEqual(input.range, range);
+            assert.equal(input.seconds, 150);
+            return { ...range, source_seconds: 150, label: '', chosen: 'range' };
+        },
+        sourceAudioCutter: async song => ({ ...song, duration: 10 }),
+        sourceImageDownloader: async source => {
+            assert.deepEqual(source, { preset: 'meximutt' });
+            return { path: join(directory, 'portrait.png'), mimeType: 'image/png', bytes: 123 };
+        } });
+    await broker.start();
+    const submit = async (extra = {}) => {
+        const res = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', command_variant: 'oalgo', prompt: 'make a music video for this song',
+                source_audio_video: clip, source_image: { preset: 'meximutt' }, source_range: range,
+                requester_id: 'u', origin_bot_id: 'b', channel_id: 'c', command_message_id: 'm', status_message_id: 's', ...extra }) });
+        return [res.status, await res.json()];
+    };
+    try {
+        const [status, body] = await submit();
+        assert.equal(status, 201, JSON.stringify(body));
+        assert.equal(body.job.has_source_audio, true);
+        assert.equal(body.job.has_source_video, false);
+        assert.equal(body.job.source_kind, 'preset');
+        assert.equal(body.job.source_audio_seconds, 10);
+        assert.equal(body.job.requested_duration_seconds, 10);
+        assert.equal((await submit())[0], 200);
+        assert.equal(downloads, 1);
+        for (const extra of [{ model: 'ltx' }, { source_audio: descriptor }, { source_video: clip },
+            { source_image: clip }, { source_image_composite: clip }, { video_edit_target: 'the singer' }]) {
+            assert.equal((await submit({ command_message_id: 'invalid', ...extra }))[0], 400);
+        }
+        assert.equal(downloads, 1, 'invalid requests fail before downloading');
     } finally { await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 

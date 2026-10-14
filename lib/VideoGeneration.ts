@@ -1202,6 +1202,7 @@ export async function resolveVideoEditRequest(
     context: string, preset: VideoCharacter | null, classify = classifyVideoEditIntent,
     resolveSources = videoSourcesFromMessages,
 ): Promise<{ replacement: ReturnType<typeof parseVideoReplacement>;
+    audioVideo?: SubmittedVideoClipSourceImage;
     sources: Awaited<ReturnType<typeof videoSourcesFromMessages>> }> {
     let replacement = parseVideoReplacement(prompt);
     const links = new Map<Parameters<typeof twitterVideoFromMessage>[0], ReturnType<typeof twitterVideoFromMessage>>();
@@ -1216,6 +1217,9 @@ export async function resolveVideoEditRequest(
             onUsage: usage => { recordTokenSpend(usage); },
         });
         if (intent.action === 'clarify') throw new Error(intent.clarification);
+        if (intent.action === 'soundtrack') {
+            return { replacement: null, audioVideo: candidates.clip, sources: { image: candidates.image, clip: null } };
+        }
         if (intent.action === 'replace' || intent.action === 'add') {
             replacement = { target: intent.target, prompt: intent.replacement, mode: intent.action };
         }
@@ -1242,6 +1246,7 @@ export async function handleVideoRequest(
     let sourceAudio: SubmittedVideoSourceAudio | null;
     let replacement: ReturnType<typeof parseVideoReplacement>;
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
+    let audioVideo: SubmittedVideoClipSourceImage | null = null;
     prompt = stripTwitterPostLinks(prompt);
     // A time range such as "1:05-1:50" picks the part of a long song or source video to use.
     const promptWithRange = prompt;
@@ -1254,16 +1259,18 @@ export async function handleVideoRequest(
     try {
         const resolved = model === 'minimax'
             ? await withTyping(msg.channel, () => resolveVideoEditRequest(prompt, msg, referencedMessage, editContext, character))
-            : { replacement: null, sources: { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null } };
+            : { replacement: null, audioVideo: undefined, sources: { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null } };
         replacement = resolved.replacement;
         const sources = resolved.sources;
         sourceVideo = sources.clip;
         if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X or YouTube video link to edit. You can also reply to a message containing one.');
         attachedSourceImage = sources.image;
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
+        // An explicit song attachment wins; otherwise extract the selected clip's soundtrack.
+        audioVideo = sourceAudio ? null : resolved.audioVideo || null;
         if (sourceAudio && model !== 'minimax') throw new Error('Song lip-sync is supported by $minimax and $oalgo.');
         if (replacement && sourceAudio) throw new Error('This edit keeps your video’s soundtrack. Please remove the separate song attachment.');
-        sourceRange = sourceAudio || replacement ? videoSourceRange(extracted.range) : null;
+        sourceRange = sourceAudio || audioVideo || replacement ? videoSourceRange(extracted.range) : null;
         if (replacement && !attachedSourceImage && !character && !replacement.prompt) {
             throw new Error('Attach a replacement image or describe the replacement: replace the character with slugs.');
         }
@@ -1306,7 +1313,7 @@ export async function handleVideoRequest(
         ? `Getting your video ready and creating ${replacement?.mode === 'add' ? 'what to add' : 'the replacement'} from your description…`
         : initialVideoRequestStatus(model, commandVariant));
     const plannerGuidance = [
-        sourceAudio ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement || !character ? '' : videoCharacterPlannerGuidance(character),
+        sourceAudio || audioVideo ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement || !character ? '' : videoCharacterPlannerGuidance(character),
         isVideoClipSourceImage(sourceImage) ? VIDEO_CLIP_FRAME_PLANNER_GUIDANCE : '',
         videoReplyChainGuidance(await earlierReplyChain),
     ]
@@ -1336,12 +1343,13 @@ export async function handleVideoRequest(
                 video_edit_context: replacement ? editContext : undefined,
                 video_replacement_prompt: replacementImagePrompt,
                 source_audio: sourceAudio,
+                source_audio_video: audioVideo,
                 source_range: sourceRange || undefined,
                 source_image_composite: compositeSourceImage,
                 source_image_provider: options.compositeProvider,
                 planner_guidance: plannerGuidance || undefined,
             }),
-        }, (compositeSourceImage || sourceAudio || sourceVideo) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
+        }, (compositeSourceImage || sourceAudio || audioVideo || sourceVideo) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
     } catch (error) {
         await pending.edit(`Couldn’t queue your video: ${error instanceof Error ? error.message : String(error)}`);
         return;

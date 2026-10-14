@@ -102,7 +102,8 @@ export async function cutVideoSourceClip(input: string, output: string, excerpt:
 }
 
 export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, directory: string,
-    range: VideoSourceRange | null = null, fetchYoutube?: YoutubeVideoFetcher): Promise<StoredVideoSourceClip> {
+    range: VideoSourceRange | null = null, fetchYoutube?: YoutubeVideoFetcher,
+    options: { fullSource?: boolean } = {}): Promise<StoredVideoSourceClip> {
     source = sourceClipDescriptor(source)!;
     const extension = source.name.split('.').pop()!.toLowerCase();
     mkdirSync(directory, { recursive: true });
@@ -135,7 +136,8 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
         }
         if (!bytes) throw new Error('The source video is empty.');
         const duration = await probeDuration(temporary);
-        const excerpt = videoSourceClipExcerpt(duration, range);
+        // Soundtrack extraction selects its own excerpt after transcribing the whole song.
+        const excerpt = options.fullSource ? null : videoSourceClipExcerpt(duration, range);
         if (excerpt) {
             const cut = join(directory, 'source-video.mp4');
             const cutDuration = await cutVideoSourceClip(temporary, cut, excerpt);

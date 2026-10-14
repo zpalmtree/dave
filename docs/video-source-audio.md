@@ -10,6 +10,16 @@ Examples:
 - Attach `song.wav` and `character.png`: `$minimax perform this song in a recording studio`
 - Reply to a song attachment: `$oalgo`
 
+A video can also supply the original soundtrack: attach or reply to a clip, or
+include a supported Twitter/X or YouTube link, and request
+`$oalgo make a music video for this song`. The bot extracts the video's audio and
+uses Meximutt's portrait for the new visuals, without compositing a source-video
+frame. `$minimax` can use a separately attached image. An explicit audio attachment
+takes precedence over a clip's soundtrack. Requests to react to or replace a subject
+in a clip retain their existing behavior. Silent or undecodable clips are rejected.
+The same song excerpt selection, time ranges and fixed-original-audio rendering
+below apply to video soundtracks, including ranges beyond the first two minutes.
+
 Supported files: MP3, WAV, FLAC, OGG, Opus, M4A and AAC, up to 100 MiB and
 1 second to 10 minutes. The excerpt's duration determines the finished video
 duration, rounded up to the next video frame. The command's own song takes precedence over a
