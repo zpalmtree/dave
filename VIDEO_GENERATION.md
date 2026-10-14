@@ -7,6 +7,13 @@ to that broker through Tailscale Serve. ComfyUI remains bound to
 
 ## Discord commands
 
+Generated video delivery includes a CPU-only audio/video timing check on three
+short samples. Confident, consistent offsets can move the soundtrack by up to
+80 ms without changing video frames. The pass has a 45-second budget; uncertain
+results, short clips, and failures retain the original timing. Source-video edits
+skip it. See [desktop delivery sync](desktop/README.md#bounded-delivery-audiovideo-sync)
+for installation, diagnostics, and the `VIDEO_DELIVERY_SYNC=0` switch.
+
 - `$minimax <prompt>` queues an automatic-length, maximum-quality MiniMax H3 video of up to two minutes.
 - `$minimaxfast <prompt>` and `$oalgofast <prompt>` use the three-step TaoMate renderer with sparse attention. `$oalgofast` supplies the same OALGO portrait and dialogue guidance as `$oalgo`. The standard `$minimax` and `$oalgo` renderers are unchanged. See [TaoMate deployment and validation](docs/video-taomate.md).
 - `$minimax` and `$oalgo` also accept an attached or replied-to song for original-audio lip-sync. Attach one MP3, WAV, FLAC, OGG/Opus, M4A or AAC file (1 second to 10 minutes, up to 100 MiB), optionally with an image. A song longer than 35 seconds is cut to about 30 seconds: the part the prompt names, otherwise its hook. A range such as `1:05-1:50` (up to two minutes) or `from 2:10` in the prompt picks the part instead. The excerpt determines the duration and remains the soundtrack. Its transcribed lyric timing places scene cuts between sung lines, lets the shots follow the lyrics, and keeps mouths closed during instrumental passages. See [original-song lip-sync](docs/video-source-audio.md).

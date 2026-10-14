@@ -1,5 +1,34 @@
 # Desktop video optimization changes
 
+## Bounded delivery audio/video sync
+
+`video-delivery-sync.patch` checks generated videos before loudness normalization
+and Discord compression. The CPU-only SyncNet helper samples three 2.8-second
+windows, detects faces every fifth frame, and permits one replacement window
+when tracking fails. Three unambiguous samples must each have confidence >= 4
+and distance <= 11. Corrections use their median in 40 ms steps, at most 80 ms;
+conflicting directions, a spread over 80 ms, missing samples, and clips shorter
+than 8.4 seconds retain their original timing. This shifts only audio, preserving
+encoded video and workflow metadata. Advancing trims a short audio prefix;
+delaying trims the corresponding tail to retain the video's duration.
+
+The analysis deadline is 35 seconds and the delivery wrapper has a 45-second
+budget including audio muxing. Failure or timeout keeps the input; cancellation
+propagates and stops analysis. Source-video edits preserve their soundtrack and
+skip this pass. Set `VIDEO_DELIVERY_SYNC=0` to disable it. The helper uses the
+existing `VIDEO_LIPSYNC_PYTHON`, `VIDEO_LIPSYNC_DISTRO`, and `LATENTSYNC_ROOT`
+settings and local SyncNet/S3FD checkpoints; it uses no GPU or model downloads.
+Per-delivery `.avsync-<job>.json` files record samples, decisions, and elapsed time.
+
+Install with `python3 scripts/apply-video-delivery-sync-desktop.py --check`, then
+without `--check`; reload the idle supervised worker and deploy both tracks with
+`scripts/deploy-bots.sh --with-broker`. Run
+`python3 -m unittest discover -s desktop -p test_video_sync_delivery.py` for
+policy, cancellation, fallback, actual audio timing, video-byte preservation,
+and metadata regressions. The short-sample prototype took 23 seconds plus one
+second to mux on job `66c4a27e`; runtime varies, and the deadline takes precedence
+over obtaining a correction.
+
 ## Horizontal delivery without the old resolution cap
 
 `video-landscape-delivery.patch` corrects the orientation regression introduced

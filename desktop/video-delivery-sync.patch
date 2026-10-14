@@ -1,0 +1,15 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -3435,6 +3435,12 @@
+         if not ffmpeg:
+             raise RuntimeError("FFmpeg is required to prepare a Discord-compatible delivery copy.")
+ 
++        from video_sync_delivery import correct_delivery_sync
++        sync_started = time.monotonic()
++        output = await correct_delivery_sync(ffmpeg, output, job_id, duration_seconds,
++                                             preserve_audio=preserve_audio)
++        self.add_span("worker", "audio_video_sync", time.monotonic() - sync_started)
++
+         normalization_started = time.monotonic()
+         normalized = output if preserve_audio else await self.normalize_delivery_audio(ffmpeg, output, job_id)
+         self.add_span(
