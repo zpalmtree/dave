@@ -107,6 +107,8 @@ test('video failure policy waits on readiness and suppresses identical render re
     assert.equal(videoFailureDisposition('Sampler crashed.', true, 0, 0, null), 'retry');
     assert.equal(videoFailureDisposition('Sampler crashed.', true, 1, 0, 'Sampler crashed.'), 'fail');
     assert.equal(videoFailureDisposition('Invalid screenplay.', false, 0, 0, null), 'fail');
+    assert.equal(videoFailureDisposition('local_planning_exhausted: Invalid screenplay.', true, 0, 0, null), 'fail');
+    assert.equal(videoFailureDisposition('local_planning_unavailable: Service timeout.', true, 0, 0, null), 'retry');
 });
 
 test('long video estimates scale by full segment cost and live job progress replaces expired history', () => {

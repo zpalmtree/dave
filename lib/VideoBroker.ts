@@ -487,6 +487,11 @@ function parseStoredFrontierAnalysis(value: string | null): Record<string, any> 
 
 export type VideoFailureDisposition = 'fail' | 'retry' | 'wait-readiness';
 
+/** The desktop has exhausted candidate validation, rather than lost a service. */
+export function localPlanningExhausted(error: string): boolean {
+    return error.startsWith('local_planning_exhausted:');
+}
+
 export function duplicateVideoTerminalEventMatches(
     message: Record<string, any>,
     job: { status: VideoJobStatus; lease_token: string | null; error?: string | null; stage?: string | null },
@@ -514,7 +519,7 @@ export function videoFailureDisposition(
     readinessRetries: number,
     previousError: string | null,
 ): VideoFailureDisposition {
-    if (!retryable) return 'fail';
+    if (!retryable || localPlanningExhausted(error)) return 'fail';
     const normalized = error.trim().toLowerCase().replace(/\s+/g, ' ');
     const readiness = /(?:gpuq|gpu reservation|comfyui|comfy).*(?:ready|readiness|start|respond|timeout|timed out)/.test(normalized)
         || /(?:timeout|timed out).*(?:gpuq|gpu reservation|comfyui|comfy)/.test(normalized);
@@ -4360,7 +4365,8 @@ export class VideoBroker {
                     prior.waits = (prior.waits || 0) + 1;
                     prior.last_error = prior.terminal_error || publicError;
                     const delay = Math.min(900, 30 * 2 ** Math.min(5, prior.waits - 1));
-                    const exhausted = recoveryLimitReached(prior) || message.retryable === false || Boolean(prior.terminal_error);
+                    const exhausted = recoveryLimitReached(prior) || message.retryable === false
+                        || localPlanningExhausted(publicError) || Boolean(prior.terminal_error);
                     await this.run(`UPDATE video_jobs SET status=?, stage=?,
                         recovery_json=?, recovery_next_at=?, worker_id=NULL, lease_token=NULL,
                         lease_expires_at=NULL, gpu_queue_state=NULL, progress=NULL, progress_scope=NULL,

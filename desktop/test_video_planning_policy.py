@@ -53,7 +53,7 @@ class PlanningPolicyTests(unittest.TestCase):
               mock.patch.object(vg, 'unload_planner_model'),
               mock.patch.object(vg, 'verify_plan_fidelity', return_value=['The final wave is missing'])):
             with self.assertRaisesRegex(vg.VideoGenError,
-                    'after 3 screenplay attempts; fallback quality gate: The final wave is missing. No video was rendered'):
+                    'after 3 screenplay attempts; fallback quality gate rejected the plan. No video was rendered'):
                 vg.create_video_plan('A gardener tends a garden.', None, 30, '16:9', ('h3',))
 
     def test_validated_fallback_can_succeed_after_three_invalid_drafts(self):

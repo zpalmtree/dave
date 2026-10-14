@@ -1,0 +1,388 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -39,6 +39,7 @@
+ PID_FILE = SCRIPT_DIR / "comfyui_video_gen.pid.json"
+ # Embedded Windows Python omits the script directory from its isolated path.
+ sys.path.insert(0, str(SCRIPT_DIR))
++from video_planning import PlanningDiagnostics, PLANNING_EXHAUSTED, runtime_constraint, timing_snapshot, mask_runtime_numbers
+ from gpuq_settings import qwen_settings
+ _QWEN_SETTINGS = qwen_settings()
+ LLAMA_CPP_DIR = _QWEN_SETTINGS['qwenworkingdirectory']
+@@ -2694,7 +2695,7 @@
+         masked = re.sub(pattern, lambda match: " " * len(match[0]), masked)
+     for match in quoted:
+         masked = masked[:match.start()] + match[0] + masked[match.end():]
+-    content = masked
++    content = mask_runtime_numbers(masked, requested_duration)
+     if requested_duration is not None:
+         text = re.sub(r"[‐‑‒–—]", "-", content)
+         text = re.sub(r'''"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'(?!\w)''',
+@@ -3019,7 +3020,14 @@
+     segment_min: float,
+     preferred_total: float | None = None,
+     preserve_timing: bool = False,
++    timing_diagnostics: dict[str, Any] | None = None,
+ ) -> dict[str, Any]:
++    constraint = runtime_constraint(raw_prompt, requested_duration)
++    if constraint and requested_duration is None:
++        requested_duration = constraint["max_seconds"]
++    if timing_diagnostics is not None:
++        timing_diagnostics["input"] = timing_snapshot(plan, dialogue_floor_seconds)
++        timing_diagnostics["runtime_constraint"] = constraint
+     prompt_analysis = plan.get("prompt_analysis") if isinstance(plan, dict) else None
+     semantic_analysis = plan.get("semantic_analysis") if isinstance(plan, dict) else None
+     generation_notice = plan.get("generation_notice") if isinstance(plan, dict) else None
+@@ -3223,6 +3231,11 @@
+         floors.append(floor)
+         targets.append(target)
+ 
++    if timing_diagnostics is not None:
++        timing_diagnostics["normalized_before_allocation"] = timing_snapshot(
++            {"segments": [{**segment, "target_seconds": target} for segment, target in zip(normalized, targets)]},
++            dialogue_floor_seconds,
++        )
+     minimum_total = sum(floors)
+     if minimum_total > AUTO_TOTAL_CAP_SECONDS + 1e-6:
+         raise VideoGenError(
+@@ -3237,7 +3250,10 @@
+                 f"all scenes and dialogue, but the requested runtime is {requested_duration:g}s. "
+                 "Replan more concisely or request authorization for a longer runtime; no scenes were removed."
+             )
+-        desired_total = max(minimum_total, sum(targets)) if has_delivery_cuts else requested_duration
++        desired_runtime = requested_duration
++        if constraint and constraint["min_seconds"] != constraint["max_seconds"]:
++            desired_runtime = max(constraint["min_seconds"], min(sum(targets), constraint["max_seconds"]))
++        desired_total = max(minimum_total, sum(targets)) if has_delivery_cuts else desired_runtime
+     else:
+         desired_total = min(sum(targets), AUTO_TOTAL_CAP_SECONDS)
+         if preferred_total is not None:
+@@ -3273,6 +3289,8 @@
+             f"{AUTO_TOTAL_CAP_SECONDS:g}s generation limit"
+         )
+ 
++    if timing_diagnostics is not None:
++        timing_diagnostics["normalized"] = timing_snapshot({"segments": normalized}, dialogue_floor_seconds)
+     output_total = 0.0
+     for index, segment in enumerate(normalized):
+         output = float(segment.get("output_seconds", segment["target_seconds"]))
+@@ -3281,14 +3299,18 @@
+                 f"planner segment {index + 1} has invalid final-cut duration {output:g}s"
+             )
+         if output + 1e-6 < dialogue_floor_seconds(segment):
+-            raise VideoGenError(f"duration conflict: final cut of segment {index + 1} truncates required dialogue")
++            raise VideoGenError(
++                f"duration conflict: final cut of segment {index + 1} truncates required dialogue "
++                f"(target={segment['target_seconds']:.3f}s, cut={output:.3f}s, "
++                f"speech_estimate={dialogue_floor_seconds(segment):.3f}s; heuristic, not measured audio)"
++            )
+         if segment.get("output_seconds") is not None:
+             segment["output_seconds"] = output
+         output_total += output
+-    if requested_duration is not None and abs(output_total - requested_duration) > 0.05:
++    if constraint and not (constraint["min_seconds"] - 0.05 <= output_total <= constraint["max_seconds"] + 0.05):
+         raise VideoGenError(
+             f"duration conflict: screenplay delivers {output_total:g}s instead of the requested "
+-            f"{requested_duration:g}s; preserve all scenes and replan within the runtime"
++            f"{constraint['min_seconds']:g}-{constraint['max_seconds']:g}s bounds; preserve all scenes and replan within the runtime"
+         )
+     if requested_duration is None and output_total > AUTO_TOTAL_CAP_SECONDS + 1e-6:
+         raise VideoGenError(
+@@ -3317,6 +3339,7 @@
+         "segments": normalized,
+         "duration_mode": "explicit" if requested_duration is not None else "auto",
+         "target_total_seconds": output_total,
++        "runtime_constraint": constraint,
+         "generation_total_seconds": generation_total,
+     }
+     if isinstance(prompt_analysis, dict):
+@@ -4260,6 +4283,8 @@
+             f"Original request:\n{raw_prompt}\n\n"
+             f"Binding semantic analysis:\n{json.dumps(analysis, ensure_ascii=False)}\n\n"
+             f"Candidate screenplay:\n{json.dumps(review_plan, ensure_ascii=False)}\n\n"
++            f"Resolved binding runtime constraint (seconds): {json.dumps(plan.get('runtime_constraint'))}. "
++            "When present, use these bounds for duration review; the explicit API value takes precedence over prompt timing. "
+             "Rendering contract: this candidate already passed structural validation. "
+             "target_total_seconds is the finished runtime. generation_total_seconds and "
+             "segment target_seconds include footage trimmed away at output_seconds; a "
+@@ -4741,7 +4766,12 @@
+     conservative_analysis_only: bool = False,
+     planner_guidance: str = "",
+     frontier_analysis: dict[str, Any] | None = None,
++    diagnostics_dir: Path | None = None,
+ ) -> dict[str, Any]:
++    diagnostics = PlanningDiagnostics(diagnostics_dir or SCRIPT_DIR / "worker_logs" / "planning_diagnostics")
++    constraint = runtime_constraint(raw_prompt, requested_duration)
++    planning_duration = constraint["max_seconds"] if constraint else None
++    infrastructure_failed = False
+     analysis_model = PROMPT_INTENT_MODEL
+     if conservative_analysis_only:
+         print(
+@@ -4783,7 +4813,7 @@
+         except VideoGenError as exc:
+             print(f"WARNING: Source-frame observation unavailable: {exc}", flush=True)
+     segment_max = 15.0 if "h3" in models else 20.0
+-    segment_min = 4.0 if requested_duration is not None and "h3" in models else (
++    segment_min = 4.0 if planning_duration is not None and "h3" in models else (
+         5.0 if "h3" in models else 3.0
+     )
+     duration_instruction = (
+@@ -4793,6 +4823,14 @@
+         if requested_duration is not None
+         else f"Choose the shortest natural total duration, no more than {AUTO_TOTAL_CAP_SECONDS:g} seconds."
+     )
++    if constraint:
++        duration_instruction = (
++            f"The finished video must be between {constraint['min_seconds']:g} and "
++            f"{constraint['max_seconds']:g} seconds. Preserve all required dialogue and scenes; "
++            "never extend the runtime. target_seconds is generated footage, output_seconds is "
++            "the retained cut and must fit the full estimated speech duration. "
++            "A generation target alone does not protect dialogue in a shorter retained cut."
++        )
+     frontier_analysis = binding_frontier_analysis(frontier_analysis, raw_prompt, analysis)
+     protected_frontier_lines = frontier_protected_dialogue(frontier_analysis)
+     if protected_frontier_lines:
+@@ -4859,6 +4897,9 @@
+         for attempt in range(LOCAL_PLAN_ATTEMPTS):
+             screenplay_attempts += 1
+             content = ""
++            candidate = None
++            timings = {}
++            stage = "planner_request"
+             try:
+                 response = planner_json(
+                     "/api/chat",
+@@ -4878,7 +4919,11 @@
+                     timeout=420.0,
+                 )
+                 content = response.get("message", {}).get("content", "")
+-                candidate = fill_plan_headers(json.loads(content), analysis)
++                stage = "json_validation"
++                original_candidate = json.loads(content)
++                timings["original"] = timing_snapshot(original_candidate, dialogue_floor_seconds)
++                stage = "candidate_preparation"
++                candidate = fill_plan_headers(original_candidate, analysis)
+                 if image_path is not None:
+                     candidate["keyframe"]["recommended"] = False
+                     candidate["keyframe"]["reference_requirements"] = []
+@@ -4902,20 +4947,24 @@
+                             print(f"WARNING: Source-frame observation unavailable: {exc}", flush=True)
+                     candidate["semantic_analysis"] = analysis
+                     candidate = anchor_screenplay_opening(candidate)
++                stage = "structural_validation"
+                 plan = validate_plan_shape(
+                     candidate,
+                     raw_prompt,
+                     requested_duration,
+                     segment_max,
+                     segment_min,
+-                    None if requested_duration is not None else float(analysis["recommended_total_seconds"]),
++                    None if constraint else float(analysis["recommended_total_seconds"]),
++                    timing_diagnostics=timings,
+                 )
+                 best_structural_plan = plan
+                 missing = plan_quality_issues(raw_prompt, analysis, plan)
+                 if not missing:
++                    stage = "semantic_review_request"
+                     missing = verify_plan_fidelity(
+                         raw_prompt, analysis, plan, 0, model, image_path
+                     )
++                stage = "semantic_validation"
+                 missing = normalize_quality_issues(missing, raw_prompt, analysis, frontier_analysis)
+                 if missing:
+                     best_fidelity_warning = missing
+@@ -4942,7 +4991,10 @@
+                 return plan
+             except (TypeError, ValueError, json.JSONDecodeError, VideoGenError) as exc:
+                 last_error = str(exc)
+-                print(f"WARNING: Local screenplay attempt {attempt + 1} failed: {last_error}", flush=True)
++                infrastructure_failed |= stage in {"planner_request", "semantic_review_request"}
++                diagnostics.reject(screenplay_attempts, stage=stage, response=content, candidate=candidate,
++                                   timings=timings, error=last_error, runtime_constraint=constraint)
++                print(f"WARNING: Local screenplay attempt {attempt + 1} failed {stage}; private diagnostics saved when available.", flush=True)
+                 if attempt + 1 < LOCAL_PLAN_ATTEMPTS:
+                     if content:
+                         messages.append({"role": "assistant", "content": content})
+@@ -4958,22 +5010,23 @@
+                     )
+         if best_structural_plan is not None:
+             print(
+-                "WARNING: The structurally valid screenplay failed the render-quality gate: "
+-                + "; ".join(best_fidelity_warning),
++                "WARNING: The structurally valid screenplay failed the render-quality gate; see private diagnostics.",
+                 flush=True,
+             )
+         unload_planner_model(model)
+     print(
+-        f"WARNING: The local planner could not produce a valid screenplay ({last_error}); "
++        "WARNING: The local planner could not produce a valid screenplay; "
+         "evaluating a semantic fallback candidate; no video has been rendered.",
+         flush=True,
+     )
++    fallback_candidate = None
++    fallback_timings = {}
+     try:
+         fallback_candidate = fill_plan_headers(
+             fallback_video_plan(
+                 raw_prompt,
+                 analysis,
+-                requested_duration,
++                planning_duration,
+                 segment_max,
+                 segment_min,
+                 source_image_supplied=image_path is not None,
+@@ -4990,12 +5043,16 @@
+             requested_duration,
+             segment_max,
+             segment_min,
+-            None if requested_duration is not None else float(analysis["recommended_total_seconds"]),
++            None if constraint else float(analysis["recommended_total_seconds"]),
++            timing_diagnostics=fallback_timings,
+         )
+     except (TypeError, ValueError, VideoGenError) as exc:
++        diagnostics.reject("fallback", stage="structural_validation", candidate=fallback_candidate,
++                           timings=fallback_timings, error=str(exc), runtime_constraint=constraint)
++        code = "local_planning_unavailable" if infrastructure_failed else PLANNING_EXHAUSTED
+         raise VideoGenError(
+-            f"Local screenplay planning failed after {screenplay_attempts} screenplay attempts; "
+-            f"fallback validation failed: {exc}. No video was rendered."
++            f"{code}: Local screenplay planning failed after {screenplay_attempts} screenplay attempts; "
++            "fallback validation failed. No video was rendered. Inspect private planning diagnostics."
+         ) from exc
+     fallback_issues = plan_quality_issues(raw_prompt, analysis, fallback)
+     if not fallback_issues:
+@@ -5004,6 +5061,7 @@
+                 raw_prompt, analysis, fallback, 0, analysis_model, image_path
+             )
+         except VideoGenError as exc:
++            infrastructure_failed = True
+             fallback_issues = [f"semantic fallback review unavailable: {exc}"]
+     fallback_issues = normalize_quality_issues(
+         fallback_issues, raw_prompt, analysis, frontier_analysis
+@@ -5042,11 +5100,12 @@
+             print(f"WARNING: Opening-frame repair review unavailable: {exc}", flush=True)
+         hard_issues, soft_issues = split_quality_issues(fallback_issues)
+     if fallback_issues:
+-        details = "; ".join(re.sub(r"\s+", " ", str(issue)).strip()[:400]
+-                            for issue in fallback_issues[:4])
++        diagnostics.reject("fallback", stage="semantic_validation", candidate=fallback,
++                           timings=fallback_timings, issues=fallback_issues, runtime_constraint=constraint)
++        code = "local_planning_unavailable" if infrastructure_failed else PLANNING_EXHAUSTED
+         raise VideoGenError(
+-            f"Local screenplay planning failed after {screenplay_attempts} screenplay attempts; "
+-            f"fallback quality gate: {details}. No video was rendered."
++            f"{code}: Local screenplay planning failed after {screenplay_attempts} screenplay attempts; "
++            "fallback quality gate rejected the plan. No video was rendered. Inspect private planning diagnostics."
+         )
+     fallback["planner_route"] = "local-validated-fallback"
+     fallback["fallback_tier"] = fallback_tier
+@@ -8501,6 +8560,7 @@
+                 conservative_analysis_only=bool(args.conservative_semantic_analysis),
+                 planner_guidance=args.planner_guidance,
+                 frontier_analysis=load_frontier_prompt_analysis(args.frontier_prompt_analysis),
++                diagnostics_dir=args.local_plan_output.parent / (args.local_plan_output.stem + ".diagnostics"),
+             )
+             destination = args.local_plan_output.expanduser().resolve()
+             write_json(destination, plan)
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -2592,6 +2592,9 @@
+                     }
+                 )
+             except Exception as exc:
++                if not self.is_retryable(str(exc)):
++                    await self.fail_current(str(exc), False)
++                    return
+                 print(
+                     f"WARNING: Local preplanning unavailable ({exc}); "
+                     "the generator will render a literal best-effort fallback.",
+@@ -3686,6 +3689,11 @@
+ 
+     @staticmethod
+     def is_retryable(detail: str) -> bool:
++        from video_planning import planning_exhausted
++        if planning_exhausted(detail):
++            return False
++        if detail.startswith("local_planning_unavailable:"):
++            return True
+         permanent = (
+             "prompt cannot be empty",
+             "unknown model",
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -14,6 +14,8 @@
+ from pathlib import Path
+ 
+ import aiohttp
++
++from video_planning import planning_exhausted
+ 
+ MAX_RENDER_ATTEMPTS = 2
+ 
+@@ -779,7 +781,8 @@
+             await worker.finish_cancelled_job(job['id'])
+         else:
+             traceback.print_exc()
+-            await worker.fail_current(str(error), not isinstance(error, RecoveryLimitError))
++            await worker.fail_current(str(error), not isinstance(error, RecoveryLimitError)
++                                      and not planning_exhausted(str(error)))
+ 
+     finally:
+         if prefetch is not None:
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -2327,7 +2327,7 @@
+             mock.patch.object(video_gen, "analyze_video_intent", return_value=analysis),
+             mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
+         ):
+-            with self.assertRaisesRegex(video_gen.VideoGenError, 'after 3 screenplay attempts; fallback quality gate: an optional scarf was not shown'):
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'after 3 screenplay attempts; fallback quality gate rejected the plan'):
+                 video_gen.create_video_plan(
+                     "Five dogs march together.", None, 5.0, "16:9", ("ltx",)
+                 )
+@@ -2409,7 +2409,7 @@
+             ),
+             mock.patch.object(video_gen, "verify_plan_fidelity", side_effect=fidelity),
+         ):
+-            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate: one remaining staging miss'):
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate rejected the plan'):
+                 video_gen.create_video_plan(prompt, None, 5.0, "16:9", ("h3",))
+ 
+ 
+@@ -2492,7 +2492,7 @@
+             mock.patch.object(video_gen, "planner_json", side_effect=fake_planner),
+             mock.patch.object(Path, "read_bytes", return_value=b"image"),
+         ):
+-            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate:.*negated employment'):
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate rejected the plan'):
+                 video_gen.create_video_plan(
+                     prompt, Path("source.png"), None, "2:3", ("h3",)
+                 )
+@@ -2666,7 +2666,7 @@
+                 side_effect=video_gen.VideoGenError("planner unavailable"),
+             ),
+         ):
+-            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate:.*semantic analysis only repeats'):
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate rejected the plan'):
+                 video_gen.create_video_plan(prompt, None, None, "1:1", ("h3",))
+ 
+ 
+@@ -2695,7 +2695,7 @@
+                 side_effect=video_gen.VideoGenError("reviewer offline"),
+             ),
+         ):
+-            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate: semantic fallback review unavailable: reviewer offline'):
++            with self.assertRaisesRegex(video_gen.VideoGenError, 'fallback quality gate rejected the plan'):
+                 video_gen.create_video_plan(prompt, None, 5.0, "16:9", ("h3",))
+ 
+ 
+--- a/test_video_planning_policy.py
++++ b/test_video_planning_policy.py
+@@ -53,7 +53,7 @@
+               mock.patch.object(vg, 'unload_planner_model'),
+               mock.patch.object(vg, 'verify_plan_fidelity', return_value=['The final wave is missing'])):
+             with self.assertRaisesRegex(vg.VideoGenError,
+-                    'after 3 screenplay attempts; fallback quality gate: The final wave is missing. No video was rendered'):
++                    'after 3 screenplay attempts; fallback quality gate rejected the plan. No video was rendered'):
+                 vg.create_video_plan('A gardener tends a garden.', None, 30, '16:9', ('h3',))
+ 
+     def test_validated_fallback_can_succeed_after_three_invalid_drafts(self):

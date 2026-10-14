@@ -142,6 +142,10 @@ patch targets the audited desktop baseline and preserves unrelated local edits.
 
 ## Local Qwen fallback
 
+See [local planning diagnostics](../docs/video-planning-diagnostics.md) for private
+rejected-candidate evidence, prompt runtime ranges, and terminal planning
+exhaustion. Install with `scripts/apply-video-planning-diagnostics-desktop.py`.
+
 `video-local-fallback.patch` lets recovery protocol 3 plan, compose opening images,
 and review scenes with local Qwen when GPT-5.6 Sol or the image providers reject a
 request. See [video recovery](../docs/video-recovery.md#local-qwen-fallback).
