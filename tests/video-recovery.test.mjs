@@ -477,11 +477,18 @@ test('broker persists recovery and requires every recorded scene for the matchin
         await broker.run("UPDATE video_jobs SET status='running', recovery_json='{}' WHERE public_id=?", [id]);
         broker.worker.currentJob = id;
         await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
-            error: 'Local screenplay planning failed after 3 screenplay attempts; fallback quality gate: final scene missing. No video was rendered.',
-            retryable: false });
+            error: 'local_planning_exhausted: Local screenplay planning failed after 3 screenplay attempts; fallback quality gate: final scene missing. No video was rendered.',
+            retryable: true }); // Defend against a worker incorrectly labelling exhaustion transient.
         const planningFailure = await broker.get('SELECT status,error FROM video_jobs WHERE public_id=?', [id]);
         assert.equal(planningFailure.status, 'failed');
         assert.match(planningFailure.error, /1 failed recovery pass \(separate from screenplay attempts\).*3 screenplay attempts.*final scene missing/);
+        await broker.run("UPDATE video_jobs SET status='running', recovery_json='{}' WHERE public_id=?", [id]);
+        broker.worker.currentJob = id;
+        await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
+            error: 'local_planning_unavailable: Local planner service timed out.', retryable: true });
+        const unavailable = await broker.get('SELECT status,recovery_next_at FROM video_jobs WHERE public_id=?', [id]);
+        assert.equal(unavailable.status, 'queued');
+        assert.ok(unavailable.recovery_next_at > Date.now() / 1000);
         broker.worker = null;
         await broker.run("UPDATE video_jobs SET status='delivered', delivery_message_id='123456' WHERE public_id=?", [id]);
         const botRequest = async (endpoint, body) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs/${id}/${endpoint}`, {
