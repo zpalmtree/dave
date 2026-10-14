@@ -1,9 +1,34 @@
 # Desktop video optimization changes
 
-## Native delivery canvas
+## Horizontal delivery without the old resolution cap
+
+`video-landscape-delivery.patch` corrects the orientation regression introduced
+by native-canvas delivery. The renderer follows the starting image's aspect,
+so preserving its canvas made portrait references produce vertical deliveries.
+Recovery assembly now widens portrait and square canvases to approximately
+16:9 (rounded to even pixels), retaining their native height and full picture
+with side padding. Existing landscape canvases retain their native dimensions.
+For example, a 736×1120 render delivers at 1992×1120; a 1344×768 render stays
+1344×768. Discord's upload-size compression can still resize large files.
+
+This changes assembly, not generation: source identity, framing, render budgets,
+and source-video edits retain their behavior. Accepted scenes, including resumed
+jobs, use the same horizontal canvas without rerendering. Audio, transitions,
+and exact song timing remain intact.
+
+Install with `python3 scripts/apply-video-landscape-delivery-desktop.py --check`,
+then without `--check`. The hash-checked delta includes the updated canvas tests
+and preserves other desktop changes. Reload the supervised worker while idle
+and deploy both bot tracks with `scripts/deploy-bots.sh --with-broker`.
+Run `python -m unittest test_video_canvas test_video_output_quality test_video_recovery`
+in the desktop Python environment. Tests use CPU media fixtures and verify
+full-picture padding, native landscape detail, odd sizes, cuts, dissolves, and
+resumed regular/song uploads; no GPU render is needed.
+
+## Native canvas foundation (superseded delivery orientation)
 
 `video-native-canvas.patch` removes the fixed 960×720 recovery canvas. Assembly
-uses the first accepted render's native width and height for the whole video,
+originally used the first accepted render's native width and height for the whole video,
 rounding odd dimensions up to the next even pixel for H.264 compatibility.
 Later clips fit that canvas without cropping or stretching; padding appears
 only where their aspect ratios differ. Frame rate and audio normalization,

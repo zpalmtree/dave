@@ -1,4 +1,4 @@
-"""CPU/media regressions for native-size recovery delivery, including resumed jobs."""
+"""CPU/media regressions for native-size normalization and horizontal delivery."""
 import asyncio
 import copy
 import json
@@ -70,13 +70,17 @@ class NativeCanvasTests(unittest.TestCase):
     def test_mixed_scenes_fit_full_picture_and_join_on_the_first_canvas(self):
         first = self.clip('portrait', (144, 256))
         second = self.clip('wide', (256, 144))
-        canvas = recovery.video_canvas(first)
+        canvas = recovery.delivery_canvas(first)
+        self.assertEqual(canvas, (456, 256))
         clips = [recovery.normalize_clip(path, self.root / f'normalized-{index}.mp4', canvas=canvas)
                  for index, path in enumerate([first, second])]
         fitted = self.inspect(clips[1], canvas, frames=24)
         self.assert_bands(fitted, fitted.height // 2)
-        self.assertLess(max(fitted.getpixel((72, 4))), 10)
-        self.assertLess(max(fitted.getpixel((72, 251))), 10)
+        portrait = self.inspect(clips[0], canvas, frames=24)
+        left = (portrait.width - 144) // 2
+        self.assert_bands(portrait.crop((left, 0, left + 144, 256)), 4)
+        self.assertLess(max(portrait.getpixel((4, 128))), 10)
+        self.assertLess(max(portrait.getpixel((451, 128))), 10)
         for transition, frames in [('cut', 48), ('dissolve', 42)]:
             output = recovery.join_clips(clips, self.root / f'{transition}.mp4',
                 [{'transition': 'start'}, {'transition': transition, 'audio_transition': 'auto'}])
@@ -90,6 +94,32 @@ class NativeCanvasTests(unittest.TestCase):
         self.assertEqual(recovery.video_canvas(source), (146, 258))
         output = recovery.normalize_clip(source, self.root / 'even.mp4')
         self.inspect(output, (146, 258), frames=24)
+
+    def test_delivery_keeps_native_detail_and_adds_only_side_padding(self):
+        for size, expected in [((736, 1120), (1992, 1120)),
+                               ((832, 832), (1480, 832)),
+                               ((1120, 736), (1120, 736)),
+                               ((1344, 768), (1344, 768))]:
+            with self.subTest(size=size):
+                source = self.clip('delivery-source', size, audio=False)
+                canvas = recovery.delivery_canvas(source)
+                self.assertEqual(canvas, expected)
+                output = recovery.normalize_clip(source, self.root / 'delivery.mp4', canvas=canvas)
+                image = self.inspect(output, expected, frames=24)
+                left = (image.width - size[0]) // 2
+                picture = image.crop((left, 0, left + size[0], size[1]))
+                self.assert_bands(picture, 4)
+                self.assert_bands(picture, size[1] - 5)
+                if left:
+                    self.assertLess(max(image.getpixel((4, size[1] // 2))), 10)
+                    self.assertLess(max(image.getpixel((image.width - 5, size[1] // 2))), 10)
+
+    def test_odd_portrait_delivery_is_horizontal_and_encodable(self):
+        source = self.clip('odd-delivery', (145, 257), audio=False, odd=True)
+        canvas = recovery.delivery_canvas(source)
+        self.assertEqual(canvas, (460, 258))
+        output = recovery.normalize_clip(source, self.root / 'even-delivery.mp4', canvas=canvas)
+        self.inspect(output, canvas, frames=24)
 
     def exercise_recovery(self, song=False):
         """Resume accepted scenes through the real normalization, join and upload path."""
@@ -152,7 +182,7 @@ class NativeCanvasTests(unittest.TestCase):
                 asyncio.run(recovery.run_recovery_job(worker, job))
                 self.assertEqual(worker.upload.await_count, attempt + 1)
                 delivered = worker.upload.await_args.args[1]
-                self.inspect(delivered, (144, 256), frames=48)
+                self.inspect(delivered, (456, 256), frames=48)
         worker.fail_current.assert_awaited_once_with('temporary upload outage', True)
         worker.wait_and_send_terminal.assert_awaited_once()
         for index, original in enumerate(originals):
@@ -160,15 +190,15 @@ class NativeCanvasTests(unittest.TestCase):
         if song:
             # Two exact silent scene clips become one two-second source soundtrack.
             for index in range(2):
-                self.inspect(job_root / f'scene-{index}' / 'normalized.mp4', (144, 256), frames=24, audio=False)
+                self.inspect(job_root / f'scene-{index}' / 'normalized.mp4', (456, 256), frames=24, audio=False)
             with av.open(str(delivered)) as container:
                 audio = container.streams.audio[0]
                 self.assertAlmostEqual(float(audio.duration * audio.time_base), 2, delta=.05)
 
-    def test_resumed_video_reuses_first_canvas_without_rendering_again(self):
+    def test_resumed_video_delivers_horizontal_without_rendering_again(self):
         self.exercise_recovery()
 
-    def test_resumed_song_preserves_native_canvas_and_exact_audio_timeline(self):
+    def test_resumed_song_delivers_horizontal_with_exact_audio_timeline(self):
         self.exercise_recovery(song=True)
 
 

@@ -168,9 +168,12 @@ Actions explicitly preceding speech get their own timing so the remaining
 speaking window can hold the complete line.
 
 Completion requires approval for every scene and the exact uploaded file hash.
-Generated clips share the first accepted render's native canvas, with even
-dimensions for H.264. Later scenes fit without cropping, adding padding only
-when their aspect ratios differ. They retain the common frame rate and audio
+Generated clips share a horizontal delivery canvas derived from the first
+accepted render, with even dimensions for H.264. Landscape renders keep their
+native size; portrait and square renders retain their native height and gain
+side padding to approximately 16:9. This preserves the full source picture
+without restoring the old 960×720 resolution cap. Later scenes fit without
+cropping or stretching. They retain the common frame rate and audio
 layout needed for cuts and dissolves; songs keep their exact frame timeline.
 Assembly retries derive the same canvas from the accepted original. Discord's
 existing size-limit compression can still downsize an oversized delivery.
