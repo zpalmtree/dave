@@ -51,7 +51,8 @@ You can disable functions in `lib/CommandDefinitions.ts` if you can't be bothere
 The optional watcher polls the [Codex Resets public API](https://codex-resets.com/api/docs)
 every 60 seconds. It announces explicit scheduled resets and separately reports executed
 resets, including banked credits. Forecasts and elapsed ETAs never count as execution.
-Alerts link back to Codex Resets and the source post without pinging anyone.
+Both alert types ping the `@codex` role (`1560349689025532064`) and link back to
+Codex Resets and the source post. All other mentions are disabled.
 
 Create `~/.config/dave-codex-resets.json` (or set `CODEX_RESET_WATCH_CONFIG_FILE`):
 
@@ -64,6 +65,7 @@ Create `~/.config/dave-codex-resets.json` (or set `CODEX_RESET_WATCH_CONFIG_FILE
 
 Only the selected bot runs the watcher, preventing duplicate alerts across the two
 deployment tracks. It needs View Channel, Send Messages, and Embed Links permissions.
+The `@codex` role must be mentionable, or the bot must have Mention Everyone permission.
 Restart the bots after configuring it. No API key is required.
 
 The adjacent `.state.json` file stores seen events and a persistent delivery queue.
