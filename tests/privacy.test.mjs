@@ -5,6 +5,7 @@ import {
     canProcessMessage, fetchProcessableMessage, initPrivacy, isPrivacyOptedOut,
     PrivacyAwareHistoryCache, runWithPrivacyContext, setPrivacyOptOut,
 } from '../dist/Privacy.js';
+import { initPrivacyRequests } from '../dist/PrivacyRequests.js';
 import { handlePrivacyMessage, privacyCommandArgs } from '../dist/PrivacyCommand.js';
 import { dispatchPrefixedCommand } from '../dist/CommandDispatcher.js';
 import { createTablesIfNeeded, executeQuery, selectQuery } from '../dist/Database.js';
@@ -19,6 +20,7 @@ async function database(t) {
     const db = new sqlite3.Database(':memory:');
     await createTablesIfNeeded(db);
     await initPrivacy(db);
+    await initPrivacyRequests(db);
     t.after(async () => {
         await executeQuery('DELETE FROM privacy_preferences', db);
         await initPrivacy(db);

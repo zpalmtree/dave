@@ -7,12 +7,24 @@ https://github.com/user-attachments/assets/80d7947d-5c55-492e-8d2b-d8d7986ead96
 The operator-hosted Discord bots' data practices and privacy contact are described
 in the [Dave and Sluglicious privacy policy](PRIVACY.md).
 
-Use `$privacy` to view the policy and your status, `$privacy optout` to stop
-processing your messages, or `$privacy optin` to resume (substitute the bot's
+Use `$privacy` to open buttons for the policy, status, opt-out/opt-in and deletion
+requests. `$privacy optout` stops processing your messages; `$privacy optin` resumes (substitute the bot's
 configured prefix). You can also mention the bot followed by `privacy optout`
 or `privacy optin`. No holder role is required. The preference persists for that
-bot across restarts; set it separately on each bot. Existing records and outputs
-require a deletion request to the operator.
+bot across restarts; set it separately on each bot. `$privacy delete` opens a
+confirmation to request deletion and opt out. `$privacy status` shows the saved
+request reference and status. Submitting a request is not immediate erasure.
+
+The configured operator (`config.god`) sees a **Review deletion requests** button
+in their privacy panel. The queue and review responses are ephemeral and
+operator-only. Review applicable bot records, saved features, worker/media files,
+logs, backups and provider-side records before marking a request completed; the
+completion button records the outcome and does not delete data itself.
+
+Routine usage logs no longer save command arguments. Startup removes existing
+argument values from the active bot database while preserving command counts
+and metadata. Saved quotes, reminders and other intentional feature data retain
+their existing behavior; this is not a universal 30-day retention policy.
 
 If Discord rejects Message Content access at login, the bot reconnects without
 that intent so mention-based privacy controls remain available. Ordinary prefix

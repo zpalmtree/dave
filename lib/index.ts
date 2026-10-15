@@ -1,5 +1,7 @@
 import { canProcessMessage, fetchProcessableMessage, initPrivacy, onPrivacyChange, runWithPrivacyContext } from './Privacy.js';
-import { handlePrivacyMessage } from './PrivacyCommand.js';
+import { handlePrivacyInteraction, handlePrivacyMessage } from './PrivacyCommand.js';
+import { initPrivacyRequests } from './PrivacyRequests.js';
+import { minimizeCommandLogs } from './PrivacyRetention.js';
 import sqlite3 from 'sqlite3';
 
 import {
@@ -153,6 +155,12 @@ function createDiscordClient(db: sqlite3.Database, messageContent = true): { cli
 
     });
 
+    client.on('interactionCreate', interaction => {
+        void handlePrivacyInteraction(interaction, db).catch(() => {
+            console.error('[Privacy] Could not acknowledge a privacy interaction.');
+        });
+    });
+
     client.on('messageCreate', async (msg) => {
         try {
             await runWithPrivacyContext(() => handleMessage(msg as Message, db));
@@ -212,6 +220,8 @@ async function main() {
     await createTablesIfNeeded(db);
 
     await initPrivacy(db);
+    await initPrivacyRequests(db);
+    await minimizeCommandLogs(db);
     initTokenSpend(db);
     exchangeService.start();
 
