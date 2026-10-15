@@ -1,6 +1,7 @@
 import { pinVideoPlanToAudio, VideoSourceAudioLyrics } from './VideoSourceAudio.js';
-import { createFrontierVideoPlan, FrontierPlannerRejectedError, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
-import { VideoFrontierCallOptions } from './VideoUsage.js';
+import { configuredVideoPlannerVariant, createFrontierVideoPlan, FrontierPlannerRejectedError, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
+import { VideoFrontierCallOptions, VideoPlannerRequestLimitError, withVideoPlannerRequestLimit } from './VideoUsage.js';
+import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
 import { VideoModelId } from './VideoProtocol.js';
 import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 
@@ -35,11 +36,14 @@ export async function prepareRecoveryPlan(input: {
     const notice = '';
     const useSources = true;
     const planner = input.planner || createFrontierVideoPlan;
+    const plannerModel = input.options.plannerModel || configuredVideoPlannerVariant().plannerModel;
+    const options = videoTextModelCapabilities(plannerModel).provider === 'meta'
+        ? withVideoPlannerRequestLimit(input.options, 2) : input.options;
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             const plan: any = await planner(prompt, input.model, input.requester,
                 input.sources, {
-                    ...input.options,
+                    ...options,
                     plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. The requested total runtime is binding; preserve every requested scene and line, and never extend the runtime without authorization. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`
                         + (input.requireSourceIdentity ? '\nThe supplied character identity is required. Do not invent a replacement person or change their anatomy, body proportions, hair, or clothing.' : '')
                         + (input.requireOriginalFirstFrame ? '\nFrame zero must be the supplied portrait itself, fully framed and unchanged. Set keyframe.recommended=false. Start in its exact pose, crop and background, then reveal the permitted story through motion or later shots.' : ''),
@@ -60,6 +64,9 @@ export async function prepareRecoveryPlan(input: {
             if (input.requireOriginalFirstFrame) contract.original_first_frame = true;
             return { plan, contract, contract_hash: recoveryHash(contract), prompt, notice };
         } catch (error) {
+            if (error instanceof VideoPlannerRequestLimitError) {
+                throw localPlanRequired('planner_budget_exhausted', null, error.message);
+            }
             if (error instanceof FrontierPlannerRejectedError) {
                 throw localPlanRequired(error.reasonCode, error.promptAnalysis, error.message);
             }

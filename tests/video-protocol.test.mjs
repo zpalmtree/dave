@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { config } from '../dist/Config.js';
+import { VideoPlannerRequestLimitError } from '../dist/VideoUsage.js';
 
 import { Commands } from '../dist/CommandDeclarations.js';
 import {
@@ -1357,6 +1359,53 @@ test('single-pass frontier planner returns validated analysis and screenplay fro
     }
 });
 
+test('Muse reuses valid single-pass analysis for one screenplay repair without escalating effort', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = config.metaApiKey;
+    config.metaApiKey = 'test-meta-key';
+    const requests = [];
+    const invalid = frontierPlan();
+    delete invalid.keyframe;
+    globalThis.fetch = async (_url, init) => {
+        const request = JSON.parse(init.body);
+        requests.push(request);
+        return jsonResponse({ status: 'completed', output_text: JSON.stringify(requests.length === 1
+            ? { prompt_analysis: frontierAnalysis(), plan: invalid } : frontierPlan()) });
+    };
+    try {
+        const result = await createFrontierVideoPlan('A dog runs through a park.', 'minimax', 'test', undefined, {
+            plannerModel: 'muse-wonder-1.0', plannerStrategy: 'single-pass',
+            analysisReasoningEffort: 'low', screenplayReasoningEffort: 'low',
+        });
+        assert.equal(requests.length, 2);
+        assert.deepEqual(requests.map(request => request.text.format.name),
+            ['local_video_analysis_and_screenplay', 'local_video_screenplay']);
+        assert.ok(requests.every(request => request.reasoning.effort === 'low'));
+        assert.deepEqual(result.prompt_analysis, frontierAnalysis());
+    } finally {
+        globalThis.fetch = originalFetch;
+        config.metaApiKey = originalKey;
+    }
+});
+
+test('Muse stops at two requests even when malformed analysis triggers the two-pass path', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = config.metaApiKey;
+    config.metaApiKey = 'test-meta-key';
+    let calls = 0;
+    globalThis.fetch = async () => jsonResponse({ status: 'completed',
+        output_text: JSON.stringify(++calls === 1 ? {} : frontierAnalysis()) });
+    try {
+        await assert.rejects(createFrontierVideoPlan('A dog runs through a park.', 'minimax', 'test', undefined, {
+            plannerModel: 'muse-wonder-1.0', plannerStrategy: 'single-pass',
+        }), VideoPlannerRequestLimitError);
+        assert.equal(calls, 2);
+    } finally {
+        globalThis.fetch = originalFetch;
+        config.metaApiKey = originalKey;
+    }
+});
+
 test('Anthropic hybrid single pass validates serialized analysis and structured screenplay', async () => {
     await assert.rejects(
         createFrontierVideoPlan('A dog runs.', 'minimaxfast', 'non-anthropic-hybrid', undefined,
@@ -2162,10 +2211,14 @@ test('broker validation splits long H3 dialogue and still catches literal omissi
         text: Array.from({ length: 50 }, (_, index) => `word${index}`).join(' '),
     }]);
     const originalText = plan.segments[0].shots[0].dialogue[0].text;
-    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast'));
+    const prompt = `A dog says "${originalText}".`;
+    assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(plan, 'minimaxfast', prompt));
     assert.ok(plan.segments.length > 1);
     assert.ok(plan.segments.every(segment => segment.target_seconds <= 15));
     assert.equal(plan.segments.flatMap(segment => segment.shots.flatMap(shot => shot.dialogue.map(line => line.text))).join(' '), originalText);
+    const missingWord = structuredClone(plan);
+    missingWord.segments[0].shots[0].dialogue[0].text = missingWord.segments[0].shots[0].dialogue[0].text.replace('word1 ', '');
+    assert.throws(() => validateFrontierVideoPlanForKeyframe(missingWord, 'minimaxfast', prompt), /omitted quoted wording/);
     const literalPlan = frontierPlan();
     assert.throws(
         () => validateFrontierVideoPlanForKeyframe(literalPlan, 'minimaxfast', 'Show 623996725509750785 saying "hello".'),

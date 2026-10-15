@@ -96,6 +96,25 @@ export interface VideoFrontierCallOptions extends VideoProviderHooks {
     }) => void;
 }
 
+export class VideoPlannerRequestLimitError extends Error {}
+
+const plannerRequestBudget = Symbol('plannerRequestBudget');
+
+/** Preserve one request budget across planner retries and copied call options. */
+export function withVideoPlannerRequestLimit(options: VideoFrontierCallOptions, maximum: number): VideoFrontierCallOptions {
+    if ((options as VideoFrontierCallOptions & { [plannerRequestBudget]?: boolean })[plannerRequestBudget]) return options;
+    let requests = 0;
+    return {
+        ...options,
+        ...{ [plannerRequestBudget]: true },
+        beforeRequest: async request => {
+            if (requests >= maximum) throw new VideoPlannerRequestLimitError(`Video planner reached its ${maximum}-request limit.`);
+            requests += 1;
+            await options.beforeRequest?.(request);
+        },
+    };
+}
+
 export interface VideoUsageEvent {
     event_id: string;
     job_id: string;

@@ -268,6 +268,17 @@ judge rated renderability about one point lower, and total planned runtime rose
   path (key in `metaApiKey` or `MODEL_API_KEY`); it is off unless selected. On
   six `$oalgo` prompts on October 12 it staged the request literally with little
   added writing, at both medium and high effort, so it stays a benchmark arm.
+  Muse planning is limited to two API requests across recovery retries. A failed
+  single-pass screenplay reuses its validated analysis, and retries retain the
+  selected reasoning effort instead of escalating to high. When the request
+  budget is exhausted, recovery hands planning to the local worker. Use low
+  analysis and screenplay effort for the cheaper experimental configuration.
+  On October 15, four selected historical fallback requests cost an estimated
+  $0.72 with low effort and these safeguards, versus $2.44 in the original
+  medium-effort run (excluding its control). Three passed in one call; the long
+  monologue reached the two-call cap and requested local planning. No videos or
+  local fallback plans were rendered/generated in this comparison. It is one
+  sample per arm, with effort and cache effects mixed into the comparison.
 - `VIDEO_PLANNER_STRATEGY` accepts `hybrid-single-pass`, `two-pass`, or
   `single-pass`. By default Opus uses hybrid with two-pass fallback and Sol uses
   single-pass. Hybrid requires an Anthropic model; plain single-pass on Opus
