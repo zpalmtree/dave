@@ -1,3 +1,4 @@
+import { fetchProcessableMessage } from './Privacy.js';
 import { existsSync } from 'fs';
 import { AttachmentBuilder, Client, Message } from 'discord.js';
 
@@ -301,7 +302,7 @@ async function handleQwenImageRequest(msg: Message, args: string, model: QwenIma
     let referenced: Message | null = null;
     if (msg.reference?.messageId) {
         try {
-            referenced = await msg.channel.messages.fetch(msg.reference.messageId);
+            referenced = await fetchProcessableMessage(msg, msg.reference.messageId);
         } catch {
             referenced = null;
         }

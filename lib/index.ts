@@ -1,3 +1,5 @@
+import { canProcessMessage, fetchProcessableMessage, initPrivacy, onPrivacyChange, runWithPrivacyContext } from './Privacy.js';
+import { handlePrivacyMessage } from './PrivacyCommand.js';
 import sqlite3 from 'sqlite3';
 
 import {
@@ -13,7 +15,7 @@ import {
 } from './Utilities.js';
 import { startGitHubCommitWatch } from './GitHubCommitWatch.js';
 import { startCodexResetWatch } from './CodexResetWatch.js';
-import { getDiscordLoginRetryDelay } from './DiscordRetry.js';
+import { getDiscordLoginRetryDelay, isDisallowedIntentsError } from './DiscordRetry.js';
 
 import {
     selectQuery,
@@ -59,7 +61,7 @@ async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> 
     }
 
     try {
-        const referencedMessage = await msg.channel.messages.fetch(msg.reference.messageId);
+        const referencedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
 
         for (const restriction of relevantRestrictions) {
             if (!restriction.blockedUserIds.includes(referencedMessage.author.id)) {
@@ -98,6 +100,12 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
         return;
     }
 
+    if (await handlePrivacyMessage(msg, db)) return;
+    if (!canProcessMessage(msg)) {
+        msg.channel.messages.cache.delete(msg.id);
+        return;
+    }
+
     if (await handleRestrictedExternalBotReply(msg)) {
         return;
     }
@@ -120,16 +128,21 @@ async function handleMessage(msg: Message, db: sqlite3.Database): Promise<void> 
     await dispatchPrefixedCommand(msg, db);
 }
 
-function createDiscordClient(db: sqlite3.Database): Client {
+function createDiscordClient(db: sqlite3.Database, messageContent = true): { client: Client; dispose: () => Promise<void> } {
     const client = new Client({
         intents: [
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages,
-            GatewayIntentBits.MessageContent,
+            ...(messageContent ? [GatewayIntentBits.MessageContent] : []),
             GatewayIntentBits.GuildMessageReactions,
         ],
     });
 
+    const removePrivacyListener = onPrivacyChange(() => {
+        for (const channel of client.channels.cache.values()) {
+            if ('messages' in channel) channel.messages.cache.clear();
+        }
+    });
     client.on('clientReady', async () => {
         console.log('Logged in');
 
@@ -167,10 +180,10 @@ function createDiscordClient(db: sqlite3.Database): Client {
 
     client.on('messageCreate', async (msg) => {
         try {
-            await handleMessage(msg as Message, db);
+            await runWithPrivacyContext(() => handleMessage(msg as Message, db));
         /* Usually discord permissions errors */
         } catch (err) {
-            console.error(`Caught error while executing ${msg.content} for ${msg.author.id}: ${(err as any).toString()}`);
+            console.error(`Caught error while handling message ${msg.id}: ${(err as any).toString()}`);
             console.log(`Error stack trace: ${(err as any).stack}`);
             tryReactMessage(msg, '🔥');
             await msg.reply(`Error: ${(err as any).toString()}`);
@@ -182,19 +195,32 @@ function createDiscordClient(db: sqlite3.Database): Client {
         console.log(`Error stack trace: ${err.stack}`);
     });
 
-    return client;
+    return {
+        client,
+        dispose: async () => {
+            removePrivacyListener();
+            await client.destroy();
+        },
+    };
 }
 
 async function loginWithRetry(db: sqlite3.Database): Promise<void> {
     let attempt = 0;
+    let messageContent = true;
 
     while (true) {
-        const client = createDiscordClient(db);
+        const { client, dispose } = createDiscordClient(db, messageContent);
 
         try {
             await client.login(config.token);
             return;
         } catch (error) {
+            await dispose();
+            if (messageContent && isDisallowedIntentsError(error)) {
+                messageContent = false;
+                console.warn('[Discord] Message Content access is unavailable. Reconnecting without it; mention this bot followed by "privacy" for privacy controls. Restart after access is restored.');
+                continue;
+            }
             const retryDelay = getDiscordLoginRetryDelay(attempt);
             const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
             console.error(`[Discord] Login failed (${detail}); retrying in ${retryDelay / 1000}s.`);
@@ -210,6 +236,7 @@ async function main() {
     await deleteTablesIfNeeded(db);
     await createTablesIfNeeded(db);
 
+    await initPrivacy(db);
     initTokenSpend(db);
     exchangeService.start();
 

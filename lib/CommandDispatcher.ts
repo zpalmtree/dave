@@ -1,3 +1,5 @@
+import { assertPrivacyContextCurrent, canProcessMessage, runWithPrivacyContext } from './Privacy.js';
+import { handlePrivacyMessage } from './PrivacyCommand.js';
 import moment from 'moment';
 import { Message } from 'discord.js';
 import { Database } from 'sqlite3';
@@ -43,6 +45,12 @@ export function isMessageAllowed(msg: Message): boolean {
 }
 
 export async function dispatchPrefixedCommand(msg: Message, db: Database): Promise<void> {
+    await runWithPrivacyContext(() => dispatchPrefixedCommandInternal(msg, db));
+}
+
+async function dispatchPrefixedCommandInternal(msg: Message, db: Database): Promise<void> {
+    if (await handlePrivacyMessage(msg, db)) return;
+    if (!canProcessMessage(msg)) return;
     if (!isMessageAllowed(msg) || !msg.content.startsWith(config.prefix)) {
         return;
     }
@@ -63,7 +71,7 @@ export async function dispatchPrefixedCommand(msg: Message, db: Database): Promi
             return;
         }
 
-        insertQuery(
+        await insertQuery(
             `INSERT INTO logs
                 (user_id, channel_id, guild_id, command, args, timestamp)
             VALUES
@@ -78,6 +86,8 @@ export async function dispatchPrefixedCommand(msg: Message, db: Database): Promi
                 moment.utc().format('YYYY-MM-DD HH:mm:ss'),
             ]
         );
+
+        assertPrivacyContextCurrent();
 
         if (args.length === 1 && args[0] === 'help') {
             handleHelp(msg, c.aliases[0]);

@@ -1,3 +1,4 @@
+import { fetchProcessableMessage, PrivacyAwareHistoryCache } from './Privacy.js';
 import { Message } from 'discord.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from './Config.js';
@@ -34,7 +35,7 @@ const DEFAULT_SETTINGS = {
 
 const REFUSAL_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
-const chatHistoryCache = new Map<string, Anthropic.MessageParam[]>();
+const chatHistoryCache = new PrivacyAwareHistoryCache<Anthropic.MessageParam[]>();
 const MAX_PAUSE_TURN_CONTINUATIONS = 2;
 const MAX_EMPTY_RESPONSE_RETRIES = 1;
 const MAX_TOKENS_CEILING = 8192;
@@ -126,7 +127,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
         previousConvo = chatHistoryCache.get(reply) || [];
 
         if (previousConvo.length === 0) {
-            const repliedMessage = await msg.channel?.messages.fetch(reply);
+            const repliedMessage = await fetchProcessableMessage(msg, reply);
 
             if (repliedMessage) {
                 previousConvo.push({
@@ -151,7 +152,7 @@ async function masterClaudeHandler(options: ClaudeHandlerOptions): Promise<Claud
     if (includeImages) {
         if (msg.reference?.messageId) {
             try {
-                repliedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+                repliedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
             } catch (error) {
                 console.error("Failed to fetch replied message:", error);
             }

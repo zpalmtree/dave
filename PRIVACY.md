@@ -1,6 +1,6 @@
 # Dave and Sluglicious privacy policy
 
-Last updated: 10 September 2026
+Last updated: 15 October 2026
 
 ## Scope and contact
 
@@ -109,8 +109,26 @@ under their applicable policies.
 
 ## Choices and access
 
-There is currently no built-in per-user command that opts a person out of all
-message processing. You can contact the operator about exclusion or deletion.
+Use the bot's configured prefix followed by `privacy` (for example, `$privacy`)
+to view this policy and your preference. `privacy optout` stops new processing
+of your messages and commands by that bot, except for privacy controls.
+`privacy optin` enables processing again. In Discord, you can also mention the
+bot followed by `privacy`, `privacy optout`, or `privacy optin`; this works even
+when Message Content access is unavailable and the bot is connected in its
+limited mode. These controls are available without a holder role.
+
+Opt-out preferences persist across restarts and apply to the individual bot on
+the platform where you set them; set the preference separately with Dave and
+Sluglicious if you use both. We store your user ID and platform to enforce the
+preference. Opted-out authors' messages are excluded from new summaries and
+fetched reply context. Conversation caches are cleared when preferences change.
+The bot still receives events and history batches from Discord and checks author
+IDs so it can discard excluded messages; opting out cannot prevent Discord from
+sending those events.
+
+Opting out does not cancel work already submitted, delete existing persistent
+records or published outputs, or control copies of your content posted by other
+users. Contact the operator for deletion of existing records or outputs.
 Server administrators can restrict the channels the bot can view or remove it
 from a server to stop future access there. Not invoking a command alone does
 not prevent the ordinary-message features described above.

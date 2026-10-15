@@ -1,3 +1,4 @@
+import { fetchProcessableMessage } from './Privacy.js';
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { VideoStickerSourceImage, videoStickerSourceImage } from './VideoSticker.js';
 import { describeVideoSourceExcerpt, extractVideoSourceRange, videoSourceRange, VideoSourceRange } from './VideoSourceExcerpt.js';
@@ -485,7 +486,7 @@ async function fetchReferencedVideoMessage(msg: Message): Promise<Message | null
     const messageId = msg.reference?.messageId;
     if (!messageId || !('messages' in msg.channel)) return null;
     try {
-        return await msg.channel.messages.fetch(messageId);
+        return await fetchProcessableMessage(msg, messageId);
     } catch (error) {
         console.warn(`[Video] Could not fetch referenced message ${messageId}: ${String(error)}`);
         return null;

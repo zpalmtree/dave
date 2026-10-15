@@ -7,6 +7,18 @@ https://github.com/user-attachments/assets/80d7947d-5c55-492e-8d2b-d8d7986ead96
 The operator-hosted Discord bots' data practices and privacy contact are described
 in the [Dave and Sluglicious privacy policy](PRIVACY.md).
 
+Use `$privacy` to view the policy and your status, `$privacy optout` to stop
+processing your messages, or `$privacy optin` to resume (substitute the bot's
+configured prefix). You can also mention the bot followed by `privacy optout`
+or `privacy optin`. No holder role is required. The preference persists for that
+bot across restarts; set it separately on each bot. Existing records and outputs
+require a deletion request to the operator.
+
+If Discord rejects Message Content access at login, the bot reconnects without
+that intent so mention-based privacy controls remain available. Ordinary prefix
+commands and automatic features are limited until access is restored. Restart
+the bot after restoring the intent to enable full functionality again.
+
 ## Prerequisites
 
 * yarn

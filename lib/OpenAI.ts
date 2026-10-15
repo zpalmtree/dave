@@ -1,3 +1,4 @@
+import { fetchProcessableMessage, PrivacyAwareHistoryCache } from './Privacy.js';
 import {
     Message,
     EmbedBuilder,
@@ -102,7 +103,7 @@ const TRANSCRIPTION_FORMATTER_PROMPT = [
     'Return only the cleaned transcript text.',
 ].join(' ');
 
-const chatHistoryCache = new Map<string, UniversalMessage[]>();
+const chatHistoryCache = new PrivacyAwareHistoryCache<UniversalMessage[]>();
 
 
 interface OpenAIHandlerOptions {
@@ -458,7 +459,7 @@ async function masterOpenAIHandler(
       if (reply) {
         previousConvo = chatHistoryCache.get(reply) || [];
         if (previousConvo.length === 0) {
-          const repliedMessage = await msg.channel?.messages.fetch(reply);
+          const repliedMessage = await fetchProcessableMessage(msg, reply);
           if (repliedMessage) {
             previousConvo.push({ role: 'user', content: repliedMessage.content });
           }
@@ -471,9 +472,7 @@ async function masterOpenAIHandler(
         let repliedMessage: Message | undefined;
         if (msg.reference?.messageId) {
           try {
-            repliedMessage = await msg.channel?.messages.fetch(
-              msg.reference.messageId,
-            );
+            repliedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
           } catch (e) {
             console.error('Failed to fetch replied message:', e);
           }
@@ -757,7 +756,7 @@ async function gatherImageURLsForRequest(
 
   if (!contextMessage && msg.reference?.messageId) {
     try {
-      contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+      contextMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
     } catch (err) {
       console.warn('Failed to fetch referenced message for image context', err);
     }
@@ -872,7 +871,7 @@ export async function handleTranscribe(msg: Message) {
     const urls = extractURLs(msg.content);
 
     if (reply) {
-        const replyMessage = await msg.channel?.messages.fetch(reply);
+        const replyMessage = await fetchProcessableMessage(msg, reply);
         const replyURLs = extractURLs(replyMessage.content);
         urls.push(...replyURLs);
 
@@ -1003,7 +1002,7 @@ export async function handleRemoveBg(msg: Message, args: string): Promise<void> 
     let referencedMessage: Message | undefined;
     if (msg.reference?.messageId) {
         try {
-            referencedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+            referencedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
         } catch (err) {
             console.warn('Failed to fetch referenced message for prompt context', err);
         }
@@ -1384,7 +1383,7 @@ export async function handleCImage(msg: Message, args: string): Promise<void> {
     let referencedMessage: Message | undefined;
     if (msg.reference?.messageId) {
         try {
-            referencedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+            referencedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
         } catch (err) {
             console.warn('Failed to fetch referenced message for prompt context', err);
         }

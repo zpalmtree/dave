@@ -1,3 +1,4 @@
+import { assertPrivacyContextCurrent, canProcessMessage, isPrivacyOptedOut, onPrivacyChange } from './Privacy.js';
 import { Message, Guild } from 'discord.js';
 
 import { config } from './Config.js';
@@ -28,8 +29,10 @@ const SUMMARY_CHUNK_CONCURRENCY = 4;
 const EXCLUDED_SUMMARY_AUTHOR_ID = '446154284514541579';
 
 const cachedMessages = new Map<string, CachedMessage[]>();
+onPrivacyChange(() => cachedMessages.clear());
 
 function toCachedMessage(msg: Message): CachedMessage | undefined {
+    if (!canProcessMessage(msg)) return undefined;
     let content = msg.content.trim();
 
     if (msg.attachments.size) {
@@ -75,7 +78,8 @@ export async function fetchRecentMessagesForSummarization(
         const batchMessages = [...batch.values()];
         inspectedMessageCount += batchMessages.length;
         fetchedMessages.push(...batchMessages.filter((storedMessage) =>
-            storedMessage.createdTimestamp >= windowStartTimestamp
+            canProcessMessage(storedMessage)
+            && storedMessage.createdTimestamp >= windowStartTimestamp
         ));
 
         const oldestMessage = batchMessages.reduce((oldest, candidate) =>
@@ -150,6 +154,7 @@ async function summarizeChunks(chunks: string[]): Promise<SummarizeResponse[]> {
         while (nextChunkIndex < chunks.length) {
             const chunkIndex = nextChunkIndex;
             nextChunkIndex += 1;
+            assertPrivacyContextCurrent();
             responses[chunkIndex] = await grokSummarizeChunk(
                 chunks[chunkIndex],
                 chunkIndex + 1,
@@ -179,11 +184,13 @@ export async function summarizeMessages(
 
     try {
         previousMessages = await fetchRecentMessagesForSummarization(msg, windowStartTimestamp);
+        assertPrivacyContextCurrent();
         cachedMessages.set(channel, previousMessages);
     } catch (err) {
         console.error(`Failed to fetch message history for summary in ${channel}:`, err);
         previousMessages = (cachedMessages.get(channel) || []).filter((storedMessage) =>
-            storedMessage.createdTimestamp >= windowStartTimestamp
+            !isPrivacyOptedOut(storedMessage.author)
+            && storedMessage.createdTimestamp >= windowStartTimestamp
         );
     }
 
@@ -243,6 +250,7 @@ export async function summarizeMessages(
     }
 
     const requestingUser = await getUsername(authorId, guild);
+    assertPrivacyContextCurrent();
     const chunks = chunkSummaryInput(messageLines);
 
     if (chunks.length === 1) {
@@ -259,6 +267,7 @@ export async function summarizeMessages(
         };
     }
 
+    assertPrivacyContextCurrent();
     return grokSynthesizeSummaries(
         chunkResponses.map(({ result }) => result!),
         requestingUser,

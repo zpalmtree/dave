@@ -1,3 +1,4 @@
+import { canProcessMessage } from './Privacy.js';
 import { APIEmbed, Client, escapeMarkdown, MessageCreateOptions } from 'discord.js';
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
@@ -361,7 +362,7 @@ export function startGitHubCommitWatch(client: Client): void {
             return response.json();
         };
         client.on('messageCreate', message => {
-            if (message.author.bot || message.channelId !== threadId) return;
+            if (!canProcessMessage(message) || message.author.bot || message.channelId !== threadId) return;
             void (async () => {
                 const embeds = await previewPullRequests(message.content, repository, request);
                 if (embeds.length) await message.reply({ embeds, allowedMentions: { parse: [], repliedUser: false } });
