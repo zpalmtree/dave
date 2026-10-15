@@ -7,6 +7,9 @@ messages are omitted. The captions identify the presentation changes.
 
 ## Sluglicious
 
+[View the Sluglicious summary and link-preview screenshot gallery](sluglicious/README.md).
+The additional captures were taken on 15 October 2026 from historical messages.
+
 ![Existing Sluglicious link-preview output](sluglicious-link-preview.png)
 
 This excerpt shows Sluglicious's replacement preview for a public Sol Slugs post.
