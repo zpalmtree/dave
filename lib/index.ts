@@ -12,6 +12,7 @@ import {
     tryReactMessage,
 } from './Utilities.js';
 import { startGitHubCommitWatch } from './GitHubCommitWatch.js';
+import { startCodexResetWatch } from './CodexResetWatch.js';
 import { getDiscordLoginRetryDelay } from './DiscordRetry.js';
 
 import {
@@ -137,6 +138,7 @@ function createDiscordClient(db: sqlite3.Database): Client {
         startVideoGenerationService(client);
         startQwenImageService(client);
         startGitHubCommitWatch(client);
+        startCodexResetWatch(client);
 
         /* Backfill guild_id for existing log rows */
         const rows = await selectQuery(
