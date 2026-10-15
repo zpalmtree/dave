@@ -324,6 +324,24 @@ test('original request and portrait are retained in planning', async () => {
     }), /reference is missing/);
 });
 
+test('Muse shares its two-request budget across recovery retries and then routes locally', async () => {
+    let requests = 0;
+    let attempts = 0;
+    await assert.rejects(prepareRecoveryPlan({ prompt: 'An explorer speaks.', model: 'minimax', requester: 'test', sources: [],
+        options: { plannerModel: 'muse-wonder-1.0', beforeRequest: () => { requests++; } },
+        planner: async (_prompt, _model, _requester, _sources, options) => {
+            attempts++;
+            for (let index = 0; index < 2; index++) await options.beforeRequest({
+                stage: 'screenplay', attempt: 1, provider: 'meta', model: 'muse-wonder-1.0',
+                maxInputTokens: 10, maxOutputTokens: 10,
+            });
+            throw new Error('Invalid screenplay.');
+        },
+    }), error => error instanceof RecoveryLocalPlanRequired && error.reasonCode === 'planner_budget_exhausted');
+    assert.equal(attempts, 2);
+    assert.equal(requests, 2);
+});
+
 test('a generated replacement opening cannot satisfy a required original portrait', async () => {
     let calls = 0;
     await assert.rejects(prepareRecoveryPlan({ prompt: 'A character speaks', model: 'minimax', requester: 'test',

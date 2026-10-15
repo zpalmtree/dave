@@ -11,6 +11,8 @@ import { VIDEO_IMAGE_ONLY_AUTO_PROMPT, VIDEO_MODELS, VideoModelId, requestedVide
 import {
     VideoFrontierCallOptions,
     VideoUsagePersistenceError,
+    VideoPlannerRequestLimitError,
+    withVideoPlannerRequestLimit,
     geminiVideoUsage,
     openAIVideoUsage,
     videoRequestInputTokenBound,
@@ -1654,7 +1656,10 @@ export function validateFrontierVideoPlanForKeyframe(
             }
         }
         const semantic = semanticPlanText(plan);
-        const missingQuotes = quotedRequirements(rawPrompt).filter(quote => !semantic.includes(quote));
+        // Speech may span shots; their visual/audio fields interrupt semanticPlanText.
+        // Check the ordered dialogue separately without weakening visible-text contracts.
+        const missingQuotes = quotedRequirements(rawPrompt).filter(quote =>
+            !semantic.includes(quote) && !planPreservesDialogueLine(plan, quote));
         if (missingQuotes.length) {
             throw new Error(`Video planner omitted quoted wording: ${missingQuotes.join(' | ')}`);
         }
@@ -2140,7 +2145,7 @@ async function requestSolResponse(
         } catch (error) {
             lastError = error;
             detail = error instanceof Error ? error.message : String(error);
-            if (error instanceof VideoUsagePersistenceError) throw error;
+            if (error instanceof VideoUsagePersistenceError || error instanceof VideoPlannerRequestLimitError) throw error;
             if (signal.aborted || !retryable || attempt >= maxAttempts) throw error;
         } finally {
             await options.onAttempt?.({
@@ -2509,6 +2514,7 @@ export async function createFrontierVideoPlan(
     videoTextModelCapabilities(plannerModel);
     const promptVariant = options.plannerPromptVariant || configuredVideoPlannerPromptVariant(plannerModel);
     const plannerProvider = videoTextModelCapabilities(plannerModel).provider;
+    if (plannerProvider === 'meta') options = withVideoPlannerRequestLimit(options, 2);
     if (options.plannerStrategy === 'hybrid-single-pass' && plannerProvider !== 'anthropic') {
         throw new Error('Hybrid single-pass video planning requires an Anthropic model.');
     }
@@ -2520,10 +2526,10 @@ export async function createFrontierVideoPlan(
     const configured = configuredVideoPlannerVariant(process.env, plannerStrategy, plannerModel);
     const analysisReasoningEffort = options.analysisReasoningEffort || configured.analysisReasoningEffort;
     const screenplayReasoningEffort = options.screenplayReasoningEffort || configured.screenplayReasoningEffort;
-    const fallbackAnalysisReasoningEffort = plannerStrategy === 'single-pass'
+    const fallbackAnalysisReasoningEffort = plannerStrategy === 'single-pass' && plannerProvider !== 'meta'
         ? 'high'
         : analysisReasoningEffort;
-    const fallbackScreenplayReasoningEffort = plannerStrategy === 'single-pass'
+    const fallbackScreenplayReasoningEffort = plannerStrategy === 'single-pass' && plannerProvider !== 'meta'
         ? 'high'
         : screenplayReasoningEffort;
     const plannerFingerprint = videoPlannerFingerprint(
@@ -2558,6 +2564,7 @@ export async function createFrontierVideoPlan(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
     let singlePassFallbackSeconds = 0;
+    let singlePassAnalysis: Record<string, any> | null = null;
     try {
         const safetyIdentifier = `video_${createHash('sha256').update(requesterId).digest('hex').slice(0, 24)}`;
         if (plannerStrategy === 'single-pass' || plannerStrategy === 'hybrid-single-pass') {
@@ -2629,6 +2636,7 @@ export async function createFrontierVideoPlan(
                     'single_pass_decision',
                     true,
                 );
+                singlePassAnalysis = promptAnalysis;
                 rejectedCandidateReason = promptAnalysis.frontier_handling?.disposition === 'reject'
                     ? String(promptAnalysis.frontier_handling?.reason_code || 'other')
                     : null;
@@ -2755,7 +2763,8 @@ export async function createFrontierVideoPlan(
                     );
                 }
                 if (error instanceof FrontierPlannerRejectedError
-                    || error instanceof VideoUsagePersistenceError) throw error;
+                    || error instanceof VideoUsagePersistenceError
+                    || error instanceof VideoPlannerRequestLimitError) throw error;
                 if (hybrid && !candidateReceived) throw error;
                 singlePassFallbackSeconds = Math.max(0.001, (Date.now() - singlePassStarted) / 1000);
                 const detail = error instanceof Error ? error.message : String(error);
@@ -2773,7 +2782,7 @@ export async function createFrontierVideoPlan(
             }
         }
         const analysisStarted = Date.now();
-        const promptAnalysis = await analyzePromptWithPlanner(
+        const promptAnalysis = (plannerProvider === 'meta' && singlePassAnalysis) || await analyzePromptWithPlanner(
             prompt,
             model,
             plannerModel,
