@@ -8,7 +8,7 @@ import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, write
 import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_MAX_BYTES, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
-import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
+import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole,
     validateContinuityDecision, validateOpeningIdentityDecision } from './VideoCharacterContinuity.js';
 import { createHash, randomUUID } from 'crypto';
@@ -40,6 +40,8 @@ import {
     VIDEO_MAX_USER_JOBS,
     VIDEO_MODELS,
     VIDEO_PLANNER_GUIDANCE_MAX_CHARS,
+    VIDEO_MUSE_PLANNER_MODEL,
+    VIDEO_MUSE_PLANNER_NOTICE,
     VIDEO_PROTOCOL_VERSION,
     VIDEO_RESULT_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
@@ -461,9 +463,10 @@ function generationNotice(row: JobRow): string | null {
     if (!row.planner_json) return null;
     try {
         const notice = JSON.parse(row.planner_json)?.generation_notice;
-        return typeof notice === 'string' && notice.trim()
-            ? sanitizeVideoWorkerText(notice, '', 1000).trim() || null
-            : null;
+        const clean = typeof notice === 'string' ? sanitizeVideoWorkerText(notice, '', 1000).trim() : '';
+        const muse = row.planner_model === VIDEO_MUSE_PLANNER_MODEL && !clean.includes(VIDEO_MUSE_PLANNER_NOTICE)
+            ? VIDEO_MUSE_PLANNER_NOTICE : '';
+        return [muse, clean].filter(Boolean).join('\n') || null;
     } catch {
         return null;
     }
@@ -3050,12 +3053,13 @@ export class VideoBroker {
                     const plannerSourceImage = sourceImages.length > 1
                         ? sourceImages
                         : sourceImages[0];
-                    const plan = await (this.options.frontierPlanner || createFrontierVideoPlan)(
+                    const plan = await createVideoPlanWithMuseFallback(
                         job.prompt,
                         job.model,
                         job.requester_id,
                         plannerSourceImage,
                         plannerOptions,
+                        this.options.frontierPlanner || createFrontierVideoPlan,
                     );
                     if (job.source_audio_seconds) pinVideoPlanToAudio(plan, job.source_audio_seconds, parseVideoSourceAudioLyrics(job.source_audio_lyrics_json));
                     const provisional = this.provisionalKeyframePrefetch.get(job.public_id);
@@ -4972,7 +4976,7 @@ export class VideoBroker {
         if (song) return state; // The desktop must compose the soundtrack before planning.
         if (!state.prepared && !state.local_plan) {
             try {
-                state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlan)({
+                state.prepared = await (this.options.recoveryPlanner || prepareRecoveryPlanWithMuseFallback)({
                     prompt: job.prompt, model: job.model, requester: job.requester_id,
                     sources, options, planner: this.options.frontierPlanner,
                     sourceAudioSeconds: job.source_audio_seconds || undefined,

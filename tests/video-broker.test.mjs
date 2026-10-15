@@ -3011,7 +3011,7 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         assert.equal(cachedBody.fallback, 'local');
         assert.equal(cachedBody.disposition, 'reject');
         assert.equal(cachedBody.reason_code, 'provider_policy');
-        assert.equal(plannerCalls, 1);
+        assert.equal(plannerCalls, 2, 'Primary and Muse decline once; a resumed job does not repeat either request.');
         assert.equal(lease.job.has_source_image, false);
 
         const localPlan = {

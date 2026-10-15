@@ -10,18 +10,30 @@ speech. Recovery does not rewrite the request, substitute another story, or
 discard its source images. Technical planning failures retry the same original
 brief once within the job budget.
 
+## Muse planning fallback
+
+The broker tries `muse-wonder-1.0` before local Qwen when the primary planner
+declines a recovery request. Muse receives the original request, source images,
+character guidance, and duration/audio constraints through the same approved-plan
+validation. It uses single-pass planning at low effort, with a shared two-request
+budget across repair and recovery retries. Its usage is recorded under provider
+`meta`, and the saved planner model drives the `Planned with Muse.` status and
+delivery note. A failed Muse attempt followed by Qwen is not labeled as Muse.
+The legacy worker planning endpoint also tries Muse before local planning when
+its primary planner fails. Set `VIDEO_MUSE_FALLBACK=0` for rollback.
+
 ## Local Qwen fallback
 
-When GPT-5.6 Sol rejects the request, whether through its `frontier_handling`
-decision, an API refusal, or an OpenAI moderation block, the broker answers the
-worker's `plan` call with `local_plan_required` instead of stopping or retrying.
-The broker persists that routing decision, so a resumed job never asks Sol
-again. The desktop worker then plans the original request with the local
-abliterated model (`hauhaucs-qwen3.8:27b-q4kp-mtp`), passing Sol's prompt
+If Muse also declines, is unavailable, or exhausts its request budget without an
+approved plan, the broker answers the worker's `plan` call with
+`local_plan_required`. The broker persists that routing decision, so a resumed
+job does not repeat either cloud planner. Existing saved local-fallback decisions
+also stay local. The desktop worker then plans the original request with the local
+abliterated model (`hauhaucs-qwen3.8:27b-q4kp-mtp`), passing the primary planner's prompt
 analysis so both planners agree on what is spoken. It uploads the screenplay to
 `recovery/local-plan`, and that screenplay becomes the approved contract
 (`contract.planner = 'local'`). The one exception is `minor_sexualization`:
-sexual content involving minors stops the job and is never planned locally.
+sexual content involving minors stops the job before trying another planner.
 
 New scene openings always try the frontier image providers first, even for a
 story Sol rejected: they draw far better frames, and a single scene of a

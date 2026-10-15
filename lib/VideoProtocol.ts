@@ -13,6 +13,8 @@ export const VIDEO_SOURCE_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/
 export const VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS = 9 * 60 * 1000;
 // Holds a character's guidance plus the clip-frame and reply-chain context sent with it.
 export const VIDEO_PLANNER_GUIDANCE_MAX_CHARS = 10_000;
+export const VIDEO_MUSE_PLANNER_MODEL = 'muse-wonder-1.0';
+export const VIDEO_MUSE_PLANNER_NOTICE = 'Planned with Muse.';
 // Include both source downloads and time to return the broker's result.
 // Long songs add transcription and excerpt selection before any image composition.
 export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS + 6 * 60 * 1000;
