@@ -46,6 +46,34 @@ You can disable functions in `lib/CommandDefinitions.ts` if you can't be bothere
 * Youtube API: https://developers.google.com/youtube/v3/docs
 * Weather API: https://openweathermap.org/price
 
+## Codex reset alerts
+
+The optional watcher polls the [Codex Resets public API](https://codex-resets.com/api/docs)
+every 60 seconds. It announces explicit scheduled resets and separately reports executed
+resets, including banked credits. Forecasts and elapsed ETAs never count as execution.
+Alerts link back to Codex Resets and the source post without pinging anyone.
+
+Create `~/.config/dave-codex-resets.json` (or set `CODEX_RESET_WATCH_CONFIG_FILE`):
+
+```json
+{
+  "botUserId": "446154284514541579",
+  "channelId": "746507379310461010"
+}
+```
+
+Only the selected bot runs the watcher, preventing duplicate alerts across the two
+deployment tracks. It needs View Channel, Send Messages, and Embed Links permissions.
+Restart the bots after configuring it. No API key is required.
+
+The adjacent `.state.json` file stores seen events and a persistent delivery queue.
+Keep it across restarts. First startup silently baselines executed history but announces
+any currently scheduled reset. Later polls page through history to catch resets missed
+during downtime and retry failed deliveries. Missing configuration disables the watcher;
+invalid state fails closed. Use a new config/state path when changing the destination.
+Detection depends on the tracker publishing an announcement or execution signal;
+it cannot verify individual accounts' limits.
+
 ## Uproar (uproar.chat)
 
 Dave can run on Uproar alongside Discord. It stays Discord-only until you set both
