@@ -183,7 +183,7 @@ const sharedCommands: Command[] = [
             argsFormat: Args.Combined,
             needDb: true,
             implementation: handlePrivacy,
-            description: 'View the privacy policy and your status; use privacy optout or privacy optin.',
+            description: 'Open privacy controls, opt out, or request data deletion with privacy delete.',
             examples: [{ value: 'privacy' }, { value: 'privacy optout' }, { value: 'privacy optin' }],
         },
     },

@@ -82,7 +82,7 @@ async function dispatchPrefixedCommandInternal(msg: Message, db: Database): Prom
                 msg.channel.id,
                 msg.guild?.id ?? null,
                 c.aliases[0],
-                args.join(' '),
+                null, // Usage statistics do not need users' command text.
                 moment.utc().format('YYYY-MM-DD HH:mm:ss'),
             ]
         );

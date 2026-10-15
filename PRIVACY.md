@@ -11,7 +11,15 @@ The chat-bot source is available at <https://github.com/zpalmtree/dave>.
 Independent operators of copies of this software are responsible for their own
 data practices; this policy does not describe their deployments.
 
-For privacy questions, access, correction, or deletion requests, contact
+To request deletion from a bot, mention it followed by `privacy`, click
+**Request deletion**, and confirm. You can also use `$privacy delete` with the
+bot's configured prefix. This saves a request reference and opts you out.
+`privacy status` shows whether the request is pending or marked completed.
+Requests are reviewed by the operator; submission does not mean deletion has
+already finished. No holder role or direct message to the operator is required
+to submit a request.
+
+For privacy questions, access, correction, or additional deletion details, contact
 `zpalmtree` privately on Discord in a server where the bot operates. A server
 administrator can help put you in touch with the operator. Include your Discord
 user ID and enough context to identify the relevant feature or records. Do not
@@ -75,8 +83,12 @@ brokers. Data may also need to be disclosed where required by law.
 ## Storage and retention
 
 Some data is held in process memory, and some is written to operator-managed
-databases, files, media-job storage and logs. Saved feature data, command
-arguments and operational records can persist across bot restarts.
+databases, files, media-job storage and logs. Saved feature data and operational
+records can persist across bot restarts. Routine command-use logs retain command
+names, user/channel/server IDs and timestamps, but no longer store command
+arguments. Existing argument values are cleared from the active bot databases
+when this update starts. This does not remove copies in older backups or other
+feature-specific storage, such as reminders or media-generation jobs.
 
 The operator-managed bot and verification servers now use encrypted storage
 for application databases, temporary files, media-job files, application logs
@@ -95,10 +107,16 @@ In-memory caches disappear when their process restarts, but the bot may retrieve
 accessible message history again for a later request. The application does not
 currently have a universal automatic expiry schedule for persistent records.
 
-Data is retained for the features and operation described above. Contact the
-operator to request access, correction or deletion. Requests are handled
-manually, and data that is no longer needed for these purposes or is subject to
-a valid deletion request will be removed, except where retention is required
+Deletion-request records contain the requesting user ID, platform, request
+reference, status, and submission/completion timestamps. These records support
+handling requests and displaying their status. The operator reviews the queue
+and marks a request completed only after addressing it.
+
+Data is retained for the features and operation described above. Use the privacy
+panel to request deletion, or contact the operator for access, correction, or
+help. Requests are handled manually, and data that is no longer needed for these
+purposes or is subject to a valid deletion request will be removed, except where
+retention is required
 by law. The operator may need to verify that a request relates to your data.
 
 Deleting a Discord message does not automatically erase every cached copy,
@@ -110,7 +128,9 @@ under their applicable policies.
 ## Choices and access
 
 Use the bot's configured prefix followed by `privacy` (for example, `$privacy`)
-to view this policy and your preference. `privacy optout` stops new processing
+to open a panel with the policy, status, opt-out/opt-in buttons and a deletion
+request button. Button responses in Discord are private to the person clicking,
+and always affect that person's own account. `privacy optout` stops new processing
 of your messages and commands by that bot, except for privacy controls.
 `privacy optin` enables processing again. In Discord, you can also mention the
 bot followed by `privacy`, `privacy optout`, or `privacy optin`; this works even
