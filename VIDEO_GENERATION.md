@@ -112,8 +112,10 @@ loops, transformations, and brand films can declare one recurring visual spine,
 while ordinary narrative and found-footage requests explicitly opt out. It
 prepares the next queued job one position ahead while
 the desktop is rendering, without reserving the GPU. The API key never leaves
-the server, successful plans and generated frames are cached per job, and the desktop's local
-uncensored HauhauCS Qwen 3.8 27B Q4_K_P planner is the automatic offline fallback.
+the server, and successful plans and generated frames are cached per job. When the
+primary planner routes a recovery job to fallback, Muse Wonder 1.0 tries first at
+low effort with at most two API requests. The desktop's local HauhauCS Qwen 3.8
+27B Q4_K_P planner remains the last resort if Muse cannot approve a plan.
 It runs through llama.cpp with full GPU offload, 16K context, embedded MTP, and a
 vision projector for supplied reference images, then releases its VRAM before
 rendering. The worker optionally anchors the video with a
@@ -265,9 +267,10 @@ judge rated renderability about one point lower, and total planned runtime rose
 - `VIDEO_PLANNER_MODEL` overrides the Opus production default. Use
   `gpt-6-sol` for the Sol baseline or `gemini-3.8-flash` for the Flash adapter.
   `muse-wonder-1.0` selects Meta's Model API through the same Responses request
-  path (key in `metaApiKey` or `MODEL_API_KEY`); it is off unless selected. On
+  path (key in `metaApiKey` or `MODEL_API_KEY`). It is now the default fallback
+  before local Qwen; the primary planner remains Opus unless overridden. On
   six `$oalgo` prompts on October 12 it staged the request literally with little
-  added writing, at both medium and high effort, so it stays a benchmark arm.
+  added writing, at both medium and high effort, so it is not the default primary.
   Muse planning is limited to two API requests across recovery retries. A failed
   single-pass screenplay reuses its validated analysis, and retries retain the
   selected reasoning effort instead of escalating to high. When the request
@@ -279,6 +282,9 @@ judge rated renderability about one point lower, and total planned runtime rose
   monologue reached the two-call cap and requested local planning. No videos or
   local fallback plans were rendered/generated in this comparison. It is one
   sample per arm, with effort and cache effects mixed into the comparison.
+- `VIDEO_MUSE_FALLBACK=0` skips Muse and restores the direct local-Qwen fallback.
+  Approved Muse plans show `Planned with Muse.` in status and delivery posts.
+  Cached plans and existing local-fallback decisions are retained on resume.
 - `VIDEO_PLANNER_STRATEGY` accepts `hybrid-single-pass`, `two-pass`, or
   `single-pass`. By default Opus uses hybrid with two-pass fallback and Sol uses
   single-pass. Hybrid requires an Anthropic model; plain single-pass on Opus

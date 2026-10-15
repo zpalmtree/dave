@@ -1,8 +1,8 @@
 import { pinVideoPlanToAudio, VideoSourceAudioLyrics } from './VideoSourceAudio.js';
 import { configuredVideoPlannerVariant, createFrontierVideoPlan, FrontierPlannerRejectedError, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
-import { VideoFrontierCallOptions, VideoPlannerRequestLimitError, withVideoPlannerRequestLimit } from './VideoUsage.js';
+import { VideoFrontierCallOptions, VideoPlannerRequestLimitError, VideoUsagePersistenceError, withVideoPlannerRequestLimit } from './VideoUsage.js';
 import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
-import { VideoModelId } from './VideoProtocol.js';
+import { VIDEO_MUSE_PLANNER_MODEL, VideoModelId } from './VideoProtocol.js';
 import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 
 export class RecoveryStoppedError extends Error {}
@@ -64,6 +64,7 @@ export async function prepareRecoveryPlan(input: {
             if (input.requireOriginalFirstFrame) contract.original_first_frame = true;
             return { plan, contract, contract_hash: recoveryHash(contract), prompt, notice };
         } catch (error) {
+            if (error instanceof VideoUsagePersistenceError) throw error;
             if (error instanceof VideoPlannerRequestLimitError) {
                 throw localPlanRequired('planner_budget_exhausted', null, error.message);
             }
@@ -75,4 +76,64 @@ export async function prepareRecoveryPlan(input: {
         }
     }
     throw new Error('Waiting for an approved screenplay.');
+}
+
+function useMuseFallback(options: VideoFrontierCallOptions): boolean {
+    return process.env.VIDEO_MUSE_FALLBACK !== '0'
+        && (options.plannerModel || configuredVideoPlannerVariant().plannerModel) !== VIDEO_MUSE_PLANNER_MODEL;
+}
+
+function museFallbackOptions(options: VideoFrontierCallOptions): VideoFrontierCallOptions {
+    return { ...options, plannerModel: VIDEO_MUSE_PLANNER_MODEL, plannerStrategy: 'single-pass',
+        plannerPromptVariant: 'baseline', analysisReasoningEffort: 'low', screenplayReasoningEffort: 'low',
+        maxRequestAttempts: 1, onProvisionalKeyframe: undefined };
+}
+
+/** Try the bounded cloud fallback before handing an unplanned recovery job to the GPU worker. */
+export async function prepareRecoveryPlanWithMuseFallback(input: Parameters<typeof prepareRecoveryPlan>[0]): Promise<any> {
+    try {
+        return await prepareRecoveryPlan(input);
+    } catch (original) {
+        if (!(original instanceof RecoveryLocalPlanRequired) || !useMuseFallback(input.options)) throw original;
+        try {
+            const prepared = await prepareRecoveryPlan({ ...input, options: museFallbackOptions(input.options) });
+            prepared.plan._planner_model = VIDEO_MUSE_PLANNER_MODEL;
+            return prepared;
+        } catch (error) {
+            if (error instanceof RecoveryStoppedError || error instanceof VideoUsagePersistenceError) throw error;
+            // Keep the original dialogue contract for the final local fallback, including on resume.
+            throw new RecoveryLocalPlanRequired(original.reasonCode, original.promptAnalysis,
+                `Muse fallback did not produce an approved plan: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+}
+
+/** Legacy worker planning uses the same fallback model and accounting hooks. */
+export async function createVideoPlanWithMuseFallback(
+    prompt: string, model: VideoModelId, requester: string,
+    sources: VideoPlanSourceImage | VideoPlanSourceImage[] | undefined,
+    options: VideoFrontierCallOptions, planner = createFrontierVideoPlan,
+): Promise<Record<string, any>> {
+    try {
+        return await planner(prompt, model, requester, sources, options);
+    } catch (original) {
+        if (!useMuseFallback(options) || original instanceof VideoUsagePersistenceError
+            || (original instanceof FrontierPlannerRejectedError && original.reasonCode === 'minor_sexualization')) throw original;
+        try {
+            const plan = await planner(prompt, model, requester, sources, museFallbackOptions(options));
+            const handling = (plan.prompt_analysis as any)?.frontier_handling;
+            if (handling?.disposition === 'reject') {
+                throw new FrontierPlannerRejectedError(handling.reason_code || 'other', 'Muse declined the request.', plan.prompt_analysis as any);
+            }
+            return { ...plan, _planner_model: VIDEO_MUSE_PLANNER_MODEL };
+        } catch (error) {
+            if (error instanceof VideoUsagePersistenceError
+                || (error instanceof FrontierPlannerRejectedError && error.reasonCode === 'minor_sexualization')) throw error;
+            throw new FrontierPlannerRejectedError(
+                original instanceof FrontierPlannerRejectedError ? original.reasonCode : 'other',
+                `Muse fallback did not produce an approved plan: ${error instanceof Error ? error.message : String(error)}`,
+                original instanceof FrontierPlannerRejectedError ? original.promptAnalysis : null,
+            );
+        }
+    }
 }

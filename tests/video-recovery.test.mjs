@@ -8,7 +8,8 @@ import { VIDEO_CHARACTERS, videoCharacterPhotorealKeyframe } from '../dist/Video
 import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash,
     repairVideoTiming, recoveryLimitReached, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
-import { prepareRecoveryPlan, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
+import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
+import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 
@@ -340,6 +341,139 @@ test('Muse shares its two-request budget across recovery retries and then routes
     }), error => error instanceof RecoveryLocalPlanRequired && error.reasonCode === 'planner_budget_exhausted');
     assert.equal(attempts, 2);
     assert.equal(requests, 2);
+});
+
+test('recovery tries low-effort Muse after primary rejection with the same sources and constraints', async () => {
+    const calls = [];
+    const sources = [{ data: Buffer.from('portrait'), mimeType: 'image/png' }];
+    const onUsage = () => {};
+    const result = await prepareRecoveryPlanWithMuseFallback({
+        prompt: 'An explorer says "We made it home."', model: 'minimax', requester: 'test', sources,
+        requireSourceIdentity: true, requireOriginalFirstFrame: true,
+        options: { plannerModel: 'claude-opus-5-5', plannerStrategy: 'hybrid-single-pass',
+            plannerPromptVariant: 'opus-tuned', plannerGuidance: 'Keep the explorer.', onUsage },
+        planner: async (_prompt, _model, _requester, images, options) => {
+            calls.push(options.plannerModel);
+            assert.equal(images, sources);
+            if (options.plannerModel !== 'muse-wonder-1.0') throw new FrontierPlannerRejectedError('cannot_faithfully_fulfill');
+            assert.equal(options.plannerStrategy, 'single-pass');
+            assert.equal(options.plannerPromptVariant, 'baseline');
+            assert.equal(options.screenplayReasoningEffort, 'low');
+            assert.equal(options.analysisReasoningEffort, 'low');
+            assert.equal(options.maxRequestAttempts, 1);
+            assert.equal(options.onUsage, onUsage);
+            assert.match(options.plannerGuidance, /Keep the explorer/);
+            assert.match(options.plannerGuidance, /keyframe.recommended=false/);
+            const value = plan(); value.keyframe.recommended = false; return value;
+        },
+    });
+    assert.deepEqual(calls, ['claude-opus-5-5', 'muse-wonder-1.0']);
+    assert.equal(result.plan._planner_model, 'muse-wonder-1.0');
+    assert.equal(result.contract.original_first_frame, true);
+    assert.equal(result.contract_hash, recoveryHash(result.contract));
+});
+
+test('Muse fallback preserves stop decisions, accounting failures, and the original local contract', async () => {
+    for (const failure of ['minor', 'accounting', 'both-decline']) {
+        const models = [];
+        const analysis = plan().prompt_analysis;
+        await assert.rejects(prepareRecoveryPlanWithMuseFallback({
+            prompt: 'An explorer speaks.', model: 'minimax', requester: 'test', sources: [],
+            options: { plannerModel: 'claude-opus-5-5' },
+            planner: async (_prompt, _model, _requester, _images, options) => {
+                models.push(options.plannerModel);
+                if (failure === 'accounting') throw new VideoUsagePersistenceError('Could not save usage.');
+                throw new FrontierPlannerRejectedError(failure === 'minor' ? 'minor_sexualization' : 'provider_policy',
+                    'Declined.', options.plannerModel === 'muse-wonder-1.0' ? null : analysis);
+            },
+        }), error => failure === 'minor' ? error instanceof RecoveryStoppedError
+            : failure === 'accounting' ? error instanceof VideoUsagePersistenceError
+            : error instanceof RecoveryLocalPlanRequired && error.promptAnalysis === analysis);
+        assert.equal(models.length, failure === 'both-decline' ? 2 : 1);
+    }
+});
+
+test('legacy planning tries Muse once while preserving sources and attributing the approved model', async () => {
+    const models = [];
+    const source = { data: Buffer.from('portrait'), mimeType: 'image/png' };
+    const result = await createVideoPlanWithMuseFallback('An explorer speaks.', 'minimax', 'test', source,
+        { plannerModel: 'claude-opus-5-5' }, async (_prompt, _model, _requester, image, options) => {
+            models.push(options.plannerModel);
+            assert.equal(image, source);
+            if (models.length === 1) throw new Error('Primary unavailable.');
+            return plan();
+        });
+    assert.deepEqual(models, ['claude-opus-5-5', 'muse-wonder-1.0']);
+    assert.equal(result._planner_model, 'muse-wonder-1.0');
+});
+
+test('rollback skips Muse and an explicitly selected Muse primary is never called again as fallback', async () => {
+    const previous = process.env.VIDEO_MUSE_FALLBACK;
+    try {
+        for (const [setting, model] of [['0', 'claude-opus-5-5'], ['1', 'muse-wonder-1.0']]) {
+            process.env.VIDEO_MUSE_FALLBACK = setting;
+            let calls = 0;
+            await assert.rejects(prepareRecoveryPlanWithMuseFallback({
+                prompt: 'An explorer speaks.', model: 'minimax', requester: 'test', sources: [],
+                options: { plannerModel: model },
+                planner: async () => { calls++; throw new FrontierPlannerRejectedError('provider_policy'); },
+            }), RecoveryLocalPlanRequired);
+            assert.equal(calls, 1);
+        }
+    } finally {
+        if (previous === undefined) delete process.env.VIDEO_MUSE_FALLBACK;
+        else process.env.VIDEO_MUSE_FALLBACK = previous;
+    }
+});
+
+test('broker persists a Muse fallback and exposes its note without replanning on resume', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-recovery-muse-'));
+    const models = [];
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+        recoveryEnabled: true, preplanQueuedJobs: false,
+        frontierPlanner: async (_prompt, _model, _requester, _images, options) => {
+            models.push(options.plannerModel);
+            if (options.plannerModel !== 'muse-wonder-1.0') throw new FrontierPlannerRejectedError('cannot_faithfully_fulfill');
+            return plan();
+        },
+    });
+    await broker.start();
+    try {
+        const base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const response = await fetch(`${base}/v1/jobs`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'explorers return', requester_id: '1', origin_bot_id: '2',
+                channel_id: '3', command_message_id: '4', status_message_id: '5' }),
+        });
+        const id = (await response.json()).job.id;
+        broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+            scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+        await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=? WHERE public_id=?",
+            [VIDEO_RECOVERY_VERSION, id]);
+        const request = async () => {
+            const result = await fetch(`${base}/v1/worker/jobs/${id}/recovery/plan`, { method: 'POST',
+                headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' }, body: '{}' });
+            assert.equal(result.status, 200);
+            return result.json();
+        };
+        const first = await request();
+        assert.equal(first.local_plan_required, undefined);
+        assert.equal(first.plan._planner_model, 'muse-wonder-1.0');
+        assert.equal((await request()).contract_hash, first.contract_hash);
+        assert.equal(models.length, 2);
+        const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [id]);
+        assert.equal(row.planner_model, 'muse-wonder-1.0');
+        assert.equal((await broker.views([row]))[0].generation_notice, 'Planned with Muse.');
+        const saved = JSON.parse(row.planner_json);
+        saved.generation_notice = 'An alternate renderer recovered a scene.';
+        row.planner_json = JSON.stringify(saved);
+        assert.equal((await broker.views([row]))[0].generation_notice,
+            'Planned with Muse.\nAn alternate renderer recovered a scene.');
+        row.planner_model = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
+        assert.doesNotMatch((await broker.views([row]))[0].generation_notice, /Muse/);
+    } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('a generated replacement opening cannot satisfy a required original portrait', async () => {
@@ -703,7 +837,7 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         const routed = await request('plan');
         assert.equal(routed.status, 200, JSON.stringify(routed.body));
         assert.deepEqual(routed.body.prompt_analysis, analysis, 'The local planner keeps the frontier dialogue contract.');
-        assert.equal(frontierCalls, 1, 'Recovery does not retry a rejected brief with the frontier planner.');
+        assert.equal(frontierCalls, 2, 'Primary and Muse each decline once before local planning.');
         assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
             'local-fallback:provider_policy');
         const empty = await request('local-plan', { plan: { segments: [] } });

@@ -24,6 +24,7 @@ import { formatDiscordDateAndRelative } from './DiscordTime.js';
 import {
     VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MODELS,
+    VIDEO_MUSE_PLANNER_NOTICE,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS,
@@ -562,7 +563,8 @@ export function initialVideoRequestStatus(model: VideoModelId, commandVariant?: 
 
 export function formatVideoJob(job: VideoJobView): string {
     const source = videoSourceDescription(job, true);
-    const head = `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**${source ? ` · ${source}` : ''}`;
+    const head = `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**${source ? ` · ${source}` : ''}`
+        + (job.generation_notice?.includes(VIDEO_MUSE_PLANNER_NOTICE) ? ` · ${VIDEO_MUSE_PLANNER_NOTICE}` : '');
     if (job.status === 'queued') {
         const position = job.queue_position ? `**#${job.queue_position} in line.**` : '**In line.**';
         if (job.paused_until) return `${head}\n${position}${pauseText(job.paused_until)} Usually takes **${roughRuntimeRange(job)}** once it starts.`;
