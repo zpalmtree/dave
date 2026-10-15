@@ -93,9 +93,14 @@ test('state cannot be sent to a different destination or by a different bot', ()
     assert.throws(() => validateState({}, settings), /Invalid/);
 });
 
-test('notifications include source attribution, bounded text and no mentions', () => {
+test('both alert types ping only the codex role and retain bounded source attribution', () => {
+    for (const phase of ['announced', 'dropped']) {
+        const alert = resetNotification({ phase, reset: reset('new') });
+        assert.equal(alert.content, '<@&1560349689025532064>');
+        assert.deepEqual(alert.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
+    }
     const message = resetNotification({ phase: 'announced', reset: { ...scheduled('new'), text: '@everyone ' + '*'.repeat(5000) } });
-    assert.deepEqual(message.allowedMentions, { parse: [] });
+    assert.deepEqual(message.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
     assert.match(message.embeds[0].title, /announced/);
     assert.match(message.embeds[0].description, /Expected: <t:/);
     assert.match(message.embeds[0].description, /Data from Codex Resets/);

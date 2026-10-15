@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 
 const site = 'https://codex-resets.com';
+const codexRoleId = '1560349689025532064';
 interface Reset {
     id: string;
     reset_type: 'regular' | 'banked';
@@ -108,7 +109,8 @@ export function resetNotification(item: ResetWatchState['pending'][number]): Mes
     const sourceUrl = typeof reset.source.url === 'string' && /^https:\/\/(?:x\.com|twitter\.com)\//i.test(reset.source.url)
         ? reset.source.url : site;
     return {
-        allowedMentions: { parse: [] },
+        content: `<@&${codexRoleId}>`,
+        allowedMentions: { parse: [], roles: [codexRoleId] },
         embeds: [{
             title: phase === 'announced' ? '📣 Codex reset announced' : '✅ Codex reset dropped',
             color: phase === 'announced' ? 0xf0b232 : 0x23a55a,
