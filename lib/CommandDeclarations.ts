@@ -1,3 +1,4 @@
+import { handlePrivacy } from './PrivacyCommand.js';
 import {
     Message,
     EmbedBuilder,
@@ -175,6 +176,16 @@ function characterVideoCommands(character: VideoCharacter): Command[] {
 
 /* Keep shared command order synchronized across deployment tracks. */
 const sharedCommands: Command[] = [
+    {
+        aliases: ['privacy'],
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            needDb: true,
+            implementation: handlePrivacy,
+            description: 'View the privacy policy and your status; use privacy optout or privacy optin.',
+            examples: [{ value: 'privacy' }, { value: 'privacy optout' }, { value: 'privacy optin' }],
+        },
+    },
     {
         aliases: ['minimax'],
         discordOnly: true,

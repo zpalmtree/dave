@@ -1,3 +1,4 @@
+import { fetchProcessableMessage, PrivacyAwareHistoryCache } from './Privacy.js';
 import {
     Message,
     AttachmentBuilder,
@@ -124,7 +125,7 @@ const SAFETY_SETTINGS: SafetySetting[] = [
 ];
 
 // Cache for conversation history
-const chatHistoryCache = new Map<string, any[]>();
+const chatHistoryCache = new PrivacyAwareHistoryCache<any[]>();
 
 /**
  * Fetches an image from a URL and converts it to base64
@@ -384,7 +385,7 @@ export async function handleGemini(msg: Message, args: string, options: GeminiOp
             // If no history found but replying to message, fetch it for context
             if (history.length === 0) {
                 try {
-                    contextMessage = await msg.channel?.messages.fetch(replyMsgId);
+                    contextMessage = await fetchProcessableMessage(msg, replyMsgId);
                 } catch (error) {
                     console.error("Failed to fetch replied message:", error);
                 }
@@ -811,7 +812,7 @@ export async function handleGeminiImageGen(msg: Message, args: string): Promise<
         // Check for replied message
         if (msg.reference?.messageId) {
             try {
-                contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+                contextMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
                 if (contextMessage) {
                     const repliedMessageImages = getImageURLsFromMessage(contextMessage);
                     if (repliedMessageImages.length > 0) {
@@ -940,7 +941,7 @@ export async function handleGeminiCaption(msg: Message, args: string): Promise<v
         // Check for replied message
         if (msg.reference?.messageId) {
             try {
-                const contextMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+                const contextMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
                 if (contextMessage) {
                     const repliedMessageImages = getImageURLsFromMessage(contextMessage);
                     if (repliedMessageImages.length > 0) {

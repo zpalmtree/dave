@@ -1,3 +1,4 @@
+import { canProcessMessage } from './Privacy.js';
 import {
     Client,
     Guild,
@@ -489,6 +490,7 @@ export function getImageURLsFromMessage(
     const supportedMimeTypes = ['image/png', 'image/gif', 'image/jpeg', 'image/webp'];
 
     function processMessage(message: Message) {
+        if (!canProcessMessage(message)) return;
         // Check attachments
         message.attachments.forEach((attachment) => {
             if (supportedMimeTypes.includes(attachment.contentType || '')) {

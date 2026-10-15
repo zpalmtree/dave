@@ -1,3 +1,4 @@
+import { fetchProcessableMessage } from './Privacy.js';
 import moment from 'moment';
 
 import fetch from 'node-fetch';
@@ -1029,7 +1030,7 @@ export async function handleYoutubeApi(msg: Message, args: string): Promise<unde
 
     if (replyMessageId) {
         try {
-            const repliedMessage = await msg.channel.messages.fetch(replyMessageId);
+            const repliedMessage = await fetchProcessableMessage(msg, replyMessageId);
             const repliedText = repliedMessage.content.trim();
 
             if (repliedText) {

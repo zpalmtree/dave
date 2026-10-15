@@ -1,3 +1,4 @@
+import { fetchProcessableMessage, PrivacyAwareHistoryCache } from './Privacy.js';
 import { Message, AttachmentBuilder, MessageFlags } from 'discord.js';
 import { createCanvas, loadImage } from 'canvas';
 import { config } from './Config.js';
@@ -75,7 +76,7 @@ interface XAITool {
     enable_image_understanding?: boolean;
 }
 
-const chatHistoryCache = new Map<string, XAIMessage[]>();
+const chatHistoryCache = new PrivacyAwareHistoryCache<XAIMessage[]>();
 
 interface GrokHandlerOptions {
     msg: Message;
@@ -160,7 +161,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         previousConvo = chatHistoryCache.get(reply) || [];
 
         if (previousConvo.length === 0) {
-            const repliedMessage = await msg.channel?.messages.fetch(reply);
+            const repliedMessage = await fetchProcessableMessage(msg, reply);
 
             if (repliedMessage) {
                 previousConvo.push({
@@ -178,7 +179,7 @@ async function masterGrokHandler(options: GrokHandlerOptions, isRetry: boolean =
         let repliedMessage: Message | undefined;
         if (msg.reference?.messageId) {
             try {
-                repliedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+                repliedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
             } catch (error) {
                 console.error("Failed to fetch replied message:", error);
             }
@@ -515,7 +516,7 @@ export async function handleGrokImage(msg: Message, args: string): Promise<void>
     let repliedMessage: Message | undefined;
     if (msg.reference?.messageId) {
         try {
-            repliedMessage = await msg.channel?.messages.fetch(msg.reference.messageId);
+            repliedMessage = await fetchProcessableMessage(msg, msg.reference.messageId);
         } catch (error) {
             console.error("Failed to fetch replied message:", error);
         }
