@@ -1,4 +1,4 @@
-import { repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
+import { repairVideoTiming, requireRecoveryPlanningPolicy, truncateAutomaticVideoPlan, videoPlanBeforeDurationCut, VIDEO_AUTOMATIC_LIMIT_SECONDS } from './VideoRecovery.js';
 import { VIDEO_LYRIC_VISUAL_INSTRUCTIONS } from './VideoSourceAudio.js';
 import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA } from './VideoAudioContinuity.js';
 import { createHash } from 'crypto';
@@ -1006,7 +1006,7 @@ const NUMBER_WORDS = [
     'eighteen', 'nineteen', 'twenty',
 ];
 
-const AUTO_TOTAL_LIMIT_SECONDS = 2 * 60;
+const AUTO_TOTAL_LIMIT_SECONDS = VIDEO_AUTOMATIC_LIMIT_SECONDS;
 
 function requireExhaustiveGenerationBudget(memberCount: number, segmentMinimum: number): void {
     const minimumTotal = memberCount * segmentMinimum;
@@ -1527,8 +1527,16 @@ export function validateFrontierVideoPlanForKeyframe(
     model: VideoModelId,
     rawPrompt = '',
     requestedDurationSeconds?: number | null,
+    allowAutomaticOverflow = false,
 ): void {
     requestedDurationSeconds ??= requestedVideoDurationSeconds(rawPrompt);
+    if (plan?.duration_truncation) {
+        requireRecoveryPlanningPolicy(plan, requestedDurationSeconds);
+        validateFrontierVideoPlanForKeyframe(videoPlanBeforeDurationCut(plan), model, rawPrompt,
+            requestedDurationSeconds, true);
+        return;
+    }
+    const allowOverflow = allowAutomaticOverflow && requestedDurationSeconds == null;
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments) || !plan.segments.length) {
         throw new Error('Video planner returned no screenplay segments.');
     }
@@ -1620,13 +1628,13 @@ export function validateFrontierVideoPlanForKeyframe(
         finishedTotal += segment.output_seconds === undefined ? target : declaredOutput;
     }
     requireRecoveryPlanningPolicy(plan, requestedDurationSeconds);
-    if (!plan.recovery_extended && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!allowOverflow && !plan.recovery_extended && generationTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `Video planner screenplay needs ${generationTotal.toFixed(1)}s of generated footage, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s generation limit.`,
         );
     }
-    if (!plan.recovery_extended && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
+    if (!allowOverflow && !plan.recovery_extended && outputTotal > AUTO_TOTAL_LIMIT_SECONDS + 1e-6) {
         throw new Error(
             `Video planner screenplay needs ${outputTotal.toFixed(1)}s of finished runtime, `
             + `above the ${AUTO_TOTAL_LIMIT_SECONDS}s automatic limit.`,
@@ -2541,6 +2549,9 @@ export async function createFrontierVideoPlan(
         promptVariant,
     );
     const attributed = <T extends Record<string, any>>(plan: T): T => {
+        if (options.truncateAutomaticDuration !== false) {
+            truncateAutomaticVideoPlan(plan, options.requestedDurationSeconds ?? requestedVideoDurationSeconds(prompt));
+        }
         (plan as any)._planner_model = plannerModel;
         (plan as any)._planner_fingerprint = plannerFingerprint;
         (plan as any)._planner_configuration = {
@@ -2664,6 +2675,7 @@ export async function createFrontierVideoPlan(
                         model,
                         prompt,
                         options.requestedDurationSeconds,
+                        options.truncateAutomaticDuration !== false,
                     );
                     if (rejectedCandidateReason) {
                         validateRejectedSinglePassCandidate(compiled, promptAnalysis);
@@ -2713,6 +2725,7 @@ export async function createFrontierVideoPlan(
                     model,
                     prompt,
                     options.requestedDurationSeconds,
+                    options.truncateAutomaticDuration !== false,
                 );
                 if (rejectedCandidateReason) {
                     validateRejectedSinglePassCandidate(plan, promptAnalysis);
@@ -2897,6 +2910,7 @@ export async function createFrontierVideoPlan(
                         model,
                         prompt,
                         options.requestedDurationSeconds,
+                        options.truncateAutomaticDuration !== false,
                     );
                     compiled.planner_metrics = {
                         prompt_analysis_seconds: promptAnalysisSeconds,
@@ -2924,6 +2938,7 @@ export async function createFrontierVideoPlan(
                     model,
                     prompt,
                     options.requestedDurationSeconds,
+                    options.truncateAutomaticDuration !== false,
                 );
                 (plan as any).planner_metrics = {
                     prompt_analysis_seconds: promptAnalysisSeconds,
@@ -2987,6 +3002,7 @@ export async function createFrontierVideoPlan(
                         model,
                         prompt,
                         options.requestedDurationSeconds,
+                        options.truncateAutomaticDuration !== false,
                     );
                     compiled.planner_metrics = {
                         prompt_analysis_seconds: promptAnalysisSeconds,

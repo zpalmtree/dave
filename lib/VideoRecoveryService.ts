@@ -2,7 +2,7 @@ import { pinVideoPlanToAudio, VideoSourceAudioLyrics } from './VideoSourceAudio.
 import { configuredVideoPlannerVariant, createFrontierVideoPlan, FrontierPlannerRejectedError, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
 import { VideoFrontierCallOptions, VideoPlannerRequestLimitError, VideoUsagePersistenceError, withVideoPlannerRequestLimit } from './VideoUsage.js';
 import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
-import { VIDEO_MUSE_PLANNER_MODEL, VideoModelId } from './VideoProtocol.js';
+import { VIDEO_MUSE_PLANNER_MODEL, VIDEO_MODELS, VideoModelId } from './VideoProtocol.js';
 import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 
 export class RecoveryStoppedError extends Error {}
@@ -33,7 +33,6 @@ export async function prepareRecoveryPlan(input: {
         throw new RecoveryStoppedError('The required original character reference is missing.');
     }
     const prompt = input.prompt;
-    const notice = '';
     const useSources = true;
     const planner = input.planner || createFrontierVideoPlan;
     const plannerModel = input.options.plannerModel || configuredVideoPlannerVariant().plannerModel;
@@ -44,6 +43,7 @@ export async function prepareRecoveryPlan(input: {
             const plan: any = await planner(prompt, input.model, input.requester,
                 input.sources, {
                     ...options,
+                    ...(input.sourceAudioSeconds ? { truncateAutomaticDuration: false } : {}),
                     plannerGuidance: `${input.options.plannerGuidance || ''}\nPreserve all permitted speech and major story beats. The requested total runtime is binding; preserve every requested scene and line, and never extend the runtime without authorization. Shot timings are flexible; divide long speech across segments rather than truncating it. For a mouthless source character, speech comes from its established speaker or voice mechanism without adding human facial anatomy or lip sync. When action must finish before speech, allocate separate timed action and speaking shots and reserve the full speaking duration after the action.`
                         + (input.requireSourceIdentity ? '\nThe supplied character identity is required. Do not invent a replacement person or change their anatomy, body proportions, hair, or clothing.' : '')
                         + (input.requireOriginalFirstFrame ? '\nFrame zero must be the supplied portrait itself, fully framed and unchanged. Set keyframe.recommended=false. Start in its exact pose, crop and background, then reveal the permitted story through motion or later shots.' : ''),
@@ -56,9 +56,11 @@ export async function prepareRecoveryPlan(input: {
             if (input.requireOriginalFirstFrame && plan.keyframe?.recommended !== false) {
                 throw new Error('The screenplay did not retain the required original portrait as its opening frame.');
             }
-            repairVideoTiming(plan, 15, 5);
+            const isH3 = VIDEO_MODELS[input.model].generatorModel === 'h3';
+            repairVideoTiming(plan, isH3 ? 15 : 20, isH3 ? 5 : 3);
             if (input.sourceAudioSeconds) pinVideoPlanToAudio(plan, input.sourceAudioSeconds, input.sourceAudioLyrics);
             requireRecoveryPlanningPolicy(plan, input.sourceAudioSeconds ?? input.options.requestedDurationSeconds);
+            const notice = String(plan.generation_notice || '').trim();
             const contract = approvedRecoveryContract(plan, prompt, notice, useSources);
             if (input.requireSourceIdentity || input.requireOriginalFirstFrame) contract.source_reference_required = true;
             if (input.requireOriginalFirstFrame) contract.original_first_frame = true;
