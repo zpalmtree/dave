@@ -120,6 +120,9 @@ export async function checkVideoCharacterContinuity(
     if (!anchors.length) throw new Error('Character continuity requires an original reference.');
     const model = AI_MODELS.geminiChat;
     const stage = 'character_continuity';
+    // Gemini shares this cap between reasoning and the JSON answer. The old
+    // 2048-token/medium combination exhausted it before finishing the decision.
+    const maxOutputTokens = 8192;
     const instruction = [
         'Check only character continuity at a MiniMax image-to-video clip boundary. Do not judge plot, quality, aesthetics, or rewrite the story.',
         'The reference images permanently define character identity. The final image is a candidate continuation frame, NOT an identity authority.',
@@ -131,6 +134,7 @@ export async function checkVideoCharacterContinuity(
         'Describe each needed character from the ORIGINAL references: distinct face, hair, age appearance, silhouette, clothing, and a clear role/name binding. No guessed names or hidden details.',
         'Separate stable identity from explicitly requested appearance changes. Do not freeze wardrobe or body features the screenplay deliberately changes.',
         'Describe identity only, not original background, pose, framing or actions. Explain the boundary decision briefly.',
+        'Keep identity_description under 1200 characters and reason under 600 characters. Return one complete JSON decision.',
         'In reason, state the concrete facial matches or differences you observed between the original and candidate. Matching breed, color, or labels alone is insufficient evidence to continue.',
         'Separately decide restore_face. The next clip copies the candidate frame, so every drift in it compounds. For each needed character, read these from the candidate pixels alone and then from the original: whether the eyes are open, iris color, apparent age and skin texture, lip shape, and hair color. Name the iris color you see in each image in reason; the screenplay\'s description is not evidence of what the candidate shows.',
         'Set restore_face true when action is continue and a needed character\'s eyes are closed or mid-blink, or any of those features differs from the original without the screenplay asking for the change: a different iris color, an older or harsher face, deeper lines, a changed skin tone. Set it false when the face still matches the original, when the screenplay requested the changed appearance, and whenever action is reanchor.',
@@ -150,9 +154,10 @@ export async function checkVideoCharacterContinuity(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
     let outcome: 'success' | 'error' = 'error';
+    let detail: string | undefined;
     try {
         await hooks.beforeRequest?.({ stage, attempt: 1, provider: 'google', model,
-            maxInputTokens: videoRequestInputTokenBound({ instruction, parts }), maxOutputTokens: 2048 });
+            maxInputTokens: videoRequestInputTokenBound({ instruction, parts }), maxOutputTokens });
         const client = new GoogleGenAI({ apiKey: config.geminiApiKey, apiVersion: 'v1alpha' });
         const response = await client.models.generateContent({ model, contents: [{ role: 'user', parts }], config: {
             abortSignal: controller.signal, systemInstruction: instruction, responseMimeType: 'application/json',
@@ -163,18 +168,31 @@ export async function checkVideoCharacterContinuity(
                     identity_description: { type: 'string' }, reason: { type: 'string' },
                     restore_face: { type: 'boolean' },
                 } },
-            maxOutputTokens: 2048, thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+            maxOutputTokens, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         } });
         const usage = response.usageMetadata;
-        await hooks.onUsage?.({ stage, attempt: 1, outcome: 'success', provider: 'google',
-            model: response.modelVersion || model, serviceTier: 'default',
-            ...geminiVideoUsage(usage) });
-        const decision = validateContinuityDecision(JSON.parse(String(response.text || '')));
-        outcome = 'success';
-        return decision;
+        try {
+            const finishReason = response.candidates?.[0]?.finishReason;
+            if (finishReason && finishReason !== 'STOP') {
+                throw new Error(`Character continuity check returned an incomplete decision (${finishReason}; `
+                    + `${usage?.thoughtsTokenCount || 0} thinking tokens, ${usage?.candidatesTokenCount || 0} answer tokens).`);
+            }
+            const decision = validateContinuityDecision(JSON.parse(String(response.text || '')));
+            outcome = 'success';
+            return decision;
+        } finally {
+            // Invalid/truncated replies are still billed, but are not successful checks.
+            await hooks.onUsage?.({ stage, attempt: 1, outcome, provider: 'google',
+                model: response.modelVersion || model, serviceTier: 'default',
+                ...geminiVideoUsage(usage) });
+        }
+    } catch (error) {
+        outcome = 'error';
+        detail = error instanceof Error ? error.message : String(error);
+        throw error;
     } finally {
         clearTimeout(timeout);
         await hooks.onAttempt?.({ stage, attempt: 1, outcome, provider: 'google', model,
-            serviceTier: 'default', durationSeconds: (Date.now() - started) / 1000 });
+            serviceTier: 'default', durationSeconds: (Date.now() - started) / 1000, detail });
     }
 }
