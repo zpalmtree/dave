@@ -5,9 +5,56 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VideoBroker } from '../dist/VideoBroker.js';
 import { approvedRecoveryContract, recoveryHash, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
-import { decodeContinuityImage, validateContinuityDecision } from '../dist/VideoCharacterContinuity.js';
+import { checkVideoCharacterContinuity, decodeContinuityImage, validateContinuityDecision } from '../dist/VideoCharacterContinuity.js';
+import { config } from '../dist/Config.js';
 
 const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=';
+
+test('continuity leaves room for reasoning and JSON, and rejects incomplete provider decisions', async () => {
+    const originalFetch = globalThis.fetch, originalKey = config.geminiApiKey;
+    const requests = [], budgets = [], usage = [], attempts = [];
+    const decision = { action: 'continue', identity_description: 'Same man in the flag shirt.',
+        reason: 'The face and brown irises match.', restore_face: false };
+    let finishReason = 'STOP';
+    let answer = JSON.stringify(decision);
+    config.geminiApiKey = 'test-key';
+    globalThis.fetch = async (_url, options) => {
+        const request = JSON.parse(options.body);
+        requests.push(request);
+        // a53dbc37 used 1962 reasoning tokens and returned only 69 answer tokens.
+        const fits = request.generationConfig.maxOutputTokens >= 1962 + 1200;
+        return new Response(JSON.stringify({ candidates: [{ finishReason: fits ? finishReason : 'MAX_TOKENS',
+            content: { role: 'model', parts: [{ text: fits ? answer : '{"action":"continue","identity_description":"' }] } }],
+            usageMetadata: { promptTokenCount: 4139, thoughtsTokenCount: 1962, candidatesTokenCount: fits ? 1200 : 69 },
+        }), { headers: { 'content-type': 'application/json' } });
+    };
+    const run = () => checkVideoCharacterContinuity({ segments: [{}, {}] }, 1,
+        [decodeContinuityImage(image)], decodeContinuityImage(image), {
+            beforeRequest: value => budgets.push(value), onUsage: value => usage.push(value),
+            onAttempt: value => attempts.push(value),
+        });
+    try {
+        assert.deepEqual(await run(), decision);
+        assert.equal(requests[0].generationConfig.thinkingConfig.thinkingLevel, 'LOW');
+        assert.equal(budgets[0].maxOutputTokens, requests[0].generationConfig.maxOutputTokens);
+        assert.equal(usage[0].outcome, 'success');
+        finishReason = 'MAX_TOKENS';
+        // Even syntactically valid JSON must not hide an incomplete generation.
+        await assert.rejects(run(), /incomplete decision \(MAX_TOKENS; 1962 thinking tokens/);
+        assert.equal(usage[1].outcome, 'error');
+        assert.equal(usage[1].outputTokens, 3162);
+        assert.match(attempts[1].detail, /MAX_TOKENS/);
+        finishReason = 'STOP';
+        answer = '{"action":"continue","identity_description":"';
+        await assert.rejects(run(), SyntaxError);
+        assert.equal(usage[2].outcome, 'error');
+        assert.equal(attempts[2].outcome, 'error');
+        assert.equal(requests.length, 3, 'No hidden retry loop or acceptance of broken JSON.');
+    } finally {
+        globalThis.fetch = originalFetch;
+        config.geminiApiKey = originalKey;
+    }
+});
 
 test('continuity decisions reject missing identity, invalid actions, and unbounded images', () => {
     assert.throws(() => validateContinuityDecision({ action: 'reanchor', reason: 'Hidden', identity_description: '' }));
