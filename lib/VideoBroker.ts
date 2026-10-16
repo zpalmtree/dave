@@ -2814,6 +2814,7 @@ export class VideoBroker {
             serviceTier: configuredVideoOpenAIServiceTier(),
             ...configured,
             ...this.optimization(job)?.options,
+            ...(job.source_audio_seconds ? { truncateAutomaticDuration: false } : {}),
             ...(plannerGuidance ? { plannerGuidance } : {}),
             ...(job.requested_duration_seconds !== null ? {
                 requestedDurationSeconds: job.requested_duration_seconds,

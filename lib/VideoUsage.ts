@@ -86,6 +86,8 @@ export interface VideoFrontierCallOptions extends VideoProviderHooks {
     screenplayReasoningEffort?: 'low' | 'medium' | 'high';
     plannerGuidance?: string;
     requestedDurationSeconds?: number;
+    /** Fixed source audio is pinned after planning and must keep its complete timeline. */
+    truncateAutomaticDuration?: boolean;
     plannerExamples?: Array<{
         prompt: string;
         plan: Record<string, unknown>;

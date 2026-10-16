@@ -63,7 +63,7 @@ function localRecoveryDialogueAnalysis(analysis: any, prompt: string): any {
 }
 
 function requireProtectedRecoveryDialogue(plan: any, analyses: any[], prompt: string): void {
-    const actual = normalizedRecoverySpeech(recoveryDialogue(plan).map(line => line.text).join(' '));
+    const actual = normalizedRecoverySpeech(recoveryDialogue(videoPlanBeforeDurationCut(plan)).map(line => line.text).join(' '));
     for (const analysis of analyses) {
         const contract = localRecoveryDialogueAnalysis(analysis, prompt)?.dialogue_contract;
         if (!contract || contract.mode === 'none') continue;
@@ -195,8 +195,64 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
     }
 }
 
+export const VIDEO_AUTOMATIC_LIMIT_SECONDS = 120;
+
+/** Keep complete opening segments; preserve the omitted tail for fidelity checks and diagnostics. */
+export function truncateAutomaticVideoPlan(plan: any, requestedSeconds?: number | null): void {
+    if (requestedSeconds != null || plan.duration_truncation) return;
+    const segments = plan.segments || [];
+    let seconds = 0;
+    let count = 0;
+    for (const segment of segments) {
+        const target = Number(segment.target_seconds);
+        if (!Number.isFinite(target) || target <= 0) throw new Error('Invalid screenplay duration.');
+        if (seconds + target > VIDEO_AUTOMATIC_LIMIT_SECONDS + 1e-6) break;
+        seconds += target;
+        count++;
+    }
+    if (count === segments.length) return;
+    if (!count) throw new Error('No complete screenplay segment fits the automatic duration limit.');
+    const retained = segments.slice(0, count);
+    plan.duration_truncation = {
+        retained_sha256: recoveryHash(retained),
+        omitted_segments: segments.slice(count),
+        original_segment_keyframes: plan.segment_keyframes,
+    };
+    plan.segments = retained;
+    if (Array.isArray(plan.segment_keyframes)) {
+        plan.segment_keyframes = plan.segment_keyframes.filter((frame: any) => frame.segment_index <= count);
+    }
+    delete plan.recovery_extended;
+    plan.generation_notice = [String(plan.generation_notice || '').trim(),
+        `This video keeps the first ${Number(seconds.toFixed(1))} seconds of planned footage; `
+        + `the rest of the story was omitted to fit the ${VIDEO_AUTOMATIC_LIMIT_SECONDS}-second limit.`,
+    ].filter(Boolean).join(' ');
+}
+
+/** Reconstruct only a verified, unchanged opening cut, never an arbitrary missing-dialogue waiver. */
+export function videoPlanBeforeDurationCut(plan: any): any {
+    const cut = plan?.duration_truncation;
+    if (!cut) return plan;
+    const seconds = (plan.segments || []).reduce((sum: number, segment: any) => sum + Number(segment.target_seconds), 0);
+    const omitted = cut.omitted_segments;
+    if (!Array.isArray(omitted) || !omitted.length || !plan.segments?.length
+        || cut.retained_sha256 !== recoveryHash(plan.segments)
+        || !Number.isFinite(seconds) || seconds <= 0 || seconds > VIDEO_AUTOMATIC_LIMIT_SECONDS + 1e-6
+        || !(seconds + Number(omitted[0].target_seconds) > VIDEO_AUTOMATIC_LIMIT_SECONDS + 1e-6)) {
+        throw new UnapprovedLocalRecoveryPlanError('The duration-limited screenplay is not an unchanged opening sequence.');
+    }
+    const original = { ...plan, segments: [...plan.segments, ...omitted],
+        segment_keyframes: cut.original_segment_keyframes };
+    delete original.duration_truncation;
+    return original;
+}
+
 /** Approval cannot silently authorize omitted content or a different runtime. */
 export function requireRecoveryPlanningPolicy(plan: any, requestedSeconds?: number | null): void {
+    videoPlanBeforeDurationCut(plan);
+    if (plan?.duration_truncation && requestedSeconds != null) {
+        throw new UnapprovedLocalRecoveryPlanError('An explicit runtime cannot use an automatic duration cutoff.');
+    }
     if (plan?.best_effort_truncated) {
         throw new UnapprovedLocalRecoveryPlanError('The screenplay was truncated; preserve every requested scene and line before rendering.');
     }
@@ -219,7 +275,7 @@ export function approvedRecoveryContract(plan: any, prompt: string, notice = '',
     if (!Array.isArray(plan.segments) || !plan.segments.length || plan.quality_gate_bypassed) {
         throw new Error('Waiting for a screenplay that preserves the approved story.');
     }
-    const actual = normalizedRecoverySpeech(recoveryDialogue(plan).map(line => line.text).join(' '));
+    const actual = normalizedRecoverySpeech(recoveryDialogue(videoPlanBeforeDurationCut(plan)).map(line => line.text).join(' '));
     let cursor = 0;
     for (const line of analysis.dialogue_contract?.lines || []) {
         if (!line.verbatim) continue;

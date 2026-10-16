@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { approvedRecoveryContract, truncateAutomaticVideoPlan } from '../dist/VideoRecovery.js';
+import { prepareRecoveryPlan } from '../dist/VideoRecoveryService.js';
 import { config } from '../dist/Config.js';
 import { VideoPlannerRequestLimitError } from '../dist/VideoUsage.js';
 
@@ -1971,6 +1973,106 @@ test('best-effort compiler preserves all beats and extends generation beyond the
             compiled, 'ltxfast', 'A dog runs through three stages.',
         ),
     );
+});
+
+test('oversized screenplays keep a validated opening without fallback or recovery retries', async (t) => {
+    // 73501a51: generated duration exceeded 120s even though final-cut timing fitted.
+    for (const strategy of ['single-pass', 'hybrid-single-pass', 'two-pass']) {
+        for (const shorterOutput of [true, false]) {
+            const candidate = frontierPlan();
+            const lines = Array.from({ length: 12 }, (_, index) =>
+                `Opening chapter ${index}: the dog tells us another story.`);
+            candidate.segments = lines.map((text, index) => ({
+                ...structuredClone(candidate.segments[0]), title: `Chapter ${index}`,
+                transition: index ? 'cut' : 'start', target_seconds: 15,
+                output_seconds: shorterOutput ? 8 : 15,
+                shots: [{ ...structuredClone(candidate.segments[0].shots[0]), duration_seconds: 15,
+                    dialogue: [{ speaker_id: 'dog', language: 'English', delivery: 'natural', text }] }],
+            }));
+            candidate.segment_keyframes = lines.slice(1).map((_, index) => ({
+                segment_index: index + 2, prompt: `Chapter ${index + 1}`,
+            }));
+            const analysis = frontierAnalysis('verbatim');
+            analysis.dialogue_contract.lines = [{ speaker_hint: 'dog', text: lines.join(' '), verbatim: true }];
+            const prompt = `The dog says "${lines.join(' ')}"`;
+            const hybrid = strategy === 'hybrid-single-pass';
+            const replies = strategy === 'two-pass' ? [analysis, candidate] : [hybrid
+                ? { prompt_analysis_json: JSON.stringify(analysis), plan: candidate }
+                : { prompt_analysis: analysis, plan: candidate }];
+            let calls = 0;
+            const mock = t.mock.method(globalThis, 'fetch', async () => {
+                calls++;
+                assert.ok(replies.length, 'An oversized valid plan must not request fallback or repair.');
+                const reply = replies.shift();
+                return jsonResponse(hybrid ? {
+                    model: 'claude-opus-5-5', stop_reason: 'end_turn',
+                    content: [{ type: 'text', text: JSON.stringify(reply) }],
+                } : { status: 'completed', output_text: JSON.stringify(reply), model: VIDEO_PLANNER_MODEL });
+            });
+            try {
+                const prepared = await prepareRecoveryPlan({ prompt, model: 'minimax', requester: 'duration-cut',
+                    sources: [], options: { plannerStrategy: strategy,
+                        plannerModel: hybrid ? 'claude-opus-5-5' : VIDEO_PLANNER_MODEL } });
+                const result = prepared.plan;
+                assert.equal(calls, strategy === 'two-pass' ? 2 : 1);
+                assert.equal(result.segments.length, 8);
+                assert.equal(result.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 120);
+                assert.deepEqual(result.segments.map(segment => segment.shots[0].dialogue[0].text), lines.slice(0, 8));
+                assert.equal(result.duration_truncation.omitted_segments.length, 4);
+                assert.ok(result.segment_keyframes.every(frame => frame.segment_index <= 8));
+                assert.deepEqual(prepared.contract.segments, result.segments);
+                assert.match(prepared.notice, /rest of the story was omitted.*120-second limit/);
+                assert.equal(prepared.contract.notice, prepared.notice);
+                assert.doesNotThrow(() => validateFrontierVideoPlanForKeyframe(result, 'minimax', prompt));
+                assert.doesNotThrow(() => approvedRecoveryContract(JSON.parse(JSON.stringify(result)), prompt));
+                const before = structuredClone(result);
+                truncateAutomaticVideoPlan(result);
+                assert.deepEqual(result, before, 'The cutoff survives repeated processing.');
+                const damaged = structuredClone(result);
+                damaged.segments[0].shots[0].dialogue[0].text = 'Different words.';
+                assert.throws(() => approvedRecoveryContract(damaged, prompt), /unchanged opening/);
+            } finally { mock.mock.restore(); }
+        }
+    }
+});
+
+test('LTX recovery preserves the duration cut in its own twenty-second render windows', async (t) => {
+    const candidate = frontierPlan();
+    candidate.segments = Array.from({ length: 8 }, (_, index) => ({
+        ...structuredClone(candidate.segments[0]), target_seconds: 20, output_seconds: 20,
+        transition: index ? 'cut' : 'start',
+        shots: [{ ...structuredClone(candidate.segments[0].shots[0]), duration_seconds: 20 }],
+    }));
+    const mock = t.mock.method(globalThis, 'fetch', async () => jsonResponse({
+        status: 'completed', model: VIDEO_PLANNER_MODEL,
+        output_text: JSON.stringify({ prompt_analysis: frontierAnalysis(), plan: candidate }),
+    }));
+    try {
+        const prepared = await prepareRecoveryPlan({ prompt: 'A dog runs through a park.',
+            model: 'ltxfast', requester: 'duration-cut-ltx', sources: [],
+            options: { plannerModel: VIDEO_PLANNER_MODEL, plannerStrategy: 'single-pass' } });
+        assert.equal(prepared.plan.segments.length, 6);
+        assert.deepEqual(prepared.plan.segments.map(segment => segment.target_seconds), Array(6).fill(20));
+        assert.equal(prepared.contract.segments.length, 6);
+        assert.equal(mock.mock.callCount(), 1);
+    } finally { mock.mock.restore(); }
+});
+
+test('duration cutoff preserves segment boundaries, short plans, and explicit duration contracts', () => {
+    const candidate = frontierPlan();
+    const short = structuredClone(candidate);
+    truncateAutomaticVideoPlan(short);
+    assert.deepEqual(short, candidate);
+    candidate.segments = Array.from({ length: 10 }, () => ({
+        ...structuredClone(candidate.segments[0]), target_seconds: 13, output_seconds: 13,
+    }));
+    const explicit = structuredClone(candidate);
+    truncateAutomaticVideoPlan(explicit, 130);
+    assert.deepEqual(explicit, candidate);
+    truncateAutomaticVideoPlan(candidate);
+    assert.equal(candidate.segments.length, 9);
+    assert.equal(candidate.segments.reduce((sum, segment) => sum + segment.target_seconds, 0), 117);
+    assert.throws(() => approvedRecoveryContract(candidate, 'A 117 second video.'), /explicit runtime/);
 });
 
 test('exhaustive sequential coverage rejects rosters that exceed the generated-footage cap', () => {

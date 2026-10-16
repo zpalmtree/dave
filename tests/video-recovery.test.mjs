@@ -982,3 +982,16 @@ test('an image-provider refusal of an approved scene falls back to local composi
         }
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+
+test('fixed source audio disables automatic screenplay truncation before timeline pinning', async () => {
+    const prepared = await prepareRecoveryPlan({ prompt: 'Explorers return home.', model: 'minimax',
+        requester: 'source-audio', sources: [], options: {}, sourceAudioSeconds: 5,
+        planner: async (_prompt, _model, _requester, _sources, options) => {
+            assert.equal(options.truncateAutomaticDuration, false);
+            return plan();
+        } });
+    assert.equal(prepared.plan.duration_truncation, undefined);
+    assert.equal(prepared.contract.segments.reduce((sum, segment) =>
+        sum + (segment.output_seconds ?? segment.target_seconds), 0), 5);
+});
