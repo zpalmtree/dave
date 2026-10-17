@@ -103,20 +103,33 @@ export function planResetAlerts(previous: ResetWatchState | undefined, settings:
 
 export function resetNotification(item: ResetWatchState['pending'][number]): MessageCreateOptions {
     const { phase, reset } = item;
+    const announced = phase === 'announced';
+    const banked = reset.reset_type === 'banked';
     const scheduledFor = 'scheduled_for' in reset ? reset.scheduled_for : null;
-    const eta = scheduledFor && Number.isFinite(Date.parse(scheduledFor))
-        ? `\nExpected: <t:${Math.floor(Date.parse(scheduledFor) / 1000)}:F> (estimate)` : '';
+    const eta = announced && scheduledFor && Number.isFinite(Date.parse(scheduledFor))
+        ? Math.floor(Date.parse(scheduledFor) / 1000) : null;
+    const text = reset.text.trim();
+    // Short completion boilerplate adds no information beyond the headline.
+    const details = !announced && /^(?:done|complete|completed|reset complete|reset completed)[.!]?$/i.test(text)
+        ? '' : escapeMarkdown(text).slice(0, 1800);
+    const description = [announced ? 'Awaiting confirmation.' : '', details].filter(Boolean).join('\n\n');
     const sourceUrl = typeof reset.source.url === 'string' && /^https:\/\/(?:x\.com|twitter\.com)\//i.test(reset.source.url)
         ? reset.source.url : site;
     return {
         content: `<@&${codexRoleId}>`,
         allowedMentions: { parse: [], roles: [codexRoleId] },
         embeds: [{
-            title: phase === 'announced' ? '📣 Codex reset announced' : '✅ Codex reset dropped',
-            color: phase === 'announced' ? 0xf0b232 : 0x23a55a,
+            title: announced
+                ? (banked ? '🕒 Codex reset credit announced' : '🕒 Codex usage reset announced')
+                : (banked ? '✅ Codex reset credit added' : '✅ Codex usage limits reset'),
+            color: announced ? 0xf0b232 : 0x23a55a,
             url: sourceUrl,
-            description: `${reset.reset_type === 'banked' ? '**Banked reset credit**' : '**Usage limit reset**'}\n${phase === 'announced'
-                ? `Announced; awaiting execution.${eta}` : 'Reported as executed by Codex Resets.'}\n\n${escapeMarkdown(reset.text).slice(0, 1800)}\n\n[Data from Codex Resets](https://codex-resets.com)`,
+            ...(description ? { description } : {}),
+            ...(eta !== null ? { fields: [{
+                name: 'Expected reset · estimate',
+                value: `<t:${eta}:f> · <t:${eta}:R>`,
+            }] } : {}),
+            footer: { text: 'Data from Codex Resets' },
             timestamp: new Date(reset.announced_at).toISOString(),
         }],
     };

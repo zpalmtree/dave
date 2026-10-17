@@ -41,7 +41,7 @@ test('multiple executed resets during downtime are delivered chronologically, in
     ]));
     assert.deepEqual(state.pending.map(item => item.reset.id), ['observed-earlier', 'later']);
     const message = resetNotification(state.pending[0]);
-    assert.match(message.embeds[0].description, /Banked reset credit/);
+    assert.match(message.embeds[0].title, /reset credit added/);
     assert.equal(message.embeds[0].url, 'https://codex-resets.com');
 });
 
@@ -102,7 +102,8 @@ test('both alert types ping only the codex role and retain bounded source attrib
     const message = resetNotification({ phase: 'announced', reset: { ...scheduled('new'), text: '@everyone ' + '*'.repeat(5000) } });
     assert.deepEqual(message.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
     assert.match(message.embeds[0].title, /announced/);
-    assert.match(message.embeds[0].description, /Expected: <t:/);
-    assert.match(message.embeds[0].description, /Data from Codex Resets/);
+    assert.match(message.embeds[0].fields[0].name, /estimate/);
+    assert.match(message.embeds[0].fields[0].value, /<t:\d+:f> · <t:\d+:R>/);
+    assert.match(message.embeds[0].footer.text, /Data from Codex Resets/);
     assert.ok(message.embeds[0].description.length < 4096);
 });
