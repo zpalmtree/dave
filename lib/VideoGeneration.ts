@@ -898,7 +898,10 @@ export class VideoGenerationService {
     }
 
     private async postDelivery(job: VideoJobView, statusMessage: any): Promise<any> {
-        const channel = statusMessage.channel;
+        const channel = statusMessage?.channel || await this.client.channels.fetch(job.channel_id);
+        if (!statusMessage && (!channel || !channel.isTextBased() || !('send' in channel))) {
+            throw new Error(`Video delivery channel is unavailable for ${job.id}`);
+        }
         const existing = await this.existingDelivery(job, channel);
         if (existing && (job.delivery_revision || 0) <= (job.delivered_revision || 0)) return existing;
         const name = completedVideoAttachmentName(job);
@@ -922,6 +925,7 @@ export class VideoGenerationService {
             }
             return existing;
         }
+        if (!statusMessage) return channel.send(payload);
         try {
             const commandMessage = await channel.messages.fetch(job.command_message_id);
             return await commandMessage.reply(payload);
@@ -950,9 +954,6 @@ export class VideoGenerationService {
 
     private async updateJob(job: VideoJobView): Promise<void> {
         const message = await this.statusMessage(job);
-        if (!message) return;
-        await this.watchCancellationControl(job, message);
-        const content = formatVideoStatusPost(job);
         if (job.status === 'ready') {
             if (!job.result_path || !existsSync(job.result_path)) {
                 console.warn(`[Video] Result is not readable for ${job.id}: ${job.result_path}`);
@@ -962,14 +963,20 @@ export class VideoGenerationService {
             const delivery = await this.postDelivery(job, message);
             const deliverySeconds = (Date.now() - deliveryStarted) / 1000;
             await this.acknowledge(job, 'delivered', deliverySeconds, delivery.id);
-            await message.edit({
-                content: `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**\nYour video: ${delivery.url}`,
-                attachments: [],
-            });
-            await this.removeCancellationReaction(job.id, message);
+            this.stopCancellationControl(job.id);
             this.rendered.delete(job.id);
+            if (message) {
+                await message.edit({
+                    content: `**${videoJobDisplayName(job)} · ${shortJobId(job.id)}**\nYour video: ${delivery.url}`,
+                    attachments: [],
+                });
+                await this.removeCancellationReaction(job.id, message);
+            }
             return;
         }
+        if (!message) return;
+        await this.watchCancellationControl(job, message);
+        const content = formatVideoStatusPost(job);
         if (job.status === 'failed') {
             const failure = await this.postFailure(job, message);
             await message.edit({
