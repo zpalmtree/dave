@@ -55,8 +55,8 @@ retry. The local planner sometimes marks a segment that keeps the same shot
 ("Meximutt remains in the medium close-up") as a hard cut; the broker turns such
 a segment into a continuation, so it opens on the previous clip's last frame
 instead of a newly generated image. Every local step (planning and each opening image) takes
-its own `gpuq` reservation on the `video-h3` profile and releases it afterward,
-like a scene render.
+its own `gpuq` reservation on the `video-h3` profile and releases it afterward.
+Scene rendering uses the shared reservation described below.
 Saved plans that silently rewrote the request are rejected on resume.
 For a character command such as oalgo, the character's original portrait
 reference is mandatory. If it is missing or excluded, the job stops before
@@ -80,6 +80,26 @@ recovery pass. A render that produces no valid output is retried once with the
 requested renderer: two render attempts total per scene, across reconnects and
 recovery passes. The worker persists this count and stops before reserving more
 GPU work once it is exhausted.
+
+### GPU reservation across scenes
+
+Ready scenes in one video reuse a single GPUq reservation. After each successful
+render, the worker holds it for up to 15 seconds while recording the checkpoint,
+validating the clip, and preparing the next opening. A ready scene cancels that
+idle timer before rendering. If preparation takes longer, the worker releases
+the GPU and the next scene queues normally with its own attempt identity.
+
+The reservation is released immediately after the final scene, a failed render,
+or before a local opening-image fallback. Final CPU normalization, assembly,
+audio processing, and upload do not hold it. Cloud opening prefetch still overlaps
+rendering. User cancellation and Gaming Mode retain their existing behavior;
+completed scenes remain checkpointed. Queue wait and admission events are recorded
+once per reservation, even when several scenes share it.
+
+Install with `python3 scripts/apply-video-reservation-desktop.py --check`, then
+without `--check`, and reload the supervised worker while idle. The installer
+checks the exact source revision. Run `test_video_reservation`,
+`test_video_recovery`, and `test_video_worker` with the desktop Python runtime.
 
 ### Character continuity at clip boundaries
 
