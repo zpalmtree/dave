@@ -108,10 +108,7 @@ export function resetNotification(item: ResetWatchState['pending'][number]): Mes
     const scheduledFor = 'scheduled_for' in reset ? reset.scheduled_for : null;
     const eta = announced && scheduledFor && Number.isFinite(Date.parse(scheduledFor))
         ? Math.floor(Date.parse(scheduledFor) / 1000) : null;
-    const text = reset.text.trim();
-    // Short completion boilerplate adds no information beyond the headline.
-    const details = !announced && /^(?:done|complete|completed|reset complete|reset completed)[.!]?$/i.test(text)
-        ? '' : escapeMarkdown(text).slice(0, 1800);
+    const details = escapeMarkdown(reset.text.trim()).slice(0, 1800);
     const description = [announced ? 'Awaiting confirmation.' : '', details].filter(Boolean).join('\n\n');
     const sourceUrl = typeof reset.source.url === 'string' && /^https:\/\/(?:x\.com|twitter\.com)\//i.test(reset.source.url)
         ? reset.source.url : site;
