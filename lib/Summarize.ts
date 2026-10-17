@@ -22,6 +22,7 @@ export const SUMMARY_WINDOW_MS = 12 * 60 * 60 * 1000;
 export const SUMMARY_OUTPUT_MAX_LENGTH = 1900;
 
 const MAX_SUMMARIZE_MESSAGE_COUNT = 5000;
+const MIN_SUMMARIZE_MESSAGE_COUNT = 50;
 const SUMMARY_FETCH_BATCH_SIZE = 100;
 const SUMMARY_CHUNK_MAX_INPUT_LENGTH = 120000;
 const SUMMARY_CHUNK_CONCURRENCY = 4;
@@ -52,11 +53,24 @@ function toCachedMessage(msg: Message): CachedMessage | undefined {
     };
 }
 
+function selectSummaryMessages(
+    messages: CachedMessage[],
+    windowStartTimestamp: number,
+): CachedMessage[] {
+    const chronological = messages
+        .filter((message) => !isPrivacyOptedOut(message.author))
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+    return chronological.filter((message, index) =>
+        message.createdTimestamp >= windowStartTimestamp
+        || index >= chronological.length - MIN_SUMMARIZE_MESSAGE_COUNT
+    );
+}
+
 export async function fetchRecentMessagesForSummarization(
     msg: Message,
     windowStartTimestamp: number,
 ): Promise<CachedMessage[]> {
-    const fetchedMessages: Message[] = [];
+    const fetchedMessages: CachedMessage[] = [];
     let inspectedMessageCount = 0;
     let before = msg.id;
 
@@ -77,30 +91,27 @@ export async function fetchRecentMessagesForSummarization(
 
         const batchMessages = [...batch.values()];
         inspectedMessageCount += batchMessages.length;
-        fetchedMessages.push(...batchMessages.filter((storedMessage) =>
-            canProcessMessage(storedMessage)
-            && storedMessage.createdTimestamp >= windowStartTimestamp
-        ));
+        fetchedMessages.push(...batchMessages
+            .filter((storedMessage) =>
+                storedMessage.author.id !== msg.client.user?.id
+                && storedMessage.author.id !== EXCLUDED_SUMMARY_AUTHOR_ID
+                && !storedMessage.content.startsWith(config.prefix)
+            )
+            .map(toCachedMessage)
+            .filter((storedMessage): storedMessage is CachedMessage => storedMessage !== undefined));
 
         const oldestMessage = batchMessages.reduce((oldest, candidate) =>
             candidate.createdTimestamp < oldest.createdTimestamp ? candidate : oldest
         );
         before = oldestMessage.id;
 
-        if (oldestMessage.createdTimestamp < windowStartTimestamp || batch.size < limit) {
+        if ((oldestMessage.createdTimestamp < windowStartTimestamp
+            && fetchedMessages.length >= MIN_SUMMARIZE_MESSAGE_COUNT) || batch.size < limit) {
             break;
         }
     }
 
-    return fetchedMessages
-        .filter((storedMessage) =>
-            storedMessage.author.id !== msg.client.user?.id
-            && storedMessage.author.id !== EXCLUDED_SUMMARY_AUTHOR_ID
-            && !storedMessage.content.startsWith(config.prefix)
-        )
-        .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-        .map(toCachedMessage)
-        .filter((storedMessage): storedMessage is CachedMessage => storedMessage !== undefined);
+    return selectSummaryMessages(fetchedMessages, windowStartTimestamp);
 }
 
 export function chunkSummaryInput(
@@ -188,9 +199,9 @@ export async function summarizeMessages(
         cachedMessages.set(channel, previousMessages);
     } catch (err) {
         console.error(`Failed to fetch message history for summary in ${channel}:`, err);
-        previousMessages = (cachedMessages.get(channel) || []).filter((storedMessage) =>
-            !isPrivacyOptedOut(storedMessage.author)
-            && storedMessage.createdTimestamp >= windowStartTimestamp
+        previousMessages = selectSummaryMessages(
+            cachedMessages.get(channel) || [],
+            windowStartTimestamp,
         );
     }
 

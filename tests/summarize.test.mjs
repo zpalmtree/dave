@@ -9,6 +9,7 @@ import {
 import {
     SUMMARY_OUTPUT_MAX_LENGTH,
     SUMMARY_WINDOW_MS,
+    cacheMessageForSummarization,
     chunkSummaryInput,
     fetchRecentMessagesForSummarization,
     fitSummaryInDiscordMessage,
@@ -196,6 +197,88 @@ test('history selection excludes bot and command messages while retaining attach
     ]);
 });
 
+test('fetches beyond 12 hours and across filtered pages to include the latest 50 eligible messages', async () => {
+    const commandTimestamp = 2 * SUMMARY_WINDOW_MS;
+    const cutoff = commandTimestamp - SUMMARY_WINDOW_MS;
+    const history = Array.from({ length: 200 }, (_, index) => makeMessage({
+        id: String(200 - index),
+        content: index % 2 === 0 ? `message ${index}` : index % 4 === 1 ? '' : '$summary',
+        createdTimestamp: index < 2 ? commandTimestamp - 1000 : cutoff - index,
+    }));
+    const batches = [history.slice(0, 100), history.slice(100)];
+    let calls = 0;
+    const msg = {
+        id: '201',
+        client: { user: { id: 'summary-bot' } },
+        channel: { messages: { async fetch() {
+            calls++;
+            return makeBatch(batches.shift() || []);
+        } } },
+    };
+
+    const selected = await fetchRecentMessagesForSummarization(msg, cutoff);
+
+    assert.equal(calls, 1);
+    assert.equal(selected.length, 50);
+    assert.equal(selected[0].id, '102');
+    assert.equal(selected.at(-1).id, '200');
+
+    // The first page now has only 25 eligible messages, so continue past the cutoff.
+    batches.unshift(history.slice(0, 100).map((message, index) =>
+        index % 4 === 0 ? message : { ...message, content: '' }));
+    calls = 0;
+    const paginated = await fetchRecentMessagesForSummarization(msg, cutoff);
+    assert.equal(calls, 2);
+    assert.equal(paginated.length, 50);
+    assert.equal(paginated[0].id, '52');
+    assert.equal(paginated.at(-1).id, '200');
+});
+
+test('uses all available history when fewer than 50 eligible messages exist', async () => {
+    const msg = {
+        id: '3',
+        client: { user: { id: 'summary-bot' } },
+        channel: { messages: { async fetch() {
+            return makeBatch([
+                makeMessage({ id: '2', content: 'recent', createdTimestamp: SUMMARY_WINDOW_MS }),
+                makeMessage({ id: '1', content: 'older', createdTimestamp: 1 }),
+            ]);
+        } } },
+    };
+    const selected = await fetchRecentMessagesForSummarization(msg, SUMMARY_WINDOW_MS);
+    assert.deepEqual(selected.map(message => message.id), ['1', '2']);
+});
+
+test('cache fallback also includes the latest 50 messages beyond the time window', async () => {
+    const channel = { id: 'minimum-history-fallback-test', messages: { async fetch() {
+        throw new Error('history unavailable');
+    } } };
+    for (let index = 0; index < 60; index++) {
+        await cacheMessageForSummarization({
+            ...makeMessage({ id: String(index), content: `cached-${index}-text`, createdTimestamp: index }),
+            channel,
+        });
+    }
+    const originalFetch = globalThis.fetch;
+    let input;
+    globalThis.fetch = async (_url, options) => {
+        input = JSON.parse(options.body).messages[1].content;
+        return successfulGrokResponse('cached summary');
+    };
+    try {
+        const response = await summarizeMessages({
+            id: '61', channel, createdTimestamp: 2 * SUMMARY_WINDOW_MS,
+        }, channel.id, null, 'requesting-person');
+        assert.deepEqual(response, { result: 'cached summary' });
+        assert.equal(input.match(/cached-\d+-text/g).length, 50);
+        assert.match(input, /cached-10-text/);
+        assert.match(input, /cached-59-text/);
+        assert.doesNotMatch(input, /cached-9-text/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('chunks summary input only between complete message lines', () => {
     assert.deepEqual(chunkSummaryInput(['aaaaaa', 'bbbbbb', 'cccc'], 10), [
         'aaaaaa',
@@ -213,12 +296,12 @@ test('hard-limits summaries to one Discord message at a readable boundary', () =
     assert.ok(!fitted.endsWith(' …'));
 });
 
-test('summarizes fetched history from the preceding 12 hours when the cache is cold', async () => {
+test('summarizes older fetched history when the cache is cold and the channel is quiet', async () => {
     const commandTimestamp = 2 * SUMMARY_WINDOW_MS;
     const history = [makeMessage({
         id: '10',
         content: 'historical chat',
-        createdTimestamp: commandTimestamp - 1000,
+        createdTimestamp: commandTimestamp - SUMMARY_WINDOW_MS - 1000,
     })];
     const msg = {
         channel: {
