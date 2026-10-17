@@ -1,0 +1,263 @@
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -182,8 +182,8 @@
+ async def release_recovery_reservation(worker) -> None:
+     await worker.finish_gpuq_reservation()
+     await worker.stop_gpu_monitor()
+-    # The legacy worker keeps one reservation for its entire job. Recovery
+-    # releases it between scenes/reviews, so the next render needs a new lease.
++    # Clear completed admission state so an idle expiry or local fallback is
++    # followed by a fresh lease, never reuse of a completed idempotency key.
+     control = getattr(worker, 'gpuq_control_dir', None)
+     worker.gpuq_job_id = None
+     worker.gpuq_control_dir = None
+@@ -196,6 +196,70 @@
+     worker.save_journal()
+     if control and control.is_dir():
+         shutil.rmtree(control, ignore_errors=True)
++
++
++class SceneGpuReservation:
++    """Keep ready scenes together; yield the GPU after a bounded preparation gap."""
++    def __init__(self, worker, idle_seconds=15.0):
++        self.worker = worker
++        self.idle_seconds = idle_seconds
++        self.lock = asyncio.Lock()
++        self.idle_task = None
++        self.error = None
++        self.owned = False
++
++    async def _stop_idle_locked(self):
++        task, self.idle_task = self.idle_task, None
++        if task is not None:
++            task.cancel()
++            await asyncio.gather(task, return_exceptions=True)
++
++    async def stop_idle(self):
++        # If expiry already started releasing, wait for it to finish. Never
++        # cancel half of a release or let it race the next render/terminal event.
++        async with self.lock:
++            await self._stop_idle_locked()
++
++    def _check_error(self):
++        if self.error is not None:
++            raise RuntimeError('Could not release the idle GPU reservation') from self.error
++
++    async def acquire(self, job):
++        async with self.lock:
++            await self._stop_idle_locked()
++            self._check_error()
++            if self.worker.cancel_reason:
++                raise asyncio.CancelledError()
++            admitted = await self.worker.ensure_gpu_reservation(job)
++            self.owned = admitted
++            return admitted
++
++    async def _release_locked(self):
++        if self.owned:
++            await release_recovery_reservation(self.worker)
++            self.owned = False
++
++    async def release(self):
++        async with self.lock:
++            await self._stop_idle_locked()
++            self._check_error()
++            await self._release_locked()
++
++    def idle(self):
++        if self.owned:
++            if self.idle_task is not None:
++                raise RuntimeError('GPU idle grace is already running')
++            self.idle_task = asyncio.create_task(self._expire())
++
++    async def _expire(self):
++        await asyncio.sleep(self.idle_seconds)
++        async with self.lock:
++            try:
++                await self._release_locked()
++            except Exception as error:
++                # Surface this in the foreground before another command or
++                # delivery; the normal failure path then cancels the lease.
++                self.error = error
+ 
+ 
+ async def run_local_step(worker, job: dict, scope: str, command: list[str], label: str) -> None:
+@@ -377,6 +441,7 @@
+     contract_hash = ''
+     revision = int(job.get('recovery_revision', 0))
+     prefetch = None
++    scene_gpu = SceneGpuReservation(worker)
+ 
+     async def request(operation: str, body: dict | None = None):
+         if worker.cancel_reason:
+@@ -475,6 +540,7 @@
+                 return await request('review', {'segment_index': index, 'kind': kind,
+                                                'artifact_sha256': digest(path), **identity})
+             async def compose_locally(directive: dict) -> Path:
++                await scene_gpu.release()
+                 attempt = scene.get('image_attempts', 0)
+                 spec = scene_root / f'local-opening-{attempt}.json'
+                 output = scene_root / f'local-opening-{attempt}.png'
+@@ -672,7 +738,7 @@
+                     atomic_json(plan_path, one)
+                     renderer = job['model']
+                     reservation_scope = f"scene-{index}-cycle-{scene.get('cycles', 0)}-attempt-{scene.get('video_attempts', 0) + 1}"
+-                    if not await worker.ensure_gpu_reservation({**job, 'model': renderer,
++                    if not await scene_gpu.acquire({**job, 'model': renderer,
+                             'gpuq_reservation_scope': reservation_scope}):
+                         raise asyncio.CancelledError()
+                     # Queue/admission outages must not consume a render attempt.
+@@ -686,6 +752,7 @@
+                     scene['render_interrupted'] = True
+                     await save()
+                     render_started = time.monotonic()
++                    code, output = None, None
+                     try:
+                         code = await worker.run_reserved_command(command)
+                         output = worker.find_output(renderer) if code == 0 else None
+@@ -706,7 +773,10 @@
+                         worker.add_span('worker', f'generator_attempt_{scene["video_attempts"]}',
+                                         render_elapsed, segment_index=index + 1,
+                                         metadata={'renderer': renderer})
+-                        await release_recovery_reservation(worker)
++                        if code == 0 and output and index + 1 < len(plan['segments']):
++                            scene_gpu.idle()
++                        else:
++                            await scene_gpu.release()
+                     scene.pop('render_interrupted', None)
+                     await save()
+                     if worker.cancel_reason:
+@@ -734,6 +804,7 @@
+                     raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
+                                              + '; '.join(scene.get('video_issues', [])))
+             await save()
++        await scene_gpu.release()
+         checkpoint['format'] = 'generated'
+         await save()
+         # Derive this once from the accepted original, never a resized delivery copy.
+@@ -786,8 +857,10 @@
+         worker.clear_journal()
+         await worker.send_ready()
+     except asyncio.CancelledError:
++        await scene_gpu.stop_idle()
+         await worker.finish_cancelled_job(job['id'])
+     except Exception as error:
++        await scene_gpu.stop_idle()
+         if worker.cancel_reason:
+             await worker.finish_cancelled_job(job['id'])
+         else:
+@@ -796,5 +869,6 @@
+                                       and not planning_exhausted(str(error)))
+ 
+     finally:
++        await scene_gpu.stop_idle()
+         if prefetch is not None:
+             await prefetch.close()
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -1300,6 +1300,12 @@
+                     submitted_at,
+                     int(record.get("startedAtUnixMs") or int(time.time() * 1000)) // 1000,
+                 )
++                # A retained reservation is checked before every scene. Its
++                # original queue wait/event belongs to this admission only once.
++                if self.journal.get("gpuq_admitted_at") == admitted_at:
++                    if self.gpu_task is None:
++                        self.start_gpu_monitor()
++                    return True
+                 queue_wait = max(0, admitted_at - submitted_at)
+                 self.last_stage = "GPU admitted; starting video render"
+                 self.save_journal(
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -112,6 +112,9 @@
+         self.assertEqual(gpuq_reservation_identity(job), gpuq_reservation_identity(dict(job)))
+         self.assertNotEqual(gpuq_reservation_identity(job), gpuq_reservation_identity({**job,
+             'gpuq_reservation_scope': 'scene-0-attempt-2'}))
++
++    def test_slow_boundary_preparation_releases_gpu_and_requeues_next_scene(self):
++        self.exercise(original=True, continuation=True, stalled_preparation=True)
+ 
+     def test_one_targeted_retry_can_succeed(self):
+         self.exercise(render_failures=1)
+@@ -535,7 +538,7 @@
+     def exercise(self, original=False, render_failures=0, image_outage=False,
+                  review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False,
+                  continuation=False, authored_cut=False, restart_exhausted=False, telemetry_outage=False, reanchor=False, continuity_outage=False,
+-                 slow_render=False, prefetch_cut=False, restored=False):
++                 slow_render=False, prefetch_cut=False, restored=False, stalled_preparation=False):
+         from PIL import Image
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+@@ -565,7 +568,9 @@
+                 status = 200
+                 async def __aenter__(self): return self
+                 async def __aexit__(self, *args): pass
+-                async def json(self, **kwargs): return self.value
++                async def json(self, **kwargs):
++                    if getattr(self, 'delay', False): await asyncio.sleep(0.04)
++                    return self.value
+ 
+             class Session:
+                 def post(self, url, json, **kwargs):
+@@ -575,6 +580,7 @@
+                     if operation == 'plan': result.value = {**prepared, 'checkpoint': copy.deepcopy(state)}
+                     elif operation == 'checkpoint': state.update(copy.deepcopy(json['checkpoint'])); result.value = {'ok': True}
+                     elif operation == 'continuity':
++                        result.delay = stalled_preparation
+                         if outages['continuity']:
+                             outages['continuity'] = False
+                             result.status = 503
+@@ -619,14 +625,20 @@
+                 if outages['admission']:
+                     outages['admission'] = False
+                     raise RuntimeError('admission temporarily unavailable')
+-                self.assertIsNone(getattr(worker, 'gpuq_job_id', None), 'Completed reservation reused')
++                renderers.append(job['model'])
++                if getattr(worker, 'gpuq_job_id', None):
++                    return True  # same active reservation, not a fresh submission
+                 scope = job['gpuq_reservation_scope']
+                 self.assertNotIn(scope, reservation_scopes, 'Completed idempotency key reused')
+                 reservation_scopes.add(scope)
+                 worker.gpuq_job_id = 'fresh-reservation'
+                 worker.journal['gpuq_job_id'] = worker.gpuq_job_id
+-                renderers.append(job['model'])
+                 return True
++            def cancel_lease(*_args, **_kwargs):
++                worker.gpuq_job_id = None
++                worker.journal.clear()
++            worker.fail_current.side_effect = cancel_lease
++            worker.finish_cancelled_job.side_effect = cancel_lease
+             worker.ensure_gpu_reservation.side_effect = admit
+             worker.add_span.side_effect = lambda source, name, seconds, **kwargs: worker.job_metrics['spans'].append({
+                 'source': source, 'name': name, 'duration_seconds': seconds, **kwargs})
+@@ -637,7 +649,10 @@
+                     'source': 'comfy', 'name': 'sampling_progress', 'duration_seconds': 1.2,
+                     'metadata': {'steps_total': 20},
+                 }], {}))
+-            with mock.patch.dict(sys.modules, {'video_worker': fake}):
++            reservation_class = recovery.SceneGpuReservation
++            with (mock.patch.dict(sys.modules, {'video_worker': fake}),
++                  mock.patch.object(recovery, 'SceneGpuReservation', side_effect=lambda worker:
++                      reservation_class(worker, idle_seconds=0.01 if stalled_preparation else 15))):
+                 job = {'id': 'test-job', 'model': 'minimax', 'recovery_revision': 0}
+                 asyncio.run(recovery.run_recovery_job(worker, job))
+                 if restart_exhausted:
+@@ -671,6 +686,7 @@
+                         checkpoint.write_text(json.dumps(stored, ensure_ascii=False), encoding='utf-8')
+                     asyncio.run(recovery.run_recovery_job(worker, job))
+                     self.assertEqual(worker.run_reserved_command.await_count, before + int(admission_outage or continuity_outage))
++                self.assertIsNone(worker.gpuq_job_id, 'Delivery must not hold the GPU.')
+                 worker.wait_and_send_terminal.assert_awaited_once()
+                 self.assertEqual(state['format'], 'generated')
+                 if original:
+@@ -678,6 +694,9 @@
+                     self.assertFalse(any(operation == 'review' and body['kind'] == 'image' and body['segment_index'] == 0
+                                          for operation, body in calls), 'The original portrait is never reviewed away.')
+                 if continuation:
++                    if not continuity_outage:
++                        self.assertEqual(len(reservation_scopes), 2 if stalled_preparation else 1,
++                                         'Only stalled preparation should split the GPU lease.')
+                     if not authored_cut and not prefetch_cut:
+                         self.assertEqual(state['scenes']['1']['image_source'], 'generated' if reanchor else 'continuation')
+                         checks = [body for operation, body in calls if operation == 'continuity']
