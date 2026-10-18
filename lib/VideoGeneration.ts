@@ -12,7 +12,7 @@ import {
 } from './VideoCharacters.js';
 import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
-import { stripTwitterPostLinks, twitterVideoFromMessage } from './TwitterVideo.js';
+import { stripTwitterPostLinks, twitterPostFromMessage } from './TwitterVideo.js';
 import { youtubeVideoFromMessage } from './YoutubeVideo.js';
 import { existsSync } from 'fs';
 import { videoWorkflowArchive } from './VideoWorkflow.js';
@@ -295,7 +295,7 @@ export function failedVideoPost(job: VideoJobView): string {
 export interface SubmittedVideoAttachmentSourceImage {
     url: string;
     mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
-    bytes: number;
+    bytes?: number;
     name: string;
 }
 
@@ -417,21 +417,30 @@ export async function videoSourcesFromMessages(
     commandMessage: Message,
     referencedMessage: Message | null,
     replacement: boolean,
-    resolveLink = twitterVideoFromMessage,
-): Promise<{ image: SubmittedVideoAttachmentOrClipSourceImage | null; clip: SubmittedVideoClipSourceImage | null }> {
-    const image = replacement ? videoAttachmentImageFromMessages(commandMessage, referencedMessage) : null;
+    resolveLink = twitterPostFromMessage,
+): Promise<{ image: SubmittedVideoAttachmentOrClipSourceImage | null; clip: SubmittedVideoClipSourceImage | null; postText?: string }> {
+    let postText = '';
+    let image = replacement ? videoAttachmentImageFromMessages(commandMessage, referencedMessage) : null;
     for (const message of [commandMessage, referencedMessage]) {
         if (!message) continue;
         if (!replacement) {
             const attachment = videoSourceImageFromMessage(message);
-            if (attachment) return { image: attachment, clip: null };
+            if (attachment) return { image: attachment, clip: null, ...(postText ? { postText } : {}) };
         }
         // A YouTube link is only an edit's source footage; elsewhere it can name a song to sing.
-        const clip = videoClipSourceImageFromMessage(message) || await resolveLink(message)
+        const attachedClip = videoClipSourceImageFromMessage(message);
+        const post = attachedClip ? null : await resolveLink(message);
+        if (post?.text) postText = [postText, post.text].filter(Boolean).join('\n\n');
+        const context = postText ? { postText } : {};
+        if (post?.image) {
+            if (!replacement) return { image: post.image, clip: null, ...context };
+            image ||= post.image;
+        }
+        const clip = attachedClip || post?.clip
             || (replacement ? youtubeVideoFromMessage(message) : null);
-        if (clip) return replacement ? { image, clip } : { image: clip, clip: null };
+        if (clip) return replacement ? { image, clip, ...context } : { image: clip, clip: null, ...context };
     }
-    return { image, clip: null };
+    return { image, clip: null, ...(postText ? { postText } : {}) };
 }
 
 export function videoReplacementUsesPreset(prompt: string, character: VideoCharacter): boolean {
@@ -474,11 +483,19 @@ export function videoPromptFromMessages(
     commandPrompt: string,
     referencedMessage: Pick<Message, 'content'> & Partial<Pick<Message, 'channel'>> | null,
     channel?: Message['channel'],
+    postText = '',
 ): string {
     const current = videoPromptPlainText(stripTwitterPostLinks(commandPrompt), channel).trim();
-    const referenced = videoPromptPlainText(stripTwitterPostLinks(referencedMessage?.content || ''), referencedMessage?.channel).trim();
+    let referenced = [videoPromptPlainText(stripTwitterPostLinks(referencedMessage?.content || ''), referencedMessage?.channel).trim(),
+        postText ? `Twitter/X post text (source context):\n${videoPromptPlainText(postText, channel)}` : ''].filter(Boolean).join('\n\n');
+    const contextHeading = 'Context from the replied message:\n';
+    const instructionHeading = '\n\nCurrent instruction (takes priority):\n';
+    // The broker caps prompts at 4,000 characters. A long post must not push
+    // the user's higher-priority instruction past that limit.
+    if (postText) referenced = referenced.slice(0, Math.max(0, 4000 - (current
+        ? current.length + contextHeading.length + instructionHeading.length : 0)));
     if (current && referenced) {
-        return `Context from the replied message:\n${referenced}\n\nCurrent instruction (takes priority):\n${current}`;
+        return `${contextHeading}${referenced}${instructionHeading}${current}`;
     }
     return current || referenced;
 }
@@ -1215,20 +1232,20 @@ export async function resolveVideoEditRequest(
     audioVideo?: SubmittedVideoClipSourceImage;
     sources: Awaited<ReturnType<typeof videoSourcesFromMessages>> }> {
     let replacement = parseVideoReplacement(prompt);
-    const links = new Map<Parameters<typeof twitterVideoFromMessage>[0], ReturnType<typeof twitterVideoFromMessage>>();
-    const resolveLink: typeof twitterVideoFromMessage = message => {
-        if (!links.has(message)) links.set(message, twitterVideoFromMessage(message));
+    const links = new Map<Parameters<typeof twitterPostFromMessage>[0], ReturnType<typeof twitterPostFromMessage>>();
+    const resolveLink: typeof twitterPostFromMessage = message => {
+        if (!links.has(message)) links.set(message, twitterPostFromMessage(message));
         return links.get(message)!;
     };
     const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink);
     if (!replacement && candidates.clip) {
-        const intent = await classify({ request: prompt, context,
+        const intent = await classify({ request: prompt, context: [context, candidates.postText].filter(Boolean).join('\n\n'),
             hasReplacementImage: Boolean(candidates.image), hasPreset: Boolean(preset), presetName: preset?.name }, {
             onUsage: usage => { recordTokenSpend(usage); },
         });
         if (intent.action === 'clarify') throw new Error(intent.clarification);
         if (intent.action === 'soundtrack') {
-            return { replacement: null, audioVideo: candidates.clip, sources: { image: candidates.image, clip: null } };
+            return { replacement: null, audioVideo: candidates.clip, sources: { ...candidates, clip: null } };
         }
         if (intent.action === 'replace' || intent.action === 'add') {
             replacement = { target: intent.target, prompt: intent.replacement, mode: intent.action };
@@ -1236,7 +1253,8 @@ export async function resolveVideoEditRequest(
     }
     if (replacement) return { replacement, sources: candidates };
     // Retain established attachment precedence for requests to make a new video.
-    return { replacement: null, sources: await resolveSources(commandMessage, referencedMessage, false, resolveLink) };
+    return { replacement: null, sources: { ...(candidates.postText ? { postText: candidates.postText } : {}),
+        ...await resolveSources(commandMessage, referencedMessage, false, resolveLink) } };
 }
 
 // Meximutt's guidance under the name the benchmarks and tests know it by.
@@ -1257,6 +1275,7 @@ export async function handleVideoRequest(
     let replacement: ReturnType<typeof parseVideoReplacement>;
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
     let audioVideo: SubmittedVideoClipSourceImage | null = null;
+    let postText = '';
     prompt = stripTwitterPostLinks(prompt);
     // A time range such as "1:05-1:50" picks the part of a long song or source video to use.
     const promptWithRange = prompt;
@@ -1272,6 +1291,7 @@ export async function handleVideoRequest(
             : { replacement: null, audioVideo: undefined, sources: { image: videoSourceImageFromMessages(msg, referencedMessage), clip: null } };
         replacement = resolved.replacement;
         const sources = resolved.sources;
+        postText = 'postText' in sources ? sources.postText || '' : '';
         sourceVideo = sources.clip;
         if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X or YouTube video link to edit. You can also reply to a message containing one.');
         attachedSourceImage = sources.image;
@@ -1306,7 +1326,7 @@ export async function handleVideoRequest(
         await msg.reply(`Attach an image or video, or reply to one, to combine it with ${character?.name || 'the character'} using --image-provider.`);
         return;
     }
-    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel);
+    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel, postText);
     if (replacement && !prompt) prompt = "Use the replacement image as the new subject while preserving the source clip's action, background, camera movement, and timing.";
     if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {

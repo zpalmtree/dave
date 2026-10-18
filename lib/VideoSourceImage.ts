@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import { VIDEO_SOURCE_IMAGE_MAX_BYTES, VIDEO_SOURCE_IMAGE_MIME_TYPES } from './VideoProtocol.js';
 import { VideoStickerSourceImage, videoStickerSourceImage, videoStickerFrameUrl } from './VideoSticker.js';
 import { isVideoSourceClipUrl } from './VideoSourceClip.js';
+import { isTwitterImageUrl } from './TwitterVideo.js';
 import { imageExtension } from './VideoImageMime.js';
 import type { VideoKeyframeResult } from './VideoKeyframeProvider.js';
 import { videoCharacterForPreset } from './VideoCharacters.js';
@@ -16,7 +17,7 @@ import { videoCharacterForPreset } from './VideoCharacters.js';
 export interface VideoAttachmentSourceImageDescriptor {
     url: string;
     mime_type: typeof VIDEO_SOURCE_IMAGE_MIME_TYPES[number];
-    bytes: number;
+    bytes?: number;
     name: string;
 }
 
@@ -57,17 +58,18 @@ export function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | 
         return { clip_url: clipUrl, name: String(value.name || 'clip').slice(0, 255) };
     }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
-    const bytes = Number(value.bytes || 0);
+    const bytes = value.bytes === undefined && isTwitterImageUrl(String(value.url || ''))
+        ? undefined : Number(value.bytes || 0);
     if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) {
         throw new Error('The starting image must be PNG, JPEG, or WebP.');
     }
-    if (!Number.isInteger(bytes) || bytes <= 0 || bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
+    if (bytes !== undefined && (!Number.isInteger(bytes) || bytes <= 0 || bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES)) {
         throw new Error('The starting image is empty or exceeds the 20 MiB limit.');
     }
     return {
         url: String(value.url || ''),
         mime_type: mimeType as VideoAttachmentSourceImageDescriptor['mime_type'],
-        bytes,
+        ...(bytes === undefined ? {} : { bytes }),
         name: String(value.name || 'start-frame').slice(0, 255),
     };
 }
@@ -87,20 +89,21 @@ export function isClipSourceImage(
 function isDiscordAttachmentUrl(value: string): boolean {
     try {
         const url = new URL(value);
-        return url.protocol === 'https:'
+        return url.protocol === 'https:' && !url.port && !url.username && !url.password
             && (url.hostname === 'cdn.discordapp.com' || url.hostname === 'media.discordapp.net');
     } catch {
         return false;
     }
 }
 
-async function downloadDiscordSourceImage(
+async function downloadSourceImage(
     descriptor: Pick<VideoAttachmentSourceImageDescriptor, 'url' | 'mime_type'>
         & Partial<Pick<VideoAttachmentSourceImageDescriptor, 'bytes' | 'name'>>,
     directory: string,
+    fetcher: typeof fetch = fetch,
 ): Promise<StoredVideoSourceImage> {
-    if (!isDiscordAttachmentUrl(descriptor.url)) {
-        throw new Error('The starting image is not a Discord attachment.');
+    if (!isDiscordAttachmentUrl(descriptor.url) && !isTwitterImageUrl(descriptor.url)) {
+        throw new Error('The starting image is not a Discord attachment or resolved Twitter/X photo.');
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -108,18 +111,18 @@ async function downloadDiscordSourceImage(
     const temporary = join(directory, 'source.part');
     rmSync(temporary, { force: true });
     try {
-        const response = await fetch(descriptor.url, {
+        const response = await fetcher(descriptor.url, {
             signal: controller.signal,
-            redirect: 'follow',
+            redirect: isTwitterImageUrl(descriptor.url) ? 'error' : 'follow',
         });
-        if (!response.ok || !response.body || !isDiscordAttachmentUrl(response.url)) {
-            throw new Error(`Discord returned HTTP ${response.status} for the starting image.`);
+        if (!response.ok || !response.body || (!isDiscordAttachmentUrl(response.url) && !isTwitterImageUrl(response.url))) {
+            throw new Error(`Image host returned HTTP ${response.status} for the starting image.`);
         }
         const mimeType = String(response.headers.get('content-type') || descriptor.mime_type)
             .split(';')[0]
             .toLowerCase();
         if (!VIDEO_SOURCE_IMAGE_MIME_TYPES.includes(mimeType as any)) {
-            throw new Error(`Discord returned unsupported image type ${mimeType || 'unknown'}.`);
+            throw new Error(`Image host returned unsupported image type ${mimeType || 'unknown'}.`);
         }
         const declaredLength = Number(response.headers.get('content-length') || 0);
         if (declaredLength > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
@@ -245,7 +248,7 @@ export async function extractVideoClipSourceImage(
             throw new Error('Could not extract a starting frame from the Twitter/X video. Try attaching the video directly.');
         }
         console.warn(`[Video] Could not extract a frame from ${descriptor.name} with ffmpeg; using Discord's first frame.`, error);
-        return downloadDiscordSourceImage({
+        return downloadSourceImage({
             url: videoClipProxyFrameUrl(descriptor.clip_url),
             mime_type: 'image/webp',
             bytes: 1,
@@ -257,15 +260,16 @@ export async function extractVideoClipSourceImage(
 export async function storeVideoSourceImage(
     descriptor: VideoSourceImageDescriptor,
     directory: string,
+    fetcher: typeof fetch = fetch,
 ): Promise<StoredVideoSourceImage> {
     if ('sticker_id' in descriptor) {
-        return downloadDiscordSourceImage({ url: videoStickerFrameUrl(descriptor), mime_type: 'image/png' }, directory);
+        return downloadSourceImage({ url: videoStickerFrameUrl(descriptor), mime_type: 'image/png' }, directory);
     }
     if (isClipSourceImage(descriptor)) {
         return extractVideoClipSourceImage(descriptor, directory);
     }
     if (!isPresetSourceImage(descriptor)) {
-        return downloadDiscordSourceImage(descriptor, directory);
+        return downloadSourceImage(descriptor, directory, fetcher);
     }
     const character = videoCharacterForPreset(descriptor.preset);
     if (!character) throw new Error('Unknown starting-image preset.');
