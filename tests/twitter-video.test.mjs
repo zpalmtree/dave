@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { Readable } from 'node:stream';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Response } from 'node-fetch';
-import { twitterVideoFromMessage, stripTwitterPostLinks, isTwitterVideoUrl } from '../dist/TwitterVideo.js';
+import { twitterVideoFromMessage, twitterPostFromMessage, stripTwitterPostLinks, isTwitterVideoUrl, isTwitterImageUrl } from '../dist/TwitterVideo.js';
+import { sourceImageDescriptor, storeVideoSourceImage } from '../dist/VideoSourceImage.js';
 import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
-import { videoSourcesFromMessages, videoPromptFromMessages, videoReplacementUsesPreset } from '../dist/VideoGeneration.js';
+import { videoSourcesFromMessages, videoPromptFromMessages, videoReplacementUsesPreset, resolveVideoEditRequest } from '../dist/VideoGeneration.js';
 import { ARGENMUTT, MEXIMUTT } from '../dist/VideoCharacters.js';
 
 const post = 'https://fxtwitter.com/juhrafftrades/status/2103886182404772256';
@@ -75,7 +80,7 @@ test('only recognized post hosts trigger lookup and only Twitter CDN MP4s are ac
 });
 
 test('replacement inputs combine a command image with a replied Twitter video; ordinary requests use a starting frame', async () => {
-    const resolve = msg => twitterVideoFromMessage(msg, fetcher(payload([video])));
+    const resolve = msg => twitterPostFromMessage(msg, fetcher(payload([video])));
     const sources = await videoSourcesFromMessages(message('replace the character with slugs', [image]), message(post), true, resolve);
     assert.equal(sources.image.url, image.url);
     assert.equal(sources.clip.clip_url, mp4);
@@ -106,4 +111,116 @@ test('post URLs are removed from planner instructions and explicit replacements 
     assert.equal(videoReplacementUsesPreset('Argenmutt, keeping the moves', ARGENMUTT), true);
     assert.equal(videoReplacementUsesPreset('Meximutt, keeping the moves', ARGENMUTT), false,
         'Another character named as the replacement is a description, not this command\'s preset.');
+});
+
+const photo = { type: 'photo', url: 'https://pbs.twimg.com/media/example.jpg', width: 1200, height: 800 };
+const tweetText = 'Hey guys I know your cities are burning\n\nBut I really need $70,000,000,000\n\nThanks';
+const photoPayload = (photos = [photo]) => ({ code: 200, status: { text: tweetText, media: { all: photos, photos } } });
+
+test('photo posts supply the photo and full tweet text from content links or embed links', async () => {
+    for (const reply of [message(post), message('', [], [{ url: post, description: 'preview with engagement counts' }])]) {
+        const resolve = msg => twitterPostFromMessage(msg, fetcher(photoPayload()));
+        const result = await resolveVideoEditRequest('react to this', message('$oalgo react to this'), reply, '', MEXIMUTT,
+            async () => assert.fail('photo posts must not invoke the video edit classifier'),
+            (command, referenced, edit) => videoSourcesFromMessages(command, referenced, edit, resolve));
+        assert.equal(result.replacement, null);
+        assert.equal(result.sources.clip, null);
+        assert.equal(result.sources.image.url, photo.url);
+        assert.equal(result.sources.postText, tweetText);
+        assert.deepEqual(sourceImageDescriptor(result.sources.image), result.sources.image);
+        const prompt = videoPromptFromMessages('react to this', reply, undefined, result.sources.postText);
+        assert.ok(prompt.includes(tweetText));
+        assert.match(prompt, /Current instruction \(takes priority\):\nreact to this$/);
+        assert.ok(!prompt.includes(post));
+        assert.ok(!prompt.includes('engagement counts'));
+        assert.ok(videoPromptFromMessages('', reply, undefined, result.sources.postText).includes(tweetText), 'bare $oalgo must retain tweet context');
+    }
+});
+
+test('direct post links and custom attached images keep tweet text', async () => {
+    const resolve = msg => twitterPostFromMessage(msg, fetcher(photoPayload()));
+    const direct = await videoSourcesFromMessages(message(`$oalgo ${post}`), null, false, resolve);
+    assert.equal(direct.image.url, photo.url);
+    assert.equal(direct.postText, tweetText);
+    const overridden = await resolveVideoEditRequest('react', message('$oalgo react', [image]), message(post), '', MEXIMUTT,
+        async () => assert.fail('photo is not a clip'),
+        (command, referenced, edit) => videoSourcesFromMessages(command, referenced, edit, resolve));
+    assert.equal(overridden.sources.image.url, image.url);
+    assert.equal(overridden.sources.postText, tweetText);
+});
+
+test('text-only posts are context and photos need an explicit selection when ambiguous', async () => {
+    const text = await twitterPostFromMessage(message(post), fetcher({ code: 200, status: { text: tweetText } }));
+    assert.deepEqual(text, { text: tweetText, image: null, clip: null });
+    const second = { ...photo, url: photo.url.replace('example', 'second') };
+    await assert.rejects(twitterPostFromMessage(message(post), fetcher(photoPayload([photo, second]))), /multiple photos/);
+    const selected = await twitterPostFromMessage(message(`${post}/photo/2`, [], [{ url: post }]), fetcher(photoPayload([photo, second])));
+    assert.equal(selected.image.url, second.url);
+    assert.equal(stripTwitterPostLinks(`react ${post}/photo/2`), 'react');
+    await assert.rejects(twitterPostFromMessage(message(`${post}/photo/3`), fetcher(photoPayload())), /media index/);
+    const mixed = { code: 200, status: { text: tweetText, media: { all: [photo, video], photos: [photo], videos: [video] } } };
+    assert.equal((await twitterPostFromMessage(message(`${post}/photo/1`), fetcher(mixed))).image.url, photo.url);
+    assert.equal((await twitterPostFromMessage(message(`${post}/video/2`), fetcher(mixed))).clip.clip_url, mp4);
+});
+
+test('photo URLs remain restricted and only trusted photos may omit a declared length', async () => {
+    assert.ok(isTwitterImageUrl(photo.url));
+    assert.ok(isTwitterImageUrl('https://pbs.twimg.com/media/example?format=png&name=orig'));
+    const metadata = { mime_type: 'image/jpeg', name: 'photo.jpg' };
+    for (const url of ['http://pbs.twimg.com/media/example.jpg', 'https://pbs.twimg.com.evil.test/media/example.jpg',
+        'https://user@pbs.twimg.com/media/example.jpg', 'https://pbs.twimg.com:444/media/example.jpg',
+        'https://pbs.twimg.com/profile_images/example.jpg', 'https://pbs.twimg.com/media/example.svg', 'https://example.com/image.jpg']) {
+        assert.equal(isTwitterImageUrl(url), false);
+        await assert.rejects(twitterPostFromMessage(message(post), fetcher(photoPayload([{ ...photo, url }]))), /no downloadable photo/);
+        assert.throws(() => sourceImageDescriptor({ ...metadata, url }), /20 MiB/);
+        await assert.rejects(storeVideoSourceImage({ ...metadata, url, bytes: 12 }, '/unused-twitter-photo-test'), /not a Discord attachment/);
+    }
+    for (const bytes of [0, -1, 20 * 1024 * 1024 + 1]) {
+        assert.throws(() => sourceImageDescriptor({ ...metadata, url: photo.url, bytes }), /20 MiB/);
+    }
+    assert.throws(() => sourceImageDescriptor({ ...metadata, url: image.url }), /20 MiB/);
+});
+
+
+test('broker downloads Twitter photos with actual size enforcement and cleans failed downloads', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-twitter-photo-'));
+    const descriptor = sourceImageDescriptor((await twitterPostFromMessage(message(post), fetcher(photoPayload()))).image);
+    const bytes = Buffer.from('image-content');
+    try {
+        const stored = await storeVideoSourceImage(descriptor, directory, async (url, options) => {
+            assert.equal(url, photo.url);
+            assert.equal(options.redirect, 'error', 'photo redirects must not escape the trusted host');
+            assert.ok(options.signal);
+            return new Response(Readable.from([bytes]), { url, headers: { 'content-type': 'image/jpeg' } });
+        });
+        assert.equal(stored.bytes, bytes.length);
+        assert.deepEqual(readFileSync(stored.path), bytes);
+        const oversize = 20 * 1024 * 1024 + 1;
+        for (const [body, headers, pattern] of [
+            [bytes, { 'content-type': 'text/html' }, /unsupported image type/],
+            [bytes, { 'content-length': String(oversize) }, /20 MiB/],
+            [Buffer.alloc(oversize), {}, /20 MiB/],
+            [Buffer.alloc(0), {}, /empty/],
+        ]) {
+            await assert.rejects(storeVideoSourceImage(descriptor, directory,
+                async () => new Response(Readable.from([body]), { url: photo.url, headers })), pattern);
+            assert.equal(existsSync(join(directory, 'source.part')), false);
+        }
+        await assert.rejects(storeVideoSourceImage(descriptor, directory,
+            async () => new Response(Readable.from([bytes]), { url: 'https://example.com/image.jpg' })), /HTTP/);
+        await assert.rejects(storeVideoSourceImage(descriptor, directory,
+            async () => { throw new Error('network unavailable'); }), /network unavailable/);
+        assert.equal(existsSync(join(directory, 'source.part')), false);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+
+test('long tweet context cannot truncate the command at the broker prompt limit', () => {
+    const instruction = 'Use the photo but say exactly "Thanks".';
+    const prompt = videoPromptFromMessages(instruction, { content: post }, undefined, 'Long tweet. '.repeat(1000));
+    assert.equal(prompt.length, 4000);
+    assert.ok(prompt.endsWith(instruction));
+    assert.equal(videoPromptFromMessages('', { content: post }, undefined, 'x'.repeat(8000)).length, 4000);
 });
