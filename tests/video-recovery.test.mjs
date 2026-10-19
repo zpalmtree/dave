@@ -473,7 +473,16 @@ test('broker persists a Muse fallback and exposes its note without replanning on
         assert.equal((await broker.views([row]))[0].generation_notice,
             'Planned with Muse.\nAn alternate renderer recovered a scene.');
         row.planner_model = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
-        assert.doesNotMatch((await broker.views([row]))[0].generation_notice, /Muse/);
+        assert.equal((await broker.views([row]))[0].generation_notice,
+            'Planned with Qwen.\nAn alternate renderer recovered a scene.');
+        for (const [model, notice] of [
+            ['muse-wonder-1.0', 'Planned with Muse.'],
+            ['hauhaucs-qwen3.8:27b-q4kp-mtp', 'Planned with Qwen.'],
+        ]) {
+            row.planner_model = model;
+            row.planner_json = JSON.stringify({ ...saved, generation_notice: notice });
+            assert.equal((await broker.views([row]))[0].generation_notice, notice);
+        }
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -942,6 +951,11 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         assert.equal(frontierCalls, 2, 'Primary and Muse each decline once before local planning.');
         assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
             'local-fallback:provider_policy');
+        const jobView = async () => {
+            const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [id]);
+            return (await broker.views([row]))[0];
+        };
+        assert.equal((await jobView()).generation_notice, null, 'Routing to Qwen alone must not credit it yet.');
         const empty = await request('local-plan', { plan: { segments: [] } });
         assert.ok([422, 503].includes(empty.status), 'An empty local screenplay is refused.');
         await broker.run('UPDATE video_jobs SET recovery_json=? WHERE public_id=?',
@@ -963,6 +977,7 @@ test('a rejected recovery job is planned and composed through local Qwen and app
         assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
         contractHash = uploaded.body.contract_hash;
         assert.equal(uploaded.body.notice, 'Planned by the local model.');
+        assert.equal((await jobView()).generation_notice, 'Planned with Qwen.\nPlanned by the local model.');
         assert.equal(uploaded.body.contract.local_reason, 'provider_policy');
         assert.equal(uploaded.body.plan.segments[1].transition, 'continue', 'An unbroken shot opens on the previous clip.');
         const image = await request('image', { segment_index: 0 });

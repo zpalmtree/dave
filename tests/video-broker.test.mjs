@@ -3077,6 +3077,10 @@ test('broker caches an explicit frontier rejection so the desktop consistently p
         const storedBody = await stored.json();
         assert.equal(storedBody.cached, true);
         assert.equal(storedBody.planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        const visible = await fetch(`${base}/v1/users/rejection-user/jobs`, {
+            headers: { authorization: 'Bearer bot-secret' },
+        });
+        assert.equal((await visible.json()).jobs[0].generation_notice, 'Planned with Qwen.');
         assert.equal(
             storedBody.plan.keyframe.reference_requirements[0].label,
             'Gigachad character',

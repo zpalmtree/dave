@@ -42,6 +42,7 @@ import {
     VIDEO_PLANNER_GUIDANCE_MAX_CHARS,
     VIDEO_MUSE_PLANNER_MODEL,
     VIDEO_MUSE_PLANNER_NOTICE,
+    VIDEO_QWEN_PLANNER_NOTICE,
     VIDEO_PROTOCOL_VERSION,
     VIDEO_RESULT_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
@@ -464,9 +465,10 @@ function generationNotice(row: JobRow): string | null {
     try {
         const notice = JSON.parse(row.planner_json)?.generation_notice;
         const clean = typeof notice === 'string' ? sanitizeVideoWorkerText(notice, '', 1000).trim() : '';
-        const muse = row.planner_model === VIDEO_MUSE_PLANNER_MODEL && !clean.includes(VIDEO_MUSE_PLANNER_NOTICE)
-            ? VIDEO_MUSE_PLANNER_NOTICE : '';
-        return [muse, clean].filter(Boolean).join('\n') || null;
+        const plannerNotice = row.planner_model === VIDEO_MUSE_PLANNER_MODEL ? VIDEO_MUSE_PLANNER_NOTICE
+            : row.planner_model === LOCAL_VIDEO_PLANNER_MODEL ? VIDEO_QWEN_PLANNER_NOTICE : '';
+        const attribution = plannerNotice && !clean.includes(plannerNotice) ? plannerNotice : '';
+        return [attribution, clean].filter(Boolean).join('\n') || null;
     } catch {
         return null;
     }
