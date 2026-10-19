@@ -433,12 +433,17 @@ test('video runtime is formatted for the delivered post', () => {
     }), /The screenplay was truncated\./);
 });
 
-test('Muse attribution appears once in status and delivery and is absent for other planners', () => {
+test('Muse and Qwen attribution appears once in status and delivery and is absent for other planners', () => {
     const job = { id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a', model: 'minimax', prompt: 'An explorer returns.',
-        status: 'running', worker_online: true, generation_notice: 'Planned with Muse.' };
+        status: 'running', worker_online: true };
     for (const format of [formatVideoJob, completedVideoPost]) {
-        assert.equal(format(job).match(/Planned with Muse\./g)?.length, 1);
-        assert.doesNotMatch(format({ ...job, generation_notice: null }), /Muse/);
+        for (const planner of ['Muse', 'Qwen']) {
+            const generation_notice = `Planned with ${planner}.\nAn alternate renderer recovered a scene.`;
+            const rendered = format({ ...job, generation_notice });
+            assert.equal(rendered.split(`Planned with ${planner}.`).length - 1, 1);
+            assert.doesNotMatch(rendered, planner === 'Muse' ? /Qwen/ : /Muse/);
+        }
+        assert.doesNotMatch(format({ ...job, generation_notice: null }), /Muse|Qwen/);
     }
 });
 

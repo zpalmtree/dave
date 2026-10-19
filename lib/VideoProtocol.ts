@@ -15,6 +15,7 @@ export const VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS = 9 * 60 * 1000;
 export const VIDEO_PLANNER_GUIDANCE_MAX_CHARS = 10_000;
 export const VIDEO_MUSE_PLANNER_MODEL = 'muse-wonder-1.0';
 export const VIDEO_MUSE_PLANNER_NOTICE = 'Planned with Muse.';
+export const VIDEO_QWEN_PLANNER_NOTICE = 'Planned with Qwen.';
 // Include both source downloads and time to return the broker's result.
 // Long songs add transcription and excerpt selection before any image composition.
 export const VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS = VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS + 6 * 60 * 1000;
