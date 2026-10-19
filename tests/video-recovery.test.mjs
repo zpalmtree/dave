@@ -12,6 +12,7 @@ import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPl
 import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
 import { FrontierPlannerRejectedError } from '../dist/VideoFrontierPlanner.js';
 import { VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
+import { config } from '../dist/Config.js';
 
 function plan(text = 'We made it home.') {
     return { intent: 'Two adult explorers return home.', continuity_bible: 'The same explorers.',
@@ -794,6 +795,107 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
         assert.match(stopped.body.error, /never planned locally/);
         await failed();
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('Anthropic refusals reach configured recovery fallback and persist local routing without retries', async t => {
+    for (const museEnabled of [true, false]) {
+        await t.test(museEnabled ? 'Muse then local' : 'direct local', async t => {
+            const originalFetch = globalThis.fetch;
+            const originalKey = config.metaApiKey;
+            const originalFallback = process.env.VIDEO_MUSE_FALLBACK;
+            const requests = [];
+            const refusal = 'The provider declined this request.';
+            config.metaApiKey = 'test-meta-key';
+            process.env.VIDEO_MUSE_FALLBACK = museEnabled ? '1' : '0';
+            t.mock.method(globalThis, 'fetch', async (input, init) => {
+                const url = String(input);
+                if (url.startsWith('http://127.0.0.1:')) return originalFetch(input, init);
+                requests.push(JSON.parse(init.body).model);
+                if (url === 'https://api.anthropic.com/v1/messages') {
+                    return new Response(JSON.stringify({
+                        model: 'claude-opus-5-5',
+                        ...(museEnabled ? { stop_reason: 'refusal' } : { stop_reason: 'end_turn',
+                            stop_details: { type: 'refusal', explanation: refusal } }),
+                        content: [{ type: 'text', text: refusal }],
+                        usage: { input_tokens: 100, output_tokens: 20 },
+                    }));
+                }
+                assert.equal(url, 'https://api.meta.ai/v1/responses');
+                return new Response(JSON.stringify({ status: 'completed', model: 'muse-wonder-1.0',
+                    output: [{ type: 'message', content: [{ type: 'refusal', refusal }] }],
+                    usage: { input_tokens: 100, output_tokens: 20 },
+                }));
+            });
+            const directory = mkdtempSync(join(tmpdir(), 'video-recovery-anthropic-refusal-'));
+            const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+                resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+                recoveryEnabled: true, preplanQueuedJobs: false });
+            const frontierOptions = broker.frontierOptions.bind(broker);
+            t.mock.method(broker, 'frontierOptions', (...args) => ({ ...frontierOptions(...args),
+                plannerModel: 'claude-opus-5-5', plannerStrategy: 'hybrid-single-pass', serviceTier: 'default' }));
+            try {
+                await broker.start();
+                const base = `http://127.0.0.1:${broker.listeningPort()}`;
+                const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
+                    headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+                    body: JSON.stringify({ model: 'minimax', prompt: 'A dog runs through a park.', requester_id: '1',
+                        origin_bot_id: '2', channel_id: '3', command_message_id: '4', status_message_id: '5' }),
+                });
+                assert.equal(submitted.status, 201);
+                const id = (await submitted.json()).job.id;
+                broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+                    capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+                    scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+                await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=? WHERE public_id=?",
+                    [VIDEO_RECOVERY_VERSION, id]);
+                const requestPlan = async () => {
+                    const result = await fetch(`${base}/v1/worker/jobs/${id}/recovery/plan`, { method: 'POST',
+                        headers: { authorization: 'Bearer worker', 'content-type': 'application/json',
+                            'x-video-lease-id': 'lease' }, body: '{}' });
+                    const body = await result.json();
+                    assert.equal(result.status, 200, JSON.stringify(body));
+                    return body;
+                };
+                const routed = await requestPlan();
+                assert.equal(routed.local_plan_required, true);
+                assert.equal(routed.reason_code, 'provider_policy');
+                assert.equal(routed.prompt_analysis, null);
+                assert.deepEqual(await requestPlan(), routed, 'Resume reuses the persisted routing decision.');
+                assert.deepEqual(requests, museEnabled ? ['claude-opus-5-5', 'muse-wonder-1.0'] : ['claude-opus-5-5']);
+                const row = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [id]);
+                assert.equal(row.status, 'running');
+                assert.equal(row.planner_model, 'local-fallback:provider_policy');
+                const state = JSON.parse(row.recovery_json);
+                assert.equal(state.waits || 0, 0, 'Provider refusals do not consume recovery passes.');
+                assert.equal(state.local_plan.reason_code, 'provider_policy');
+                assert.equal(state.local_plan.detail, museEnabled
+                    ? `Muse fallback did not produce an approved plan: ${refusal}` : refusal);
+                const usage = await broker.all('SELECT provider,outcome FROM video_usage_events WHERE job_public_id=? ORDER BY sequence', [id]);
+                assert.equal(usage[0].provider, 'anthropic');
+                assert.equal(usage[0].outcome, 'rejected');
+                assert.equal(usage.some(event => event.provider === 'meta'), museEnabled);
+                const attempts = await broker.all('SELECT model FROM video_provider_attempt_metrics WHERE job_public_id=? ORDER BY rowid', [id]);
+                assert.deepEqual(attempts.map(attempt => attempt.model), requests);
+
+                const terminal = 'local_planning_exhausted: Local planner could not produce an approved screenplay.';
+                await broker.handleWorkerMessage({ type: 'event', event: 'failed', job_id: id, lease_id: 'lease',
+                    error: terminal, retryable: true });
+                const stopped = await broker.get('SELECT status,error,recovery_json FROM video_jobs WHERE public_id=?', [id]);
+                assert.equal(stopped.status, 'failed');
+                assert.equal(JSON.parse(stopped.recovery_json).waits, 1);
+                assert.ok(stopped.error.endsWith(terminal));
+                assert.doesNotMatch(stopped.error, /3 failed recovery passes/);
+                assert.equal(requests.length, museEnabled ? 2 : 1);
+            } finally {
+                broker.worker = null;
+                await broker.stop();
+                rmSync(directory, { recursive: true, force: true });
+                config.metaApiKey = originalKey;
+                if (originalFallback === undefined) delete process.env.VIDEO_MUSE_FALLBACK;
+                else process.env.VIDEO_MUSE_FALLBACK = originalFallback;
+            }
+        });
+    }
 });
 
 test('a rejected recovery job is planned and composed through local Qwen and approved without review', async t => {

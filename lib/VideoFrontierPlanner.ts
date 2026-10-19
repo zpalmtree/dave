@@ -2273,7 +2273,7 @@ async function requestAnthropicPlannerResponse(
             if (refused) {
                 detail = body?.stop_details?.explanation || 'Anthropic planner refused the request.';
                 retryable = false;
-                throw new Error(detail);
+                throw new FrontierPlannerRejectedError('provider_policy', detail);
             }
             if (!complete) {
                 detail = body?.stop_reason === 'max_tokens'
