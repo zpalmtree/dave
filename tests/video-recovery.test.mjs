@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { OALGO_PHOTOREAL_KEYFRAME, VideoBroker } from '../dist/VideoBroker.js';
 import { VIDEO_CHARACTERS, videoCharacterPhotorealKeyframe } from '../dist/VideoCharacters.js';
 import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash,
-    repairVideoTiming, recoveryLimitReached, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
+    repairVideoTiming, recoveryLimitReached, videoDialogueFloorSeconds, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
 import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
 import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
@@ -24,6 +24,45 @@ function plan(text = 'We made it home.') {
             shots: [{ duration_seconds: 5, visual: 'Both explorers arrive home and wave.', camera: 'Wide',
                 audio: 'Wind', dialogue: [{ speaker_id: 'explorer', language: 'English', delivery: 'natural', text }] }] }] };
 }
+
+for (const fixture of JSON.parse(readFileSync(new URL('./fixtures/video-dialogue-timing.json', import.meta.url)))) {
+    test(`dialogue timing matches the desktop renderer: ${fixture.name}`, () => {
+        assert.ok(Math.abs(videoDialogueFloorSeconds({ shots: [{ dialogue: fixture.lines }] }) - fixture.seconds) < 1e-9);
+    });
+}
+
+test('timing repair fixes the 491faa62 cut without changing dialogue or completed scenes', () => {
+    const text = 'Five hundred twenty gorduras, mayne. The people have spoken, o algo.';
+    for (const target of [7, 8]) {
+        const value = plan();
+        const opening = structuredClone(value.segments[0]);
+        const failing = plan(text).segments[0];
+        Object.assign(failing, { target_seconds: target, output_seconds: 7, transition: 'cut' });
+        failing.shots[0].duration_seconds = target;
+        value.segments.push(failing);
+        repairVideoTiming(value, 15, 5);
+        assert.deepEqual(value.segments[0], opening);
+        assert.equal(value.segments.length, 2);
+        assert.equal(value.segments[1].shots[0].dialogue[0].text, text);
+        assert.equal(value.segments[1].transition, 'cut');
+        const repaired = value.segments[1];
+        assert.ok((repaired.output_seconds ?? repaired.target_seconds) >= 7.364285714);
+        const before = structuredClone(value);
+        repairVideoTiming(value, 15, 5);
+        assert.deepEqual(value, before);
+    }
+});
+
+test('timing repair preserves valid delivery cuts, including short silent openings', () => {
+    for (const dialogue of [[], [{ text: 'Hello.', delivery: 'natural' }]]) {
+        const value = plan();
+        Object.assign(value.segments[0], { target_seconds: 8, output_seconds: 3 });
+        Object.assign(value.segments[0].shots[0], { duration_seconds: 8, dialogue });
+        const before = structuredClone(value);
+        repairVideoTiming(value, 15, 5);
+        assert.deepEqual(value, before);
+    }
+});
 
 test('timing repair preserves long dialogue, beat order, keyframe indexes, and is idempotent', () => {
     const text = Array.from({ length: 45 }, (_, i) => `word${i}`).join(' ');
@@ -232,9 +271,8 @@ test('timing repair fits several turns without packing an oversized split into t
     repairVideoTiming(value, 15, 5);
     assert.equal(value.segments.flatMap(s => s.shots.flatMap(shot => shot.dialogue.map(line => line.text))).join(' '), original);
     for (const segment of value.segments) {
-        const turns = segment.shots.flatMap(shot => shot.dialogue);
-        const words = turns.map(line => line.text).join(' ').split(/\s+/).length;
-        assert.ok(words / (140 / 60) + turns.length * 0.3 + 1.25 <= segment.target_seconds);
+        assert.ok(videoDialogueFloorSeconds(segment) <= segment.target_seconds + 1e-6);
+        assert.ok(segment.target_seconds <= 15);
     }
 });
 

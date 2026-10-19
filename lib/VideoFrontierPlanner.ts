@@ -1,4 +1,4 @@
-import { repairVideoTiming, requireRecoveryPlanningPolicy, truncateAutomaticVideoPlan, videoPlanBeforeDurationCut, VIDEO_AUTOMATIC_LIMIT_SECONDS } from './VideoRecovery.js';
+import { repairVideoTiming, requireRecoveryPlanningPolicy, truncateAutomaticVideoPlan, videoPlanBeforeDurationCut, videoDialogueFloorSeconds as dialogueFloorSeconds, VIDEO_AUTOMATIC_LIMIT_SECONDS } from './VideoRecovery.js';
 import { VIDEO_LYRIC_VISUAL_INSTRUCTIONS } from './VideoSourceAudio.js';
 import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA } from './VideoAudioContinuity.js';
 import { createHash } from 'crypto';
@@ -1112,20 +1112,6 @@ function quotedRequirements(prompt: string): string[] {
     return found.sort((a, b) => a.index - b.index).map(candidate => candidate.text);
 }
 
-function dialogueFloorSeconds(segment: any): number {
-    const lines = (segment?.shots || []).flatMap((shot: any) =>
-        (shot?.dialogue || []).map((line: any) => String(line?.text || '')).filter(Boolean),
-    );
-    if (!lines.length) return 0;
-    const words = lines.reduce((total: number, line: string) =>
-        total + (line.match(/[\p{L}\p{N}_'-]+/gu) || []).length, 0);
-    const punctuationPause = lines.reduce((total: number, line: string) =>
-        total + (line.match(/[,;]/g) || []).length * 0.25
-        + (line.match(/[.!?]|\.{3}/g) || []).length * 0.45, 0);
-    const turnPause = Math.max(0, lines.length - 1) * 0.4;
-    return words / (140 / 60) + punctuationPause + turnPause + 1.25;
-}
-
 function normalizedCoverageMember(value: unknown): string {
     return String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 }
@@ -1613,6 +1599,9 @@ export function validateFrontierVideoPlanForKeyframe(
             }
         }
         const dialogueFloor = dialogueFloorSeconds(segment);
+        if (Number(segment.output_seconds ?? target) + 1e-6 < dialogueFloor) {
+            throw new Error(`Video planner segment ${segmentIndex + 1} cuts off required dialogue.`);
+        }
         const floor = Math.max(
             minimum,
             dialogueFloor,

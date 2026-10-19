@@ -81,6 +81,12 @@ requested renderer: two render attempts total per scene, across reconnects and
 recovery passes. The worker persists this count and stops before reserving more
 GPU work once it is exhausted.
 
+Broker timing repair and validation use the desktop renderer's dialogue estimate,
+including punctuation pauses, speaker turns, and rapid delivery. A final cut must
+also fit the complete line; an undersized cut is repaired before approval. Shared
+fixtures in `tests/fixtures/video-dialogue-timing.json` are checked by the broker
+tests and `desktop/test_video_dialogue_timing.py` against the installed generator.
+
 ### GPU reservation across scenes
 
 Ready scenes in one video reuse a single GPUq reservation. After each successful

@@ -1,0 +1,22 @@
+[
+  {
+    "name": "491faa62 scene 2 with comma and sentence pauses",
+    "lines": [{"text": "Five hundred twenty gorduras, mayne. The people have spoken, o algo.", "delivery": "boastful and conversational"}],
+    "seconds": 7.364285714285714
+  },
+  {
+    "name": "rapid delivery uses the renderer's faster speaking rate",
+    "lines": [{"text": "Five hundred twenty gorduras, mayne. The people have spoken, o algo.", "delivery": "fast rap"}],
+    "seconds": 4.89
+  },
+  {
+    "name": "speaker turns and punctuation runs",
+    "lines": [{"text": "Hello, there..."}, {"text": "Wait?!"}],
+    "seconds": 4.085714285714286
+  },
+  {
+    "name": "silent scene",
+    "lines": [],
+    "seconds": 0
+  }
+]

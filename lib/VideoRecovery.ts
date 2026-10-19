@@ -82,11 +82,22 @@ function requireProtectedRecoveryDialogue(plan: any, analyses: any[], prompt: st
 }
 
 function speechSeconds(lines: any[]): number {
-    return lines.reduce((total, line) => total
-        + (String(line.spoken_text || line.text || '').match(/[\p{L}\p{N}_'-]+/gu) || []).length / (140 / 60)
-        // A run such as "..." or "?!" is one pause, not one per mark.
-        + (String(line.spoken_text || line.text || '').match(/[.!?;,\u2026]+/g) || []).length * 0.15
-        + 0.3, lines.length ? 1.25 : 0);
+    // Keep this estimate in sync with video_gen.dialogue_floor_seconds. The
+    // renderer validates approved plans too, including their final cut points.
+    const spoken = lines.filter(line => String(line.text || '').trim());
+    if (!spoken.length) return 0;
+    return spoken.reduce((total, line) => {
+        const text = String(line.text);
+        const fast = /\b(?:fast|rapid|double[- ]?time|rap|rapping)\b/i.test(String(line.delivery || ''));
+        return total + (text.match(/[\p{L}\p{N}_][\p{L}\p{N}_'-]*/gu) || []).length / ((fast ? 220 : 140) / 60)
+            + (text.match(/[,;]/g) || []).length * (fast ? 0.12 : 0.25)
+            // A run such as "..." or "?!" is one pause, not one per mark.
+            + (text.match(/[.!?\u2026]+/g) || []).length * (fast ? 0.20 : 0.45);
+    }, 1.25 + Math.max(0, spoken.length - 1) * 0.4);
+}
+
+export function videoDialogueFloorSeconds(segment: any): number {
+    return speechSeconds((segment?.shots || []).flatMap((shot: any) => shot.dialogue || []));
 }
 
 /** A shot's physical place, or '' when the planner gave none (older and fallback plans). */
@@ -115,6 +126,7 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
         const relocated = locationChanges(original.shots);
         if (!relocated && original.shots.length <= 4 && Number(original.target_seconds) >= minimum
             && Number(original.target_seconds) <= maximum && speechSeconds(lines) <= Number(original.target_seconds)
+            && speechSeconds(lines) <= Number(original.output_seconds ?? original.target_seconds)
             && original.shots.every((shot: any) => speechSeconds(shot.dialogue || []) <= Number(shot.duration_seconds))) {
             repaired.push(original);
             continue;
