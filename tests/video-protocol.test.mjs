@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { approvedRecoveryContract, truncateAutomaticVideoPlan } from '../dist/VideoRecovery.js';
-import { prepareRecoveryPlan } from '../dist/VideoRecoveryService.js';
+import { prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback } from '../dist/VideoRecoveryService.js';
 import { config } from '../dist/Config.js';
 import { VideoPlannerRequestLimitError } from '../dist/VideoUsage.js';
 
@@ -1488,15 +1488,27 @@ test('Anthropic refusal and provider failures never trigger two-pass hybrid fall
     const originalFetch = globalThis.fetch;
     const cases = [
         {
-            name: 'refusal',
+            name: 'stop_reason refusal',
             response: { ok: true, status: 200, json: async () => ({
                 model: 'claude-opus-5-5', stop_reason: 'refusal',
+                content: [],
+                usage: { input_tokens: 100, output_tokens: 0 },
+            }) },
+            requests: 1,
+            pattern: /Anthropic planner refused the request\./,
+            rejected: true,
+        },
+        {
+            name: 'stop_details refusal',
+            response: { ok: true, status: 200, json: async () => ({
+                model: 'claude-opus-5-5', stop_reason: 'end_turn',
                 stop_details: { type: 'refusal', explanation: 'The request was refused.' },
                 content: [{ type: 'text', text: 'I cannot help with that.' }],
                 usage: { input_tokens: 100, output_tokens: 20 },
             }) },
             requests: 1,
             pattern: /refused/,
+            rejected: true,
         },
         {
             name: 'provider error',
@@ -1505,6 +1517,7 @@ test('Anthropic refusal and provider failures never trigger two-pass hybrid fall
             }) },
             requests: 2,
             pattern: /temporarily unavailable/,
+            rejected: false,
         },
     ];
     try {
@@ -1522,13 +1535,54 @@ test('Anthropic refusal and provider failures never trigger two-pass hybrid fall
                         plannerStrategy: 'hybrid-single-pass',
                         onAttempt: attempt => attempts.push(attempt),
                     }),
-                item.pattern,
+                error => {
+                    assert.match(error.message, item.pattern);
+                    assert.equal(error instanceof FrontierPlannerRejectedError, item.rejected);
+                    if (item.rejected) {
+                        assert.equal(error.reasonCode, 'provider_policy');
+                        assert.equal(error.promptAnalysis, null);
+                    }
+                    return true;
+                },
             );
             assert.equal(requests, item.requests);
             assert.equal(attempts.some(attempt => attempt.stage === 'single_pass_fallback'), false);
         }
     } finally {
         globalThis.fetch = originalFetch;
+    }
+});
+
+test('Anthropic refusal recovers through the real Muse adapter with an approved plan', async t => {
+    const originalKey = config.metaApiKey;
+    const originalFallback = process.env.VIDEO_MUSE_FALLBACK;
+    config.metaApiKey = 'test-meta-key';
+    process.env.VIDEO_MUSE_FALLBACK = '1';
+    const requests = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        requests.push(JSON.parse(init.body).model);
+        if (url === 'https://api.anthropic.com/v1/messages') {
+            return jsonResponse({ stop_reason: 'refusal', content: [],
+                usage: { input_tokens: 100, output_tokens: 0 } });
+        }
+        assert.equal(url, 'https://api.meta.ai/v1/responses');
+        return jsonResponse({ status: 'completed',
+            output_text: JSON.stringify({ prompt_analysis: frontierAnalysis(), plan: frontierPlan() }),
+            usage: { input_tokens: 100, output_tokens: 50 } });
+    });
+    try {
+        const prepared = await prepareRecoveryPlanWithMuseFallback({
+            prompt: 'A dog runs through a park.', model: 'minimaxfast', requester: 'test', sources: [],
+            options: { plannerModel: 'claude-opus-5-5', plannerStrategy: 'hybrid-single-pass' },
+        });
+        assert.deepEqual(requests, ['claude-opus-5-5', 'muse-wonder-1.0']);
+        assert.equal(prepared.plan._planner_model, 'muse-wonder-1.0');
+        assert.equal(prepared.contract.prompt, 'A dog runs through a park.');
+        assert.deepEqual(prepared.contract.analysis, frontierAnalysis());
+    } finally {
+        config.metaApiKey = originalKey;
+        if (originalFallback === undefined) delete process.env.VIDEO_MUSE_FALLBACK;
+        else process.env.VIDEO_MUSE_FALLBACK = originalFallback;
     }
 });
 
