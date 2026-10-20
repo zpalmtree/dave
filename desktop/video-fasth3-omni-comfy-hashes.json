@@ -1,0 +1,10 @@
+{
+  "comfy/model_detection.py": {
+    "before_sha256": "5b8c69002e7d1f05c3d94ffb8c58b8d442a780f1c9e7f119dd88ffab94b8b373",
+    "after_sha256": "63a6de15c3a1775272a3a6e16a4ed7976040e2f7ae5262dc50e46599a09b5ba8"
+  },
+  "comfy/ldm/minimax/model.py": {
+    "before_sha256": "0d5edcf32b4b98d704eaa51de60ed71f507d0c7d9845947f566647dc76fb8dfe",
+    "after_sha256": "b2765720f962d9cbbd86410733597300f002896435bb9a5bb016826d6c66566e"
+  }
+}

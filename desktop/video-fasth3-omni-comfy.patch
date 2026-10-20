@@ -1,0 +1,67 @@
+--- a/comfy/model_detection.py
++++ b/comfy/model_detection.py
+@@ -393,8 +393,12 @@
+         dit_config["num_layers"] = count_blocks(state_dict_keys, '{}blocks.'.format(key_prefix) + '{}.')
+         dit_config["token_refiner_num_layers"] = count_blocks(state_dict_keys, '{}token_refiner.blocks.'.format(key_prefix) + '{}.')
+         dit_config["hidden_size"] = state_dict['{}video_patch_proj.weight'.format(key_prefix)].shape[0]
+-        dit_config["latents_dim"] = state_dict['{}final_layer.video_out.weight'.format(key_prefix)].shape[0] // 4  # patch 1x2x2
+-        dit_config["audio_latents_dim"] = state_dict['{}final_layer.audio_out.weight'.format(key_prefix)].shape[0]
++        # A distilled checkpoint stacks pdd_steps output heads per stream.
++        pdd_steps = 1
++        if metadata is not None and "config" in metadata:
++            pdd_steps = json.loads(metadata["config"]).get("transformer", {}).get("pdd_steps", 1)
++        dit_config["latents_dim"] = state_dict['{}final_layer.video_out.weight'.format(key_prefix)].shape[0] // (4 * pdd_steps)
++        dit_config["audio_latents_dim"] = state_dict['{}final_layer.audio_out.weight'.format(key_prefix)].shape[0] // pdd_steps
+         dit_config["attention_head_dim"] = state_dict['{}blocks.0.attn.q_norm.weight'.format(key_prefix)].shape[0]
+         qkv = state_dict['{}blocks.0.attn.qkv_proj.weight'.format(key_prefix)]
+         dit_config["num_attention_heads"] = qkv.shape[0] // (3 * dit_config["attention_head_dim"])
+--- a/comfy/ldm/minimax/model.py
++++ b/comfy/ldm/minimax/model.py
+@@ -298,16 +298,17 @@
+ 
+ 
+ class FinalLayer(nn.Module):
+-    def __init__(self, hidden, t_dim, video_dim, audio_dim, eps, apply_silu=True, adaln_dtype=None,
++    def __init__(self, hidden, t_dim, video_dim, audio_dim, eps, apply_silu=True, adaln_dtype=None, pdd_steps=1,
+                  dtype=None, device=None, operations=None):
+         super().__init__()
++        self.video_dim = video_dim
+         self.norm = operations.RMSNorm(hidden, eps=eps, dtype=dtype, device=device)
+         self.adaln_proj = AdalnProj(t_dim, hidden, 2, 1, apply_silu=apply_silu,
+                                     dtype=adaln_dtype if adaln_dtype is not None else dtype,
+                                     device=device, operations=operations)
+         # output heads are the checkpoint's fp32 island; norm/adaln are stored at model dtype
+-        self.video_out = operations.Linear(hidden, video_dim, bias=True, dtype=torch.float32, device=device)
+-        self.audio_out = operations.Linear(hidden, audio_dim, bias=True, dtype=torch.float32, device=device)
++        self.video_out = operations.Linear(hidden, video_dim * pdd_steps, bias=True, dtype=torch.float32, device=device)
++        self.audio_out = operations.Linear(hidden, audio_dim * pdd_steps, bias=True, dtype=torch.float32, device=device)
+ 
+     def forward(self, x, t_emb, video_seg, audio_seg, sigma, sample_sigmas, shifts):
+         # video_seg / audio_seg: (start, stop, row) of the target streams, where row
+@@ -318,7 +319,7 @@
+             a, b, row = seg
+             return (self.norm(x[a:b]) * (1.0 + _mod_row(scale, row, scale.dtype)) + _mod_row(shift, row, shift.dtype)).to(torch.float32)
+ 
+-        n = self.video_out.weight.shape[0] // self.video_out.out_features
++        n = self.video_out.weight.shape[0] // self.video_dim
+         if n == 1:
+             return self.video_out(mod(video_seg)), self.audio_out(mod(audio_seg))
+ 
+@@ -477,7 +478,7 @@
+                  timestep_input_dim=256, time_embed_hidden_size=5376, time_embed_dim=2688,
+                  rope_inv_freq_len=16, norm_eps=1e-5, qk_norm_eps=1e-5, final_norm_eps=1e-5,
+                  sigma_shift_video=12.0, sigma_shift_audio=3.0,
+-                 adaln_curve_grid=None, gate_compress=False,
++                 adaln_curve_grid=None, gate_compress=False, pdd_steps=1,
+                  image_model=None, dtype=None, device=None, operations=None, **kwargs):
+         super().__init__()
+         self.dtype = dtype
+@@ -512,7 +513,7 @@
+                      dtype=dtype, device=device, operations=operations)
+             for _ in range(num_layers)])
+         self.final_layer = FinalLayer(hidden_size, time_embed_dim, video_patch_dim, audio_latents_dim,
+-                                      final_norm_eps, **curve, dtype=dtype, device=device, operations=operations)
++                                      final_norm_eps, **curve, pdd_steps=pdd_steps, dtype=dtype, device=device, operations=operations)
+ 
+     def preprocess_text_embeds(self, text_states):
+         """[B, L, text_dim] Qwen states -> [B, L, hidden] refined text embeds."""
