@@ -51,6 +51,17 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(build.call_args.kwargs['input_name'], 'same.png')
             self.assertEqual(build.call_args.kwargs['seed'], 7)
 
+    def test_production_canvas_preserves_resolution_selector(self):
+        case = dict(prompt='same prompt', frames=124, aspect='16:9',
+                    width=1344, height=768, canvas_mode='production')
+        for renderer in ('base', 'taomate'):
+            inputs = dict(width=['size', 0], height=['size', 1])
+            build = Mock(return_value={'cond': {'inputs': inputs.copy()}})
+            vg = SimpleNamespace(WORKFLOWS={('h3', 'i2v'): {'prompt': 'cond'}}, build_prompt=build)
+            graph = bench.graph_for(vg, case, renderer, 7, 'same.png', 'test')
+            self.assertEqual(graph['cond']['inputs'], inputs)
+            self.assertEqual(build.call_args.kwargs['quality'], 'final')
+
 
 if __name__ == '__main__':
     unittest.main()

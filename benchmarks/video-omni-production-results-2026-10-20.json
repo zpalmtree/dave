@@ -1,0 +1,1589 @@
+{
+  "date": "2026-10-20",
+  "corpus": "video-omni-production-corpus.json",
+  "runtime": {
+    "gpu": "RTX 5090 32 GB",
+    "comfy_commit": "3f767e7f67bc587e88d6de6668eb424f725d4649",
+    "source_hashes": {
+      "comfy/ldm/minimax/model.py": "0d5edcf32b4b98d704eaa51de60ed71f507d0c7d9845947f566647dc76fb8dfe",
+      "comfy/model_detection.py": "5b8c69002e7d1f05c3d94ffb8c58b8d442a780f1c9e7f119dd88ffab94b8b373",
+      "comfy_extras/nodes_minimax_h3.py": "e4618cc7193cb7702c260d61728b852a5a2f20e9e1ce60b87988165666c16f47",
+      "comfy_extras/nodes_sparse_attention.py": "f205faa57e3d348ead3f60e59caed24c31ebf2976d8d50e9eaaa2e55b36ef067",
+      "custom_nodes/sol_attn_minimax_v5.py": "97c9d56fdc7c9a102e59bff9ac8d79503299514d061892088a03d99dcf415b0c"
+    },
+    "torch": "2.13.0+cu130",
+    "comfy_kitchen": "0.2.35",
+    "python": "3.13.14",
+    "download_source": "FastVideo/FastH3-OmniRef-NVFP4-QAD-Comfy@36dbf15cd11113471114b1040c4f38646c031549",
+    "official_template_blob": "86e9389e3ccc27e9173ddfea4398aa83ed740717",
+    "isolated_pdd_patch": {
+      "comfy/model_detection.py": "63a6de15c3a1775272a3a6e16a4ed7976040e2f7ae5262dc50e46599a09b5ba8",
+      "comfy/ldm/minimax/model.py": "b2765720f962d9cbbd86410733597300f002896435bb9a5bb016826d6c66566e"
+    },
+    "gpuq_job": "34835c5e95df482e8923de7e8cc9d593",
+    "resolution_selector_sha256": "3fe5c3f9aeceed343725a91c6feaa13377b5ebad2c95fd633e3806d69d10bcc8"
+  },
+  "resolution_verification": [
+    {
+      "workflow": "motion5-1020021-taomate.workflow.json",
+      "conditioning_width": [
+        "115",
+        0
+      ],
+      "conditioning_height": [
+        "115",
+        1
+      ],
+      "selector": {
+        "aspect_ratio": "16:9 (Widescreen)",
+        "megapixels": 0.98,
+        "multiple": 32
+      },
+      "resolved": [
+        1344,
+        768
+      ]
+    },
+    {
+      "workflow": "motion5-1020022-taomate.workflow.json",
+      "conditioning_width": [
+        "115",
+        0
+      ],
+      "conditioning_height": [
+        "115",
+        1
+      ],
+      "selector": {
+        "aspect_ratio": "16:9 (Widescreen)",
+        "megapixels": 0.98,
+        "multiple": 32
+      },
+      "resolved": [
+        1344,
+        768
+      ]
+    },
+    {
+      "workflow": "oalgo5-1020011-taomate.workflow.json",
+      "conditioning_width": [
+        "115",
+        0
+      ],
+      "conditioning_height": [
+        "115",
+        1
+      ],
+      "selector": {
+        "aspect_ratio": "2:3 (Portrait Photo)",
+        "megapixels": 0.79,
+        "multiple": 32
+      },
+      "resolved": [
+        736,
+        1120
+      ]
+    },
+    {
+      "workflow": "oalgo5-1020012-taomate.workflow.json",
+      "conditioning_width": [
+        "115",
+        0
+      ],
+      "conditioning_height": [
+        "115",
+        1
+      ],
+      "selector": {
+        "aspect_ratio": "2:3 (Portrait Photo)",
+        "megapixels": 0.79,
+        "multiple": 32
+      },
+      "resolved": [
+        736,
+        1120
+      ]
+    },
+    {
+      "workflow": "speech5-1020001-taomate.workflow.json",
+      "conditioning_width": [
+        "115",
+        0
+      ],
+      "conditioning_height": [
+        "115",
+        1
+      ],
+      "selector": {
+        "aspect_ratio": "16:9 (Widescreen)",
+        "megapixels": 0.98,
+        "multiple": 32
+      },
+      "resolved": [
+        1344,
+        768
+      ]
+    },
+    {
+      "workflow": "speech5-1020002-taomate.workflow.json",
+      "conditioning_width": [
+        "115",
+        0
+      ],
+      "conditioning_height": [
+        "115",
+        1
+      ],
+      "selector": {
+        "aspect_ratio": "16:9 (Widescreen)",
+        "megapixels": 0.98,
+        "multiple": 32
+      },
+      "resolved": [
+        1344,
+        768
+      ]
+    }
+  ],
+  "result_directory": "/mnt/d/AI/ComfyUI_windows_portable/video_gen/experiments/fasth3_omni_20261020/production-results",
+  "timing_scope": "Prompt submission through completed MP4 retrieval, excludes backend startup, checkpoint verification, queue, planning, keyframe creation and Discord delivery.",
+  "render_order": [
+    "taomate",
+    "fasth3_omni"
+  ],
+  "rows": [
+    {
+      "renderer": "fasth3_omni",
+      "seed": 1020021,
+      "elapsed_seconds": 48.883,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 9.461253387098681,
+      "cache_context": "first run after admission or case change; cache uncontrolled",
+      "source_image_sha256": "6988b86beeaf46d8341c2443227adc469494f456b13fda25e9f55afed8be7d44",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+      "graph_sha256": "f4b1babeb87f28425417298601d61a8b7df704206444e7a8f950c3aa9c808789",
+      "prompt_id": "87d8ba03-2dc6-4873-b760-e6b3929f16e5",
+      "sampling_runs": [
+        {
+          "steps_observed": 8,
+          "steps_total": 8,
+          "progress_seconds": 37.015,
+          "first_step_seconds": 7.13,
+          "steady_step_mean_seconds": 4.269,
+          "steady_step_median_seconds": 4.275,
+          "steady_step_p90_seconds": 4.325,
+          "step_seconds": [
+            7.13,
+            4.325,
+            4.249,
+            4.275,
+            4.319,
+            4.325,
+            4.232,
+            4.159
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 2113714,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "image_0",
+          "class_type": "LoadImage",
+          "label": "Load Image",
+          "seconds": 0.097
+        },
+        {
+          "node_id": "conditioning",
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "label": "Mini Max H3 Reference To Video",
+          "seconds": 3.066
+        },
+        {
+          "node_id": "guider",
+          "class_type": "BasicGuider",
+          "label": "Basic Guider",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "noise",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "sample",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 37.262
+        },
+        {
+          "node_id": "split",
+          "class_type": "LTXVSeparateAVLatent",
+          "label": "LTXV Separate A V Latent",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "decode_audio",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.167
+        },
+        {
+          "node_id": "decode",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 5.049
+        },
+        {
+          "node_id": "video",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "save",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.883
+        }
+      ],
+      "case": "motion5",
+      "video": "motion5-1020021-fasth3_omni.mp4"
+    },
+    {
+      "renderer": "taomate",
+      "seed": 1020021,
+      "elapsed_seconds": 48.875,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 9.459640451613062,
+      "cache_context": "first run after admission or case change; cache uncontrolled",
+      "source_image_sha256": "6988b86beeaf46d8341c2443227adc469494f456b13fda25e9f55afed8be7d44",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": null,
+      "graph_sha256": "06c12450320e78fefd8578cb3a6fe65017c06586c81f1626d1f5dc6c1167361d",
+      "prompt_id": "eadc57d6-8d72-4c66-98e9-625e1ddbf814",
+      "sampling_runs": [
+        {
+          "steps_observed": 3,
+          "steps_total": 3,
+          "progress_seconds": 20.633,
+          "first_step_seconds": 11.068,
+          "steady_step_mean_seconds": 4.782,
+          "steady_step_median_seconds": 4.782,
+          "steady_step_p90_seconds": 4.783,
+          "step_seconds": [
+            11.068,
+            4.782,
+            4.783
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 2185578,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "115",
+          "class_type": "ResolutionSelector",
+          "label": "Resolution Selector",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:104",
+          "class_type": "MiniMaxH3ImageToVideo",
+          "label": "Preparing H3 conditioning",
+          "seconds": 6.437
+        },
+        {
+          "node_id": "105:16",
+          "class_type": "BasicGuider",
+          "label": "Basic Guider",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "105:15",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:14",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 20.896
+        },
+        {
+          "node_id": "105:23",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.21
+        },
+        {
+          "node_id": "105:10",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 17.989
+        },
+        {
+          "node_id": "105:91",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "92",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.888
+        }
+      ],
+      "case": "motion5",
+      "video": "motion5-1020021-taomate.mp4"
+    },
+    {
+      "renderer": "fasth3_omni",
+      "seed": 1020022,
+      "elapsed_seconds": 42.514,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 8.228453167740465,
+      "cache_context": "consecutive fresh seed, same case/model",
+      "source_image_sha256": "6988b86beeaf46d8341c2443227adc469494f456b13fda25e9f55afed8be7d44",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+      "graph_sha256": "18f825fd4aec2ed971223f056bdf518eef467c21e13a0b63ef265e95121c1a45",
+      "prompt_id": "97101516-bdfd-4dcb-a2c9-2b49e38409fe",
+      "sampling_runs": [
+        {
+          "steps_observed": 8,
+          "steps_total": 8,
+          "progress_seconds": 34.372,
+          "first_step_seconds": 5.263,
+          "steady_step_mean_seconds": 4.158,
+          "steady_step_median_seconds": 4.17,
+          "steady_step_p90_seconds": 4.185,
+          "step_seconds": [
+            5.263,
+            4.17,
+            4.193,
+            4.177,
+            4.135,
+            4.179,
+            4.136,
+            4.12
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1770392,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "sample",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 34.598
+        },
+        {
+          "node_id": "split",
+          "class_type": "LTXVSeparateAVLatent",
+          "label": "LTXV Separate A V Latent",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "decode_audio",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.126
+        },
+        {
+          "node_id": "decode",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 4.686
+        },
+        {
+          "node_id": "video",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "save",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.706
+        }
+      ],
+      "case": "motion5",
+      "video": "motion5-1020022-fasth3_omni.mp4"
+    },
+    {
+      "renderer": "taomate",
+      "seed": 1020022,
+      "elapsed_seconds": 23.459,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 4.540488619361103,
+      "cache_context": "consecutive fresh seed, same case/model",
+      "source_image_sha256": "6988b86beeaf46d8341c2443227adc469494f456b13fda25e9f55afed8be7d44",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": null,
+      "graph_sha256": "c5aea04ddfc65d33ae928377501a2d904b2f7b5cf7f2886e5a1f6d5afcba8e8c",
+      "prompt_id": "ccdc2c8e-f069-442b-b2ea-0ddbe0e0a763",
+      "sampling_runs": [
+        {
+          "steps_observed": 3,
+          "steps_total": 3,
+          "progress_seconds": 14.841,
+          "first_step_seconds": 5.227,
+          "steady_step_mean_seconds": 4.807,
+          "steady_step_median_seconds": 4.807,
+          "steady_step_p90_seconds": 4.833,
+          "step_seconds": [
+            5.227,
+            4.84,
+            4.774
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 2107906,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "105:14",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 15.043
+        },
+        {
+          "node_id": "105:23",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.172
+        },
+        {
+          "node_id": "105:10",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 5.057
+        },
+        {
+          "node_id": "105:91",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "92",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.694
+        }
+      ],
+      "case": "motion5",
+      "video": "motion5-1020022-taomate.mp4"
+    },
+    {
+      "renderer": "fasth3_omni",
+      "seed": 1020011,
+      "elapsed_seconds": 39.819,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 7.7069000709696756,
+      "cache_context": "first run after admission or case change; cache uncontrolled",
+      "source_image_sha256": "8198b19bf3ac4a4e48c4bc24e0bd83b7500f4a72cd2dfdb2f69faad4b4d06204",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+      "graph_sha256": "4f411d8ec0377dd76eaf509e9d262e9b58219de9e2c3f6ff2b8064f4bc569ae0",
+      "prompt_id": "f681f57d-5ffd-43d6-b2cb-ad53133331b8",
+      "sampling_runs": [
+        {
+          "steps_observed": 8,
+          "steps_total": 8,
+          "progress_seconds": 29.029,
+          "first_step_seconds": 5.833,
+          "steady_step_mean_seconds": 3.314,
+          "steady_step_median_seconds": 3.291,
+          "steady_step_p90_seconds": 3.389,
+          "step_seconds": [
+            5.833,
+            3.237,
+            3.251,
+            3.254,
+            3.291,
+            3.384,
+            3.39,
+            3.389
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1067370,
+        "duration_seconds": 5.167,
+        "width": 736,
+        "height": 1120,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "image_0",
+          "class_type": "LoadImage",
+          "label": "Load Image",
+          "seconds": 0.124
+        },
+        {
+          "node_id": "conditioning",
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "label": "Mini Max H3 Reference To Video",
+          "seconds": 3.102
+        },
+        {
+          "node_id": "guider",
+          "class_type": "BasicGuider",
+          "label": "Basic Guider",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "noise",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "sample",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 29.228
+        },
+        {
+          "node_id": "split",
+          "class_type": "LTXVSeparateAVLatent",
+          "label": "LTXV Separate A V Latent",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "decode_audio",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.172
+        },
+        {
+          "node_id": "decode",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 4.534
+        },
+        {
+          "node_id": "video",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "save",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.315
+        }
+      ],
+      "case": "oalgo5",
+      "video": "oalgo5-1020011-fasth3_omni.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "We finished the tech tree. Now we prestige."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "taomate",
+      "seed": 1020011,
+      "elapsed_seconds": 43.332,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 8.38683569032113,
+      "cache_context": "first run after admission or case change; cache uncontrolled",
+      "source_image_sha256": "8198b19bf3ac4a4e48c4bc24e0bd83b7500f4a72cd2dfdb2f69faad4b4d06204",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": null,
+      "graph_sha256": "734d0c49d3b3194db44f8fb1e903cff2268764a585df4893bfad0ec593d82f44",
+      "prompt_id": "7adffe9e-4fab-4903-a31c-9ccd302f8620",
+      "sampling_runs": [
+        {
+          "steps_observed": 3,
+          "steps_total": 3,
+          "progress_seconds": 17.305,
+          "first_step_seconds": 10.085,
+          "steady_step_mean_seconds": 3.61,
+          "steady_step_median_seconds": 3.61,
+          "steady_step_p90_seconds": 3.628,
+          "step_seconds": [
+            10.085,
+            3.632,
+            3.588
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1716667,
+        "duration_seconds": 5.167,
+        "width": 736,
+        "height": 1120,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "115",
+          "class_type": "ResolutionSelector",
+          "label": "Resolution Selector",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "105:104",
+          "class_type": "MiniMaxH3ImageToVideo",
+          "label": "Preparing H3 conditioning",
+          "seconds": 6.148
+        },
+        {
+          "node_id": "105:16",
+          "class_type": "BasicGuider",
+          "label": "Basic Guider",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:15",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "105:14",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 17.543
+        },
+        {
+          "node_id": "105:23",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.215
+        },
+        {
+          "node_id": "105:10",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 16.29
+        },
+        {
+          "node_id": "105:91",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "92",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.621
+        }
+      ],
+      "case": "oalgo5",
+      "video": "oalgo5-1020011-taomate.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "We finished the tech tree. Now we prestige."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "fasth3_omni",
+      "seed": 1020012,
+      "elapsed_seconds": 35.104,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 6.794361677422608,
+      "cache_context": "consecutive fresh seed, same case/model",
+      "source_image_sha256": "8198b19bf3ac4a4e48c4bc24e0bd83b7500f4a72cd2dfdb2f69faad4b4d06204",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+      "graph_sha256": "39299a842699d488de508e20b1d1b9fa27bfe4bb323c93bd0d8561ef92af379f",
+      "prompt_id": "ba4afa3c-198e-408d-ad7f-96ebdf51f741",
+      "sampling_runs": [
+        {
+          "steps_observed": 8,
+          "steps_total": 8,
+          "progress_seconds": 28.021,
+          "first_step_seconds": 4.416,
+          "steady_step_mean_seconds": 3.372,
+          "steady_step_median_seconds": 3.384,
+          "steady_step_p90_seconds": 3.444,
+          "step_seconds": [
+            4.416,
+            3.445,
+            3.443,
+            3.384,
+            3.414,
+            3.337,
+            3.258,
+            3.324
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1256161,
+        "duration_seconds": 5.167,
+        "width": 736,
+        "height": 1120,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "noise",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.05
+        },
+        {
+          "node_id": "sample",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 28.219
+        },
+        {
+          "node_id": "split",
+          "class_type": "LTXVSeparateAVLatent",
+          "label": "LTXV Separate A V Latent",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "decode_audio",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.1
+        },
+        {
+          "node_id": "decode",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 4.138
+        },
+        {
+          "node_id": "video",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "save",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.274
+        }
+      ],
+      "case": "oalgo5",
+      "video": "oalgo5-1020012-fasth3_omni.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "We finished the tech tree. Now we prestige."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "taomate",
+      "seed": 1020012,
+      "elapsed_seconds": 18.603,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 3.6005182645148444,
+      "cache_context": "consecutive fresh seed, same case/model",
+      "source_image_sha256": "8198b19bf3ac4a4e48c4bc24e0bd83b7500f4a72cd2dfdb2f69faad4b4d06204",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": null,
+      "graph_sha256": "f2d598d59c2b7f441eb95f6c518f4ce21f68baec635c9e52302a50765815d54a",
+      "prompt_id": "d4d79cf7-7aee-41ac-8b05-1a9908ae546b",
+      "sampling_runs": [
+        {
+          "steps_observed": 3,
+          "steps_total": 3,
+          "progress_seconds": 11.085,
+          "first_step_seconds": 3.931,
+          "steady_step_mean_seconds": 3.577,
+          "steady_step_median_seconds": 3.577,
+          "steady_step_p90_seconds": 3.596,
+          "step_seconds": [
+            3.931,
+            3.553,
+            3.601
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1571389,
+        "duration_seconds": 5.167,
+        "width": 736,
+        "height": 1120,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "105:14",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 11.277
+        },
+        {
+          "node_id": "105:23",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.161
+        },
+        {
+          "node_id": "105:10",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 4.355
+        },
+        {
+          "node_id": "105:91",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.0
+        },
+        {
+          "node_id": "92",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.377
+        }
+      ],
+      "case": "oalgo5",
+      "video": "oalgo5-1020012-taomate.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "We finished the tech tree. Now we prestige."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "fasth3_omni",
+      "seed": 1020001,
+      "elapsed_seconds": 55.509,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 10.743614709676963,
+      "cache_context": "first run after admission or case change; cache uncontrolled",
+      "source_image_sha256": "a73d83f040eeeb16a7cbce88fd8aae19bb6a9f40ab9d6b89c91227a30469e981",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+      "graph_sha256": "c9e5a898696e28ab618d0d54df32a25f383fe95cded00017ed850f1770e33425",
+      "prompt_id": "88641b34-0c81-4a00-b645-061eba1d6256",
+      "sampling_runs": [
+        {
+          "steps_observed": 8,
+          "steps_total": 8,
+          "progress_seconds": 38.837,
+          "first_step_seconds": 8.711,
+          "steady_step_mean_seconds": 4.304,
+          "steady_step_median_seconds": 4.31,
+          "steady_step_p90_seconds": 4.36,
+          "step_seconds": [
+            8.711,
+            4.357,
+            4.366,
+            4.268,
+            4.235,
+            4.26,
+            4.33,
+            4.31
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1270926,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "image_0",
+          "class_type": "LoadImage",
+          "label": "Load Image",
+          "seconds": 0.379
+        },
+        {
+          "node_id": "conditioning",
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "label": "Mini Max H3 Reference To Video",
+          "seconds": 7.047
+        },
+        {
+          "node_id": "model",
+          "class_type": "UNETLoader",
+          "label": "Loading diffusion model",
+          "seconds": 0.42
+        },
+        {
+          "node_id": "shift",
+          "class_type": "MiniMaxH3SigmaShift",
+          "label": "Mini Max H3 Sigma Shift",
+          "seconds": 0.009
+        },
+        {
+          "node_id": "attention",
+          "class_type": "ModelAttentionBackend",
+          "label": "Model Attention Backend",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "sparse",
+          "class_type": "BlockSparseAttention",
+          "label": "Block Sparse Attention",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "scheduler",
+          "class_type": "BasicScheduler",
+          "label": "Basic Scheduler",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "guider",
+          "class_type": "BasicGuider",
+          "label": "Basic Guider",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "noise",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "sample",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 39.075
+        },
+        {
+          "node_id": "split",
+          "class_type": "LTXVSeparateAVLatent",
+          "label": "LTXV Separate A V Latent",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "decode_audio",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.167
+        },
+        {
+          "node_id": "decode",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 5.28
+        },
+        {
+          "node_id": "video",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "save",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.735
+        }
+      ],
+      "case": "speech5",
+      "video": "speech5-1020001-fasth3_omni.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "Good morning, everyone. The coffee is ready."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "taomate",
+      "seed": 1020001,
+      "elapsed_seconds": 52.939,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 10.246273354845,
+      "cache_context": "first run after admission or case change; cache uncontrolled",
+      "source_image_sha256": "a73d83f040eeeb16a7cbce88fd8aae19bb6a9f40ab9d6b89c91227a30469e981",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": null,
+      "graph_sha256": "66be699bcf090cecfe1c64fd1bd1440e9113bc4abb45cc60b67dddf11bc0505e",
+      "prompt_id": "22c35b13-dc64-40e8-975f-21a9dd35948e",
+      "sampling_runs": [
+        {
+          "steps_observed": 3,
+          "steps_total": 3,
+          "progress_seconds": 22.72,
+          "first_step_seconds": 13.25,
+          "steady_step_mean_seconds": 4.735,
+          "steady_step_median_seconds": 4.735,
+          "steady_step_p90_seconds": 4.742,
+          "step_seconds": [
+            13.25,
+            4.743,
+            4.727
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1014859,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "114",
+          "class_type": "LoadImage",
+          "label": "Load Image",
+          "seconds": 0.036
+        },
+        {
+          "node_id": "105:11",
+          "class_type": "VAELoader",
+          "label": "Loading VAE",
+          "seconds": 0.224
+        },
+        {
+          "node_id": "105:13",
+          "class_type": "CLIPLoader",
+          "label": "Loading text encoder",
+          "seconds": 1.022
+        },
+        {
+          "node_id": "105:111",
+          "class_type": "PrimitiveFloat",
+          "label": "Primitive Float",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "105:107",
+          "class_type": "ComfyMathExpression",
+          "label": "Comfy Math Expression",
+          "seconds": 0.0
+        },
+        {
+          "node_id": "115",
+          "class_type": "ResolutionSelector",
+          "label": "Resolution Selector",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "105:104",
+          "class_type": "MiniMaxH3ImageToVideo",
+          "label": "Preparing H3 conditioning",
+          "seconds": 3.482
+        },
+        {
+          "node_id": "105:126",
+          "class_type": "PrimitiveBoolean",
+          "label": "Primitive Boolean",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:122",
+          "class_type": "ComfySwitchNode",
+          "label": "Comfy Switch Node",
+          "seconds": 0.005
+        },
+        {
+          "node_id": "105:123",
+          "class_type": "ComfySwitchNode",
+          "label": "Comfy Switch Node",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:17",
+          "class_type": "KSamplerSelect",
+          "label": "K Sampler Select",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "105:15",
+          "class_type": "RandomNoise",
+          "label": "Random Noise",
+          "seconds": 0.0
+        },
+        {
+          "node_id": "105:6",
+          "class_type": "UNETLoader",
+          "label": "Loading diffusion model",
+          "seconds": 0.075
+        },
+        {
+          "node_id": "105:121",
+          "class_type": "LoraLoaderModelOnly",
+          "label": "Applying H3 Turbo LoRA",
+          "seconds": 0.031
+        },
+        {
+          "node_id": "video:taomate_sla",
+          "class_type": "SolAttnMiniMax",
+          "label": "Applying FastH3 VSA attention",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:16",
+          "class_type": "BasicGuider",
+          "label": "Basic Guider",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:125",
+          "class_type": "PrimitiveInt",
+          "label": "Primitive Int",
+          "seconds": 0.001
+        },
+        {
+          "node_id": "105:9",
+          "class_type": "BasicScheduler",
+          "label": "Basic Scheduler",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "105:14",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 22.944
+        },
+        {
+          "node_id": "105:23",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 1.119
+        },
+        {
+          "node_id": "105:10",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 19.496
+        },
+        {
+          "node_id": "105:91",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.005
+        },
+        {
+          "node_id": "92",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 4.083
+        }
+      ],
+      "case": "speech5",
+      "video": "speech5-1020001-taomate.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "Good morning, everyone. The coffee is ready."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "fasth3_omni",
+      "seed": 1020002,
+      "elapsed_seconds": 43.988,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 8.513796135486524,
+      "cache_context": "consecutive fresh seed, same case/model",
+      "source_image_sha256": "a73d83f040eeeb16a7cbce88fd8aae19bb6a9f40ab9d6b89c91227a30469e981",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+      "graph_sha256": "b5a270f8f37e7dba0f77c46a247ae7b78ea0974959f5f81b03d2799efba9116f",
+      "prompt_id": "820caec9-fead-482d-8631-24b35ef90421",
+      "sampling_runs": [
+        {
+          "steps_observed": 8,
+          "steps_total": 8,
+          "progress_seconds": 35.609,
+          "first_step_seconds": 5.562,
+          "steady_step_mean_seconds": 4.292,
+          "steady_step_median_seconds": 4.256,
+          "steady_step_p90_seconds": 4.369,
+          "step_seconds": [
+            5.562,
+            4.321,
+            4.365,
+            4.376,
+            4.251,
+            4.256,
+            4.243,
+            4.235
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1227434,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "sample",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 35.863
+        },
+        {
+          "node_id": "split",
+          "class_type": "LTXVSeparateAVLatent",
+          "label": "LTXV Separate A V Latent",
+          "seconds": 0.002
+        },
+        {
+          "node_id": "decode_audio",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.171
+        },
+        {
+          "node_id": "decode",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 4.85
+        },
+        {
+          "node_id": "video",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.0
+        },
+        {
+          "node_id": "save",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 2.697
+        }
+      ],
+      "case": "speech5",
+      "video": "speech5-1020002-fasth3_omni.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "Good morning, everyone. The coffee is ready."
+          }
+        ]
+      }
+    },
+    {
+      "renderer": "taomate",
+      "seed": 1020002,
+      "elapsed_seconds": 24.954,
+      "generated_seconds": 5.166666666666667,
+      "realtime_factor": 4.829861593545385,
+      "cache_context": "consecutive fresh seed, same case/model",
+      "source_image_sha256": "a73d83f040eeeb16a7cbce88fd8aae19bb6a9f40ab9d6b89c91227a30469e981",
+      "generator_sha256": "f6f1923c9d9156bee23e11676df537069706e9cc1615132d8632361ac4f0ae80",
+      "templates": {
+        "h3_i2v.json": "0daa0f806d55216d8d6d2ffbefb62293f494c474e69ec82e21fc27d7bd93dce3",
+        "h3_t2v.json": "86c910123042fcded0a0202831c00f4bde1ed16211e924aa4cc5484c4492c066"
+      },
+      "renderer_sha256": "ce576af886d38a29dfb2e11403841cd1255dd6b742ddaadc935b13259cabf062",
+      "harness_sha256": "66484c1117626e239e6fac8d26f3a48c05b53bc1999f51029c687ed87e18632f",
+      "model_sha256": null,
+      "graph_sha256": "45670a83e11d32d3099518f1dba778b970d10609f101bb269c658f0c0e1eaa11",
+      "prompt_id": "730f7815-de18-493a-85ad-a7856cff79b6",
+      "sampling_runs": [
+        {
+          "steps_observed": 3,
+          "steps_total": 3,
+          "progress_seconds": 14.846,
+          "first_step_seconds": 5.337,
+          "steady_step_mean_seconds": 4.754,
+          "steady_step_median_seconds": 4.754,
+          "steady_step_p90_seconds": 4.764,
+          "step_seconds": [
+            5.337,
+            4.766,
+            4.742
+          ]
+        }
+      ],
+      "validation": {
+        "size_bytes": 1024989,
+        "duration_seconds": 5.167,
+        "width": 1344,
+        "height": 768,
+        "fps": 24.0,
+        "audio_sample_rate": 32000,
+        "audio_channels": 2,
+        "decoded_video_frames": 124,
+        "decoded_audio_frames": 162
+      },
+      "node_seconds": [
+        {
+          "node_id": "105:14",
+          "class_type": "SamplerCustomAdvanced",
+          "label": "Initializing sampler",
+          "seconds": 15.121
+        },
+        {
+          "node_id": "105:23",
+          "class_type": "VAEDecodeAudio",
+          "label": "Decoding audio",
+          "seconds": 0.184
+        },
+        {
+          "node_id": "105:10",
+          "class_type": "VAEDecode",
+          "label": "Decoding video",
+          "seconds": 5.44
+        },
+        {
+          "node_id": "105:91",
+          "class_type": "CreateVideo",
+          "label": "Encoding video and audio",
+          "seconds": 0.003
+        },
+        {
+          "node_id": "92",
+          "class_type": "SaveVideo",
+          "label": "Saving MP4",
+          "seconds": 3.673
+        }
+      ],
+      "case": "speech5",
+      "video": "speech5-1020002-taomate.mp4",
+      "dialogue": {
+        "status": "passed",
+        "observations": [
+          {
+            "model": "gpt-transcribe",
+            "run": 1,
+            "text": "Good morning, everyone. The coffee is ready."
+          }
+        ]
+      }
+    }
+  ],
+  "comparison_script_sha256": "da6e6dc032b47c424ee8476d4d84c33e5b3b451cee3556194403ec08858e9abd",
+  "comparisons": [
+    {
+      "file": "motion5-1020021-taomate-vs-omni.mp4",
+      "sha256": "399c25e855e156a7932ba6bc0d9359b7541d48c73504de5385569dec8e8963e7",
+      "bytes": 11498007,
+      "frames": 248,
+      "audio_passes": [
+        "taomate",
+        "fasth3_omni"
+      ]
+    },
+    {
+      "file": "motion5-1020022-taomate-vs-omni.mp4",
+      "sha256": "1e1ba889bb2f978221c2fa2f4cc92e10d5cf0735e483be88109a61a19a3e37b2",
+      "bytes": 11009460,
+      "frames": 248,
+      "audio_passes": [
+        "taomate",
+        "fasth3_omni"
+      ]
+    },
+    {
+      "file": "oalgo5-1020011-taomate-vs-omni.mp4",
+      "sha256": "2d4e46436495afd560880964c45cb7ca18b970ab1040f2f2d6b9b60183d61b13",
+      "bytes": 8601226,
+      "frames": 248,
+      "audio_passes": [
+        "taomate",
+        "fasth3_omni"
+      ]
+    },
+    {
+      "file": "oalgo5-1020012-taomate-vs-omni.mp4",
+      "sha256": "29ec2be811b6768d9fd491971d22140444c226010ce8826caadd2cf5ea842ae5",
+      "bytes": 7515270,
+      "frames": 248,
+      "audio_passes": [
+        "taomate",
+        "fasth3_omni"
+      ]
+    },
+    {
+      "file": "speech5-1020001-taomate-vs-omni.mp4",
+      "sha256": "ce8e96f07f93705dccb5fa020c694914886add85e21adda2cb43e94c06b3a261",
+      "bytes": 6988925,
+      "frames": 248,
+      "audio_passes": [
+        "taomate",
+        "fasth3_omni"
+      ]
+    },
+    {
+      "file": "speech5-1020002-taomate-vs-omni.mp4",
+      "sha256": "1313c1cef8337b3547bd3af89cbefc3a2303ef5123c00fce70e05f52a462d716",
+      "bytes": 6796167,
+      "frames": 248,
+      "audio_passes": [
+        "taomate",
+        "fasth3_omni"
+      ]
+    }
+  ]
+}

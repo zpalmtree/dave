@@ -5,8 +5,10 @@ used by `scripts/benchmark-video-omni.py`. It produces a single scene from
 ordered image references, with optional audio references and generated stereo
 audio. It is separate from automatic bot routing: main H3 remains the existing
 20-step renderer and fast commands remain three-step TaoMate. See the
-[October 20 comparison](../benchmarks/video-omni-results-2026-10-20.md) for
-measured speed, dialogue checks and promotion blockers.
+[production-resolution A/B](../benchmarks/video-omni-production-results-2026-10-20.md)
+for the current comparison. The earlier
+[480p pilot](../benchmarks/video-omni-results-2026-10-20.md) is a compatibility
+and exploratory quality check, not evidence of production latency.
 
 The graph follows the official
 [OmniRef workflow](https://github.com/Comfy-Org/workflow_templates/blob/main/templates/video_fasth3_ominiref_r2v.json)
@@ -65,7 +67,7 @@ server in `finally`. The production ComfyUI files are untouched. The runner requ
 repository's `scripts/` and `desktop/` relative layout when copying the runner
 to Windows. Pass the live generator directory with `--desktop`.
 
-Copy `benchmarks/video-omni-corpus.json` into an experiment input directory
+Copy `benchmarks/video-omni-production-corpus.json` into an experiment input directory
 alongside `woman.png`, `oalgo.png`, and `marbles.png`. The October 20 experiment
 uses the two portraits from `experiments/taomate_ab_round2_20260927`, and frame
 zero of `marbles8-9272901-taomate_sparse.mp4`. Input hashes are recorded, so
@@ -81,9 +83,9 @@ gpuq run --source codex-dave-omni --profile video-h3-isolated --priority backgro
   D:\AI\ComfyUI_windows_portable\video_gen\experiments\fasth3_omni_20261020\scripts\run-video-omni-isolated.py `
   --comfy D:\AI\ComfyUI_windows_portable\video_gen\experiments\fasth3_omni_20261020\ComfyUI `
   --desktop D:\AI\ComfyUI_windows_portable\video_gen `
-  --manifest D:\AI\ComfyUI_windows_portable\video_gen\experiments\fasth3_omni_20261020\inputs\corpus.json `
-  --output D:\AI\ComfyUI_windows_portable\video_gen\experiments\fasth3_omni_20261020\isolated-results `
-  --renderers fasth3_omni base taomate
+  --manifest D:\AI\ComfyUI_windows_portable\video_gen\experiments\fasth3_omni_20261020\inputs\production-corpus.json `
+  --output D:\AI\ComfyUI_windows_portable\video_gen\experiments\fasth3_omni_20261020\production-results `
+  --renderers taomate fasth3_omni
 ```
 
 The underlying benchmark runner accepts `--renderer base`, `--renderer taomate`
@@ -91,9 +93,14 @@ or `--renderer fasth3_omni` and `--case speech5`; it can target an already owned
 server with `--server`. New prompts/images/canvases belong in a new manifest/output
 directory. Completed runs are skipped only with matching request signatures.
 
-The baseline graphs use the live production compiler, with only canvas geometry
-overridden to match Omni. Each case uses identical prompt, image bytes, seed,
-frame count and output size across renderers. First-frame conditioning remains
+The production corpus sets `canvas_mode: "production"`: baseline graphs retain
+the live compiler's final-quality `ResolutionSelector` connections. They resolve
+to 1344×768 for 16:9 and 736×1120 for 2:3. Omni uses those same dimensions, and
+decoded output validation checks both renderers against them. The archived
+`video-omni-corpus.json` explicitly compares smaller 480p canvases through the
+legacy override mode; its timings must not be presented as production latency.
+Each case uses identical prompt, image bytes, seed, frame count and output size
+across renderers. First-frame conditioning remains
 the baseline's behavior; Omni's image is a reference rather than an exact frame.
 This is an end-to-end renderer comparison, not an isolated checkpoint ablation.
 
@@ -106,6 +113,18 @@ and Discord delivery. Fresh sampler-step counts, decoded frame count, canvas,
 24 fps and stereo audio are checked. Request, workflow, submission and result
 files retain hashes and stage timings. Failed submissions save diagnostics;
 cleanup cancels only the owned prompt ID.
+
+Create side-by-side A/B MP4s after rendering, using CPU ffmpeg:
+
+```bash
+gpuq gaming check --quiet
+python3 scripts/compare-video-omni.py --results /path/to/production-results --output artifacts/video-omni/production-ab --all-seeds
+```
+
+A/TaoMate is on the left and B/Omni on the right, at original pixel dimensions.
+Both videos play twice: first with TaoMate audio, then with Omni audio. The
+script labels the active audio and verifies the composed frame count, canvas
+and stereo track. Without `--all-seeds`, it selects the second seed per case.
 
 ## Scope and promotion
 

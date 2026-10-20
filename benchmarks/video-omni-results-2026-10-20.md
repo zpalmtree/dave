@@ -1,5 +1,10 @@
 # FastH3 Omni: RTX 5090 evaluation, October 20, 2026
 
+This is the archived **480p pilot**, below production resolution. Use the later
+[production-resolution TaoMate/Omni A/B](video-omni-production-results-2026-10-20.md)
+for the relevant speed comparison. The ratios below do not establish a
+production speedup over main H3 or TaoMate.
+
 Keep main H3 and `$fast`/TaoMate as the production defaults. The experimental
 Omni renderer works and is substantially quicker than main H3 on this corpus,
 but it does not establish real-time generation, fast-path superiority or

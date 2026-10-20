@@ -33,6 +33,9 @@ def save(path, value):
 
 
 def graph_for(vg, case, renderer, seed, image, prefix):
+    canvas_mode = case.get('canvas_mode', 'override')
+    if canvas_mode not in ('override', 'production'):
+        raise ValueError(f'Unknown canvas mode: {canvas_mode}')
     if renderer == 'fasth3_omni':
         return build_prompt(prompt=case['prompt'], images=[image], prefix=prefix, seed=seed,
                             width=case['width'], height=case['height'], frames=case['frames'])
@@ -41,9 +44,11 @@ def graph_for(vg, case, renderer, seed, image, prefix):
         duration=case['frames'] / 24, frame_count=case['frames'], seed=seed, aspect=case['aspect'],
         fast=renderer == 'taomate', fast_profile='taomate', turbo4=False, attention='kitchen',
         ltx_one_stage=False, enhance=False, input_name=image, prefix=prefix)
-    # Override only canvas geometry, identically across the baseline renderers.
-    conditioning = graph[config['prompt']]['inputs']
-    conditioning.update(width=case['width'], height=case['height'])
+    # Production comparisons retain the compiler's ResolutionSelector links.
+    # Explicit overrides remain available for the archived 480p pilot.
+    if canvas_mode == 'override':
+        conditioning = graph[config['prompt']]['inputs']
+        conditioning.update(width=case['width'], height=case['height'])
     return graph
 
 
