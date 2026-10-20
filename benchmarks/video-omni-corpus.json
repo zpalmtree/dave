@@ -1,0 +1,22 @@
+{
+  "cases": {
+    "speech5": {
+      "image": "woman.png", "aspect": "16:9", "width": 832, "height": 480, "frames": 124,
+      "seeds": [1020001, 1020002],
+      "expected_dialogue": "Good morning, everyone. The coffee is ready.",
+      "prompt": "The woman in <Picture 1> is seated at the same quiet kitchen table. Preserve her face, clothing, kitchen, lighting and camera position. A single locked medium close-up. She looks at the camera, smiles slightly and says exactly: \"Good morning, everyone. The coffee is ready.\" Warm, natural conversational English, clear consonants, synchronized mouth movement. A small head nod and subtle breathing. Clear dry speech over quiet room tone. No music, no other voices, no subtitles, no cuts."
+    },
+    "oalgo5": {
+      "image": "oalgo.png", "aspect": "2:3", "width": 480, "height": 704, "frames": 124,
+      "seeds": [1020011, 1020012],
+      "expected_dialogue": "We finished the tech tree. Now we prestige.",
+      "prompt": "The man in <Picture 1> speaks in a locked frontal close-up. Preserve his face, short black hair, very broad jaw, cheeks, large lips, Mexican-flag shirt and background. He smiles confidently, raises one eyebrow and says exactly: \"We finished the tech tree. Now we prestige.\" Natural conversational rhythm, expressive Mexican-American Spanglish accent, synchronized lip movement. A small confident head nod. Clear close-miked speech over quiet room tone. No music, no extra speech, no text, no cuts."
+    },
+    "motion5": {
+      "image": "marbles.png", "aspect": "16:9", "width": 832, "height": 480, "frames": 124,
+      "seeds": [1020021, 1020022],
+      "expected_dialogue": "",
+      "prompt": "Animate the glass marbles and brass track in <Picture 1>. Preserve the tabletop, materials and warm window light. Three colored glass marbles roll one after another down the curved brass track into a shallow wooden bowl. Physically believable rolling and collisions, detailed reflections. One slow smooth sideways camera move keeps the marbles visible. Synchronized glass clicks and a soft final wooden rattle. Quiet room ambience. No speech, no music, no text, no scene cut."
+    }
+  }
+}
