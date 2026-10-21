@@ -905,6 +905,16 @@ export class VideoGenerationService {
         }
     }
 
+    /** A regenerated delivery already posted after the earlier one, when its acknowledgement was lost. */
+    private async existingRepost(job: VideoJobView, channel: any, earlierId: string): Promise<any | null> {
+        const recent = await channel.messages.fetch({ limit: 100 });
+        const marker = `video **${shortJobId(job.id)}** is ready`;
+        return recent.find((candidate: any) => candidate.id !== job.status_message_id
+            && BigInt(candidate.id) > BigInt(earlierId)
+            && candidate.author?.id === this.client.user?.id
+            && candidate.content?.includes(marker)) || null;
+    }
+
     private async existingFailure(job: VideoJobView, channel: any): Promise<any | null> {
         try {
             const recent = await channel.messages.fetch({ limit: 100 });
@@ -923,8 +933,14 @@ export class VideoGenerationService {
         if (!statusMessage && (!channel || !channel.isTextBased() || !('send' in channel))) {
             throw new Error(`Video delivery channel is unavailable for ${job.id}`);
         }
+        const revised = (job.delivery_revision || 0) > (job.delivered_revision || 0);
         const existing = await this.existingDelivery(job, channel);
-        if (existing && (job.delivery_revision || 0) <= (job.delivered_revision || 0)) return existing;
+        if (existing && !revised) return existing;
+        // A regenerated video is posted as a new reply; the earlier delivery keeps its video.
+        if (existing && revised) {
+            const reposted = await this.existingRepost(job, channel, existing.id);
+            if (reposted) return reposted;
+        }
         const name = completedVideoAttachmentName(job);
         let workflows: { attachment: Buffer; name: string } | null = null;
         if (job.result_path && existsSync(job.result_path)) {
@@ -940,12 +956,6 @@ export class VideoGenerationService {
             components: workflows ? [await saveWorkflowDownload(workflows, this.workflowDirectory)] : [],
             allowedMentions: { repliedUser: true },
         };
-        if (existing) {
-            if ((job.delivery_revision || 0) > (job.delivered_revision || 0)) {
-                return existing.edit({ ...payload, attachments: [], allowedMentions: { parse: [] } });
-            }
-            return existing;
-        }
         if (!statusMessage) return channel.send(payload);
         try {
             const commandMessage = await channel.messages.fetch(job.command_message_id);
