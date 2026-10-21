@@ -146,6 +146,25 @@ for (const hasSource of [true, false]) test(`boundary recovery preserves ${hasSo
         assert.deepEqual(generated.references[0].bytes, decodeContinuityImage(image).data);
         assert.match(generated.plan.keyframe.prompt, /Same blonde explorer/);
         assert.match(generated.plan.keyframe.prompt, /earliest recognizable instant/);
+        const sceneReference = 'data:image/png;base64,'
+            + Buffer.concat([decodeContinuityImage(image).data, Buffer.from('supporting-cast')]).toString('base64');
+        const openingRequest = { segment_index: 1, scene_reference: sceneReference,
+            ...(!hasSource ? { identity_anchor: image } : {}) };
+        assert.equal((await request('image', openingRequest)).status, 503,
+            'A scene reference must come after an accepted video.');
+        assert.equal((await request('checkpoint', { checkpoint: {
+            contract_hash: prepared.contract_hash, scenes: { 0: { video_accepted: 'a'.repeat(64) } },
+        } })).status, 200);
+        assert.equal((await request('image', openingRequest)).status, 200);
+        assert.equal(generated.references.length, 2);
+        assert.deepEqual(generated.references[0].bytes, decodeContinuityImage(image).data,
+            'The original stays first and is never overwritten by a rendered face.');
+        assert.deepEqual(generated.references[1].bytes, decodeContinuityImage(sceneReference).data);
+        assert.equal(generated.references[1].kind, 'character');
+        assert.match(generated.references[1].visualFactsToPreserve, /returning supporting characters absent from the original/);
+        assert.match(generated.plan.keyframe.prompt, /original references remain authoritative/);
+        assert.match(generated.plan.keyframe.prompt, /do not import absent cast/);
+        assert.equal((await request('image', { ...openingRequest, scene_reference: 'invalid' })).status, 503);
         // Different frame content invalidates the decision; outages never approve it.
         fail = true;
         const nextFrame = 'data:image/png;base64,' + Buffer.concat([decodeContinuityImage(image).data, Buffer.from('different')]).toString('base64');

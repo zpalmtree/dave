@@ -22,6 +22,11 @@ export function recoveryReferenceRole(position: number): string {
         : `Picture ${position + 1} supplies scene context and only the additional subjects explicitly assigned to it by the screenplay. A subject the screenplay names from it keeps their own identity from Picture ${position + 1} as a separate person from the Picture 1 character. When the screenplay casts the Picture 1 character in its protagonist's role, he plays that role with the Picture 1 identity. Import neither unrequested cast nor an unrequested rendering style.`;
 }
 
+/** A rendered scene supplies supporting cast absent from the original portrait. */
+export function recoverySceneReferenceRole(position: number): string {
+    return `Picture ${position + 1} shows the cast at the end of the preceding accepted scene. Use it only to preserve the separate appearance, apparent age, gender presentation, hair, clothing and scale of returning supporting characters absent from the original references. The original references remain authoritative for every character they depict; never copy a drifted version of that character from this scene. Match each named character to their own appearance, without swapping or blending faces. The new screenplay determines who is visible, their actions, camera and setting; do not import absent cast, the previous pose or background. Honor explicit transformations.`;
+}
+
 export interface OpeningIdentityDecision {
     acceptable: boolean;
     correction: string;

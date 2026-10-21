@@ -266,3 +266,34 @@ The long-running worker must reload the updated source while idle. Its superviso
 restarts a terminated worker child; preserve the supervisor and all active
 generator/GPUq jobs. The new optional fields are compatible with older leases.
 GPU model work always goes through GPUq, including the benchmark renderer.
+
+## Supporting cast continuity
+
+`video-cast-continuity.patch` and its hash manifest archive the candidate desktop
+update for supporting characters introduced after frame zero. The broker accepts
+an optional `scene_reference` only after the preceding video is accepted. The
+worker extracts that video's last usable frame when composing a new opening.
+Later openings wait for that accepted clip rather than prefetching from the
+portrait alone; the prefetch cache key includes the cast reference. This can add
+boundary preparation time. Existing desktop canvas, audio and GPU lease handling
+are preserved by the hash-checked delta.
+Original references remain first and authoritative; the extra frame supplies only
+returning supporting characters absent from those originals. Local image fallback
+uses the same ordered references. H3 instructions bind appearance and voice to
+each individual, including characters introduced after the opening.
+
+The installer is intentionally separate from server deployment. The desktop
+candidate is being evaluated on three historical requests before activation;
+deploying broker support alone leaves older workers' requests unchanged. After
+evaluation, check with
+`python3 scripts/apply-video-cast-continuity-desktop.py --check`, apply without
+`--check`, and reload the supervised worker while idle. Deploy both server tracks
+with `scripts/deploy-bots.sh --with-broker` before using the updated worker.
+
+Run `node --test tests/video-character-continuity.test.mjs` after building, and
+`python -m unittest test_video_recovery` with the installed desktop dependencies.
+The latter covers cut/reanchor references, retry budgets, outage recovery and
+multi-character H3 compilation. Accepted openings and videos are not regenerated.
+This is a boundary reference, not a complete character tracker: it cannot recover
+a supporting character absent from the preceding frame, and that frame can itself
+contain identity drift. Creative planning and audio mixing are unchanged.
