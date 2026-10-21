@@ -5,9 +5,11 @@ import { VideoFrontierCallOptions } from './VideoUsage.js';
  * A multi-scene H3 video renders each scene with its own generated soundtrack, so a sung song
  * restarts at every cut. For a song request the desktop worker composes one song with the local
  * MiniMax Music 3 model first; the job then plans and renders exactly like an uploaded song.
+ * A dialogue-free music-driven edit gets an instrumental score the same way, so its music
+ * carries across the cuts instead of restarting in every scene.
  */
 export interface VideoSongDecision {
-    mode: 'none' | 'compose' | 'recording';
+    mode: 'none' | 'compose' | 'recording' | 'score';
     reason: string;
     seconds: number;
     caption: string;
@@ -22,9 +24,15 @@ const DEFAULT_SONG_SECONDS = 30;
 // Words that can mean a sung song. Only these requests pay for a songwriter call, which decides.
 const SONG_REQUEST = /\b(?:songs?|music[\s-]*videos?|mv|sing(?:s|ing|er)?|sung|rap(?:s|ping|per)?|ballads?|anthems?|lyrics?|jingles?|chorus|karaoke|duets?|serenades?|hymns?|lullab(?:y|ies)|cumbias?|corridos?|rancheras?|reggaeton|opera|canci[oó]n(?:es)?|cantar?|canta(?:ndo)?)\b/i;
 
+// Words that can mean a dialogue-free edit carried by music, which gets an instrumental score.
+const SCORE_REQUEST = /\b(?:(?:hype|phonk|fan|sports?|highlight|aura|velocity|beat)[\s-]*edits?|edits?|montages?|amv|phonk|instrumental|beat[\s-]*(?:drop|sync(?:ed)?)|(?:background|epic|hype)\s+music|trailer|highlight\s+reel|aura\s+farm(?:ing)?|danc(?:e|es|ing))\b/i;
+
 export function mayWantComposedSong(prompt: string): boolean {
-    return SONG_REQUEST.test(prompt) || /\b(?:lip[ -]?sync|dance\s+to|soundtrack)\b/i.test(prompt);
+    return SONG_REQUEST.test(prompt) || SCORE_REQUEST.test(prompt) || /\b(?:lip[ -]?sync|dance\s+to|soundtrack)\b/i.test(prompt);
 }
+
+/** Music3 has no instrumental switch; an instrumental tag in place of lyrics keeps it from singing. */
+export const VIDEO_SCORE_LYRICS = '[Instrumental]';
 
 export function videoComposedSongEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
     return !['0', 'false', 'no', 'off'].includes(String(environment.VIDEO_COMPOSED_SONG ?? '1').trim().toLowerCase());
@@ -35,7 +43,7 @@ const SONG_SCHEMA = {
     additionalProperties: false,
     required: ['mode', 'reason', 'seconds', 'caption', 'lyrics', 'recording_title', 'recording_artist', 'recording_url'],
     properties: {
-        mode: { type: 'string', enum: ['none', 'compose', 'recording'] },
+        mode: { type: 'string', enum: ['none', 'compose', 'recording', 'score'] },
         reason: { type: 'string' },
         seconds: { type: 'number' },
         caption: { type: 'string' },
@@ -46,13 +54,15 @@ const SONG_SCHEMA = {
     },
 } as const;
 
-export const VIDEO_SONGWRITER_INSTRUCTIONS = `You are the songwriter for a short AI music video. A local music model (MiniMax Music 3) composes the song before anything is filmed. The video is then planned around the song and lip-synced to it, so the song is the whole soundtrack and its vocals are the only voice.
+export const VIDEO_SONGWRITER_INSTRUCTIONS = `You are the songwriter for a short AI music video. A local music model (MiniMax Music 3) composes the song before anything is filmed. The video is then planned around the song and lip-synced to it, so the song is the whole soundtrack and its vocals are the only voice. An instrumental score is likewise the whole soundtrack, and the video is cut to it.
 
-Decide mode. Choose compose when the request asks for a song, a music video, or someone singing or rapping a song. Choose none when the request is mainly speech, dialogue, or a skit whose characters talk; when it only wants background music or sound effects; or when singing would be a few words inside an otherwise spoken video. When mode is none, return seconds 0 and an empty caption and lyrics.
+Decide mode. Choose compose when the request asks for a song, a music video, or someone singing or rapping a song. Choose score when nobody in the video speaks or sings and music carries it: a hype edit, phonk or aura-farming edit, montage, dance, workout or sports highlight, trailer, or another sequence cut to a beat, including a request for background music under such a video. Each scene would otherwise generate its own music, so a score is one original instrumental track that keeps the same groove across every cut. A score replaces all of the video's sound, so choose none when anyone talks, when the request is a skit, dialogue, narration or reaction whose characters speak, when it wants only ambience or sound effects, or when singing would be a few words inside an otherwise spoken video. When mode is none, return seconds 0 and an empty caption and lyrics.
 
 Choose recording when the request asks to sing, lip-sync, dance to, or use a specific EXISTING song or a supplied YouTube song link. Return its recording_title and recording_artist (infer the artist only when unambiguous, e.g. Electric Feel is MGMT). recording_url must be an actual YouTube URL present in the request, never an invented link. The desktop finds the recording and the broker selects the requested verse or chorus. Return empty caption and lyrics, and seconds 0; do not quote the song's lyrics or replace it with an inspired original. If an artist or version is ambiguous, leave recording_artist empty so the user can specify it or supply a link. The song's recorded voice is retained, not changed into the character's voice.
 
-When composing, write an original song for the request. A request for a new song about a subject or in an artist's style uses compose; an existing song's name uses recording. For compose and none, all recording fields are empty. Follow the character guidance for who sings and how they sound, including accent, vocabulary and slang. The lyrics are what that character sings, so slang and catchphrases the guidance asks for belong in them. Keep the lyrics in the language mix the request and guidance imply.
+For score, return empty lyrics and write only the caption: an instrumental in the genre and energy the request implies (for example aggressive drift phonk for an aura-farming or hype edit), with a strong steady beat and an arrangement that builds so cuts can land on its hits. Describe it for the whole video, not one scene.
+
+When composing, write an original song for the request. A request for a new song about a subject or in an artist's style uses compose; an existing song's name uses recording. For compose, score and none, all recording fields are empty. Follow the character guidance for who sings and how they sound, including accent, vocabulary and slang. The lyrics are what that character sings, so slang and catchphrases the guidance asks for belong in them. Keep the lyrics in the language mix the request and guidance imply.
 
 seconds: the finished song length, about ${DEFAULT_SONG_SECONDS} unless the request asks for a length, between ${VIDEO_COMPOSED_SONG_MIN_SECONDS} and ${VIDEO_COMPOSED_SONG_MAX_SECONDS}.
 
@@ -62,6 +72,7 @@ caption: three paragraphs, each starting with its label.
 Global Metadata: genre and subgenre, BPM, key, mood and how it develops, then "A complete N-second song: the vocal enters on the first bar with no long intro, and it ends cleanly on a final hit." with N set to seconds.
 Vocal Details: the singer's gender, age range, timbre, register, accent and delivery, matching the character who sings, plus any backing vocals.
 Arrangement: the instruments and groove, what each section adds, and the clear final hit.
+For score, Global Metadata ends with "A complete N-second instrumental track with no vocals: the beat starts on the first bar with no long intro, and it ends cleanly on a final hit." instead, and Vocal Details is "None. Purely instrumental: no singing, rapping, spoken words or vocal chops."
 
 reason: one short sentence explaining the decision.`;
 
@@ -107,14 +118,18 @@ export function validatedVideoSongDecision(value: any, requestedDurationSeconds?
         if (!url && (!title || !artist)) throw new Error('Please specify the song and artist, or attach the recording or a YouTube song link.');
         return { mode: 'recording', reason, seconds: 0, caption: '', lyrics: '', recording: { title, artist, url } };
     }
-    if (value?.mode !== 'compose') return none();
+    if (value?.mode !== 'compose' && value?.mode !== 'score') return none();
     const caption = String(value.caption || '').trim().slice(0, 3000);
+    const requested = Number(requestedDurationSeconds) || Number(value.seconds) || DEFAULT_SONG_SECONDS;
+    const seconds = Math.round(Math.min(VIDEO_COMPOSED_SONG_MAX_SECONDS, Math.max(VIDEO_COMPOSED_SONG_MIN_SECONDS, requested)));
+    if (value.mode === 'score') {
+        return caption.length < 40 ? none('The songwriter returned no usable score.')
+            : { mode: 'score', reason, seconds, caption, lyrics: VIDEO_SCORE_LYRICS };
+    }
     // A leading intro section gives a long instrumental opening the singer has to stand through.
     const lyrics = String(value.lyrics || '').replace(/^\s*\[intro\][^\S\n]*\n(?:[^\S\n]*\n)*/i, '').trim().slice(0, 3000);
     const sung = lyrics.split('\n').filter(line => line.trim() && !/^\s*\[[^\]]+\]\s*$/.test(line));
     if (caption.length < 40 || !sung.length) return none('The songwriter returned no usable song.');
-    const requested = Number(requestedDurationSeconds) || Number(value.seconds) || DEFAULT_SONG_SECONDS;
-    const seconds = Math.round(Math.min(VIDEO_COMPOSED_SONG_MAX_SECONDS, Math.max(VIDEO_COMPOSED_SONG_MIN_SECONDS, requested)));
     return { mode: 'compose', reason, seconds, caption, lyrics };
 }
 

@@ -219,7 +219,7 @@ function videoJobDisplayName(job: Pick<VideoJobView, 'model' | 'command_variant'
 }
 
 export function videoSourceDescription(job: Pick<VideoJobView, 'command_variant'
-    | 'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio' | 'composed_song' | 'source_excerpt'>, rangeHint = false): string {
+    | 'source_kind' | 'has_source_video' | 'has_source_image' | 'has_source_audio' | 'composed_song' | 'composed_score' | 'source_excerpt'>, rangeHint = false): string {
     const star = (videoCharacterForCommand(job.command_variant) || MEXIMUTT).name;
     const descriptions: Record<string, string> = {
         video_edit: 'Editing your video',
@@ -233,7 +233,8 @@ export function videoSourceDescription(job: Pick<VideoJobView, 'command_variant'
     const source = job.has_source_video
         ? (excerpt ? `Editing ${describeVideoSourceExcerpt(excerpt, 'video')}` : descriptions.video_edit)
         : descriptions[job.source_kind || ''] || (job.has_source_image ? 'Using a reference image' : '');
-    const song = !job.has_source_audio ? '' : job.composed_song ? 'Singing an original song'
+    const song = !job.has_source_audio ? '' : job.composed_score ? 'Scoring an original soundtrack'
+        : job.composed_song ? 'Singing an original song'
         : excerpt ? `Lip-syncing to ${describeVideoSourceExcerpt(excerpt, 'song')}` : 'Lip-syncing to your song';
     const hint = rangeHint && excerpt && excerpt.chosen !== 'range' ? ' (add a range like 1:05-1:35 to pick another part)' : '';
     return [source, song].filter(Boolean).join(' · ') + hint;

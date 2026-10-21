@@ -36,7 +36,10 @@ const LINE_PAUSE_SECONDS = 0.25;
 const LINE_MAX_SECONDS = 5;
 const SNAP_WINDOW_FRAMES = 48;
 export interface VideoSourceAudioWord { start: number; end: number; text: string; }
-export interface VideoSourceAudioLyrics { words: VideoSourceAudioWord[]; lines: VideoSourceAudioWord[]; }
+/** Beat and bar start times, in seconds, of an instrumental score so its edit can cut on the music. */
+export interface VideoScoreTiming { bpm: number; beats: number[]; bars: number[]; }
+/** A song's vocal timing; an instrumental score has no words and carries its beat grid instead. */
+export interface VideoSourceAudioLyrics { words: VideoSourceAudioWord[]; lines: VideoSourceAudioWord[]; score?: VideoScoreTiming; }
 const FORMATS: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac' };
 export interface SubmittedVideoSourceAudio { url: string; name: string; bytes: number; }
 export interface StoredVideoSourceAudio { path: string; bytes: number; duration: number; }
@@ -241,6 +244,11 @@ export function parseVideoSourceAudioLyrics(json: string | null | undefined): Vi
         const value = JSON.parse(json);
         const valid = (items: any) => Array.isArray(items) && items.every((item: any) => item && typeof item.text === 'string'
             && Number.isFinite(item.start) && Number.isFinite(item.end) && item.end >= item.start);
+        const score = value?.score;
+        const times = (items: any) => Array.isArray(items) && items.every(Number.isFinite);
+        if (score && Number.isFinite(score.bpm) && times(score.beats) && times(score.bars) && valid(value.words) && valid(value.lines)) {
+            return { words: value.words, lines: value.lines, score: { bpm: score.bpm, beats: score.beats, bars: score.bars } };
+        }
         return valid(value?.words) && valid(value?.lines) && value.words.length ? { words: value.words, lines: value.lines } : null;
     } catch {
         return null;
@@ -271,6 +279,7 @@ export function videoSourceAudioPlannerGuidance(lyrics: VideoSourceAudioLyrics |
 }
 
 function videoSourceAudioTimelineGuidance(lyrics: VideoSourceAudioLyrics | null, seconds: number): string {
+    if (lyrics?.score) return videoScoreGuidance(lyrics.score, seconds);
     if (!lyrics?.lines.length) return VIDEO_SOURCE_AUDIO_GUIDANCE;
     const span = (start: number, end: number) => `${start.toFixed(1)}-${end.toFixed(1)}`;
     const entries: string[] = [];
@@ -290,6 +299,117 @@ function videoSourceAudioTimelineGuidance(lyrics: VideoSourceAudioLyrics | null,
         timeline += `\n${entry}`;
     }
     return VIDEO_SOURCE_AUDIO_LYRIC_GUIDANCE + timeline;
+}
+
+// A hype edit's scenes each generated their own music, so it restarted at every cut (job 311b658a).
+const VIDEO_SCORE_GUIDANCE = 'An original instrumental score composed for this request is the fixed soundtrack. It has no vocals and supplies all of the sound: nobody speaks, sings or lip-syncs, every shot dialogue array must be empty, and mouths stay closed. On-screen actions make no sound of their own, so let the music carry them. This overrides character voice, accent, catchphrase, dialogue lead-in and silence instructions. Keep the requested scenes and stage them with energy that follows the score; no dissolves. Timings follow the score duration exactly; keep each segment at most 14 seconds.';
+
+function videoScoreGuidance(score: VideoScoreTiming, seconds: number): string {
+    if (score.beats.length < 8 || score.bars.length < 2) return VIDEO_SCORE_GUIDANCE;
+    const beat = (score.beats[score.beats.length - 1] - score.beats[0]) / (score.beats.length - 1);
+    const bars = score.bars.slice(0, 80).map(time => time.toFixed(2)).join(', ');
+    return `${VIDEO_SCORE_GUIDANCE}\nThe score lasts ${seconds.toFixed(1)} seconds at about ${Math.round(score.bpm)} BPM, one beat every ${beat.toFixed(2)} seconds. `
+        + `Its bars start at ${bars}. Cut on the music: start each segment on a bar, and place cuts between shots inside a segment on beats.`;
+}
+
+/** Finds the beat grid of a composed instrumental score; it is empty when the score has no steady pulse. */
+export async function detectVideoScoreTiming(audio: StoredVideoSourceAudio, bpmHint = 0): Promise<VideoScoreTiming> {
+    const { stdout } = await run('ffmpeg', ['-nostdin', '-v', 'error', '-i', audio.path, '-ac', '1', '-ar', String(SCORE_SAMPLE_RATE),
+        '-f', 'f32le', 'pipe:1'], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, timeout: 60_000 });
+    // Copying aligns the PCM for a Float32Array view.
+    const bytes = new Uint8Array(stdout);
+    return videoScoreTimingFromSamples(new Float32Array(bytes.buffer, 0, bytes.length >> 2), SCORE_SAMPLE_RATE, bpmHint);
+}
+
+const SCORE_SAMPLE_RATE = 11025;
+const SCORE_HOP = 128;
+
+/**
+ * Tempo and beat phase from onset strength: rises in full-band and low (kick, 808) energy.
+ * The songwriter's BPM settles octave ambiguity; the downbeat is the beat phase with the most low-end attack.
+ */
+export function videoScoreTimingFromSamples(samples: Float32Array, rate: number, bpmHint = 0): VideoScoreTiming {
+    const none = { bpm: 0, beats: [], bars: [] };
+    const fps = rate / SCORE_HOP;
+    const frames = Math.floor(samples.length / SCORE_HOP);
+    if (frames < fps * 4) return none;
+    const alpha = 1 - Math.exp(-2 * Math.PI * 150 / rate);
+    const full = new Float64Array(frames), low = new Float64Array(frames);
+    let lowpass = 0;
+    for (let frame = 0; frame < frames; frame++) {
+        let energy = 0, lowEnergy = 0;
+        for (let i = frame * SCORE_HOP; i < (frame + 1) * SCORE_HOP; i++) {
+            lowpass += alpha * (samples[i] - lowpass);
+            energy += samples[i] * samples[i];
+            lowEnergy += lowpass * lowpass;
+        }
+        full[frame] = Math.log(1e-7 + energy / SCORE_HOP);
+        low[frame] = Math.log(1e-7 + lowEnergy / SCORE_HOP);
+    }
+    const rise = (values: Float64Array) => {
+        const raw = values.map((value, i) => i ? Math.max(0, value - values[i - 1]) : 0);
+        // Subtracting a quarter-second local mean keeps sustained noise from reading as a pulse.
+        const radius = Math.round(fps / 4);
+        return raw.map((value, i) => {
+            let sum = 0, count = 0;
+            for (let j = Math.max(0, i - radius); j <= Math.min(raw.length - 1, i + radius); j++, count++) sum += raw[j];
+            return Math.max(0, value - sum / count);
+        });
+    };
+    const lowOnset = rise(low);
+    const onset = rise(full).map((value, i) => value + lowOnset[i]);
+    const mean = onset.reduce((sum, value) => sum + value, 0) / frames;
+    if (!(mean > 1e-4)) return none;
+    const at = (position: number) => {
+        const index = Math.floor(position), fraction = position - index;
+        return index + 1 < frames ? onset[index] * (1 - fraction) + onset[index + 1] * fraction : 0;
+    };
+    let tempo = 0, tempoScore = -Infinity;
+    for (let bpm = 70; bpm <= 180; bpm += 0.25) {
+        const period = fps * 60 / bpm;
+        let score = 0;
+        for (const beats of [1, 2, 4]) {
+            const lag = period * beats;
+            let sum = 0;
+            for (let frame = 0; frame + lag < frames - 1; frame++) sum += onset[frame] * at(frame + lag);
+            score += sum / Math.max(1, frames - lag);
+        }
+        const prior = bpmHint > 0 ? Math.exp(-0.5 * (Math.log2(bpm / bpmHint) / 0.08) ** 2) : 1;
+        score *= 0.4 + 0.6 * prior;
+        if (score > tempoScore) {
+            tempo = bpm;
+            tempoScore = score;
+        }
+    }
+    const period = fps * 60 / tempo;
+    let phase = 0, phaseScore = -Infinity;
+    for (let offset = 0; offset < period; offset += 0.5) {
+        let sum = 0;
+        for (let position = offset; position < frames - 1; position += period) sum += Math.max(at(position - 1), at(position), at(position + 1));
+        if (sum > phaseScore) {
+            phase = offset;
+            phaseScore = sum;
+        }
+    }
+    const grid: number[] = [];
+    for (let position = phase; position < frames - 1; position += period) grid.push(position);
+    // A score without a steady pulse would only pull cuts onto noise.
+    if (grid.length < 8 || phaseScore / grid.length < mean * 1.5) return none;
+    // Each beat settles on its own attack, so a slight tempo misestimate does not drift.
+    const beatFrames = grid.map(position => {
+        let best = position;
+        for (let frame = Math.ceil(position - 3); frame <= Math.floor(position + 3); frame++) {
+            if (frame >= 0 && frame < frames && onset[frame] > Math.max(mean, at(best))) best = frame;
+        }
+        return best;
+    });
+    const downbeat = [0, 1, 2, 3].reduce((best, offset) => {
+        const weight = (start: number) => beatFrames.filter((_, i) => i % 4 === start)
+            .reduce((sum, frame) => sum + lowOnset[Math.round(frame)], 0);
+        return weight(offset) > weight(best) ? offset : best;
+    }, 0);
+    const beats = beatFrames.map(frame => Math.round(frame / fps * 1000) / 1000);
+    return { bpm: Math.round(tempo * 10) / 10, beats, bars: beats.filter((_, i) => i % 4 === downbeat) };
 }
 
 /** Transcribes the stored song with word timestamps, or returns null when it has no usable lyrics. */
@@ -350,6 +470,37 @@ function songCut(target: number, cursor: number, remaining: number, totalFrames:
     return best;
 }
 
+/** Moves a planned cut onto the score's nearest bar, else its nearest beat. */
+function scoreCut(target: number, cursor: number, remaining: number, totalFrames: number, bars: number[], beats: number[]): number {
+    const low = Math.max(cursor + 12, totalFrames - 360 * remaining);
+    const high = Math.min(cursor + 360, totalFrames - 12 * remaining);
+    const anchor = Math.min(high, Math.max(low, target));
+    const nearest = (grid: number[], window: number) => grid.filter(frame => frame >= low && frame <= high
+        && Math.abs(frame - anchor) <= window).sort((a, b) => Math.abs(a - anchor) - Math.abs(b - anchor))[0];
+    return nearest(bars, SNAP_WINDOW_FRAMES) ?? nearest(beats, SNAP_WINDOW_FRAMES / 2) ?? anchor;
+}
+
+/** Puts the cuts between a segment's shots on beats, keeping every shot at least half a second. */
+function snapShotsToBeats(segment: any, beats: number[]): void {
+    const start = Math.round(segment.source_audio_start_seconds * 24);
+    const end = start + segment.source_audio_frames;
+    const shots = segment.shots;
+    let boundary = start, elapsed = 0;
+    const frames = shots.map((shot: any, index: number) => {
+        elapsed += Number(shot.duration_seconds);
+        const remaining = shots.length - index - 1;
+        const low = boundary + 12, high = end - 12 * remaining;
+        const target = remaining ? Math.min(high, Math.max(low, start + Math.round(elapsed * 24))) : end;
+        const snapped = !remaining ? end : beats.filter(frame => frame >= low && frame <= high && Math.abs(frame - target) <= 12)
+            .sort((a, b) => Math.abs(a - target) - Math.abs(b - target))[0] ?? target;
+        const length = snapped - boundary;
+        boundary = snapped;
+        return length;
+    });
+    if (frames.some((length: number) => length < 12)) return;
+    shots.forEach((shot: any, index: number) => { shot.duration_seconds = frames[index] / 24; });
+}
+
 /** Where a shot's vocals play, so H3 only animates singing over sung audio. */
 function shotVocals(start: number, end: number, words: VideoSourceAudioWord[], seconds: number): { instrumental: boolean; from?: number; until?: number } {
     const inside = words.filter(w => w.end > start + 0.05 && w.start < end - 0.05);
@@ -387,6 +538,8 @@ export function pinVideoPlanToAudio(plan: any, seconds: number, lyrics: VideoSou
         if (!Number.isFinite(weight) || weight <= 0 || segments.length * 12 > totalFrames) throw new Error('The screenplay cannot fit the song timeline.');
         const words = (lyrics?.words || []).map(w => [Math.round(w.start * 24), Math.round(w.end * 24)]);
         const lineStarts = new Set((lyrics?.lines || []).map(line => Math.round(line.start * 24)));
+        const bars = (lyrics?.score?.bars || []).map(time => Math.round(time * 24));
+        const beats = (lyrics?.score?.beats || []).map(time => Math.round(time * 24));
         let cursor = 0;
         for (let i = 0; i < segments.length; i++) {
             const segment = segments[i];
@@ -394,7 +547,8 @@ export function pinVideoPlanToAudio(plan: any, seconds: number, lyrics: VideoSou
             const planned = Math.round(totalFrames
                 * segments.slice(0, i + 1).reduce((sum: number, s: any) => sum + Number(s.target_seconds), 0) / weight);
             const end = !remaining ? totalFrames : words.length
-                ? songCut(planned, cursor, remaining, totalFrames, words, lineStarts) : planned;
+                ? songCut(planned, cursor, remaining, totalFrames, words, lineStarts)
+                : beats.length ? scoreCut(planned, cursor, remaining, totalFrames, bars, beats) : planned;
             // Preserve weights until all boundaries are calculated.
             segment.source_audio_start_seconds = cursor / 24;
             segment.source_audio_frames = end - cursor;
@@ -402,12 +556,15 @@ export function pinVideoPlanToAudio(plan: any, seconds: number, lyrics: VideoSou
             cursor = end;
         }
     }
+    const score = lyrics?.score;
+    const scoreBeats = (score?.beats || []).map(time => Math.round(time * 24));
     for (const [index, segment] of segments.entries()) {
         const duration = segment.source_audio_frames / 24;
         segment.target_seconds = segment.output_seconds = duration;
         segment.transition = index === 0 ? 'start' : segment.transition === 'continue' ? 'continue' : 'cut';
         segment.audio_transition = 'cut';
-        segment.music = 'The supplied original song is the immutable soundtrack.';
+        segment.music = score ? 'The original instrumental score is the immutable soundtrack.'
+            : 'The supplied original song is the immutable soundtrack.';
         const shotTotal = segment.shots.reduce((sum: number, shot: any) => sum + Number(shot.duration_seconds || 0), 0);
         let shotStart = segment.source_audio_start_seconds;
         for (const shot of segment.shots) {
@@ -430,8 +587,13 @@ export function pinVideoPlanToAudio(plan: any, seconds: number, lyrics: VideoSou
                     shot.audio = `The original uploaded song, unchanged; its vocals play from ${vocals.from ?? 0} to ${vocals.until ?? round2(shot.duration_seconds)} seconds into this shot. Synchronize the visible performance to them and the rhythm, with relaxed closed mouths while only music plays.`;
                 }
             }
+            if (score) {
+                shot.source_audio_vocals = 'instrumental';
+                shot.audio = 'The original instrumental score, unchanged; the performers move to its rhythm with relaxed closed mouths.';
+            }
             shotStart += shot.duration_seconds;
         }
+        if (scoreBeats.length && segment.shots.length > 1) snapShotsToBeats(segment, scoreBeats);
     }
     plan.segments = segments;
     // The supplied waveform owns speech; the renderer must not regenerate textual lyrics.

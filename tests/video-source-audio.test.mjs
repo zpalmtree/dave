@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { videoSourceAudioFromMessages, sourceAudioDescriptor, pinVideoPlanToAudio, normalizeVideoSourceAudio,
     songLyricsFromTranscription, resolveVideoSourceExcerptLyrics, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics,
-    storeVideoSourceAudioFromClip, VIDEO_SOURCE_AUDIO_GUIDANCE } from '../dist/VideoSourceAudio.js';
+    storeVideoSourceAudioFromClip, VIDEO_SOURCE_AUDIO_GUIDANCE, videoScoreTimingFromSamples } from '../dist/VideoSourceAudio.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
 const descriptor = { url: 'https://cdn.discordapp.com/attachments/1/2/song.mp3', name: 'song.mp3', bytes: 1234 };
 const message = (...items) => ({ attachments: new Map(items.map((v, i) => [i, v])) });
@@ -335,6 +335,63 @@ test('lyric timing moves song cuts out of sung words and marks where each shot h
     const copy = structuredClone(value);
     pinVideoPlanToAudio(value, 20, lyrics);
     assert.deepEqual(value, copy);
+});
+
+test('a score\'s beat grid comes from its attacks, with the bar on the loudest kick', () => {
+    // 150 BPM: a kick on every beat, a heavier one on each bar, starting 0.3 s in, over hiss.
+    const rate = 11025, samples = new Float32Array(rate * 20);
+    let noise = 1;
+    for (let i = 0; i < samples.length; i++) {
+        noise = (noise * 16807) % 2147483647;
+        samples[i] = (noise / 2147483647 - 0.5) * 0.02;
+    }
+    for (let beat = 0; 0.3 + beat * 0.4 < 19.8; beat++) {
+        const start = Math.round((0.3 + beat * 0.4) * rate), gain = beat % 4 === 1 ? 0.9 : 0.35;
+        for (let i = 0; i < rate * 0.12; i++) samples[start + i] += gain * Math.exp(-i / (rate * 0.04)) * Math.sin(2 * Math.PI * 60 * i / rate);
+    }
+    for (const hint of [0, 150]) {
+        const timing = videoScoreTimingFromSamples(samples, rate, hint);
+        assert.ok(Math.abs(timing.bpm - 150) <= 1, `bpm ${timing.bpm} with hint ${hint}`);
+        assert.ok(timing.beats.length >= 46);
+        for (const time of timing.beats) assert.ok(Math.abs(((time - 0.3) / 0.4) - Math.round((time - 0.3) / 0.4)) * 0.4 < 0.03, `beat ${time}`);
+        assert.ok(Math.abs(timing.bars[0] - 0.7) < 0.03, `first bar ${timing.bars[0]}`);
+        assert.ok(timing.bars.every((time, i) => !i || Math.abs(time - timing.bars[i - 1] - 1.6) < 0.05));
+    }
+    assert.deepEqual(videoScoreTimingFromSamples(new Float32Array(rate * 10), rate), { bpm: 0, beats: [], bars: [] }, 'Silence has no beat.');
+});
+
+test('a score pins scene cuts to bars and shot cuts to beats, with every shot instrumental', () => {
+    const beats = Array.from({ length: 50 }, (_, i) => 0.25 + i * 0.4);
+    const score = { bpm: 150, beats, bars: beats.filter((_, i) => i % 4 === 0) };
+    const lyrics = { words: [], lines: [], score };
+    assert.deepEqual(parseVideoSourceAudioLyrics(JSON.stringify(lyrics)), lyrics);
+    const shot = seconds => ({ duration_seconds: seconds, visual: 'He stares down the lens', camera: 'Close-up', dialogue: [] });
+    const value = { segments: [[3.5, 2.5], [3, 3], [3.5, 3.5]].map((shots, i) => ({ title: `Scene ${i}`,
+        target_seconds: shots[0] + shots[1], transition: i ? 'cut' : 'start', shots: shots.map(shot) })) };
+    pinVideoPlanToAudio(value, 20, lyrics);
+    // Planned cuts at 6.32 s and 12.63 s move to the bars at 6.65 s and 13.05 s.
+    assert.deepEqual(value.segments.map(s => s.source_audio_start_seconds * 24), [0, 160, 313]);
+    const beatFrames = new Set(beats.map(time => Math.round(time * 24)));
+    for (const segment of value.segments) {
+        const start = segment.source_audio_start_seconds * 24;
+        const inner = start + Math.round(segment.shots[0].duration_seconds * 24);
+        assert.ok(beatFrames.has(inner), `shot cut at frame ${inner}`);
+        assert.equal(Math.round(segment.shots.reduce((sum, s) => sum + s.duration_seconds, 0) * 24), segment.source_audio_frames);
+        assert.match(segment.music, /instrumental score/);
+        for (const item of segment.shots) {
+            assert.equal(item.source_audio_vocals, 'instrumental');
+            assert.match(item.audio, /instrumental score, unchanged/);
+        }
+    }
+    const copy = structuredClone(value);
+    pinVideoPlanToAudio(value, 20, lyrics);
+    assert.deepEqual(value, copy);
+
+    const guidance = videoSourceAudioPlannerGuidance(lyrics, 20, 'composed');
+    assert.match(guidance, /^An original instrumental score composed for this request is the fixed soundtrack\./);
+    assert.match(guidance, /nobody speaks, sings or lip-syncs/);
+    assert.match(guidance, /about 150 BPM, one beat every 0\.40 seconds\. Its bars start at 0\.25, 1\.85, 3\.45,/);
+    assert.doesNotMatch(videoSourceAudioPlannerGuidance({ words: [], lines: [], score: { bpm: 0, beats: [], bars: [] } }, 20), /BPM|lip-syncing/);
 });
 
 test('broker plans songs against transcribed lyric timing and queues them when transcription fails', async () => {

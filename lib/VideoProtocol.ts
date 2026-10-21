@@ -243,6 +243,8 @@ export interface VideoJobView {
     has_source_audio?: boolean;
     /** The soundtrack is a song the worker composed for the request, not the user's upload. */
     composed_song?: boolean;
+    /** The composed soundtrack is an instrumental score for a dialogue-free edit. */
+    composed_score?: boolean;
     source_audio_seconds?: number | null;
     /** The part of a longer song or source video that was used. */
     source_excerpt?: {

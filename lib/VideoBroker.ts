@@ -3,7 +3,8 @@ import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoE
 import { describeVideoEditReference, validateVideoEditReference } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
-    cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio, storeVideoSourceAudioFromClip } from './VideoSourceAudio.js';
+    cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio, storeVideoSourceAudioFromClip,
+    detectVideoScoreTiming } from './VideoSourceAudio.js';
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_MAX_BYTES, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
@@ -182,6 +183,7 @@ interface BrokerOptions {
     sourceAudioDownloader?: typeof storeVideoSourceAudio;
     sourceAudioVideoDownloader?: typeof storeVideoSourceAudioFromClip;
     sourceAudioTranscriber?: typeof transcribeVideoSourceAudio;
+    scoreTimer?: typeof detectVideoScoreTiming;
     songWriter?: typeof writeVideoSong;
     sourceAudioExcerptSelector?: typeof selectVideoSourceAudioExcerpt;
     sourceAudioCutter?: typeof cutVideoSourceAudio;
@@ -3817,6 +3819,8 @@ export class VideoBroker {
                 result_bytes: row.result_bytes,
                 has_source_audio: Boolean(row.source_audio_path),
                 composed_song: row.source_audio_origin === 'composed' && Boolean(row.source_audio_path),
+                composed_score: row.source_audio_origin === 'composed' && Boolean(row.source_audio_path)
+                    && Boolean(parseVideoSourceAudioLyrics(row.source_audio_lyrics_json)?.score),
                 source_audio_seconds: row.source_audio_seconds,
                 source_excerpt: row.source_excerpt_json ? JSON.parse(row.source_excerpt_json) : null,
                 has_source_video: Boolean(row.source_video_path),
@@ -4866,20 +4870,20 @@ export class VideoBroker {
                 throw new RecoveryStoppedError(error instanceof Error ? error.message : 'Could not identify the requested soundtrack. Attach the song and try again.');
             }
             await persist();
-            if (state.song.mode === 'compose') console.log(`Composing a ${state.song.seconds} s song for ${job.public_id}.`);
+            if (['compose', 'score'].includes(state.song.mode)) console.log(`Composing a ${state.song.seconds} s ${state.song.mode === 'score' ? 'score' : 'song'} for ${job.public_id}.`);
         }
         if (state.song.mode === 'recording') {
             if ((this.worker?.songDownloadVersion || 0) < 1) throw new RecoveryStoppedError('The video worker needs named-song support. Attach the recording and try again.');
             if (state.song.failed) throw new RecoveryStoppedError(state.song.failed);
             return { caption: '', lyrics: '', seconds: 0, recording: state.song.recording };
         }
-        if (state.song.mode !== 'compose' || state.song.failed) return null;
+        if (!['compose', 'score'].includes(state.song.mode) || state.song.failed) return null;
         return { caption: state.song.caption, lyrics: state.song.lyrics, seconds: state.song.seconds };
     }
 
     /** Stores the worker's composed song as the job's soundtrack, exactly as an uploaded song is stored. */
     private async storeComposedSong(job: JobRow, state: any, body: any, persist: () => Promise<void>): Promise<Record<string, unknown> | null> {
-        if (!['compose', 'recording'].includes(state.song?.mode) || state.song.failed || job.source_audio_path || state.prepared) return null;
+        if (!['compose', 'recording', 'score'].includes(state.song?.mode) || state.song.failed || job.source_audio_path || state.prepared) return null;
         const recording = state.song.mode === 'recording';
         const fail = async (reason: string) => {
             // The job still renders, with each scene's own generated audio.
@@ -4908,11 +4912,18 @@ export class VideoBroker {
             rmSync(song.path, { force: true });
             return fail(`The composed song lasted ${song.duration.toFixed(1)} seconds.`);
         }
-        let lyrics = await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, this.providerHooks(job))
-            .catch(error => {
-                console.warn(`Could not transcribe the composed song for ${job.public_id}; planning without lyric timing.`, error);
-                return null;
-            });
+        // A score has no vocals to transcribe; its beat grid times the cuts instead.
+        let lyrics: VideoSourceAudioLyrics | null = state.song.mode === 'score'
+            ? { words: [], lines: [], score: await (this.options.scoreTimer || detectVideoScoreTiming)(song,
+                Number(/(\d{2,3}(?:\.\d+)?)\s*BPM/i.exec(state.song.caption)?.[1]) || 0).catch(error => {
+                console.warn(`Could not find the beat of the composed score for ${job.public_id}; planning without it.`, error);
+                return { bpm: 0, beats: [], bars: [] };
+            }) }
+            : await (this.options.sourceAudioTranscriber || transcribeVideoSourceAudio)(song, this.providerHooks(job))
+                .catch(error => {
+                    console.warn(`Could not transcribe the composed song for ${job.public_id}; planning without lyric timing.`, error);
+                    return null;
+                });
         let excerpt: VideoSourceExcerpt | null = null;
         if (recording) {
             if (!lyrics) return fail('Could not identify the requested section of the recording.');
@@ -4930,7 +4941,8 @@ export class VideoBroker {
                 excerpt ? JSON.stringify(excerpt) : null, nowSeconds(), job.public_id]);
         state.song.composed_seconds = song.duration;
         await persist();
-        return { ok: true, composed: true, seconds: song.duration, lyric_lines: lyrics?.lines.length || 0 };
+        return { ok: true, composed: true, seconds: song.duration, lyric_lines: lyrics?.lines.length || 0,
+            ...(lyrics?.score ? { beats: lyrics.score.beats.length } : {}) };
     }
 
     private recoveryPlanning = new Map<string, Promise<any>>();
