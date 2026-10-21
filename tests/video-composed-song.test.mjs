@@ -6,16 +6,24 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
 import { approvedRecoveryContract, recoveryHash } from '../dist/VideoRecovery.js';
-import { mayWantComposedSong, validatedVideoSongDecision, VIDEO_COMPOSED_SONG_MAX_SECONDS } from '../dist/VideoComposedSong.js';
+import { mayWantComposedSong, validatedVideoSongDecision, VIDEO_COMPOSED_SONG_MAX_SECONDS, VIDEO_SCORE_LYRICS } from '../dist/VideoComposedSong.js';
 import { videoSourceDescription } from '../dist/VideoGeneration.js';
 
 const CAPTION = 'Global Metadata: Cumbia, 95 BPM, A minor.\n\nVocal Details: Male lead.\n\nArrangement: Accordion and guiro.';
+const SCORE_CAPTION = 'Global Metadata: Drift phonk, 150 BPM, F minor.\n\nVocal Details: None. Purely instrumental.\n\nArrangement: 808 and cowbell.';
 
 test('songwriter answers are bounded and only sung requests reach it', () => {
     assert.equal(mayWantComposedSong('official music video for "la cumbia de la plaga rusa"'), true);
     assert.equal(mayWantComposedSong('Meximutt sings about tacos'), true);
     assert.equal(mayWantComposedSong('una canción sobre el perro'), true);
     assert.equal(mayWantComposedSong('Meximutt yells at a pigeon'), false);
+    assert.equal(mayWantComposedSong('make a hype edit for meximutt, aura farming, no speech, fast cuts'), true);
+    assert.equal(mayWantComposedSong('a montage of Meximutt training'), true);
+    const score = validatedVideoSongDecision({ mode: 'score', reason: 'A silent hype edit.', seconds: 28, caption: CAPTION, lyrics: 'ignored' });
+    assert.deepEqual([score.mode, score.seconds, score.lyrics], ['score', 28, VIDEO_SCORE_LYRICS]);
+    assert.equal(validatedVideoSongDecision({ mode: 'score', seconds: 28, caption: 'Phonk.', lyrics: '' }).mode, 'none');
+    assert.equal(videoSourceDescription({ has_source_audio: true, composed_song: true, composed_score: true, source_kind: 'preset' }),
+        'Starring Meximutt · Scoring an original soundtrack');
     const song = validatedVideoSongDecision({ mode: 'compose', reason: 'A music video.', seconds: 400, caption: CAPTION,
         lyrics: '[Intro]\n\n[Verse]\nEsta es la cumbia\n[Chorus]\nO algo' });
     assert.equal(song.mode, 'compose');
@@ -42,6 +50,7 @@ test('a song request composes its soundtrack on the worker and then plans like a
     const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
     const lyrics = { words: [{ start: 0.2, end: 1, text: 'esta' }], lines: [{ start: 0.2, end: 1, text: 'esta' }] };
     let songwriterCalls = 0, songwriterAnswer = 'compose', transcribed = 0;
+    const timedScores = [], scoreTiming = { bpm: 150, beats: [0.2, 0.6, 1, 1.4, 1.8, 2.2, 2.6, 3, 3.4], bars: [0.2, 1.8, 3.4] };
     const planned = [];
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
@@ -52,9 +61,12 @@ test('a song request composes its soundtrack on the worker and then plans like a
             assert.match(options.plannerGuidance, /Meximutt persona/, 'The songwriter writes in the character\'s voice.');
             return songwriterAnswer === 'compose'
                 ? { mode: 'compose', reason: 'A music video.', seconds: 30, caption: CAPTION, lyrics: '[Verse]\nEsta es la cumbia' }
-                : { mode: 'none', reason: 'Dialogue.', seconds: 0, caption: '', lyrics: '' };
+                : songwriterAnswer === 'score'
+                    ? { mode: 'score', reason: 'A silent hype edit.', seconds: 12, caption: SCORE_CAPTION, lyrics: VIDEO_SCORE_LYRICS }
+                    : { mode: 'none', reason: 'Dialogue.', seconds: 0, caption: '', lyrics: '' };
         },
         sourceAudioTranscriber: async () => { transcribed++; return lyrics; },
+        scoreTimer: async (audio, bpm) => { timedScores.push(bpm); return scoreTiming; },
         recoveryPlanner: async input => {
             planned.push(input);
             const own = approvedRecoveryContract(structuredClone(value), input.prompt);
@@ -145,6 +157,25 @@ test('a song request composes its soundtrack on the worker and then plans like a
         await lease(skit);
         assert.ok((await request(skit, 'plan')).body.contract_hash);
         assert.equal(songwriterCalls, before + 1, 'Only the possible song request asked the songwriter.');
+
+        // A dialogue-free edit is scored: no transcription, and its beat grid times the plan.
+        songwriterAnswer = 'score';
+        const edit = await submit('make a hype edit for meximutt, aura farming, no speech, fast cuts');
+        await lease(edit);
+        assert.deepEqual((await request(edit, 'plan')).body.compose_song, { caption: SCORE_CAPTION, lyrics: VIDEO_SCORE_LYRICS, seconds: 12 });
+        const transcriptions = transcribed;
+        const scored = await request(edit, 'soundtrack', { audio: readFileSync(songFile).toString('base64'), format: 'flac' });
+        assert.equal(scored.body.composed, true, JSON.stringify(scored.body));
+        assert.equal(scored.body.beats, scoreTiming.beats.length);
+        assert.equal(transcribed, transcriptions, 'A score has no vocals to transcribe.');
+        assert.deepEqual(timedScores, [150], 'The caption\'s tempo settles the beat search.');
+        const scoredRow = await row(edit);
+        assert.equal(scoredRow.source_audio_origin, 'composed');
+        assert.ok((await request(edit, 'plan')).body.contract_hash);
+        assert.deepEqual(planned.at(-1).sourceAudioLyrics, { words: [], lines: [], score: scoreTiming });
+        assert.match(planned.at(-1).options.plannerGuidance, /Meximutt persona guidance\.\nAn original instrumental score composed for this request/);
+        const scoredView = (await broker.views([scoredRow]))[0];
+        assert.deepEqual([scoredView.composed_song, scoredView.composed_score], [true, true]);
     } finally {
         broker.worker = null;
         await broker.stop();
