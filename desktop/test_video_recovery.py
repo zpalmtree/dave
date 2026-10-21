@@ -100,6 +100,26 @@ class RecoveryTests(unittest.TestCase):
             self.assertIn('natural lip and jaw articulation', human)
             self.assertNotIn('rigid mouthless face', human)
 
+    def test_multi_character_h3_cuts_keep_individual_identity(self):
+        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
+            self.skipTest('Run on installed desktop sources.')
+        from video_gen import compile_h3_prompt
+        segment = {'music': 'N/A', 'shots': [
+            {'visual': 'Mara, an older woman in red, meets Joel, a young man in blue.',
+             'camera': 'Wide', 'audio': 'Wind', 'duration_seconds': 4, 'dialogue': []},
+            {'visual': 'Cut to Joel transforming into a blue bird as Mara watches.',
+             'camera': 'Close-up', 'camera_transition': 'cut', 'audio': 'Wind',
+             'duration_seconds': 4, 'dialogue': []}]}
+        prompt = compile_h3_prompt(segment, True)
+        self.assertIn("each recurring character's own face", prompt)
+        self.assertIn('Characters absent from Picture 1 are distinct people', prompt)
+        self.assertIn('preserve intentional transformations', prompt)
+        self.assertIn(segment['shots'][1]['visual'], prompt)
+        self.assertNotIn('Every shot depicts the same subject', prompt)
+        text_only = compile_h3_prompt(segment, False)
+        self.assertIn('each recurring character matched to their own', text_only)
+        self.assertNotIn('Picture 1', text_only)
+
     def test_image_service_outage_defers_without_a_placeholder(self):
         self.exercise(image_outage=True)
 
@@ -217,7 +237,8 @@ class RecoveryTests(unittest.TestCase):
                 video_gen.generate_recovery_keyframe('http://server', {'prompt': 'A duck.', 'references': [str(portrait)],
                     'motion_contract': {'gaze_direction': 'left'}, 'aspect_image': str(portrait)}, 7, 60, 25)
             server, prompt, aspect, seed, _root, _timeout, references = generate.call_args.args
-            self.assertIn('Keep every person or character shown in the reference images recognizable', prompt)
+            self.assertIn('Keep the requested recurring characters recognizable', prompt)
+            self.assertIn("Follow each reference image's assigned role", prompt)
             self.assertIn('A duck.', prompt)
             self.assertNotIn('left', prompt, 'An incomplete motion contract is dropped instead of crashing.')
             self.assertEqual((aspect, seed, references), ('2:3', 7, [portrait]))
@@ -507,6 +528,14 @@ class RecoveryTests(unittest.TestCase):
                     self.assertFalse(any(operation == 'review' and body['kind'] == 'image' and body['segment_index'] == 0
                                          for operation, body in calls), 'The original portrait is never reviewed away.')
                 if continuation:
+                    openings = [body for operation, body in calls
+                                if operation == 'image' and body.get('segment_index') == 1]
+                    if authored_cut or reanchor:
+                        self.assertTrue(openings)
+                        self.assertTrue(openings[-1]['scene_reference'].startswith('data:image/jpeg;base64,'))
+                        self.assertEqual('identity_anchor' in openings[-1], not original,
+                                         'Original and generated identity anchors keep their separate roles.')
+                        self.assertTrue((root / 'worker_recovery/test-job/scene-1/previous-cast.png').is_file())
                     if not authored_cut:
                         self.assertEqual(state['scenes']['1']['image_source'], 'generated' if reanchor else 'continuation')
                         checks = [body for operation, body in calls if operation == 'continuity']

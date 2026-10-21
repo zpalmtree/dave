@@ -239,9 +239,29 @@ async def run_recovery_job(worker, job: dict) -> None:
             scene = checkpoint['scenes'].setdefault(str(index), {})
             # Original references never get replaced by a generated continuation.
             # A text-only job uses its first accepted opening as its permanent anchor.
-            identity_paths = source_paths or ([root / 'scene-0' / 'opening.png'] if index > 0 else [])
+            identity_paths = list(source_paths) or ([root / 'scene-0' / 'opening.png'] if index > 0 else [])
             identity_payload = ({'identity_anchor': data_image(identity_paths[0])}
                                 if index > 0 and not source_paths else {})
+            scene_reference = None
+
+            async def opening_references():
+                nonlocal scene_reference
+                if index == 0:
+                    return identity_payload
+                if scene_reference is None:
+                    previous = checkpoint['scenes'][str(index - 1)]
+                    if not previous.get('video_accepted'):
+                        raise RuntimeError('Cast continuity requires an accepted preceding scene.')
+                    # A portrait may contain only the lead, while another character first
+                    # appears during the video. Keep that cast available at the next cut.
+                    previous_path = Path(previous['video_path'])
+                    seconds = await asyncio.to_thread(duration, previous_path)
+                    context = scene_root / 'previous-cast.png'
+                    await asyncio.to_thread(media_command, ['-ss', str(max(0, seconds - .15)),
+                        '-i', str(previous_path), '-frames:v', '1', str(context)])
+                    scene_reference = data_image(context)
+                    identity_paths.append(context)  # Same ordered references for local image fallback.
+                return {**identity_payload, 'scene_reference': scene_reference}
             if (not scene.get('video_accepted') and render_budget_used(scene)
                     and not scene.get('pending_video') and not scene.get('render_interrupted')):
                 raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
@@ -325,7 +345,7 @@ async def run_recovery_job(worker, job: dict) -> None:
                         await save()
                         try:
                             value = await request('image', {'segment_index': index,
-                                'correction': scene.get('image_issues', []), **identity_payload})
+                                'correction': scene.get('image_issues', []), **(await opening_references())})
                             if value.get('local_image_required'):
                                 await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'], 'progress': None,
                                                    'stage': f'Composing scene {index + 1} opening locally'})

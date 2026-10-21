@@ -1,0 +1,318 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -5583,9 +5583,9 @@
+ 
+ def h3_first_frame_face_identity_instruction(has_dialogue: bool = True, mouthless: bool = False) -> str:
+     if mouthless:
+         return (
+-            "Picture 1 is the sole visual authority for every subject. Preserve the exact existing "
++            "For each subject visible in Picture 1, preserve that subject's own exact existing "
+             "head geometry, eye size and spacing, surface panels, clothing, and character design. "
+             "Subjects described as mouthless retain their rigid mouthless face throughout speech; "
+             "their voice comes from the established electronic speaker. Never add lips, teeth, a "
+             "nose, eyelids, or human facial anatomy absent from the reference. Convey emotion through "
+@@ -5599,9 +5599,9 @@
+         "directs, preserving the frame-zero lip, teeth, jaw, and chin proportions. "
+         "A resting mouth keeps its natural reference pose without invented speech articulation."
+     )
+     return (
+-        "Picture 1 is the sole visual authority for every face, overriding any generic emotion or "
++        "For each character visible in Picture 1, that picture defines their own face, overriding generic emotion or "
+         "genre shorthand later in the screenplay. Every later view depicts the same facial anatomy: "
+         "retain the exact frame-zero eye aperture, eye shape and spacing, iris and pupil scale, socket "
+         "placement, nose and nostril shape, cheek volume and contour, lip proportions, jaw width, and "
+         "chin silhouette. Blinks and squints reduce the visible eye aperture; each reopening returns "
+@@ -5621,9 +5621,9 @@
+         "Scripted non-speech actions and expressions may move the mouth and jaw while retaining "
+         "the frame-zero lip, teeth, jaw, and chin proportions."
+     )
+     return (
+-        "The same face from <Picture 1> retains its exact frame-zero eye aperture and spacing, iris "
++        "Each returning character visible in <Picture 1> retains their own frame-zero eye aperture and spacing, iris "
+         "and pupil scale, nose and nostril shape, cheek contour, lip proportions, jaw width, and chin "
+         f"silhouette. {mouth_anchor} This shot keeps the rendering medium, surface texture, and "
+         "lighting realism of <Picture 1>."
+     )
+@@ -5702,9 +5702,9 @@
+                     f"{h3_first_frame_face_identity_instruction(vocal_motion, mouthless)}"
+                 )
+             elif not continuous:
+                 image_anchor = (
+-                    "After the cut, this remains the same subject from <Picture 1>. "
++                    "After the cut, keep each returning character matched to their own appearance in <Picture 1>. "
+                     f"{h3_first_frame_face_identity_reanchor(vocal_motion, mouthless)}"
+                 )
+             else:
+                 image_anchor = ""
+@@ -5744,8 +5744,20 @@
+     if mouthless:
+         description = [value.replace("every speaker keeps their mouth closed", "every speaker remains vocally silent")
+                        .replace("speakers keep their mouths closed outside the dialogue", "the electronic voice is silent outside the dialogue")
+                        for value in description]
++    description.insert(0,
++        "Cast continuity is per character, not per camera shot. Keep each recurring character's "
++        "own face, apparent age, gender presentation, hair, body proportions, clothing and voice "
++        "through cuts, except for explicitly scripted changes. Match names and actions to the "
++        "correct individual; never transfer one character's face or voice to another. A character "
++        "introduced after the opening retains their own first established appearance in later "
++        "views. Characters absent from Picture 1 are distinct people, not copies of its subject. "
++        "Show only the cast required by the current shot, and preserve intentional transformations."
++        if has_first_frame else
++        "Keep each recurring character matched to their own first established appearance and voice "
++        "through cuts. Do not exchange faces, ages, gender presentation, clothing or speaker roles "
++        "between characters. Preserve explicitly scripted changes and transformations.")
+     parts.append("integrated_multimodal_description: " + " ".join(description))
+     soundscape = " ".join(str(shot["audio"]).strip() for shot in segment["shots"])
+     silence_marker = re.sub(r"[\s.!]+", " ", soundscape).strip().casefold()
+     if silence_marker in {"silence", "silent", "none", "n/a", "na", "no audible sound"}:
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -377,9 +377,11 @@
+         self.pending_index = None
+ 
+     def cache_key(self, index, identity):
+         return {'contract_hash': self.contract_hash, 'revision': self.revision,
+-                'segment_index': index, 'identity_anchor': identity.get('identity_anchor')}
++                'segment_index': index, 'identity_anchor': identity.get('identity_anchor'),
++                'scene_reference_sha256': hashlib.sha256(identity['scene_reference'].encode()).hexdigest()
++                    if identity.get('scene_reference') else None}
+ 
+     def cached(self, index, identity):
+         path = self.root / f'scene-{index}' / 'prefetched-opening.json'
+         try:
+@@ -404,8 +406,11 @@
+ 
+     def start(self, index, segments, scenes, identity):
+         if (self.pending is not None or index >= len(segments)
+                 or segments[index].get('transition') not in {'cut', 'dissolve'}):
++            return
++        # Returning cast needs the preceding accepted video, not an early portrait-only prefetch.
++        if index > 0 and not identity.get('scene_reference'):
+             return
+         scene = scenes.get(str(index), {})
+         if scene.get('image_accepted') or scene.get('pending_image') or scene.get('image_attempts'):
+             return
+@@ -520,11 +525,31 @@
+             if scene.get('opening_identity_stopped'):
+                 raise RecoveryLimitError(scene['opening_identity_stopped'])
+             # Original references never get replaced by a generated continuation.
+             # A text-only job uses its first accepted opening as its permanent anchor.
+-            identity_paths = source_paths or ([root / 'scene-0' / 'opening.png'] if index > 0 else [])
++            identity_paths = list(source_paths) or ([root / 'scene-0' / 'opening.png'] if index > 0 else [])
+             identity_payload = ({'identity_anchor': data_image(identity_paths[0])}
+                                 if index > 0 and not source_paths else {})
++            scene_reference = None
++
++            async def opening_references():
++                nonlocal scene_reference
++                if index == 0:
++                    return identity_payload
++                if scene_reference is None:
++                    previous = checkpoint['scenes'][str(index - 1)]
++                    if not previous.get('video_accepted'):
++                        raise RuntimeError('Cast continuity requires an accepted preceding scene.')
++                    # A portrait may contain only the lead, while another character first
++                    # appears during the video. Keep that cast available at the next cut.
++                    previous_path = Path(previous['video_path'])
++                    seconds = await asyncio.to_thread(duration, previous_path)
++                    context = scene_root / 'previous-cast.png'
++                    await asyncio.to_thread(media_command, ['-ss', str(max(0, seconds - .15)),
++                        '-i', str(previous_path), '-frames:v', '1', str(context)])
++                    scene_reference = data_image(context)
++                    identity_paths.append(context)  # Same ordered references for local image fallback.
++                return {**identity_payload, 'scene_reference': scene_reference}
+             if (not scene.get('video_accepted') and render_budget_used(scene)
+                     and not scene.get('pending_video') and not scene.get('render_interrupted')):
+                 raise RecoveryLimitError(f'Scene {index + 1} exhausted {MAX_RENDER_ATTEMPTS} render attempts. '
+                                          + '; '.join(scene.get('video_issues', [])))
+@@ -620,17 +645,18 @@
+                     if not pending:
+                         scene['image_attempts'] = scene.get('image_attempts', 0) + 1
+                         await save()
+                         try:
++                            references = await opening_references()
+                             if scene.get('opening_identity_repair'):
+                                 # Reuse the local directive: no repeat cloud provider cascade.
+                                 value = copy.deepcopy(scene['local_opening'])
+                                 value['keyframe']['prompt'] += ' Identity correction: ' + '; '.join(scene.get('image_issues', []))
+                             elif scene['image_attempts'] == 1 and not scene.get('image_issues'):
+-                                value = await prefetch.take(index, identity_payload)
++                                value = await prefetch.take(index, references)
+                             else:
+                                 value = await request('image', {'segment_index': index,
+-                                    'correction': scene.get('image_issues', []), **identity_payload})
++                                    'correction': scene.get('image_issues', []), **references})
+                             if value.get('local_image_required'):
+                                 scene['local_opening'] = value
+                                 await save()
+                                 await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'], 'progress': None,
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -100,9 +100,9 @@
+ 
+     def test_authored_cut_gets_a_new_opening_instead_of_inheriting_a_closeup_of_other_subjects(self):
+         self.exercise(original=True, continuation=True, authored_cut=True)
+ 
+-    def test_next_cut_opening_is_requested_before_current_render_finishes(self):
++    def test_next_cut_opening_waits_for_accepted_cast_reference(self):
+         self.exercise(original=True, continuation=True, slow_render=True, prefetch_cut=True)
+ 
+     def test_gpu_reservation_is_idempotent_per_attempt_but_distinct_across_attempts(self):
+         if not (Path(__file__).resolve().parent / 'video_worker.py').is_file():
+@@ -183,8 +183,41 @@
+             segment['shots'] = [{**speaking_shot, 'visual': visual}]
+             human = compile_h3_prompt(segment, True)
+             self.assertIn('natural lip and jaw articulation', human)
+             self.assertNotIn('rigid mouthless face', human)
++
++    def test_opening_cache_is_bound_to_cast_reference(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            cache = recovery.OpeningPrefetch(Path(temporary), 'contract', 0, None)
++            original = {'identity_anchor': 'original'}
++            self.assertNotEqual(cache.cache_key(1, original), cache.cache_key(1, {**original, 'scene_reference': 'first cast'}))
++            self.assertNotEqual(cache.cache_key(1, {**original, 'scene_reference': 'first cast'}),
++                                cache.cache_key(1, {**original, 'scene_reference': 'changed cast'}))
++            path = Path(temporary) / 'scene-1' / 'prefetched-opening.json'
++            path.parent.mkdir()
++            path.write_text(json.dumps({'key': {'contract_hash': 'contract', 'revision': 0,
++                'segment_index': 1, 'identity_anchor': 'original'}, 'response': {'image': 'old'}}))
++            self.assertIsNone(cache.cached(1, {**original, 'scene_reference': 'first cast'}))
++
++    def test_multi_character_h3_cuts_keep_individual_identity(self):
++        if not (Path(__file__).resolve().parent / 'video_gen.py').is_file():
++            self.skipTest('Run on installed desktop sources.')
++        from video_gen import compile_h3_prompt
++        segment = {'music': 'N/A', 'shots': [
++            {'visual': 'Mara, an older woman in red, meets Joel, a young man in blue.',
++             'camera': 'Wide', 'audio': 'Wind', 'duration_seconds': 4, 'dialogue': []},
++            {'visual': 'Cut to Joel transforming into a blue bird as Mara watches.',
++             'camera': 'Close-up', 'camera_transition': 'cut', 'audio': 'Wind',
++             'duration_seconds': 4, 'dialogue': []}]}
++        prompt = compile_h3_prompt(segment, True)
++        self.assertIn("each recurring character's own face", prompt)
++        self.assertIn('Characters absent from Picture 1 are distinct people', prompt)
++        self.assertIn('preserve intentional transformations', prompt)
++        self.assertIn(segment['shots'][1]['visual'], prompt)
++        self.assertNotIn('Every shot depicts the same subject', prompt)
++        text_only = compile_h3_prompt(segment, False)
++        self.assertIn('each recurring character matched to their own', text_only)
++        self.assertNotIn('Picture 1', text_only)
+ 
+     def test_image_service_outage_defers_without_a_placeholder(self):
+         self.exercise(image_outage=True)
+ 
+@@ -604,11 +637,11 @@
+ 
+             outcomes = iter([1] * render_failures + [0] * 4)
+             async def render(_command):
+                 if slow_render: await asyncio.sleep(0.05)
+-                if prefetch_cut:
+-                    self.assertTrue(any(operation == 'image' and body['segment_index'] == 1 for operation, body in calls),
+-                                    'The next opening must be requested before this render completes.')
++                if prefetch_cut and not state.get('scenes', {}).get('0', {}).get('video_accepted'):
++                    self.assertFalse(any(operation == 'image' and body['segment_index'] == 1 for operation, body in calls),
++                                     'Do not prefetch a cast-blind opening before the preceding video is accepted.')
+                 return next(outcomes)
+             worker = types.SimpleNamespace(broker_url='wss://test/v1/worker', http_session=Session(),
+                 cancel_reason=None, journal={}, worker_headers=lambda: {}, begin_metrics=mock.Mock(),
+                 job_metrics={'output': {}, 'environment': {}, 'spans': []}, warm_model=None,
+@@ -693,8 +726,16 @@
+                     self.assertEqual(sum(operation == 'image' for operation, _ in calls), int(authored_cut or reanchor or prefetch_cut))
+                     self.assertFalse(any(operation == 'review' and body['kind'] == 'image' and body['segment_index'] == 0
+                                          for operation, body in calls), 'The original portrait is never reviewed away.')
+                 if continuation:
++                    openings = [body for operation, body in calls
++                                if operation == 'image' and body.get('segment_index') == 1]
++                    if authored_cut or reanchor or prefetch_cut:
++                        self.assertTrue(openings)
++                        self.assertTrue(openings[-1]['scene_reference'].startswith('data:image/jpeg;base64,'))
++                        self.assertEqual('identity_anchor' in openings[-1], not original,
++                                         'Original and generated identity anchors keep their separate roles.')
++                        self.assertTrue((root / 'worker_recovery/test-job/scene-1/previous-cast.png').is_file())
+                     if not continuity_outage:
+                         self.assertEqual(len(reservation_scopes), 2 if stalled_preparation else 1,
+                                          'Only stalled preparation should split the GPU lease.')
+                     if not authored_cut and not prefetch_cut:
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -3395,9 +3395,9 @@
+         )
+         self.assertIn("<Picture 1>", prepared[1]["prompt"])
+         self.assertEqual(prepared[1]["prompt"], static[1]["prompt"])
+         self.assertEqual(prepared[1]["fallback_prompt"], source_fallback[1]["prompt"])
+-        self.assertIn("sole visual authority", prepared[1]["fallback_prompt"])
++        self.assertIn("that picture defines their own face", prepared[1]["fallback_prompt"])
+ 
+     def test_source_image_conditions_every_h3_segment_without_derived_frames(self):
+         plan = sample_plan()
+         second = json.loads(json.dumps(plan["segments"][0]))
+@@ -3458,9 +3458,9 @@
+         self.assertIn("<Picture 1>", deferred[1]["prompt"])
+         # When that frame never arrives, the cut renders T2V rather than replaying
+         # the infographic with a face-identity contract it cannot satisfy.
+         self.assertNotIn("<Picture 1>", deferred[1]["fallback_prompt"])
+-        self.assertNotIn("sole visual authority", deferred[1]["fallback_prompt"])
++        self.assertNotIn("that picture defines their own face", deferred[1]["fallback_prompt"])
+ 
+         undeferred = video_gen.prepare_model_segments(
+             "http://127.0.0.1:8188",
+             plan,
+@@ -3484,9 +3484,9 @@
+             30.0,
+             {2},
+         )
+         self.assertIn("<Picture 1>", photo[1]["fallback_prompt"])
+-        self.assertIn("sole visual authority", photo[1]["fallback_prompt"])
++        self.assertIn("that picture defines their own face", photo[1]["fallback_prompt"])
+ 
+     def test_deferred_keyframe_wait_accepts_file_or_failure_marker(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             frame = Path(temporary) / "segment-2.png"
+@@ -3801,12 +3801,12 @@
+         self.assertTrue(prompt.startswith(
+             "For the target video, at 0.00 seconds into the target video, "
+             "<Picture 1> (from [Shot 1]) is fully referenced.\n\n"
+         ))
+-        self.assertIn("Picture 1 is the sole visual authority for every face", prompt)
++        self.assertIn("For each character visible in Picture 1, that picture defines their own face", prompt)
+         self.assertIn("nose and nostril shape, cheek volume and contour", prompt)
+         self.assertIn("Speech uses natural lip and jaw articulation", prompt)
+-        self.assertIn("the camera cuts. After the cut, this remains the same subject from <Picture 1>", prompt)
++        self.assertIn("the camera cuts. After the cut, keep each returning character matched to their own appearance in <Picture 1>", prompt)
+         self.assertNotIn("cuts to After", prompt)
+         self.assertIn("keeps the rendering medium of Picture 1", prompt)
+         self.assertIn("A cut to a new place or angle keeps that same rendering medium", prompt)
+         # H3 has no negative prompt, so naming a failure mode conditions toward it.
+@@ -3814,9 +3814,9 @@
+             self.assertNotIn(primed, prompt)
+         self.assertIn("This shot keeps the rendering medium, surface texture, and lighting realism", prompt)
+         self.assertNotIn("genre styling", prompt)
+         self.assertNotIn("changes motion, editing, color, and rendering", prompt)
+-        self.assertEqual(prompt.count("Picture 1 is the sole visual authority for every face"), 1)
++        self.assertEqual(prompt.count("For each character visible in Picture 1, that picture defines their own face"), 1)
+ 
+     def test_motion_contract_fields_end_as_sentences(self):
+         text = video_gen.motion_contract_text({
+             "subject_orientation": "Facing the camera",
+@@ -3843,9 +3843,9 @@
+ 
+     def test_h3_without_first_frame_does_not_add_face_identity_lock(self):
+         segment = sample_plan("Hello.")["segments"][0]
+         prompt = video_gen.compile_h3_prompt(segment, False)
+-        self.assertNotIn("Picture 1 is the sole visual authority for every face", prompt)
++        self.assertNotIn("For each character visible in Picture 1, that picture defines their own face", prompt)
+ 
+     def test_literal_h3_first_frame_also_locks_eye_aperture(self):
+         plan = sample_plan()
+         plan["literal"] = True
+@@ -3859,9 +3859,9 @@
+             False,
+             10.0,
+         )
+         self.assertIn(
+-            "Picture 1 is the sole visual authority for every face",
++            "For each character visible in Picture 1, that picture defines their own face",
+             prepared[0]["prompt"],
+         )
+ 
+     def test_h3_dialogue_lead_in_can_be_disabled_for_ab_or_rollback(self):

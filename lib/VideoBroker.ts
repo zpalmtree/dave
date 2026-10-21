@@ -10,7 +10,7 @@ import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRang
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_MAX_BYTES, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
-import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole,
+import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole, recoverySceneReferenceRole,
     validateContinuityDecision, validateOpeningIdentityDecision } from './VideoCharacterContinuity.js';
 import { createHash, randomUUID } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
@@ -5238,17 +5238,28 @@ export class VideoBroker {
                             + ' Stage the earliest recognizable instant of their return in this scene, preserving the planned setting and requested transformations.'
                             + ' The original background and pose are not this new scene. Do not invent a replacement face.';
                     }
-                    const identitySources = prepared.contract.use_source_images && sources.length ? sources
+                    const identitySources = prepared.contract.use_source_images && sources.length ? [...sources]
                         : index > 0 && body.identity_anchor
                             ? [decodeContinuityImage(body.identity_anchor)] : [];
                     const referenceRoles = identitySources.map((_, position) => recoveryReferenceRole(position));
+                    const originalReferenceCount = identitySources.length;
+                    // Older workers omit this optional reference. Never treat a generated
+                    // scene as a replacement for the permanent original character image.
+                    if (index > 0 && body.scene_reference !== undefined) {
+                        if (!state.checkpoint?.scenes?.[index - 1]?.video_accepted) {
+                            throw new Error('Scene reference requires an accepted preceding video.');
+                        }
+                        referenceRoles.push(recoverySceneReferenceRole(identitySources.length));
+                        identitySources.push(decodeContinuityImage(body.scene_reference));
+                    }
                     if (referenceRoles.length) {
                         keyframe.prompt += ` Reference roles: ${referenceRoles.join(' ')} Current cast and permitted changes: `
                             + String(prepared.plan.continuity_bible || '').slice(0, 3000);
                     }
                     const references: VideoKeyframeReference[] = identitySources.map((source, sourceIndex) => ({
-                        label: sourceIndex ? 'Attached scene context' : 'Original identity',
-                        kind: sourceIndex ? 'object' : 'identity',
+                        label: sourceIndex >= originalReferenceCount ? 'Returning supporting cast from preceding scene'
+                            : sourceIndex ? 'Attached scene context' : 'Original identity',
+                        kind: sourceIndex >= originalReferenceCount ? 'character' : sourceIndex ? 'object' : 'identity',
                         visualFactsToPreserve: referenceRoles[sourceIndex],
                         bytes: source.data, mimeType: source.mimeType, sourceUrl: 'source:approved', contextUrl: 'source:approved',
                     }));
