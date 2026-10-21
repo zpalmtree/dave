@@ -3,6 +3,7 @@ import { VIDEO_LYRIC_VISUAL_INSTRUCTIONS } from './VideoSourceAudio.js';
 import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA } from './VideoAudioContinuity.js';
 import { createHash } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
+import { anthropicPlannerImage } from './VideoPlannerImage.js';
 
 import { AI_MODELS } from './AIModels.js';
 import { VIDEO_TEXT_MODELS, videoTextModelCapabilities } from './VideoModelCapabilities.js';
@@ -2160,22 +2161,20 @@ async function requestSolResponse(
     throw lastError instanceof Error ? lastError : new Error(`${providerName} request failed.`);
 }
 
-function anthropicPlannerMessages(input: any): Array<{ role: 'user' | 'assistant'; content: any[] }> {
+async function anthropicPlannerMessages(input: any): Promise<Array<{ role: 'user' | 'assistant'; content: any[] }>> {
     const messages = typeof input === 'string' ? [{ role: 'user', content: [{ type: 'input_text', text: input }] }] : input;
     if (!Array.isArray(messages)) throw new Error('Invalid Anthropic planner input.');
-    return messages.map(message => ({
-        role: message.role === 'assistant' ? 'assistant' as const : 'user' as const,
-        content: (Array.isArray(message.content) ? message.content : [{ type: 'input_text', text: message.content }])
-            .map((part: any) => {
-                if (part.type === 'input_text') return { type: 'text', text: String(part.text || '') };
-                if (part.type === 'input_image') {
-                    const image = /^data:(image\/(?:jpeg|png|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(part.image_url || ''));
-                    if (!image) throw new Error('Unsupported Anthropic planner image.');
-                    return { type: 'image', source: { type: 'base64', media_type: image[1], data: image[2] } };
-                }
-                throw new Error(`Unsupported Anthropic planner content: ${part.type}.`);
-            }),
-    }));
+    const converted: Array<{ role: 'user' | 'assistant'; content: any[] }> = [];
+    for (const message of messages) {
+        const content = [];
+        for (const part of Array.isArray(message.content) ? message.content : [{ type: 'input_text', text: message.content }]) {
+            if (part.type === 'input_text') content.push({ type: 'text', text: String(part.text || '') });
+            else if (part.type === 'input_image') content.push(await anthropicPlannerImage(String(part.image_url || '')));
+            else throw new Error(`Unsupported Anthropic planner content: ${part.type}.`);
+        }
+        converted.push({ role: message.role === 'assistant' ? 'assistant' : 'user', content });
+    }
+    return converted;
 }
 
 export function anthropicCompatibleResponseSchema(schema: Record<string, any>): Record<string, any> {
@@ -2201,6 +2200,7 @@ async function requestAnthropicPlannerResponse(
     if (options.serviceTier && options.serviceTier !== 'default') {
         throw new Error('Anthropic video planning supports the default service tier only.');
     }
+    const messages = await anthropicPlannerMessages(payload.input);
     const plannerModel = String(payload.model);
     const maxAttempts = options.maxRequestAttempts || 2;
     let lastError: unknown;
@@ -2228,7 +2228,7 @@ async function requestAnthropicPlannerResponse(
                     // Planner calls are usually more than five minutes apart, so a
                     // cache write (1.25x input) is almost never read back.
                     system: [{ type: 'text', text: String(payload.instructions || '') }],
-                    messages: anthropicPlannerMessages(payload.input),
+                    messages,
                     output_config: {
                         effort: String(payload.reasoning?.effort || 'medium'),
                         ...(payload.text?.format?.schema ? { format: {
