@@ -5,21 +5,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VideoGenerationService } from '../dist/VideoGeneration.js';
 
-test('regeneration replaces the original message attachment and retries lookup outages without posting duplicates', async () => {
+test('a regenerated video is posted as a new reply, leaving the earlier delivery alone, without duplicates', async () => {
     const service = new VideoGenerationService({ user: { id: 'bot' } });
     const job = { id: 'd8572423-test', model: 'minimax', prompt: 'A duck waves.', result_path: '/tmp/replacement.mp4',
+        channel_id: 'channel', status_message_id: '100', command_message_id: '50',
         delivery_message_id: '123', delivery_revision: 1, delivered_revision: 0 };
-    let edited;
-    const existing = { edit: async payload => { edited = payload; return existing; } };
-    const channel = { isTextBased: () => true, messages: { fetch: async id => { assert.equal(id, '123'); return existing; } },
-        send: () => assert.fail('Replacement must edit the existing message') };
-    assert.equal(await service.postDelivery(job, { channel }), existing);
-    assert.deepEqual(edited.attachments, []);
-    assert.equal(edited.files[0].attachment, '/tmp/replacement.mp4');
-    assert.deepEqual(edited.allowedMentions, { parse: [] });
-    edited = null;
-    await service.postDelivery({ ...job, delivered_revision: 1 }, { channel });
-    assert.equal(edited, null);
+    const earlier = { id: '123', content: 'Minimax video **d8572423** is ready.', author: { id: 'bot' },
+        edit: () => assert.fail('The earlier delivery must keep its video') };
+    let reply = null;
+    const command = { reply: async payload => {
+        reply = { id: '200', content: payload.content, author: { id: 'bot' }, payload };
+        return reply;
+    } };
+    const channel = { isTextBased: () => true, messages: { fetch: async input => {
+        if (input === '123') return earlier;
+        if (input === '200' && reply) return reply;
+        if (input === '50') return command;
+        assert.deepEqual(input, { limit: 100 });
+        return { find: predicate => [earlier, reply].filter(Boolean).find(predicate) };
+    } }, send: () => assert.fail('The new delivery replies to the command') };
+    assert.equal(await service.postDelivery(job, { channel }), reply);
+    assert.equal(reply.payload.files[0].attachment, '/tmp/replacement.mp4');
+    const first = reply;
+    assert.equal(await service.postDelivery(job, { channel }), first, 'A lost acknowledgement does not post twice.');
+    assert.equal(await service.postDelivery({ ...job, delivery_message_id: '200', delivered_revision: 1 }, { channel }), first);
     channel.messages.fetch = async () => { throw new Error('temporary Discord outage'); };
     await assert.rejects(service.postDelivery(job, { channel }), /temporary Discord outage/);
 });
