@@ -1,0 +1,409 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -5745,19 +5745,20 @@
+         description = [value.replace("every speaker keeps their mouth closed", "every speaker remains vocally silent")
+                        .replace("speakers keep their mouths closed outside the dialogue", "the electronic voice is silent outside the dialogue")
+                        for value in description]
+     parts.append("integrated_multimodal_description: " + " ".join(description))
+-    soundscape = " ".join(str(shot["audio"]).strip() for shot in segment["shots"])
+-    silence_marker = re.sub(r"[\s.!]+", " ", soundscape).strip().casefold()
+-    if silence_marker in {"silence", "silent", "none", "n/a", "na", "no audible sound"}:
++    silence_markers = {'silence', 'silent', 'none', 'n/a', 'na', 'no audible sound'}
++    silent = all(re.sub(r"[\s.!]+", " ", str(shot['audio'])).strip().casefold() in silence_markers
++                 for shot in segment['shots'])
++    if silent:
+         parts.append("overall_soundscape: Silence.")
+     else:
+         parts.append(
+-            "overall_soundscape: Build a coherent chronological production mix. Synchronize each "
+-            "foreground effect precisely to its visible physical cause or, for an unseen force such as wind, "
+-            "to the visible motion it produces, preserve realistic material, "
+-            "distance, room acoustics and stereo movement, keep the continuous environmental bed below "
+-            f"the action, and let major transients decay naturally. {soundscape}"
++            "overall_soundscape: Follow the timed sounds specified once in the shots. "
++            "Use physically proportionate levels, distance and room acoustics. Small or distant "
++            "movements may be barely audible; reserve prominent transients for actions that warrant "
++            "them. Keep dialogue intelligible, maintain the environmental bed within a location, "
++            "and preserve deliberate quiet. Do not amplify incidental foley to fill silence."
+         )
+     parts.append(f"non_diegetic_music: {normalized_music(segment['music'])}")
+     return "\n\n".join(parts)
+ 
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -3435,8 +3435,10 @@
+         output: Path,
+         job_id: str,
+         duration_seconds: float | None = None,
+         preserve_audio: bool = False,
++        sound_mix: dict | None = None,
++        background_score: Path | None = None,
+     ) -> Path:
+         ffmpeg = shutil.which("ffmpeg")
+         if not ffmpeg:
+             raise RuntimeError("FFmpeg is required to prepare a Discord-compatible delivery copy.")
+@@ -3453,8 +3455,19 @@
+             "worker",
+             "audio_loudness_normalization",
+             time.monotonic() - normalization_started,
+         )
++        if sound_mix and not preserve_audio:
++            from video_sound_mix import mix_video
++            mix_started = time.monotonic()
++            try:
++                from video_recovery import duration as media_duration
++                normalized = await asyncio.to_thread(mix_video, normalized,
++                    normalized.with_name(normalized.stem + '.sound-mix.mp4'), sound_mix,
++                    duration_seconds or await asyncio.to_thread(media_duration, normalized), background_score)
++            except Exception as error:
++                print(f"WARNING: Sound mix unavailable; retaining original audio: {error}", flush=True)
++            self.add_span("worker", "sound_mix", time.monotonic() - mix_started)
+         compatible = await self.delivery_video_is_compatible(normalized)
+         delivery_limit = job_delivery_limit_bytes(self.current_job or {})
+         delivery_target = int(delivery_limit * DELIVERY_SIZE_SAFETY)
+         if compatible and normalized.stat().st_size <= delivery_target:
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -704,8 +704,10 @@
+                     if render_budget_used(scene):
+                         break
+                     one = copy.deepcopy(plan)
+                     one['segments'] = [copy.deepcopy(segment)]
++                    if plan.get('sound_mix', {}).get('music') == 'instrumental' and not song:
++                        one['segments'][0]['music'] = 'N/A'
+                     one['segments'][0]['transition'] = 'start'
+                     identity_description = (scene.get('continuity') or {}).get('identity_description', '')
+                     if identity_description:
+                         for shot in one['segments'][0]['shots']:
+@@ -821,9 +823,13 @@
+         if song:
+             from video_source_audio import mux_original_song
+             final = await asyncio.to_thread(mux_original_song, ffmpeg(), final, song, root / 'song-final.mp4',
+                 0.0, int(plan['source_audio']['output_frames']))
+-        delivery = await worker.prepare_delivery(final, job['id'], duration(final))
++        from video_sound_mix import prepare_score
++        policy, background = await prepare_score(worker, job, plan, root, duration(final))
++        mix_options = ({'sound_mix': policy, 'background_score': background}
++                       if background or policy['effects'] != 'preserve' else {})
++        delivery = await worker.prepare_delivery(final, job['id'], duration(final), **mix_options)
+         delivery_duration = await asyncio.to_thread(duration, delivery)
+         await request('quality', {'format': checkpoint['format'], 'result_sha256': digest(delivery), 'artifacts': artifacts})
+         await worker.send({'type': 'event', 'event': 'uploading', 'job_id': job['id']})
+         upload_started = time.monotonic()
+--- a/test_video_gen.py
++++ b/test_video_gen.py
+@@ -3914,12 +3914,12 @@
+     def test_h3_builds_a_prioritized_physical_mix_and_normalizes_no_music(self):
+         segment = sample_plan(audio="Close leather footfalls strike wet concrete")['segments'][0]
+         segment["music"] = "None."
+         prompt = video_gen.compile_h3_prompt(segment, False)
+-        self.assertIn("coherent chronological production mix", prompt)
+-        self.assertIn("realistic material, distance, room acoustics", prompt)
+-        self.assertIn("for an unseen force such as wind, to the visible motion it produces", prompt)
+-        self.assertIn("Close leather footfalls strike wet concrete", prompt)
++        self.assertIn("physically proportionate levels, distance and room acoustics", prompt)
++        self.assertIn("Small or distant movements may be barely audible", prompt)
++        self.assertIn("preserve deliberate quiet", prompt)
++        self.assertEqual(prompt.count("Close leather footfalls strike wet concrete"), 1)
+         self.assertIn("non_diegetic_music: N/A", prompt)
+ 
+     def test_ltx_explicitly_suppresses_unrequested_music(self):
+         segment = sample_plan()["segments"][0]
+--- /dev/null
++++ b/video_sound_mix.py
+@@ -0,0 +1,170 @@
++"""A continuous, ducked instrumental bed; original dialogue/effects stay in the mix.
++
++CPU mixing only. The recovery worker separately admits optional Music3 generation
++through GPUq. Source-song and source-video edits bypass this module.
++"""
++from __future__ import annotations
++import asyncio
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import shutil
++import subprocess
++
++
++def enabled():
++    return os.environ.get('VIDEO_SOUND_MIX', '1').lower() not in {'0', 'false', 'no', 'off'}
++
++
++def directive(plan, source_audio=False):
++    value = plan.get('sound_mix') or {}
++    if source_audio or not enabled():
++        return {'music': 'none', 'effects': 'preserve', 'caption': ''}
++    music = value.get('music', 'none')
++    effects = value.get('effects', 'preserve')
++    caption = str(value.get('caption', '')).strip()[:2000]
++    if music not in {'none', 'instrumental'} or effects not in {'preserve', 'soften_transients'}:
++        raise ValueError('Invalid sound mix policy')
++    if music == 'instrumental' and len(caption) < 20:
++        raise ValueError('Missing instrumental description')
++    if any(shot.get('dialogue') for segment in plan.get('segments', []) for shot in segment.get('shots', [])):
++        effects = 'preserve'
++    return {'music': music, 'effects': effects, 'caption': caption}
++
++
++def media(command):
++    ffmpeg = shutil.which('ffmpeg')
++    if not ffmpeg:
++        raise RuntimeError('FFmpeg is required for sound mixing')
++    return subprocess.run([ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
++                           '-threads', '2', '-filter_complex_threads', '2', *command],
++                          capture_output=True, check=True, timeout=180,
++                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
++
++
++def continuous_bed(source: Path, output: Path, seconds: float):
++    """Fit one normalized performance to the actual timeline with overlapping loops.
++
++    Loop only if Music3 returned too little audio; never restart at scene cuts.
++    Equal-power overlaps and whole-video fades avoid abrupt loop endpoints.
++    """
++    import numpy as np
++    if not math.isfinite(seconds) or not 0 < seconds <= 600:
++        raise ValueError('Invalid mix duration')
++    rate = 48000
++    pcm = media(['-i', str(source), '-t', '120', '-vn', '-af', 'loudnorm=I=-30:TP=-3:LRA=7',
++                 '-ar', str(rate), '-ac', '2', '-f', 'f32le', 'pipe:1']).stdout
++    audio = np.frombuffer(pcm, dtype='<f4').reshape(-1, 2).copy()
++    if len(audio) < rate or not np.isfinite(audio).all():
++        raise ValueError('Music bed is invalid or too short')
++    frames = round(seconds * rate)
++    overlap = min(round(.75 * rate), len(audio) // 4)
++    result = audio.copy()
++    curve = np.linspace(0, math.pi / 2, overlap, dtype=np.float32)[:, None]
++    while len(result) < frames:
++        seam = result[-overlap:] * np.cos(curve) + audio[:overlap] * np.sin(curve)
++        result = np.concatenate((result[:-overlap], seam, audio[overlap:]))
++    result = result[:frames].copy()
++    fade = min(round(.6 * rate), frames // 2)
++    result[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)[:, None]
++    result[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)[:, None]
++    # Floating-point WAV keeps the measured bed level intact.
++    raw = output.with_suffix('.f32')
++    try:
++        raw.write_bytes(result.astype('<f4').tobytes())
++        media(['-f', 'f32le', '-ar', str(rate), '-ac', '2', '-i', str(raw), '-c:a', 'pcm_f32le', str(output)])
++    finally:
++        raw.unlink(missing_ok=True)
++
++
++def mix_video(source: Path, output: Path, policy: dict, seconds: float, score: Path | None = None) -> Path:
++    """Stream-copy video; preserve dry audio underneath a level-controlled score."""
++    if not math.isfinite(seconds) or not 0 < seconds <= 600:
++        raise ValueError('Invalid mix duration')
++    soft = policy.get('effects') == 'soften_transients'
++    if not score and not soft:
++        return source
++    # No makeup gain: quiet detail stays quiet. This acts on the complete mix,
++    # so directive() excludes dialogue and externally supplied soundtracks.
++    dry = ('acompressor=threshold=0.126:ratio=3:attack=3:release=120:makeup=1:knee=2.828:detection=peak'
++           if soft else 'anull')
++    bed = output.with_suffix('.bed.wav')
++    temporary = output.with_name(output.stem + '.partial.mp4')
++    inputs = ['-i', str(source)]
++    graph = f'[0:a]aformat=sample_rates=48000:channel_layouts=stereo,apad=pad_dur=0.5,{dry}[dry];'
++    try:
++        if score:
++            continuous_bed(score, bed, seconds)
++            inputs += ['-i', str(bed)]
++            graph += ('[dry]asplit=2[original][key];'
++                      '[1:a]apad=pad_dur=0.5[bed];[bed][key]sidechaincompress=threshold=0.04:ratio=6:attack=20:release=350:makeup=1[ducked];'
++                      '[original][ducked]amix=inputs=2:duration=first:normalize=0[mixed];')
++        else:
++            graph += '[dry]anull[mixed];'
++        graph += f'[mixed]alimiter=limit=0.95:level=false:latency=true,atrim=duration={seconds:.6f},asetpts=PTS-STARTPTS[out]'
++        media([*inputs, '-filter_complex', graph, '-map', '0:v:0', '-map', '[out]',
++               '-map_metadata', '0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
++               '-movflags', '+faststart+use_metadata_tags', str(temporary)])
++        temporary.replace(output)
++        return output
++    finally:
++        temporary.unlink(missing_ok=True)
++        bed.unlink(missing_ok=True)
++
++
++async def prepare_score(worker, job, plan, root: Path, seconds: float):
++    """One admitted composition per spec; reuse it on upload/recovery retries."""
++    policy = directive(plan, bool(job.get('has_source_audio') or job.get('has_source_video')))
++    if policy['music'] != 'instrumental':
++        return policy, None
++    from video_worker import SCRIPT_DIR, console_python_executable, stable_job_seed, atomic_json
++    from video_recovery import run_local_step
++    spec = {'caption': 'Instrumental background score, no singing or spoken words. ' + policy['caption'],
++            'lyrics': '[Instrumental]', 'seconds': min(60, max(8, seconds + 2)),
++            'seed': stable_job_seed(job['id']) % (2 ** 32)}
++    key = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
++    score, receipt, spec_path = (root / f'background-{key}{suffix}' for suffix in ('.flac', '.json', '-spec.json'))
++    if receipt.exists():
++        saved = json.loads(receipt.read_text(encoding='utf-8'))
++        if saved.get('failed'):
++            return policy, None
++        if score.is_file() and hashlib.sha256(score.read_bytes()).hexdigest() == saved.get('sha256'):
++            return policy, score
++    atomic_json(spec_path, spec)
++    score.unlink(missing_ok=True)
++    try:
++        await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
++                           'progress': None, 'stage': 'Composing one continuous background score'})
++        await run_local_step(worker, job, f'background-{key}',
++            [console_python_executable(), '-s', str(SCRIPT_DIR / 'video_sound_mix.py'),
++             '--spec', str(spec_path), '--output', str(score)], 'background score')
++        if not score.is_file():
++            raise RuntimeError('No background score was produced')
++        atomic_json(receipt, {'sha256': hashlib.sha256(score.read_bytes()).hexdigest()})
++        return policy, score
++    except asyncio.CancelledError:
++        raise
++    except Exception as error:
++        atomic_json(receipt, {'failed': str(error)[:500]})
++        print(f'WARNING: Background music unavailable; preserving original audio: {error}', flush=True)
++        return policy, None
++
++
++def compose_main():
++    """Run only inside the worker's GPUq reservation; own only a server we start."""
++    import video_gen as generator
++    import video_song
++    process = log = None
++    try:
++        if not generator.server_ready(generator.DEFAULT_SERVER):
++            process, log = generator.start_server(generator.DEFAULT_SERVER)
++        return video_song.main()
++    finally:
++        if process is not None:
++            generator.stop_server(process, log)
++
++
++if __name__ == '__main__':
++    raise SystemExit(compose_main())
+--- /dev/null
++++ b/test_video_sound_mix.py
+@@ -0,0 +1,122 @@
++import asyncio
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import types
++import unittest
++from unittest import mock
++import numpy as np
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++import video_sound_mix as mix
++
++
++class SoundMixTests(unittest.TestCase):
++    def audio(self, path):
++        return np.frombuffer(mix.media(['-i', str(path), '-vn', '-ar', '48000', '-ac', '1', '-f', 'f32le', 'pipe:1']).stdout, dtype='<f4')
++
++    def fixture(self, root, expression):
++        wav = root / 'input.wav'
++        mix.media(['-f', 'lavfi', '-i', f'aevalsrc={expression}:s=48000:d=3', str(wav)])
++        video = root / 'input.mp4'
++        mix.media(['-f', 'lavfi', '-i', 'color=c=blue:s=128x72:r=24:d=3', '-i', str(wav),
++                   '-c:v', 'libx264', '-c:a', 'aac', '-shortest', str(video)])
++        return video
++
++    def test_disabled_external_and_dialogue_guards(self):
++        plan = {'sound_mix': {'music': 'instrumental', 'caption': 'One warm understated piano arrangement', 'effects': 'soften_transients'},
++                'segments': [{'shots': [{'dialogue': [{'text': 'Hello'}]}]}]}
++        self.assertEqual(mix.directive(plan)['effects'], 'preserve')
++        self.assertEqual(mix.directive(plan, True)['music'], 'none')
++        with mock.patch.dict('os.environ', {'VIDEO_SOUND_MIX': '0'}):
++            self.assertEqual(mix.directive(plan)['music'], 'none')
++        self.assertEqual(mix.mix_video(Path('missing'), Path('unused'), {'effects': 'preserve'}, 3), Path('missing'))
++
++    def test_ducking_preserves_dry_voice_and_video_packets(self):
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            source = self.fixture(root, '0.12*sin(2*PI*440*t)*between(t\\,1\\,2)')
++            score = root / 'score.wav'
++            mix.media(['-f', 'lavfi', '-i', 'sine=frequency=880:duration=1.4:sample_rate=48000', str(score)])
++            seconds=float(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration',
++                '-of','default=nw=1:nk=1',str(source)]))
++            output = mix.mix_video(source, root / 'out.mp4', {'effects': 'preserve'}, seconds, score)
++            before, after = self.audio(source), self.audio(output)
++            def magnitude(audio, frequency, start, end):
++                data = audio[round(start*48000):round(end*48000)]
++                return abs(np.mean(data * np.exp(-2j*np.pi*frequency*np.arange(len(data))/48000)))
++            self.assertAlmostEqual(magnitude(after,440,1.2,1.7)/magnitude(before,440,1.2,1.7),1,delta=.08)
++            self.assertLess(magnitude(after,880,1.2,1.7), magnitude(after,880,.6,.9)*.85)
++            def packets(path):
++                return json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v','-show_packets',
++                    '-show_data_hash','sha256','-show_entries','packet=pts,dts,data_hash','-of','json',str(path)]))
++            self.assertEqual(packets(source), packets(output))
++            self.assertLess(abs(len(after)-len(before)),2048)
++            self.assertGreater(np.sqrt(np.mean(after[10000:30000]**2)),.001)
++
++    def test_softening_reduces_peaks_without_lifting_quiet_background(self):
++        with tempfile.TemporaryDirectory() as directory:
++            root=Path(directory)
++            source=self.fixture(root,'(0.01+0.7*between(t\\,1\\,1.2))*sin(2*PI*440*t)')
++            output=mix.mix_video(source,root/'out.mp4',{'effects':'soften_transients'},3)
++            before,after=self.audio(source),self.audio(output)
++            self.assertLess(np.max(abs(after[49000:57000])), np.max(abs(before[49000:57000]))*.65)
++            self.assertLess(np.sqrt(np.mean(after[:30000]**2)),np.sqrt(np.mean(before[:30000]**2))*1.1)
++
++    def test_composition_failure_is_cached_and_cancellation_propagates(self):
++        with tempfile.TemporaryDirectory() as directory:
++            root=Path(directory)
++            step=mock.AsyncMock(side_effect=RuntimeError('offline'))
++            fake=types.SimpleNamespace(SCRIPT_DIR=root,console_python_executable=lambda:sys.executable,
++                stable_job_seed=lambda _:17,atomic_json=lambda p,v:p.write_text(json.dumps(v)))
++            worker=types.SimpleNamespace(send=mock.AsyncMock())
++            plan={'sound_mix':{'music':'instrumental','caption':'Warm piano and brushes, one continuous arrangement','effects':'preserve'}}
++            with mock.patch.dict(sys.modules,{'video_worker':fake,'video_recovery':types.SimpleNamespace(run_local_step=step)}):
++                for _ in range(2): self.assertIsNone(asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,10))[1])
++                step.assert_awaited_once()
++                step.side_effect=asyncio.CancelledError()
++                with self.assertRaises(asyncio.CancelledError):asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,11))
++
++    def test_composer_owns_only_the_server_it_starts(self):
++        generator=types.SimpleNamespace(DEFAULT_SERVER='local',server_ready=mock.Mock(return_value=True),
++            start_server=mock.Mock(return_value=('process','log')),stop_server=mock.Mock())
++        song=types.SimpleNamespace(main=mock.Mock(return_value=0))
++        with mock.patch.dict(sys.modules,{'video_gen':generator,'video_song':song}):
++            self.assertEqual(mix.compose_main(),0)
++            generator.start_server.assert_not_called();generator.stop_server.assert_not_called()
++            generator.server_ready.return_value=False
++            song.main.side_effect=RuntimeError('composition failed')
++            with self.assertRaisesRegex(RuntimeError,'composition failed'):mix.compose_main()
++            generator.stop_server.assert_called_once_with('process','log')
++
++    def test_delivery_mixes_after_normalization_and_protects_external_audio(self):
++        if not (Path(__file__).parent/'video_worker.py').exists():
++            self.skipTest('Installed desktop integration test')
++        import video_worker
++        import video_sync_delivery
++        with tempfile.TemporaryDirectory() as directory:
++            root=Path(directory);source=root/'source.mp4';source.write_bytes(b'fixture')
++            normalized=root/'normalized.mp4';normalized.write_bytes(b'normalized')
++            mixed=root/'mixed.mp4';mixed.write_bytes(b'mixed')
++            worker=video_worker.DesktopVideoWorker.__new__(video_worker.DesktopVideoWorker)
++            worker.current_job={};worker.add_span=mock.Mock()
++            worker.normalize_delivery_audio=mock.AsyncMock(return_value=normalized)
++            worker.delivery_video_is_compatible=mock.AsyncMock(return_value=True)
++            policy={'music':'instrumental','effects':'preserve'}
++            with mock.patch.object(video_sync_delivery,'correct_delivery_sync',mock.AsyncMock(return_value=source)), \
++                 mock.patch.object(mix,'mix_video',return_value=mixed) as render:
++                output=asyncio.run(worker.prepare_delivery(source,'job',3,sound_mix=policy,background_score=root/'score.flac'))
++                self.assertEqual(output,mixed)
++                self.assertEqual(render.call_args.args[0],normalized)
++                self.assertEqual(render.call_args.args[2],policy)
++                render.reset_mock();worker.normalize_delivery_audio.reset_mock()
++                output=asyncio.run(worker.prepare_delivery(source,'job',3,preserve_audio=True,sound_mix=policy))
++                self.assertEqual(output,source);render.assert_not_called();worker.normalize_delivery_audio.assert_not_awaited()
++                render.side_effect=RuntimeError('decoder unavailable')
++                output=asyncio.run(worker.prepare_delivery(source,'job',3,sound_mix=policy))
++                self.assertEqual(output,normalized)
++
++
++if __name__=='__main__': unittest.main()

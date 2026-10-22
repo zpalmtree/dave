@@ -297,3 +297,49 @@ multi-character H3 compilation. Accepted openings and videos are not regenerated
 This is a boundary reference, not a complete character tracker: it cannot recover
 a supporting character absent from the preceding frame, and that frame can itself
 contain identity drift. Creative planning and audio mixing are unchanged.
+
+## Continuous instrumental background and proportional effects
+
+`video-sound-mix.patch` installs the optional `sound_mix` policy on the current
+Windows worker without replacing unrelated desktop changes. The planner can
+choose one instrumental background score for the full timeline, including under
+dialogue, or intentional quiet. Explicit no-music requests and supplied audio take
+precedence. Legacy plans retain their audio. Per-scene music instructions are
+cleared when a continuous score is chosen.
+
+Music3 composition runs through the worker's GPUq reservation, once per cached
+specification. Upload retries reuse the score; failed composition falls back to
+the generated soundtrack. The wrapper starts ComfyUI when necessary and stops
+only a server it owns. Mixing runs on CPU **after** existing delivery loudness
+normalization: the original audio stays underneath a quiet, ducked score. A short
+score loops with overlapping fades, independently of picture cuts. The mixer
+copies video packets unchanged; later upload-size conversion may still re-encode.
+`soften_transients` conservatively reduces peaks only on dialogue-free mixes.
+It cannot isolate an odd leaf sound from ambience or fix the timbre of a generated
+effect. H3 instructions also avoid amplifying incidental foley or repeating each
+shot's effect description in the overall soundscape.
+
+```bash
+python3 scripts/apply-video-sound-mix-desktop.py --check
+python3 scripts/apply-video-sound-mix-desktop.py
+```
+
+Install and reload the supervised worker while idle, and deploy both server tracks
+with `scripts/deploy-bots.sh --with-broker`. Set `VIDEO_SOUND_MIX=0` in the worker's
+environment and reload it to bypass optional composition and mixing. The installer
+checks exact before/after hashes and refuses concurrent edits. The supporting-cast
+continuity candidate above remains separate and is not activated by this patch.
+
+Verification: build and run `tests/video-sound-mix.test.mjs` alongside existing
+audio/recovery tests. On the desktop, run `test_video_sound_mix`,
+`test_video_recovery`, and the audio/compiler cases in `test_video_gen`. The media
+tests measure speech amplitude, ducking, transients, timeline length and identical
+video packet hashes. Human review is still needed for musical fit, unwanted
+vocals, and whether sound-generation guidance improves rendered results.
+
+For fixed-footage audio reviews use `scripts/serve-video-audio-review.mjs` with
+`--run-dir=<directory containing human-review/final-videos.json> --port=4334`.
+Its Listen A/B controls switch at the same playback position, with one soundtrack
+audible. Rating and note changes preserve the existing players. The October 22
+four-pair review contains three distinct historical requests plus the synthetic
+leaf regression; its manually chosen scores evaluate mixing, not planner taste.
