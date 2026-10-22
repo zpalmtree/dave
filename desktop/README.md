@@ -314,7 +314,8 @@ only a server it owns. Mixing runs on CPU **after** existing delivery loudness
 normalization: the original audio stays underneath a quiet, ducked score. A short
 score loops with overlapping fades, independently of picture cuts. The mixer
 copies video packets unchanged; later upload-size conversion may still re-encode.
-`soften_transients` conservatively reduces peaks only on dialogue-free mixes.
+`soften_transients` reduces peaks only on quiet dialogue-free mixes, with a
+lookahead ceiling near -24 dBFS to catch brief clicks that escape compression.
 It cannot isolate an odd leaf sound from ambience or fix the timbre of a generated
 effect. H3 instructions also avoid amplifying incidental foley or repeating each
 shot's effect description in the overall soundscape.

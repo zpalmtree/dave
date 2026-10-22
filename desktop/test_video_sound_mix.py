@@ -65,6 +65,16 @@ class SoundMixTests(unittest.TestCase):
             self.assertLess(np.max(abs(after[49000:57000])), np.max(abs(before[49000:57000]))*.65)
             self.assertLess(np.sqrt(np.mean(after[:30000]**2)),np.sqrt(np.mean(before[:30000]**2))*1.1)
 
+    def test_submillisecond_click_is_softened_without_amplifying_ambience(self):
+        # The leaf regression had a narrow click that escaped attack-based compression.
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            source=self.fixture(root,'0.005*sin(2*PI*440*t)+0.5*between(t\\,1\\,1.0003)')
+            output=mix.mix_video(source,root/'out.mp4',{'effects':'soften_transients'},3)
+            before,after=self.audio(source),self.audio(output)
+            self.assertLess(np.max(abs(after)),np.max(abs(before))*.4)
+            self.assertLess(np.sqrt(np.mean(after[:30000]**2)),np.sqrt(np.mean(before[:30000]**2))*1.1)
+
     def test_composition_failure_is_cached_and_cancellation_propagates(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
