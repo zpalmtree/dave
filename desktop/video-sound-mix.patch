@@ -111,7 +111,7 @@
          segment = sample_plan()["segments"][0]
 --- /dev/null
 +++ b/video_sound_mix.py
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,174 @@
 +"""A continuous, ducked instrumental bed; original dialogue/effects stay in the mix.
 +
 +CPU mixing only. The recovery worker separately admits optional Music3 generation
@@ -126,6 +126,10 @@
 +from pathlib import Path
 +import shutil
 +import subprocess
++import sys
++
++# The embedded Windows Python uses an isolated ._pth file even with -s.
++sys.path.insert(0, str(Path(__file__).resolve().parent))
 +
 +
 +def enabled():
