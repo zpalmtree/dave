@@ -42,7 +42,7 @@ function refreshControls(){
   }else notice?.remove();
 }
 
-function videoCard(pair,label){const item=pair.videos.find(v=>v.label===label),video=el('video',{src:endpoint(item.video_url),controls:'',preload:'metadata','data-label':label});video.muted=true;video.addEventListener('volumechange',()=>{if(!video.muted){for(const other of document.querySelectorAll('video'))if(other!==video)other.muted=true;refreshListening()}});return el('div',{class:'video-card'},[el('span',{class:'label',text:label}),video])}
+function videoCard(pair,label){const item=pair.videos.find(v=>v.label===label),video=el('video',{src:endpoint(item.video_url),controls:'',preload:'metadata','data-label':label});video.muted=true;video.addEventListener('volumechange',()=>{if(!video.muted){for(const other of document.querySelectorAll('video'))if(other!==video)other.muted=true}refreshListening()});return el('div',{class:'video-card'},[el('span',{class:'label',text:label}),video])}
 function refreshListening(){for(const b of document.querySelectorAll('[data-listen]')){const selected=[...document.querySelectorAll('video')].some(v=>v.dataset.label===b.dataset.listen&&!v.muted);b.classList.toggle('active',selected);b.setAttribute('aria-pressed',String(selected))}}
 let playbackAction=0;
 async function syncVideos(action){
