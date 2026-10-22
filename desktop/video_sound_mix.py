@@ -12,6 +12,10 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+
+# The embedded Windows Python uses an isolated ._pth file even with -s.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def enabled():
