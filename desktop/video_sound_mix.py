@@ -92,7 +92,8 @@ def mix_video(source: Path, output: Path, policy: dict, seconds: float, score: P
         return source
     # No makeup gain: quiet detail stays quiet. This acts on the complete mix,
     # so directive() excludes dialogue and externally supplied soundtracks.
-    dry = ('acompressor=threshold=0.126:ratio=3:attack=3:release=120:makeup=1:knee=2.828:detection=peak'
+    dry = ('acompressor=threshold=0.126:ratio=3:attack=3:release=120:makeup=1:knee=2.828:detection=peak,'
+           'alimiter=limit=0.063:attack=5:release=80:level=false:latency=true'
            if soft else 'anull')
     bed = output.with_suffix('.bed.wav')
     temporary = output.with_name(output.stem + '.partial.mp4')

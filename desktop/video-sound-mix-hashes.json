@@ -17,10 +17,10 @@
   },
   "video_sound_mix.py": {
     "before_sha256": null,
-    "after_sha256": "7ccde74f3591f4405868a0b5bd81787045ea8bf4888b48f25977e16c1d35fd3a"
+    "after_sha256": "a1efcf40d65adbc72a1415a71b71ed5c889855f4515d66bbee707dbe4866855f"
   },
   "test_video_sound_mix.py": {
     "before_sha256": null,
-    "after_sha256": "25b31ed673e76ee76ed8d1af590a76e21e84c652072d466c6746a1cc2c08d92f"
+    "after_sha256": "75e50b83fd3cda1269d743d659bc2f9fcc02ea9d25860ad92b878fe38704453e"
   }
 }
