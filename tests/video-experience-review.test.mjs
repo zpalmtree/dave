@@ -67,3 +67,18 @@ test('review HTTP flow authenticates status, serves custom UI, and persists expe
         assert.equal(JSON.parse(await readFile(path)).pairs[0].dimension_preferences.identity,'na');
     }finally{await review?.close();await rm(root,{recursive:true,force:true})}
 });
+
+test('music rubric saves style, coherence and audio choices without inventing visual ratings',()=>{
+    const packet=fixture();packet.rubric=['genre','coherence','audio'];
+    packet.pairs[0].dimension_preferences={genre:null,coherence:null,audio:null};
+    const payload=sanitizeFinalVideoPacket(packet);
+    payload.pairs[0].preferred='B';payload.pairs[0].dimension_preferences={genre:'B',coherence:'tie',audio:'A'};
+    const saved=applyFinalVideoRatings(packet,payload);
+    assert.deepEqual(finalVideoProgress(saved),{complete:1,total:1});
+    assert.deepEqual(sanitizeFinalVideoPacket(saved).pairs[0].dimension_preferences,{genre:'B',coherence:'tie',audio:'A'});
+    delete payload.pairs[0].dimension_preferences.coherence;
+    assert.throws(()=>applyFinalVideoRatings(packet,payload),/requires genre, coherence and audio/);
+    payload.pairs[0].dimension_preferences.coherence='na';
+    assert.throws(()=>applyFinalVideoRatings(packet,payload),/Invalid coherence/);
+    assert.throws(()=>sanitizeFinalVideoPacket({...packet,rubric:['genre','audio','coherence']}),/Unknown/);
+});
