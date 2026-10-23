@@ -110,3 +110,31 @@ production planner or music defaults.
 Music3's [model card](https://huggingface.co/MiniMaxAI/MiniMax-Music3) recommends
 structured musical descriptions and supports lyric section tags, but these are
 not guarantees. Its duration limit is a ceiling; the model may stop early.
+
+## Scoring the finished edit (2026-10-23)
+
+The genre experiment's three reviews preferred the recognizable style in all
+three cases, but preferred the original soundtrack overall in two. The follow-up
+`artifacts/music-timing-20261023` uses the exact recognizable-score mixes as
+controls for two dialogue/action scenes. The car is excluded because its engine
+masked the music in the previous review. No new footage or music is generated.
+
+`desktop/video_score_timing.py` is an offline experiment utility, not installed
+in the live worker. It applies a bounded linear gain envelope to the existing
+score without changing its sample timeline, normalization, fades or ducking.
+It rejects short scores rather than repeating them. The original scene audio
+remains the input for speech/effects; video packets are stream-copied. A flat
+envelope reproduces the production mixer in the real-media regression test.
+
+The experiment's envelopes are manually authored from timestamped frames of the
+finished edit and conservatively cover dialogue sequences; they are not precise
+speech recognition results or output from an automated scoring planner. The
+chicken scene leaves its question and final betrayal without music; the cafe
+leaves the order and catapult action without music. Timing and level change
+together, so results cannot isolate the benefit of either one alone.
+
+`SCORE_TIMING_REVIEW_PAGE` uses the explicit rubric
+`['timing', 'restraint', 'audio']` to evaluate placement, intrusion and scene fit,
+plus overall preference. Playback retains the music review's synchronized
+Listen A/B controls and does not stop on rating clicks. Production defaults
+remain unchanged pending evidence.
