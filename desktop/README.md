@@ -344,3 +344,32 @@ Its Listen A/B controls switch at the same playback position, with one soundtrac
 audible. Rating and note changes preserve the existing players. The October 22
 four-pair review contains three distinct historical requests plus the synthetic
 leaf regression; its manually chosen scores evaluate mixing, not planner taste.
+
+## Experimental creative direction and rendered review
+
+`VideoFrontierCallOptions.plannerPromptVariant = 'opus-experience'` selects the
+opt-in creative guidance. It chooses the intended viewing experience, makes
+wordplay and invented speech optional, repeats each participant's identity across
+shots, and asks for a concrete reason to use music. Explicit user requirements
+remain binding. The configured Opus default is still `opus-tuned`; this candidate
+has not earned a production rollout.
+
+Compare first outcomes on distinct requests from actual usage. Freeze both
+prompts, provider settings and renderer versions, preserve failures and production
+recovery retries, and record cost and runtime alongside the rendered videos.
+A small hand-picked diagnostic set can find problems but cannot establish a
+population-wide improvement or isolate each part of this guidance bundle.
+
+Use `scripts/serve-video-experience-review.mjs --run-dir=<experiment> --port=4335`
+for these comparisons. It expects `renders/human-review/final-videos.json` and a
+public `progress.json` listing every planned request, including queued and failed
+versions. The packet's optional rubric is `['creative', 'identity', 'audio']`.
+Reviewers choose A, B or tie for each dimension and overall; identity also permits
+not applicable. Numeric scores remain required for older packets without this
+rubric. Private paths and arm names stay off the review API. Append ready pairs
+under `renders/review.lock` to preserve concurrent ratings.
+
+Videos keep separate playback positions because their scripts may differ.
+Choosing ratings, entering notes and receiving newly completed pairs preserve
+playback. Test with `node --test tests/video-creative-direction.test.mjs
+ tests/video-experience-review.test.mjs tests/video-cost-ab.test.mjs` after building.

@@ -55,7 +55,8 @@ function requestedRange(value, size) {
         ? { start, end } : null;
 }
 
-export async function createFinalReviewServer({ runDirectory, port = 4318, readOnly = false, token: requestedToken = null }) {
+export async function createFinalReviewServer({ runDirectory, port = 4318, readOnly = false, token: requestedToken = null,
+    page = FINAL_REVIEW_PAGE, statusPath = null }) {
     const packetPath = resolve(runDirectory, 'human-review/final-videos.json');
     sanitizeFinalVideoPacket(JSON.parse(await readFile(packetPath, 'utf8')));
     if (requestedToken !== null && !/^[a-f0-9]{48}$/.test(requestedToken)) {
@@ -74,7 +75,10 @@ export async function createFinalReviewServer({ runDirectory, port = 4318, readO
             if (request.method === 'POST' && request.headers['x-review-token'] !== token) return json(response, 403, { error: 'Invalid review token.' });
             if (request.method === 'GET' && url.pathname === '/') {
                 response.writeHead(200, headers('text/html; charset=utf-8'));
-                return response.end(FINAL_REVIEW_PAGE);
+                return response.end(page);
+            }
+            if (request.method === 'GET' && url.pathname === '/api/status' && statusPath) {
+                return json(response, 200, JSON.parse(await readFile(statusPath, 'utf8')));
             }
             if (request.method === 'GET' && url.pathname === '/api/final') {
                 return json(response, 200, sanitizeFinalVideoPacket(JSON.parse(await readFile(packetPath, 'utf8'))));

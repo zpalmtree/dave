@@ -1,9 +1,24 @@
 import { createHash } from 'node:crypto';
 
+export const EXPERIENCE_DIMENSIONS = ['creative', 'identity', 'audio'];
+
 function assertPacket(packet) {
     if (!packet || packet.schema_version !== 1 || packet.blinded !== true || !Array.isArray(packet.pairs)) {
         throw new Error('Invalid blinded final-video packet.');
     }
+    if (packet.rubric !== undefined && JSON.stringify(packet.rubric) !== JSON.stringify(EXPERIENCE_DIMENSIONS)) {
+        throw new Error('Unknown final-video review rubric.');
+    }
+}
+
+function dimensionChoices(value = {}) {
+    return Object.fromEntries(EXPERIENCE_DIMENSIONS.map(key => {
+        const choice = value?.[key] ?? null;
+        if (choice !== null && !['A', 'B', 'tie', ...(key === 'identity' ? ['na'] : [])].includes(choice)) {
+            throw new Error(`Invalid ${key} preference.`);
+        }
+        return [key, choice];
+    }));
 }
 
 function publicId(index) {
@@ -22,7 +37,8 @@ function nullableRating(value) {
 
 export function finalVideoPacketFingerprint(packet) {
     assertPacket(packet);
-    return fingerprint(packet.pairs.map(pair => [pair.pair_id, pair.videos?.map(video => [video.label, video.video_path])]));
+    const pairs = packet.pairs.map(pair => [pair.pair_id, pair.videos?.map(video => [video.label, video.video_path])]);
+    return fingerprint(packet.rubric ? [packet.rubric, pairs] : pairs);
 }
 
 export function sanitizeFinalVideoPacket(packet) {
@@ -36,6 +52,7 @@ export function sanitizeFinalVideoPacket(packet) {
     return {
         schema_version: 1,
         blinded: true,
+        ...(packet.rubric ? { rubric: packet.rubric } : {}),
         fingerprint: finalVideoPacketFingerprint(packet),
         pairs: packet.pairs.map((pair, index) => ({
             public_id: publicId(index),
@@ -45,6 +62,7 @@ export function sanitizeFinalVideoPacket(packet) {
                 video_url: `/api/final/${publicId(index)}/video/${video.label}`,
             })),
             preferred: ['A', 'B', 'tie'].includes(pair.preferred) ? pair.preferred : null,
+            ...(packet.rubric ? { dimension_preferences: dimensionChoices(pair.dimension_preferences) } : {}),
             overall: {
                 A: nullableRating(pair.overall?.A),
                 B: nullableRating(pair.overall?.B),
@@ -87,7 +105,11 @@ export function applyFinalVideoRatings(packet, payload) {
                 A: ratingNumber(rating.overall?.A, 'overall.A'),
                 B: ratingNumber(rating.overall?.B, 'overall.B'),
             };
-            if (preferred !== null && (overall.A === null || overall.B === null)) {
+            const dimensions = packet.rubric ? dimensionChoices(rating.dimension_preferences) : null;
+            if (preferred !== null && dimensions && Object.values(dimensions).some(value => value === null)) {
+                throw new Error('A completed pair requires creative, identity and audio preferences.');
+            }
+            if (preferred !== null && !dimensions && (overall.A === null || overall.B === null)) {
                 throw new Error('A completed pair requires both overall scores.');
             }
             if (!rating.material_failure || typeof rating.material_failure.A !== 'boolean'
@@ -98,6 +120,7 @@ export function applyFinalVideoRatings(packet, payload) {
                 ...pair,
                 preferred,
                 overall,
+                ...(dimensions ? { dimension_preferences: dimensions } : {}),
                 material_failure: {
                     A: rating.material_failure.A,
                     B: rating.material_failure.B,
@@ -120,6 +143,8 @@ export function finalVideoPath(packet, id, label) {
 export function finalVideoProgress(packet) {
     assertPacket(packet);
     const complete = packet.pairs.filter(pair => ['A', 'B', 'tie'].includes(pair.preferred)
-        && ['A', 'B'].every(label => nullableRating(pair.overall?.[label]) !== null)).length;
+        && (packet.rubric
+            ? Object.values(dimensionChoices(pair.dimension_preferences)).every(value => value !== null)
+            : ['A', 'B'].every(label => nullableRating(pair.overall?.[label]) !== null))).length;
     return { complete, total: packet.pairs.length };
 }

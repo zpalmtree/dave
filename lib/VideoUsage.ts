@@ -81,7 +81,7 @@ export interface VideoFrontierCallOptions extends VideoProviderHooks {
     serviceTier?: VideoServiceTier;
     plannerModel?: string;
     plannerStrategy?: 'two-pass' | 'single-pass' | 'hybrid-single-pass';
-    plannerPromptVariant?: 'baseline' | 'opus-tuned';
+    plannerPromptVariant?: 'baseline' | 'opus-tuned' | 'opus-experience';
     analysisReasoningEffort?: 'low' | 'medium' | 'high';
     screenplayReasoningEffort?: 'low' | 'medium' | 'high';
     plannerGuidance?: string;
