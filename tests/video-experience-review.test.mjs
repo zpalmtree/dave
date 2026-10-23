@@ -82,3 +82,17 @@ test('music rubric saves style, coherence and audio choices without inventing vi
     assert.throws(()=>applyFinalVideoRatings(packet,payload),/Invalid coherence/);
     assert.throws(()=>sanitizeFinalVideoPacket({...packet,rubric:['genre','audio','coherence']}),/Unknown/);
 });
+
+test('score timing rubric requires timing, restraint and fit, with no genre or visual votes',()=>{
+    const packet=fixture();packet.rubric=['timing','restraint','audio'];
+    packet.pairs[0].dimension_preferences={timing:null,restraint:null,audio:null};
+    const payload=sanitizeFinalVideoPacket(packet);
+    payload.pairs[0].preferred='A';payload.pairs[0].dimension_preferences={timing:'A',restraint:'B',audio:'tie'};
+    const saved=applyFinalVideoRatings(packet,payload);
+    assert.deepEqual(finalVideoProgress(saved),{complete:1,total:1});
+    assert.deepEqual(sanitizeFinalVideoPacket(saved).pairs[0].dimension_preferences,{timing:'A',restraint:'B',audio:'tie'});
+    delete payload.pairs[0].dimension_preferences.restraint;
+    assert.throws(()=>applyFinalVideoRatings(packet,payload),/requires timing, restraint and audio/);
+    payload.pairs[0].dimension_preferences.restraint='na';
+    assert.throws(()=>applyFinalVideoRatings(packet,payload),/Invalid restraint/);
+});

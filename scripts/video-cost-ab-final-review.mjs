@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 
 export const EXPERIENCE_DIMENSIONS = ['creative', 'identity', 'audio'];
 export const MUSIC_DIMENSIONS = ['genre', 'coherence', 'audio'];
+export const SCORE_TIMING_DIMENSIONS = ['timing', 'restraint', 'audio'];
 
 function assertPacket(packet) {
     if (!packet || packet.schema_version !== 1 || packet.blinded !== true || !Array.isArray(packet.pairs)) {
         throw new Error('Invalid blinded final-video packet.');
     }
-    if (packet.rubric !== undefined && ![EXPERIENCE_DIMENSIONS, MUSIC_DIMENSIONS].some(rubric => JSON.stringify(packet.rubric) === JSON.stringify(rubric))) {
+    if (packet.rubric !== undefined && ![EXPERIENCE_DIMENSIONS, MUSIC_DIMENSIONS, SCORE_TIMING_DIMENSIONS].some(rubric => JSON.stringify(packet.rubric) === JSON.stringify(rubric))) {
         throw new Error('Unknown final-video review rubric.');
     }
 }

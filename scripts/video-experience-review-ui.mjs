@@ -1,7 +1,10 @@
 import { FINAL_REVIEW_STYLES } from './video-audio-review-ui.mjs';
 
-export function createExperienceReviewPage({ music = false } = {}) {
-const dimensions = music
+export function createExperienceReviewPage({ music = false, scoring = false } = {}) {
+music ||= scoring;
+const dimensions = scoring
+    ? [['timing', 'Musical timing', 'Do entrances, pauses and endings support the scene?'], ['restraint', 'Restraint', 'Does the music leave enough room for speech, action and quiet?'], ['audio', 'Soundtrack fit', 'Does the complete soundtrack suit the scene?']]
+    : music
     ? [['genre', 'Recognizable musical style', 'Does this sound like a familiar style of music?'], ['coherence', 'Musical flow', 'Does the rhythm and melody make sense, without awkward repetition or jumps?'], ['audio', 'Soundtrack fit', 'Does the music suit the scene and leave room for speech and effects?']]
     : [['creative', 'Creative payoff', 'Does it deliver something funny, beautiful, striking or interesting?'], ['identity', 'Character consistency', 'Do faces, bodies, clothes and voices stay consistent across shots?'], ['audio', 'Audio fit', 'Do music, ambience, effects and speech support what you see?']];
 return `<!doctype html>
@@ -26,7 +29,7 @@ function refreshControls(){if(!packet?.pairs.length)return;const pair=packet.pai
  app.querySelector('.bar').style.width=done/(batch?.planned_pairs||total)*100+'%';app.querySelector('.position').textContent='Pair '+(index+1)+' of '+total+' ready · '+done+' reviewed';
  const nav=app.querySelectorAll('.nav button');nav[0].disabled=index===0||saving;nav[1].disabled=index===total-1||saving;
  const save=app.querySelector('[data-save]');save.disabled=!complete(pair)||saving;save.textContent=saving?'Saving…':'Save & next';app.querySelector('fieldset').disabled=saving;
- app.querySelector('#readiness').textContent=complete(pair)?'Ready to save':'${music ? 'Choose overall, style, flow and soundtrack preferences' : 'Choose overall, creative, identity and audio preferences'}';
+ app.querySelector('#readiness').textContent=complete(pair)?'Ready to save':'${scoring ? 'Choose overall, timing, restraint and soundtrack preferences' : music ? 'Choose overall, style, flow and soundtrack preferences' : 'Choose overall, creative, identity and audio preferences'}';
  let notice=document.querySelector('.complete');if(done===total&&total===(batch?.planned_pairs||total)&&!dirty){if(!notice){notice=el('div',{class:'complete',text:'All decisions saved. Return to Codex and say “reviewed”.'});app.append(notice)}}else notice?.remove();
 }
 function refreshPlayback(){for(const b of app.querySelectorAll('[data-play]')){const v=app.querySelector('video[data-label="'+b.dataset.play+'"]'),active=v&&!v.paused;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))}}
@@ -36,7 +39,7 @@ function render(){if(!packet)return;if(!packet.pairs.length){app.replaceChildren
  for(const v of app.querySelectorAll('video'))v.pause();app.dataset.pairId=pair.public_id;lastPlayed=null;
  const options=[['A','Video A'],['B','Video B'],['tie','Tie']];
  const fields=dimensions.map(([key,title,hint])=>el('div',{class:'field'},[el('span',{class:'field-title'},[title,el('small',{text:hint})]),choiceGroup(pair,key,[...options,...(key==='identity'?[['na','Not applicable']]:[])])]));
- const notes=el('textarea',{'aria-label':'Notes',placeholder:'${music ? 'What style does each soundtrack sound like? Mention odd rhythms, loops, vocals or distracting moments.' : 'What worked or fell flat? Include a timestamp for identity changes, distracting sounds or weak endings.'}'});notes.value=pair.notes||'';notes.oninput=()=>{pair.notes=notes.value;changed()};
+ const notes=el('textarea',{'aria-label':'Notes',placeholder:'${scoring ? 'Where does the music help or intrude? Note timestamps for entrances, pauses, speech and the ending.' : music ? 'What style does each soundtrack sound like? Mention odd rhythms, loops, vocals or distracting moments.' : 'What worked or fell flat? Include a timestamp for identity changes, distracting sounds or weak endings.'}'});notes.value=pair.notes||'';notes.oninput=()=>{pair.notes=notes.value;changed()};
  const failures=el('div',{class:'choices'},['A','B'].map(label=>el('button',{class:'bad','data-failure':label,'aria-pressed':'false',text:'Serious failure in '+label,onclick:()=>{pair.material_failure[label]=!pair.material_failure[label];changed()}})));
  app.replaceChildren(el('div',{class:'progress'},el('div',{class:'bar'})),el('div',{class:'nav'},[el('button',{text:'← Previous',onclick:()=>{index--;render()}}),el('span',{class:'position'}),el('button',{text:'Next →',onclick:()=>{index++;render()}})]),el('div',{class:'card'},[
  el('div',{class:'prompt'},[el('div',{class:'eyebrow',text:'Original request'}),pair.prompt]),el('div',{class:'videos'},[videoCard(pair,'A'),videoCard(pair,'B')]),el('div',{class:'sync'},[...['A','B'].map(label=>el('button',{'data-play':label,'aria-pressed':'false',text:'${music ? '▶ Listen' : '▶ Play'} '+label,onclick:()=>play(label)})),el('button',{text:'Pause',onclick:()=>{for(const v of app.querySelectorAll('video'))v.pause()}}),el('span',{class:'hint',text:'${music ? 'Identical footage; only the music treatment differs. Listen A/B switches at the same position. Rating does not interrupt playback.' : 'Each video keeps its own position. Rating does not interrupt playback.'}'})]),
@@ -57,3 +60,5 @@ addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='
 
 export const EXPERIENCE_REVIEW_PAGE = createExperienceReviewPage();
 export const MUSIC_REVIEW_PAGE = createExperienceReviewPage({ music: true });
+
+export const SCORE_TIMING_REVIEW_PAGE = createExperienceReviewPage({ scoring: true });
