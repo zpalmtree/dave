@@ -1,3 +1,4 @@
+import { experienceVideoInstructions } from './VideoCreativeDirection.js';
 import { repairVideoTiming, requireRecoveryPlanningPolicy, truncateAutomaticVideoPlan, videoPlanBeforeDurationCut, videoDialogueFloorSeconds as dialogueFloorSeconds, VIDEO_AUTOMATIC_LIMIT_SECONDS } from './VideoRecovery.js';
 import { VIDEO_LYRIC_VISUAL_INSTRUCTIONS } from './VideoSourceAudio.js';
 import { normalizeVideoAudioContinuity, VIDEO_AUDIO_CONTINUITY_INSTRUCTIONS, VIDEO_SPEAKER_PROFILES_SCHEMA, VIDEO_SOUND_MIX_SCHEMA, VIDEO_SOUND_MIX_INSTRUCTIONS } from './VideoAudioContinuity.js';
@@ -607,13 +608,14 @@ ${VIDEO_PLANNER_INSTRUCTIONS}`;
 
 export function videoPlannerSystemInstructions(
     instructions: string,
-    variant: 'baseline' | 'opus-tuned' = 'baseline',
+    variant: 'baseline' | 'opus-tuned' | 'opus-experience' = 'baseline',
 ): string {
     if (variant === 'baseline') return instructions;
+    if (variant === 'opus-experience') instructions = experienceVideoInstructions(instructions);
     return `Return one complete JSON object matching the requested schema. Fill every required field. Preserve exact wording, counts, sequence, and source-image identity. Read ambiguous binding content literally; staging around it may still develop and escalate the premise. Put all decisions in the structured fields; add no preface or code fence.\n\n${instructions.replaceAll('OpenAI frontier planning path', 'frontier planning path')}`;
 }
 
-function anthropicHybridSystemInstructions(variant: 'baseline' | 'opus-tuned' = 'baseline'): string {
+function anthropicHybridSystemInstructions(variant: 'baseline' | 'opus-tuned' | 'opus-experience' = 'baseline'): string {
     return `${videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS, variant)}\n\n`
         + 'In the output, prompt_analysis_json must be a JSON-serialized object matching the analysis schema below. '
         + 'Complete it before plan, and make plan follow it. Do not add a prompt_analysis property.\n'
@@ -626,7 +628,7 @@ export function videoPlannerFingerprint(
     screenplayReasoningEffort: 'low' | 'medium' | 'high' = 'high',
     plannerGuidance = '',
     plannerStrategy: VideoPlannerStrategy = 'two-pass',
-    promptVariant: 'baseline' | 'opus-tuned' = 'baseline',
+    promptVariant: 'baseline' | 'opus-tuned' | 'opus-experience' = 'baseline',
 ): string {
     return createHash('sha256').update(JSON.stringify({
         model,
