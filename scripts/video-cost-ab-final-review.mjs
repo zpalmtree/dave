@@ -1,18 +1,19 @@
 import { createHash } from 'node:crypto';
 
 export const EXPERIENCE_DIMENSIONS = ['creative', 'identity', 'audio'];
+export const MUSIC_DIMENSIONS = ['genre', 'coherence', 'audio'];
 
 function assertPacket(packet) {
     if (!packet || packet.schema_version !== 1 || packet.blinded !== true || !Array.isArray(packet.pairs)) {
         throw new Error('Invalid blinded final-video packet.');
     }
-    if (packet.rubric !== undefined && JSON.stringify(packet.rubric) !== JSON.stringify(EXPERIENCE_DIMENSIONS)) {
+    if (packet.rubric !== undefined && ![EXPERIENCE_DIMENSIONS, MUSIC_DIMENSIONS].some(rubric => JSON.stringify(packet.rubric) === JSON.stringify(rubric))) {
         throw new Error('Unknown final-video review rubric.');
     }
 }
 
-function dimensionChoices(value = {}) {
-    return Object.fromEntries(EXPERIENCE_DIMENSIONS.map(key => {
+function dimensionChoices(value = {}, dimensions = EXPERIENCE_DIMENSIONS) {
+    return Object.fromEntries(dimensions.map(key => {
         const choice = value?.[key] ?? null;
         if (choice !== null && !['A', 'B', 'tie', ...(key === 'identity' ? ['na'] : [])].includes(choice)) {
             throw new Error(`Invalid ${key} preference.`);
@@ -62,7 +63,7 @@ export function sanitizeFinalVideoPacket(packet) {
                 video_url: `/api/final/${publicId(index)}/video/${video.label}`,
             })),
             preferred: ['A', 'B', 'tie'].includes(pair.preferred) ? pair.preferred : null,
-            ...(packet.rubric ? { dimension_preferences: dimensionChoices(pair.dimension_preferences) } : {}),
+            ...(packet.rubric ? { dimension_preferences: dimensionChoices(pair.dimension_preferences, packet.rubric) } : {}),
             overall: {
                 A: nullableRating(pair.overall?.A),
                 B: nullableRating(pair.overall?.B),
@@ -105,9 +106,9 @@ export function applyFinalVideoRatings(packet, payload) {
                 A: ratingNumber(rating.overall?.A, 'overall.A'),
                 B: ratingNumber(rating.overall?.B, 'overall.B'),
             };
-            const dimensions = packet.rubric ? dimensionChoices(rating.dimension_preferences) : null;
+            const dimensions = packet.rubric ? dimensionChoices(rating.dimension_preferences, packet.rubric) : null;
             if (preferred !== null && dimensions && Object.values(dimensions).some(value => value === null)) {
-                throw new Error('A completed pair requires creative, identity and audio preferences.');
+                throw new Error(`A completed pair requires ${packet.rubric.slice(0, -1).join(', ')} and ${packet.rubric.at(-1)} preferences.`);
             }
             if (preferred !== null && !dimensions && (overall.A === null || overall.B === null)) {
                 throw new Error('A completed pair requires both overall scores.');
@@ -144,7 +145,7 @@ export function finalVideoProgress(packet) {
     assertPacket(packet);
     const complete = packet.pairs.filter(pair => ['A', 'B', 'tie'].includes(pair.preferred)
         && (packet.rubric
-            ? Object.values(dimensionChoices(pair.dimension_preferences)).every(value => value !== null)
+            ? Object.values(dimensionChoices(pair.dimension_preferences, packet.rubric)).every(value => value !== null)
             : ['A', 'B'].every(label => nullableRating(pair.overall?.[label]) !== null))).length;
     return { complete, total: packet.pairs.length };
 }
