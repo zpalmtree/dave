@@ -134,12 +134,26 @@ function truncatePrompt(prompt: string, length = 180): string {
 
 const DISCORD_MESSAGE_CONTENT_LIMIT = 1999;
 
+function promptWithoutLinkPreviews(prompt: string): string {
+    // Suppress previews per link so the generated video attachment still plays
+    // inline. Preserve links that already use Discord's <URL> syntax.
+    return prompt.replace(/<https?:\/\/[^\s<>]+>|https?:\/\/[^\s<>]+/gi, match => {
+        if (match.startsWith('<')) return match;
+        // Leave closing Markdown link delimiters and sentence punctuation outside.
+        let url = match.replace(/[\].,!?;:]+$/, '');
+        while (url.endsWith(')') && (url.match(/\)/g) || []).length > (url.match(/\(/g) || []).length) {
+            url = url.slice(0, -1);
+        }
+        return `<${url}>${match.slice(url.length)}`;
+    });
+}
+
 function formatVideoReplyWithFullPrompt(
     prefix: string,
     job: VideoJobView,
     includePromptTease = false,
 ): string {
-    const direction = videoJobDirection(job);
+    const direction = promptWithoutLinkPreviews(videoJobDirection(job));
     // Discord's multiline quote keeps blank lines and later paragraphs inside
     // the prompt instead of making them look like the bot's own commentary.
     const separator = direction.includes('\n') ? '\n>>> ' : '\n> ';
@@ -154,7 +168,7 @@ function formatVideoReplyWithFullPrompt(
     const displayedDirection = truncatePrompt(
         direction,
         Math.max(0, availableBodyLength - displayedPrefix.length),
-    );
+    ).replace(/<https?:\/\/[^>]*$/i, '…'); // Never leave a truncated URL unsuppressed.
     return `${displayedPrefix}${tease}${separator}${displayedDirection}`;
 }
 
