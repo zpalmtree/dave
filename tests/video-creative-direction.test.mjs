@@ -23,3 +23,16 @@ test('analysis-only, screenplay-only and combined calls receive compatible direc
     const fp=v=>videoPlannerFingerprint('claude-opus-5-5','medium','medium','','hybrid-single-pass',v);
     assert.notEqual(fp('opus-tuned'),fp('opus-experience'));
 });
+
+test('specificity candidate preserves the winning instructions and adds only scene logic and theme checks',()=>{
+    const base=videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS,'opus-tuned');
+    const candidate=videoPlannerSystemInstructions(VIDEO_SINGLE_PASS_INSTRUCTIONS,'opus-specificity');
+    assert.ok(candidate.startsWith(base));
+    assert.match(candidate,/what they can see, know, hold/);
+    assert.match(candidate,/themed surface must still be shown clearly/);
+    assert.match(candidate,/do not add sarcasm merely to excuse/);
+    assert.doesNotMatch(candidate.slice(base.length),/music=|sound_mix/);
+    const fp=v=>videoPlannerFingerprint('claude-opus-5-5','medium','medium','','hybrid-single-pass',v);
+    assert.notEqual(fp('opus-tuned'),fp('opus-specificity'));
+    assert.equal(configuredVideoPlannerPromptVariant('claude-opus-5-5'),'opus-tuned');
+});

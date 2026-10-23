@@ -373,3 +373,28 @@ Videos keep separate playback positions because their scripts may differ.
 Choosing ratings, entering notes and receiving newly completed pairs preserve
 playback. Test with `node --test tests/video-creative-direction.test.mjs
  tests/video-experience-review.test.mjs tests/video-cost-ab.test.mjs` after building.
+
+## Exact continuation frame candidate
+
+`video-continuity-frame.patch` replaces approximate end-time seeks with the last
+successfully decoded video frame in both recovery and standalone generation.
+The previous recovery seek selected a frame before the clip ended; in the
+reviewed cigarette scene it rolled back two frames. The new helper decodes the
+video stream through EOF, independently of audio duration, and atomically writes
+its final frame. It does not promise that H3 reproduces the conditioning image
+exactly or solve longer-range character drift.
+
+This desktop candidate is evaluated separately from planner changes. Check with
+`python3 scripts/apply-video-continuity-frame-desktop.py --check`; apply without
+`--check` and reload the supervised worker while idle only after evaluation.
+The hash-checked installer preserves unrelated desktop work. Run
+`python -m unittest test_video_continuity_frame` with the desktop dependencies
+and FFmpeg. Tests compare against independently reversed video and cover VFR,
+B-frames, audio extending beyond the video, single-frame clips and invalid input.
+
+`plannerPromptVariant = 'opus-specificity'` is a separate opt-in planner candidate.
+It appends scene-logic and recognizable-theme checks to `opus-tuned`, without
+changing its comedy, dialogue or music policy. The configured default remains
+`opus-tuned`. Evaluate two reviewed regressions and fresh historical requests
+with the same renderer for both arms; keep the fixed-script frame-selection
+comparison separate when interpreting the results.
