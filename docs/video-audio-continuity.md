@@ -138,3 +138,33 @@ together, so results cannot isolate the benefit of either one alone.
 plus overall preference. Playback retains the music review's synchronized
 Listen A/B controls and does not stop on rating clicks. Production defaults
 remain unchanged pending evidence.
+
+## Composer audition (2026-10-23)
+
+The timing experiment won both relative comparisons, but the user still rejected
+the overall quality and clarified that the remaining problem was mostly the
+music itself. The next experiment, `artifacts/music-composer-20261023`, compares
+one Music3 sample with one ACE-Step 1.5 Turbo sample on an identical acoustic
+cafe brief. It changes the configured composer, not video rendering or effects.
+This is one sample per system and cannot establish general model superiority.
+
+The ACE-Step arm uses the official ComfyUI AIO checkpoint and workflow settings;
+the checkpoint download is pinned to a revision and verified against its published
+SHA-256 before installation. Existing ComfyUI nodes support it without upgrading
+the runtime. Both music jobs use GPUq admission. Raw outputs and graphs are
+preserved, with no quality rerolls. The comparison uses the beginning of each
+output, equal duration (20 seconds, or the shorter output if at least 15 seconds),
+and matched integrated loudness using static gain. A shared lower target avoids
+clipping if either excerpt cannot meet -20 LUFS below -1 dBTP. Both excerpts get
+the same short endpoint fades; there is no looping, compression, EQ or ducking.
+
+`scripts/serve-music-audition.mjs` serves the private audio-only review page.
+The absolute usability choices are Use A, Use B, Either works and Use neither.
+Saving requires the frozen audition fingerprint, and both source paths and model
+names stay out of the public packet. Choosing or saving a verdict does not
+replace or pause the players. Listen A/B switches at the same position, with one
+audible player at a time. No production composer default changes automatically.
+
+Official setup references:
+[ComfyUI ACE-Step guide](https://docs.comfy.org/tutorials/audio/ace-step/ace-step-v1-5)
+and [checkpoint files](https://huggingface.co/Comfy-Org/ACE-Step-1.5).
