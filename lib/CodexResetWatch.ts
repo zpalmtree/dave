@@ -11,7 +11,7 @@ interface Reset {
     reset_type: 'regular' | 'banked';
     announced_at: string;
     text: string;
-    source: { type: 'x_post' | 'observed'; url?: string };
+    source: { type: 'x_post' | 'observed' | 'account_observed'; url?: string };
 }
 interface ScheduledReset extends Reset { status: 'scheduled'; scheduled_for: string | null }
 interface Snapshot { resets: Reset[]; scheduled: ScheduledReset | null }
@@ -20,6 +20,8 @@ export interface ResetWatchState extends Settings {
     version: 1;
     seen: string[];
     pending: { phase: 'announced' | 'dropped'; reset: Reset | ScheduledReset }[];
+    recentDrops?: Reset[];
+    trackerInitialized?: boolean;
 }
 type Request = (path: string) => Promise<any>;
 
@@ -27,9 +29,21 @@ function validateReset(value: any): asserts value is Reset {
     if (!value || typeof value.id !== 'string' || !value.id || value.id.length > 64
         || !['regular', 'banked'].includes(value.reset_type)
         || typeof value.announced_at !== 'string' || !Number.isFinite(Date.parse(value.announced_at))
-        || typeof value.text !== 'string' || !['x_post', 'observed'].includes(value.source?.type)) {
+        || typeof value.text !== 'string' || !['x_post', 'observed', 'account_observed'].includes(value.source?.type)) {
         throw new Error('Invalid Codex Resets API reset.');
     }
+}
+
+export function readUsageFeed(value: any): Reset[] {
+    if (value?.version !== 1 || !Number.isFinite(Date.parse(value.updatedAt))
+        || !Array.isArray(value.events) || value.events.length > 200) throw new Error('Invalid Codex usage observation feed.');
+    for (const event of value.events) {
+        validateReset(event);
+        if (event.source.type !== 'account_observed' || !event.id.startsWith('usage-')) {
+            throw new Error('Invalid Codex account observation.');
+        }
+    }
+    return value.events;
 }
 
 export async function readSnapshot(request: Request): Promise<Snapshot> {
@@ -79,44 +93,66 @@ export function validateState(state: ResetWatchState, settings: Settings): void 
         if (!item || !['announced', 'dropped'].includes(item.phase)) throw new Error('Invalid pending Codex reset.');
         validateReset(item.reset);
     }
+    if (state.recentDrops !== undefined) {
+        if (!Array.isArray(state.recentDrops)) throw new Error('Invalid recent Codex resets.');
+        state.recentDrops.forEach(validateReset);
+    }
 }
 
-export function planResetAlerts(previous: ResetWatchState | undefined, settings: Settings, snapshot: Snapshot): ResetWatchState {
+// There is no shared event ID between an account observation and the public tracker.
+// Correlate only across sources, by kind and a bounded six-hour event-time window.
+function sameObservedDrop(a: Reset, b: Reset): boolean {
+    return a.reset_type === b.reset_type
+        && (a.source.type === 'account_observed') !== (b.source.type === 'account_observed')
+        && Math.abs(Date.parse(a.announced_at) - Date.parse(b.announced_at)) <= 6 * 3600000;
+}
+
+export function planResetAlerts(previous: ResetWatchState | undefined, settings: Settings, snapshot: Snapshot, baselineOnly = false): ResetWatchState {
     if (previous) validateState(previous, settings);
     const seen = new Set(previous?.seen || []);
     const pending = [...(previous?.pending || [])];
+    const recentDrops = [...(previous?.recentDrops || [])];
     const completed = new Set(snapshot.resets.map(reset => reset.id));
     for (const reset of [...snapshot.resets].sort((a, b) => Date.parse(a.announced_at) - Date.parse(b.announced_at))) {
         const key = `dropped:${reset.id}`;
-        if (previous && !seen.has(key)) pending.push({ phase: 'dropped', reset });
+        if (previous && !baselineOnly && !seen.has(key) && !recentDrops.some(old => sameObservedDrop(old, reset))) {
+            pending.push({ phase: 'dropped', reset });
+        }
+        if (!recentDrops.some(old => old.id === reset.id)) recentDrops.push(reset);
         seen.add(key);
     }
     const scheduled = snapshot.scheduled;
-    if (scheduled && !completed.has(scheduled.id) && !seen.has(`dropped:${scheduled.id}`)) {
+    if (scheduled && !completed.has(scheduled.id) && !seen.has(`dropped:${scheduled.id}`)
+        && !recentDrops.some(old => sameObservedDrop(old, scheduled))) {
         const key = `announced:${scheduled.id}`;
         // A pending announcement is useful even on first startup, unlike old resets.
         if (!seen.has(key)) pending.push({ phase: 'announced', reset: scheduled });
         seen.add(key);
     }
-    return { version: 1, ...settings, seen: [...seen], pending };
+    return { version: 1, ...settings, seen: [...seen], pending, trackerInitialized: previous?.trackerInitialized,
+        recentDrops: recentDrops.sort((a, b) => Date.parse(a.announced_at) - Date.parse(b.announced_at)).slice(-200) };
 }
 
 export function resetNotification(item: ResetWatchState['pending'][number]): MessageCreateOptions {
     const { phase, reset } = item;
     const announced = phase === 'announced';
     const banked = reset.reset_type === 'banked';
+    const accountObserved = reset.source.type === 'account_observed';
     const scheduledFor = 'scheduled_for' in reset ? reset.scheduled_for : null;
     const eta = announced && scheduledFor && Number.isFinite(Date.parse(scheduledFor))
         ? Math.floor(Date.parse(scheduledFor) / 1000) : null;
     const details = escapeMarkdown(reset.text.trim()).slice(0, 1800);
     const description = [announced ? 'Awaiting confirmation.' : '', details].filter(Boolean).join('\n\n');
-    const sourceUrl = typeof reset.source.url === 'string' && /^https:\/\/(?:x\.com|twitter\.com)\//i.test(reset.source.url)
+    const sourceUrl = accountObserved ? 'https://chatgpt.com/codex/settings/usage'
+        : typeof reset.source.url === 'string' && /^https:\/\/(?:x\.com|twitter\.com)\//i.test(reset.source.url)
         ? reset.source.url : site;
     return {
         content: `<@&${codexRoleId}>`,
         allowedMentions: { parse: [], roles: [codexRoleId] },
         embeds: [{
-            title: announced
+            title: accountObserved
+                ? (banked ? '✅ Codex reset credit observed on monitored account' : '✅ Codex usage reset observed on monitored account')
+                : announced
                 ? (banked ? '🕒 Codex reset credit announced' : '🕒 Codex usage reset announced')
                 : (banked ? '✅ Codex reset credit added' : '✅ Codex usage limits reset'),
             color: announced ? 0xf0b232 : 0x23a55a,
@@ -126,7 +162,7 @@ export function resetNotification(item: ResetWatchState['pending'][number]): Mes
                 name: 'Expected reset · estimate',
                 value: `<t:${eta}:f> · <t:${eta}:R>`,
             }] } : {}),
-            footer: { text: 'Data from Codex Resets' },
+            footer: { text: accountObserved ? 'Direct Codex account check · confirmed twice' : 'Data from Codex Resets' },
             timestamp: new Date(reset.announced_at).toISOString(),
         }],
     };
@@ -146,6 +182,41 @@ export async function deliverResetAlerts(state: ResetWatchState, send: (message:
     }
 }
 
+export async function pollResetSources(previous: ResetWatchState | undefined, settings: Settings, sources: {
+    observations?: Reset[];
+    tracker: () => Promise<Snapshot | null>;
+    save: (state: ResetWatchState) => Promise<void>;
+    send: (message: MessageCreateOptions) => Promise<unknown>;
+    trackerError: (error: Error) => void;
+}): Promise<ResetWatchState> {
+    let state = previous;
+    const persistAndDeliver = async () => {
+        await sources.save(state!);
+        await deliverResetAlerts(state!, sources.send, () => sources.save(state!));
+    };
+    if (sources.observations) {
+        state = planResetAlerts(state, settings, { resets: sources.observations, scheduled: null });
+        // Don't backfill all tracker history if our very first poll finds it unavailable.
+        if (!previous) state.trackerInitialized = false;
+        await persistAndDeliver();
+    }
+    let snapshot: Snapshot | null;
+    try { snapshot = await sources.tracker(); }
+    catch (error) {
+        sources.trackerError(error as Error);
+        if (state) return state;
+        throw error;
+    }
+    if (!snapshot) {
+        if (state) return state;
+        throw new Error('Codex reset tracker is waiting for its retry window.');
+    }
+    state = planResetAlerts(state, settings, snapshot, !state || state.trackerInitialized === false);
+    state.trackerInitialized = true;
+    await persistAndDeliver();
+    return state;
+}
+
 const started = new WeakSet<Client>();
 export function startCodexResetWatch(client: Client): void {
     if (started.has(client)) return;
@@ -161,18 +232,18 @@ export function startCodexResetWatch(client: Client): void {
         // Both deployment tracks load this file, but only the selected bot posts.
         if (settings.botUserId !== client.user?.id) return;
         const statePath = `${configPath}.state.json`;
-        let retryDelay = 60000;
+        let trackerRetryAt = 0;
         const request: Request = async path => {
             const response = await fetch(`${site}/api/v1${path}`, { timeout: 30000, size: 5 * 1024 * 1024 });
             if (response.status === 429) {
                 const retry = Number(response.headers.get('retry-after'));
-                if (Number.isFinite(retry) && retry > 0) retryDelay = Math.max(retryDelay, Math.min(retry * 1000, 86400000));
+                trackerRetryAt = Date.now() + (Number.isFinite(retry) && retry > 0
+                    ? Math.max(60000, Math.min(retry * 1000, 86400000)) : 60000);
             }
             if (!response.ok) throw new Error(`Codex Resets HTTP ${response.status}`);
             return response.json();
         };
         const poll = async () => {
-            retryDelay = 60000;
             try {
                 const channel = await client.channels.fetch(settings.channelId);
                 if (!channel || !channel.isTextBased() || channel.isDMBased()) throw new Error('Destination is not an accessible server text channel.');
@@ -189,15 +260,24 @@ export function startCodexResetWatch(client: Client): void {
                     await deliverResetAlerts(state, send, save);
                 }
                 const initialized = Boolean(state);
-                const snapshot = await readSnapshot(request);
-                state = planResetAlerts(state, settings, snapshot);
-                await save();
-                await deliverResetAlerts(state, send, save);
-                if (!initialized) console.log(`[Codex resets] Baseline saved: ${snapshot.resets.length} historical resets; channel ${settings.channelId}.`);
+                // Either source can fail independently. Direct observations should never
+                // have to wait for the public tracker to recover or publish a confirmation.
+                let observations: Reset[] | undefined;
+                try { observations = readUsageFeed(JSON.parse(await fs.readFile(`${configPath}.usage.json`, 'utf8'))); }
+                catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error('[Codex usage feed]', (error as Error).message);
+                }
+                state = await pollResetSources(state, settings, {
+                    observations, tracker: () => Date.now() < trackerRetryAt ? Promise.resolve(null) : readSnapshot(request), send,
+                    save: next => saveResetState(statePath, next),
+                    trackerError: error => console.error('[Codex resets tracker]', error.message),
+                });
+                if (!initialized) console.log(`[Codex resets] Baseline saved; channel ${settings.channelId}.`);
             } catch (error) {
                 console.error('[Codex resets]', (error as Error).message);
             } finally {
-                setTimeout(() => void poll(), retryDelay).unref();
+                // A tracker rate-limit backoff must not pause the local observation feed.
+                setTimeout(() => void poll(), 60000).unref();
             }
         };
         console.log(`[Codex resets] Watching channel ${settings.channelId} every 60 seconds.`);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readSnapshot, planResetAlerts, resetNotification, deliverResetAlerts, saveResetState, validateState } from '../dist/CodexResetWatch.js';
+import { readSnapshot, readUsageFeed, pollResetSources, planResetAlerts, resetNotification, deliverResetAlerts, saveResetState, validateState } from '../dist/CodexResetWatch.js';
 
 const settings = { botUserId: '123', channelId: '746507379310461010' };
 const reset = (id, overrides = {}) => ({ id, reset_type: 'regular', announced_at: '2026-10-15T06:28:13.000Z', text: 'Reset complete', source: { type: 'x_post', url: `https://x.com/thsottiaux/status/${id}` }, ...overrides });
@@ -106,4 +106,72 @@ test('both alert types ping only the codex role and retain bounded source attrib
     assert.match(message.embeds[0].fields[0].value, /<t:\d+:f> · <t:\d+:R>/);
     assert.match(message.embeds[0].footer.text, /Data from Codex Resets/);
     assert.ok(message.embeds[0].description.length < 4096);
+});
+
+const observation = (id, overrides = {}) => reset(`usage-${id}`, { source: { type: 'account_observed' }, ...overrides });
+
+test('direct observations and later tracker confirmations produce one drop alert in either order', () => {
+    for (const [first, second] of [[observation('a'), reset('tracker')], [reset('tracker'), observation('a')]]) {
+        const once = planResetAlerts(planResetAlerts(undefined, settings, snapshot()), settings, snapshot([first]));
+        assert.equal(once.pending.length, 1);
+        const twice = planResetAlerts({ ...once, pending: [] }, settings, snapshot([second]));
+        assert.equal(twice.pending.length, 0);
+        assert.ok(twice.seen.includes(`dropped:${second.id}`));
+        assert.equal(planResetAlerts(twice, settings, snapshot([first, second])).pending.length, 0);
+    }
+});
+
+test('different reset types, separate direct events and distant tracker events still alert', () => {
+    const once = planResetAlerts(planResetAlerts(undefined, settings, snapshot()), settings, snapshot([observation('a')]));
+    for (const next of [reset('banked', { reset_type: 'banked' }), observation('b'),
+        reset('tomorrow', { announced_at: '2026-10-16T06:28:13Z' })]) {
+        assert.equal(planResetAlerts({ ...once, pending: [] }, settings, snapshot([next])).pending.length, 1);
+    }
+});
+
+test('account feed validates observations and labels them with account-specific evidence', () => {
+    const event = observation('a');
+    assert.deepEqual(readUsageFeed({ version: 1, updatedAt: event.announced_at, events: [event] }), [event]);
+    for (const invalid of [{}, { version: 1, updatedAt: event.announced_at, events: [reset('external')] }]) {
+        assert.throws(() => readUsageFeed(invalid), /Invalid/);
+    }
+    const notification = resetNotification({ phase: 'dropped', reset: event });
+    assert.match(notification.embeds[0].title, /monitored account/);
+    assert.match(notification.embeds[0].footer.text, /confirmed twice/);
+    assert.equal(notification.embeds[0].url, 'https://chatgpt.com/codex/settings/usage');
+});
+
+test('direct delivery precedes tracker requests and survives tracker outages', async () => {
+    const sent = [];
+    let saved;
+    const state = await pollResetSources(planResetAlerts(undefined, settings, snapshot()), settings, {
+        observations: [observation('live')],
+        tracker: async () => { assert.equal(sent.length, 1); throw new Error('offline'); },
+        save: async value => { saved = JSON.parse(JSON.stringify(value)); },
+        send: async message => { sent.push(message); }, trackerError: () => {},
+    });
+    assert.equal(state.pending.length, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(state)), saved);
+});
+
+test('tracker recovery after initial offline startup baselines history without losing scheduled alerts', async () => {
+    const sent = [];
+    const deps = { save: async () => {}, send: async message => { sent.push(message); }, trackerError: () => {} };
+    const initial = await pollResetSources(undefined, settings, { ...deps, observations: [],
+        tracker: async () => { throw new Error('offline'); } });
+    assert.equal(initial.trackerInitialized, false);
+    const recovered = await pollResetSources(initial, settings, { ...deps, observations: [],
+        tracker: async () => snapshot([reset('historical')], scheduled('future')) });
+    assert.equal(recovered.trackerInitialized, true);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].embeds[0].title, /announced/);
+});
+
+test('tracker backoff does not pause delivery of direct observations', async () => {
+    const sent = [];
+    await pollResetSources(planResetAlerts(undefined, settings, snapshot()), settings, {
+        observations: [observation('live')], tracker: async () => null,
+        save: async () => {}, send: async message => { sent.push(message); }, trackerError: () => {},
+    });
+    assert.equal(sent.length, 1);
 });

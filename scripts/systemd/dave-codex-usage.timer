@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll Codex account limits every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60s
+AccuracySec=1s
+Unit=dave-codex-usage.service
+
+[Install]
+WantedBy=timers.target

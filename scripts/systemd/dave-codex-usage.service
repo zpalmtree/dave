@@ -1,0 +1,13 @@
+[Unit]
+Description=Read local Codex limits and forward confirmed reset observations to Dave
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Code/js/dave
+ExecStart=/usr/bin/node %h/Code/js/dave/scripts/codex-usage-watch.mjs
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=55
+KillMode=control-group
+UMask=0077
+Nice=10

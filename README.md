@@ -97,8 +97,60 @@ Keep it across restarts. First startup silently baselines executed history but a
 any currently scheduled reset. Later polls page through history to catch resets missed
 during downtime and retry failed deliveries. Missing configuration disables the watcher;
 invalid state fails closed. Use a new config/state path when changing the destination.
-Detection depends on the tracker publishing an announcement or execution signal;
-it cannot verify individual accounts' limits.
+The public tracker remains the fallback source. An optional local account monitor can
+detect resets before the tracker confirms them, without moving Codex credentials to
+the bot server.
+
+### Direct Codex account monitoring
+
+`scripts/codex-usage-watch.mjs` reads the signed-in local CLI's
+[`account/rateLimits/read`](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt)
+once per invocation. It starts no model turns and never redeems reset credits.
+Two samples at least 30 seconds apart must confirm either an early usage drop or an
+increase in available reset credits. Usage must drop by at least five percentage
+points to at most 5%, before its normal reset time. The confirmation may include
+new usage as long as it stays below the pre-reset usage.
+
+Normal rollovers, account/plan/window changes, polling gaps over five minutes,
+unknown credit inventories, and observed personal credit redemptions do not trigger
+usage-reset alerts. Complete, unchanged credit IDs also allow detection on accounts
+with banked credits. Grants can be account-specific; all direct alerts explicitly
+say they were observed on the monitored account, not verified globally. Very small
+usage drops, resets while the desktop is offline, or resets without comparable
+account data may be missed; the public tracker still works independently.
+
+The monitor keeps its baseline, pending confirmation, and seven days of observations
+in `~/.local/state/dave-codex-usage.json` (mode 0600). It forwards only confirmed
+observations over SSH to `dave:~/.config/dave-codex-resets.json.usage.json`, using an
+atomic replacement. Credentials, account IDs, credit IDs, and usage percentages are
+never forwarded. Delivery failures retry from saved observations on the next run.
+The bot reads this feed independently of public tracker availability. Same-kind
+events from the two sources within six hours of each other are treated as one reset
+to avoid a second ping when the tracker catches up; this correlation is heuristic
+because there is no shared event ID.
+
+On the signed-in WSL desktop, build the project, verify batch SSH access to `dave`,
+then install the supplied user timer:
+
+```sh
+yarn build
+mkdir -p ~/.config/systemd/user
+cp scripts/systemd/dave-codex-usage.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now dave-codex-usage.timer
+systemctl --user start dave-codex-usage.service
+journalctl --user -u dave-codex-usage.service -n 10
+```
+
+The timer polls every 60 seconds; confirmation plus the bot's own polling normally
+adds about one to three minutes from a detectable account change. It runs only while
+the desktop's WSL user services are available. The supplied unit assumes this clone
+is at `~/Code/js/dave` and Node is at `/usr/bin/node`. Override `CODEX_USAGE_CODEX`,
+`CODEX_USAGE_STATE_FILE`, or `CODEX_USAGE_REMOTE` in a systemd drop-in if needed.
+The receiver uses the default bot config path; custom bot config paths need a
+matching receiver-path adjustment. Stop monitoring with
+`systemctl --user disable --now dave-codex-usage.timer`. Preserve the local state
+and bot state files across restarts to avoid losing baselines and deduplication.
 
 ## Uproar (uproar.chat)
 
