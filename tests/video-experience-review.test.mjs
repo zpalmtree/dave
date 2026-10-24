@@ -96,3 +96,24 @@ test('score timing rubric requires timing, restraint and fit, with no genre or v
     payload.pairs[0].dimension_preferences.restraint='na';
     assert.throws(()=>applyFinalVideoRatings(packet,payload),/Invalid restraint/);
 });
+
+test('absolute soundtrack acceptability is required, independent of preference, and survives save', async()=>{
+    const packet=fixture();packet.require_acceptability=true;
+    packet.pairs[0].acceptability={A:null,B:null};
+    const payload=ratedPayload(packet);
+    assert.equal(sanitizeFinalVideoPacket(packet).require_acceptability,true);
+    assert.throws(()=>applyFinalVideoRatings(packet,payload),/acceptability for both/);
+    payload.pairs[0].acceptability={A:'unacceptable',B:'unacceptable'};
+    const saved=applyFinalVideoRatings(packet,payload);
+    assert.equal(saved.pairs[0].preferred,'B');
+    assert.deepEqual(saved.pairs[0].acceptability,{A:'unacceptable',B:'unacceptable'});
+    assert.deepEqual(finalVideoProgress(saved),{complete:1,total:1});
+    const incomplete=structuredClone(saved);incomplete.pairs[0].acceptability.B=null;
+    assert.equal(finalVideoProgress(incomplete).complete,0);
+    payload.pairs[0].acceptability.A='tie';
+    assert.throws(()=>applyFinalVideoRatings(packet,payload),/acceptability/);
+    const legacy=fixture();
+    assert.notEqual(sanitizeFinalVideoPacket(legacy).fingerprint,sanitizeFinalVideoPacket({...legacy,require_acceptability:true}).fingerprint);
+    assert.equal(sanitizeFinalVideoPacket(legacy).require_acceptability,undefined);
+    assert.equal(finalVideoProgress(applyFinalVideoRatings(legacy,ratedPayload(legacy))).complete,1);
+});
