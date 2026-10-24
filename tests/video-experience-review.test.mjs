@@ -117,3 +117,11 @@ test('absolute soundtrack acceptability is required, independent of preference, 
     assert.equal(sanitizeFinalVideoPacket(legacy).require_acceptability,undefined);
     assert.equal(finalVideoProgress(applyFinalVideoRatings(legacy,ratedPayload(legacy))).complete,1);
 });
+
+test('whole-video shareability has a distinct fingerprint and survives sanitizing',()=>{
+ const packet=fixture();packet.require_acceptability=true;
+ const before=sanitizeFinalVideoPacket(packet);packet.acceptability_scope='video';
+ const after=sanitizeFinalVideoPacket(packet);
+ assert.equal(after.acceptability_scope,'video');assert.notEqual(after.fingerprint,before.fingerprint);
+ packet.acceptability_scope='unknown';assert.throws(()=>sanitizeFinalVideoPacket(packet),/scope/);
+});
