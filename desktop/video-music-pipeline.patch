@@ -1,0 +1,437 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -3438,6 +3438,7 @@
+         preserve_audio: bool = False,
+         sound_mix: dict | None = None,
+         background_score: Path | None = None,
++        music_context: dict | None = None,
+     ) -> Path:
+         ffmpeg = shutil.which("ffmpeg")
+         if not ffmpeg:
+@@ -3456,6 +3457,20 @@
+             "audio_loudness_normalization",
+             time.monotonic() - normalization_started,
+         )
++        if music_context and not preserve_audio:
++            from video_sound_mix import prepare_score
++            from video_recovery import duration as media_duration
++            music_started = time.monotonic()
++            try:
++                sound_mix, background_score = await prepare_score(self, music_context['job'],
++                    music_context['plan'], music_context['root'],
++                    await asyncio.to_thread(media_duration, normalized), normalized, music_context['request'])
++            except asyncio.CancelledError:
++                raise
++            except Exception as error:
++                sound_mix, background_score = None, None
++                print(f"WARNING: Music processing unavailable; retaining scene audio: {error}", flush=True)
++            self.add_span("worker", "music_pipeline", time.monotonic() - music_started)
+         if sound_mix and not preserve_audio:
+             from video_sound_mix import mix_video
+             mix_started = time.monotonic()
+@@ -3463,7 +3478,7 @@
+                 from video_recovery import duration as media_duration
+                 normalized = await asyncio.to_thread(mix_video, normalized,
+                     normalized.with_name(normalized.stem + '.sound-mix.mp4'), sound_mix,
+-                    duration_seconds or await asyncio.to_thread(media_duration, normalized), background_score)
++                    await asyncio.to_thread(media_duration, normalized), background_score)
+             except Exception as error:
+                 print(f"WARNING: Sound mix unavailable; retaining original audio: {error}", flush=True)
+             self.add_span("worker", "sound_mix", time.monotonic() - mix_started)
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -824,11 +824,8 @@
+             from video_source_audio import mux_original_song
+             final = await asyncio.to_thread(mux_original_song, ffmpeg(), final, song, root / 'song-final.mp4',
+                 0.0, int(plan['source_audio']['output_frames']))
+-        from video_sound_mix import prepare_score
+-        policy, background = await prepare_score(worker, job, plan, root, duration(final))
+-        mix_options = ({'sound_mix': policy, 'background_score': background}
+-                       if background or policy['effects'] != 'preserve' else {})
+-        delivery = await worker.prepare_delivery(final, job['id'], duration(final), **mix_options)
++        delivery = await worker.prepare_delivery(final, job['id'], duration(final),
++            music_context={'job': job, 'plan': plan, 'root': root, 'request': request})
+         delivery_duration = await asyncio.to_thread(duration, delivery)
+         await request('quality', {'format': checkpoint['format'], 'result_sha256': digest(delivery), 'artifacts': artifacts})
+         await worker.send({'type': 'event', 'event': 'uploading', 'job_id': job['id']})
+--- a/video_sound_mix.py
++++ b/video_sound_mix.py
+@@ -1,4 +1,4 @@
+-"""A continuous, ducked instrumental bed; original dialogue/effects stay in the mix.
++"""An edited instrumental score; original dialogue/effects stay in the mix.
+ 
+ CPU mixing only. The recovery worker separately admits optional Music3 generation
+ through GPUq. Source-song and source-video edits bypass this module.
+@@ -87,6 +87,9 @@
+     """Stream-copy video; preserve dry audio underneath a level-controlled score."""
+     if not math.isfinite(seconds) or not 0 < seconds <= 600:
+         raise ValueError('Invalid mix duration')
++    if 'cues' in policy:
++        from video_score_cues import render
++        return render(source, score, output, seconds, policy['cues'])[0]
+     soft = policy.get('effects') == 'soften_transients'
+     if not score and not soft:
+         return source
+@@ -119,42 +122,70 @@
+         bed.unlink(missing_ok=True)
+ 
+ 
+-async def prepare_score(worker, job, plan, root: Path, seconds: float):
++async def prepare_score(worker, job, plan, root: Path, seconds: float, source: Path, request):
+     """One admitted composition per spec; reuse it on upload/recovery retries."""
+-    policy = directive(plan, bool(job.get('has_source_audio') or job.get('has_source_video')))
++    policy = directive(plan, bool(job.get('has_source_audio') or job.get('has_source_video') or plan.get('source_audio')))
+     if policy['music'] != 'instrumental':
+         return policy, None
+-    from video_worker import SCRIPT_DIR, console_python_executable, stable_job_seed, atomic_json
++    from video_worker import SCRIPT_DIR, console_python_executable, atomic_json
+     from video_recovery import run_local_step
+-    spec = {'caption': 'Instrumental background score, no singing or spoken words. ' + policy['caption'],
+-            'lyrics': '[Instrumental]', 'seconds': min(60, max(8, seconds + 2)),
+-            'seed': stable_job_seed(job['id']) % (2 ** 32)}
++    # The broker owns API credentials, usage accounting and first-attempt receipts.
++    # Build evidence only after delivery sync and loudness normalization.
++    import base64
++    from video_recovery import duration
++    await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
++                       'progress': None, 'stage': 'Planning background music from finished footage'})
++    preview = root / 'music-preview.mp4'
++    await asyncio.to_thread(media, ['-i', str(source), '-map', '0:v:0', '-map', '0:a:0',
++        '-vf', 'scale=512:512:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=12',
++        '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-crf', '28', '-c:a', 'aac', '-b:a', '96k', str(preview)])
++    preview_data = base64.b64encode(preview.read_bytes()).decode('ascii')
++    if len(preview_data) > 16_000_000:
++        raise ValueError('Music preview exceeds request limit')
++    evidence = {'preview': preview_data, 'video_seconds': seconds}
++    brief = await request('music-brief', evidence)
++    if brief.get('status') != 'ready':
++        return {**policy, 'cues': []}, None
++    spec = brief['spec']
++
++    async def edited(score):
++        await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
++                           'progress': None, 'stage': 'Selecting instrumental passages and cue timing'})
++        score_data = base64.b64encode(score.read_bytes()).decode('ascii')
++        if len(preview_data) + len(score_data) > 17_000_000:
++            raise ValueError('Music evidence exceeds request limit')
++        decision = await request('music-edit', {**evidence, 'score': score_data,
++                                               'score_seconds': await asyncio.to_thread(duration, score)})
++        cues = decision['edit']['cues'] if decision.get('status') == 'ready' else []
++        atomic_json(root / 'music-delivery-edit.json', decision)
++        return {**policy, 'cues': cues}, score if cues else None
++
+     key = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
+     score, receipt, spec_path = (root / f'background-{key}{suffix}' for suffix in ('.flac', '.json', '-spec.json'))
+     if receipt.exists():
+         saved = json.loads(receipt.read_text(encoding='utf-8'))
+         if saved.get('failed'):
+-            return policy, None
++            return {**policy, 'cues': []}, None
+         if score.is_file() and hashlib.sha256(score.read_bytes()).hexdigest() == saved.get('sha256'):
+-            return policy, score
++            return await edited(score)
+     atomic_json(spec_path, spec)
+     score.unlink(missing_ok=True)
+     try:
+         await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
+-                           'progress': None, 'stage': 'Composing one continuous background score'})
++                           'progress': None, 'stage': 'Composing and editing an instrumental score'})
+         await run_local_step(worker, job, f'background-{key}',
+             [console_python_executable(), '-s', str(SCRIPT_DIR / 'video_sound_mix.py'),
+              '--spec', str(spec_path), '--output', str(score)], 'background score')
+         if not score.is_file():
+             raise RuntimeError('No background score was produced')
+         atomic_json(receipt, {'sha256': hashlib.sha256(score.read_bytes()).hexdigest()})
+-        return policy, score
++        return await edited(score)
+     except asyncio.CancelledError:
+         raise
+     except Exception as error:
+         atomic_json(receipt, {'failed': str(error)[:500]})
+         print(f'WARNING: Background music unavailable; preserving original audio: {error}', flush=True)
+-        return policy, None
++        return {**policy, 'cues': []}, None
+ 
+ 
+ def compose_main():
+--- /dev/null
++++ b/video_score_cues.py
+@@ -0,0 +1,133 @@
++"""Explicit, offline music edits against a finished video.
++
++A cue states both destination time and source passage. Outside cues the music is
++exactly silent. No loops, time stretch, or automatic production default changes.
++Energy-ranked passages are audition candidates, not semantic musical highlights.
++"""
++from __future__ import annotations
++import math
++from pathlib import Path
++import numpy as np
++from video_sound_mix import media
++
++RATE = 48000
++
++
++def decode_score(path, normalized=True):
++    args = ['-i', str(path), '-t', '120', '-vn']
++    if normalized:
++        args += ['-af', 'loudnorm=I=-30:TP=-3:LRA=7']
++    data = media([*args, '-ar', str(RATE), '-ac', '2', '-f', 'f32le', 'pipe:1']).stdout
++    audio = np.frombuffer(data, dtype='<f4').reshape(-1, 2).copy()
++    if len(audio) < RATE or not np.isfinite(audio).all():
++        raise ValueError('Score must contain at least one second of finite audio')
++    return audio
++
++
++def passage_candidates(audio, seconds, count=5):
++    """Rank sustained windows, not individual transient peaks. Audition required."""
++    if not math.isfinite(seconds) or seconds <= 0 or seconds > len(audio) / RATE:
++        raise ValueError('Passage must fit inside the source')
++    size = round(seconds * RATE)
++    # 100 ms blocks bound memory while retaining useful temporal resolution.
++    hop = RATE // 10
++    blocks = np.array([np.mean(np.square(audio[i:i+hop], dtype=np.float64))
++                       for i in range(0, len(audio), hop)])
++    width = max(1, math.ceil(size / hop))
++    energies = np.convolve(blocks, np.ones(width)/width, mode='valid')
++    ordered = np.argsort(-energies, kind='stable')
++    result = []
++    for index in ordered:
++        start = int(index) * hop / RATE
++        if start + seconds > len(audio) / RATE + 1e-9:
++            continue
++        if any(abs(start - row['source_start']) < max(1, seconds / 2) for row in result):
++            continue
++        result.append({'source_start': start, 'seconds': seconds,
++                       'mean_energy': float(energies[index]), 'method': 'sustained-energy candidate; requires scene review'})
++        if len(result) >= count:
++            break
++    return result
++
++
++def validate_cues(cues, seconds, source_seconds):
++    if not math.isfinite(seconds) or not 0 < seconds <= 600:
++        raise ValueError('Invalid output duration')
++    if not isinstance(cues, list) or len(cues) > 32:
++        raise ValueError('Cues must be a list of at most 32 items')
++    previous_end = 0
++    for cue in cues:
++        keys = ('start', 'end', 'source_start', 'gain_db', 'fade_in', 'fade_out')
++        if not isinstance(cue, dict) or any(type(cue.get(k)) not in (int, float) or not math.isfinite(cue[k]) for k in keys):
++            raise ValueError('Cue times, gain and fades must be finite numbers')
++        start, end = cue['start'], cue['end']
++        length = end - start
++        if start < previous_end or start < 0 or end > seconds or length < .1:
++            raise ValueError('Cues must be ordered, non-overlapping and inside the finished video')
++        if cue['source_start'] < 0 or cue['source_start'] + length > source_seconds + 1e-6:
++            raise ValueError('Cue exceeds available score; looping is forbidden')
++        if not -60 <= cue['gain_db'] <= 0:
++            raise ValueError('Cue gain must attenuate the normalized score')
++        if min(cue['fade_in'], cue['fade_out']) < 0 or cue['fade_in'] + cue['fade_out'] > length:
++            raise ValueError('Cue fades must fit inside its duration')
++        if not isinstance(cue.get('reason'), str) or not cue['reason'].strip():
++            raise ValueError('Each cue needs a scene-specific reason')
++        previous_end = end
++
++
++def assemble_cues(audio, seconds, cues):
++    validate_cues(cues, seconds, len(audio)/RATE)
++    result = np.zeros((round(seconds * RATE), 2), dtype=np.float32)
++    for cue in cues:
++        start, end = round(cue['start'] * RATE), round(cue['end'] * RATE)
++        source = round(cue['source_start'] * RATE)
++        piece = audio[source:source + end - start].copy()
++        if len(piece) != end - start:
++            raise ValueError('Rounded cue exceeds available source')
++        piece *= 10 ** (cue['gain_db'] / 20)
++        for key, reverse in [('fade_in', False), ('fade_out', True)]:
++            count = round(cue[key] * RATE)
++            if count:
++                curve = np.linspace(0, 1, count, dtype=np.float32)
++                if reverse:
++                    piece[-count:] *= curve[::-1, None]
++                else:
++                    piece[:count] *= curve[:, None]
++        result[start:end] = piece
++    return result
++
++
++def render(source: Path, score: Path | None, output: Path, seconds: float, cues):
++    """Preserve original dry track and video; apply ducking only to edited music."""
++    if output.resolve() == source.resolve() or (score and output.resolve() == score.resolve()):
++        raise ValueError('Output must not overwrite an input')
++    validate_cues(cues, seconds, math.inf if cues else 0)
++    if not cues:
++        # Whole-video silence means no added music, not silencing dialogue/ambience.
++        return source, {'music': 'none', 'cues': [], 'looped': False}
++    if not score:
++        raise ValueError('Nonempty cues require a score')
++    audio = decode_score(score)
++    result = assemble_cues(audio, seconds, cues)
++    bed = output.with_suffix('.cue-bed.wav')
++    raw = output.with_suffix('.cue-bed.f32')
++    temporary = output.with_name(output.stem + '.partial.mp4')
++    try:
++        raw.write_bytes(result.astype('<f4').tobytes())
++        media(['-f', 'f32le', '-ar', str(RATE), '-ac', '2', '-i', str(raw), '-c:a', 'pcm_f32le', str(bed)])
++        graph = ('[0:a]aformat=sample_rates=48000:channel_layouts=stereo,apad=pad_dur=0.5,anull[dry];'
++                 '[dry]asplit=2[original][key];[1:a]apad=pad_dur=0.5[bed];'
++                 '[bed][key]sidechaincompress=threshold=0.04:ratio=6:attack=20:release=350:makeup=1[ducked];'
++                 '[original][ducked]amix=inputs=2:duration=first:normalize=0[mixed];'
++                 f'[mixed]alimiter=limit=0.95:level=false:latency=true,atrim=duration={seconds:.6f},asetpts=PTS-STARTPTS[out]')
++        media(['-i', str(source), '-i', str(bed), '-filter_complex', graph,
++               '-map', '0:v:0', '-map', '[out]', '-map_metadata', '0', '-c:v', 'copy',
++               '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart+use_metadata_tags', str(temporary)])
++        temporary.replace(output)
++        return output, {'music': 'edited', 'cues': cues, 'looped': False,
++                        'source_seconds': len(audio)/RATE,
++                        'unscored_seconds': seconds - sum(c['end']-c['start'] for c in cues)}
++    finally:
++        raw.unlink(missing_ok=True)
++        bed.unlink(missing_ok=True)
++        temporary.unlink(missing_ok=True)
+--- a/test_video_sound_mix.py
++++ b/test_video_sound_mix.py
+@@ -83,11 +83,46 @@
+                 stable_job_seed=lambda _:17,atomic_json=lambda p,v:p.write_text(json.dumps(v)))
+             worker=types.SimpleNamespace(send=mock.AsyncMock())
+             plan={'sound_mix':{'music':'instrumental','caption':'Warm piano and brushes, one continuous arrangement','effects':'preserve'}}
+-            with mock.patch.dict(sys.modules,{'video_worker':fake,'video_recovery':types.SimpleNamespace(run_local_step=step)}):
+-                for _ in range(2): self.assertIsNone(asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,10))[1])
++            request=mock.AsyncMock(return_value={'status':'ready','spec':{'caption':'concrete music', 'seconds':40,'seed':17}})
++            (root/'music-preview.mp4').write_bytes(b'preview')
++            with mock.patch.dict(sys.modules,{'video_worker':fake,'video_recovery':types.SimpleNamespace(run_local_step=step,duration=lambda _:10)}), \
++                 mock.patch.object(mix,'media'):
++                for _ in range(2): self.assertIsNone(asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,10,root/'source',request))[1])
+                 step.assert_awaited_once()
+                 step.side_effect=asyncio.CancelledError()
+-                with self.assertRaises(asyncio.CancelledError):asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,11))
++                request.return_value['spec']['seed']=18
++                with self.assertRaises(asyncio.CancelledError):asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,11,root/'source',request))
++
++    def test_generated_score_is_edited_once_per_delivery_and_reused_on_recovery(self):
++        with tempfile.TemporaryDirectory() as directory:
++            root=Path(directory)
++            (root/'music-preview.mp4').write_bytes(b'preview')
++            fake=types.SimpleNamespace(SCRIPT_DIR=root,console_python_executable=lambda:sys.executable,
++                atomic_json=lambda p,v:p.write_text(json.dumps(v)))
++            worker=types.SimpleNamespace(send=mock.AsyncMock())
++            plan={'sound_mix':{'music':'instrumental','caption':'A coherent restrained piano arrangement','effects':'preserve'}}
++            spec={'caption':'Concrete broker brief, not legacy caption','seconds':40,'seed':17}
++            cue={'start':2,'end':5,'source_start':10,'gain_db':-3,'fade_in':.2,'fade_out':.2,'reason':'Answer reveal'}
++            calls=[]
++            async def request(operation,body):
++                calls.append((operation,body))
++                return {'status':'ready',**({'spec':spec} if operation=='music-brief' else {'edit':{'cues':[cue]}})}
++            async def generate(*args):
++                command=args[3]
++                self.assertEqual(json.loads(Path(command[command.index('--spec')+1]).read_text()),spec)
++                Path(command[command.index('--output')+1]).write_bytes(b'score')
++            step=mock.AsyncMock(side_effect=generate)
++            with mock.patch.dict(sys.modules,{'video_worker':fake,'video_recovery':types.SimpleNamespace(run_local_step=step,duration=lambda _:40)}), \
++                 mock.patch.object(mix,'media'):
++                for _ in range(2):
++                    policy,score=asyncio.run(mix.prepare_score(worker,{'id':'job'},plan,root,12,root/'source',request))
++                    self.assertEqual(policy['cues'],[cue]);self.assertEqual(score.read_bytes(),b'score')
++                step.assert_awaited_once()
++                self.assertEqual([op for op,_ in calls],['music-brief','music-edit']*2)
++                self.assertEqual(calls[1][1]['score_seconds'],40)
++                self.assertEqual(calls[1][1]['score'],'c2NvcmU=')
++                policy,score=asyncio.run(mix.prepare_score(worker,{'id':'job','has_source_audio':True},plan,root,12,root/'source',request))
++                self.assertIsNone(score);self.assertEqual(len(calls),4)
+ 
+     def test_composer_owns_only_the_server_it_starts(self):
+         generator=types.SimpleNamespace(DEFAULT_SERVER='local',server_ready=mock.Mock(return_value=True),
+@@ -106,6 +141,7 @@
+             self.skipTest('Installed desktop integration test')
+         import video_worker
+         import video_sync_delivery
++        import video_recovery
+         with tempfile.TemporaryDirectory() as directory:
+             root=Path(directory);source=root/'source.mp4';source.write_bytes(b'fixture')
+             normalized=root/'normalized.mp4';normalized.write_bytes(b'normalized')
+@@ -116,14 +152,20 @@
+             worker.delivery_video_is_compatible=mock.AsyncMock(return_value=True)
+             policy={'music':'instrumental','effects':'preserve'}
+             with mock.patch.object(video_sync_delivery,'correct_delivery_sync',mock.AsyncMock(return_value=source)), \
+-                 mock.patch.object(mix,'mix_video',return_value=mixed) as render:
++                 mock.patch.object(mix,'mix_video',return_value=mixed) as render, \
++                 mock.patch.object(video_recovery,'duration',return_value=3.25), \
++                 mock.patch.object(mix,'prepare_score',mock.AsyncMock(return_value=(policy,root/'score.flac'))) as prepare:
+                 output=asyncio.run(worker.prepare_delivery(source,'job',3,sound_mix=policy,background_score=root/'score.flac'))
+                 self.assertEqual(output,mixed)
+                 self.assertEqual(render.call_args.args[0],normalized)
+                 self.assertEqual(render.call_args.args[2],policy)
+-                render.reset_mock();worker.normalize_delivery_audio.reset_mock()
+-                output=asyncio.run(worker.prepare_delivery(source,'job',3,preserve_audio=True,sound_mix=policy))
+-                self.assertEqual(output,source);render.assert_not_called();worker.normalize_delivery_audio.assert_not_awaited()
++                context={'job':{'id':'job'},'plan':{},'root':root,'request':mock.AsyncMock()}
++                output=asyncio.run(worker.prepare_delivery(source,'job',3,music_context=context))
++                self.assertEqual(prepare.call_args.args[4:6],(3.25,normalized))
++                self.assertEqual(render.call_args.args[3],3.25)
++                render.reset_mock();prepare.reset_mock();worker.normalize_delivery_audio.reset_mock()
++                output=asyncio.run(worker.prepare_delivery(source,'job',3,preserve_audio=True,sound_mix=policy,music_context=context))
++                self.assertEqual(output,source);prepare.assert_not_awaited();render.assert_not_called();worker.normalize_delivery_audio.assert_not_awaited()
+                 render.side_effect=RuntimeError('decoder unavailable')
+                 output=asyncio.run(worker.prepare_delivery(source,'job',3,sound_mix=policy))
+                 self.assertEqual(output,normalized)
+--- /dev/null
++++ b/test_video_score_cues.py
+@@ -0,0 +1,57 @@
++import json
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++import numpy as np
++from video_score_cues import RATE, assemble_cues, passage_candidates, render
++from video_sound_mix import media
++
++
++def cue(**kwargs):
++    return dict(start=.5, end=1.5, source_start=2, gain_db=-6,
++                fade_in=.1, fade_out=.1, reason='Leave the spoken setup silent, enter for reveal', **kwargs)
++
++
++class ScoreCueTests(unittest.TestCase):
++    def test_source_offsets_silent_gaps_and_fades(self):
++        audio=np.ones((4*RATE,2),dtype=np.float32);audio[2*RATE:3*RATE]*=.4
++        c=cue();result=assemble_cues(audio,2,[c])
++        self.assertEqual(np.max(abs(result[:RATE//2])),0)
++        self.assertEqual(np.max(abs(result[3*RATE//2:])),0)
++        self.assertAlmostEqual(float(result[RATE,0]),.4*10**(-6/20),places=6)
++        self.assertEqual(result[RATE//2,0],0);self.assertEqual(result[3*RATE//2-1,0],0)
++        for update in [{'source_start':3.5},{'start':-1},{'gain_db':1},{'end':float('nan')},{'fade_out':2}]:
++            with self.assertRaises(ValueError):assemble_cues(audio,2,[{**c,**update}])
++        with self.assertRaises(ValueError):assemble_cues(audio,2,[c,c])
++
++    def test_sustained_passage_ranking_ignores_single_peak(self):
++        audio=np.full((8*RATE,2),.01,dtype=np.float32)
++        audio[RATE:RATE+4]=1;audio[4*RATE:6*RATE]=.2
++        result=passage_candidates(audio,2)
++        self.assertAlmostEqual(result[0]['source_start'],4,places=1)
++        self.assertIn('requires scene review',result[0]['method'])
++
++    def test_real_media_preserves_picture_and_no_music_is_identity(self):
++        with tempfile.TemporaryDirectory() as folder:
++            root=Path(folder);source=root/'dry.mp4';score=root/'score.wav';out=root/'out.mp4'
++            media(['-f','lavfi','-i','color=c=blue:s=64x64:r=10:d=2',
++                   '-f','lavfi','-i','sine=frequency=220:duration=2',
++                   '-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',str(source)])
++            media(['-f','lavfi','-i','sine=frequency=880:duration=4',str(score)])
++            returned,audit=render(source,None,out,2,[])
++            self.assertEqual(returned,source);self.assertFalse(out.exists());self.assertEqual(audit['music'],'none')
++            returned,audit=render(source,score,out,2,[cue()])
++            packets=lambda p:json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v','-show_packets','-show_data_hash','sha256','-show_entries','packet=pts,dts,data_hash','-of','json',str(p)]))
++            self.assertEqual(packets(source),packets(returned));self.assertFalse(audit['looped'])
++            audio=lambda p:np.frombuffer(media(['-i',str(p),'-ar',str(RATE),'-ac','1','-f','f32le','pipe:1']).stdout,dtype='<f4')
++            before,after=audio(source),audio(out)
++            def tone(x,freq,start,end):
++                x=x[round(start*RATE):round(end*RATE)]
++                return abs(np.mean(x*np.exp(-2j*np.pi*freq*np.arange(len(x))/RATE)))
++            self.assertAlmostEqual(tone(after,220,.7,1.2)/tone(before,220,.7,1.2),1,delta=.08)
++            self.assertLess(tone(after,880,.1,.4),tone(after,880,.7,1.2)*.05)
++            with self.assertRaises(ValueError):render(source,score,source,2,[cue()])
++
++
++if __name__=='__main__':unittest.main()

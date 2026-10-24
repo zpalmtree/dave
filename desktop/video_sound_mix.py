@@ -1,4 +1,4 @@
-"""A continuous, ducked instrumental bed; original dialogue/effects stay in the mix.
+"""An edited instrumental score; original dialogue/effects stay in the mix.
 
 CPU mixing only. The recovery worker separately admits optional Music3 generation
 through GPUq. Source-song and source-video edits bypass this module.
@@ -87,6 +87,9 @@ def mix_video(source: Path, output: Path, policy: dict, seconds: float, score: P
     """Stream-copy video; preserve dry audio underneath a level-controlled score."""
     if not math.isfinite(seconds) or not 0 < seconds <= 600:
         raise ValueError('Invalid mix duration')
+    if 'cues' in policy:
+        from video_score_cues import render
+        return render(source, score, output, seconds, policy['cues'])[0]
     soft = policy.get('effects') == 'soften_transients'
     if not score and not soft:
         return source
@@ -119,42 +122,70 @@ def mix_video(source: Path, output: Path, policy: dict, seconds: float, score: P
         bed.unlink(missing_ok=True)
 
 
-async def prepare_score(worker, job, plan, root: Path, seconds: float):
+async def prepare_score(worker, job, plan, root: Path, seconds: float, source: Path, request):
     """One admitted composition per spec; reuse it on upload/recovery retries."""
-    policy = directive(plan, bool(job.get('has_source_audio') or job.get('has_source_video')))
+    policy = directive(plan, bool(job.get('has_source_audio') or job.get('has_source_video') or plan.get('source_audio')))
     if policy['music'] != 'instrumental':
         return policy, None
-    from video_worker import SCRIPT_DIR, console_python_executable, stable_job_seed, atomic_json
+    from video_worker import SCRIPT_DIR, console_python_executable, atomic_json
     from video_recovery import run_local_step
-    spec = {'caption': 'Instrumental background score, no singing or spoken words. ' + policy['caption'],
-            'lyrics': '[Instrumental]', 'seconds': min(60, max(8, seconds + 2)),
-            'seed': stable_job_seed(job['id']) % (2 ** 32)}
+    # The broker owns API credentials, usage accounting and first-attempt receipts.
+    # Build evidence only after delivery sync and loudness normalization.
+    import base64
+    from video_recovery import duration
+    await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
+                       'progress': None, 'stage': 'Planning background music from finished footage'})
+    preview = root / 'music-preview.mp4'
+    await asyncio.to_thread(media, ['-i', str(source), '-map', '0:v:0', '-map', '0:a:0',
+        '-vf', 'scale=512:512:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=12',
+        '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-crf', '28', '-c:a', 'aac', '-b:a', '96k', str(preview)])
+    preview_data = base64.b64encode(preview.read_bytes()).decode('ascii')
+    if len(preview_data) > 16_000_000:
+        raise ValueError('Music preview exceeds request limit')
+    evidence = {'preview': preview_data, 'video_seconds': seconds}
+    brief = await request('music-brief', evidence)
+    if brief.get('status') != 'ready':
+        return {**policy, 'cues': []}, None
+    spec = brief['spec']
+
+    async def edited(score):
+        await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
+                           'progress': None, 'stage': 'Selecting instrumental passages and cue timing'})
+        score_data = base64.b64encode(score.read_bytes()).decode('ascii')
+        if len(preview_data) + len(score_data) > 17_000_000:
+            raise ValueError('Music evidence exceeds request limit')
+        decision = await request('music-edit', {**evidence, 'score': score_data,
+                                               'score_seconds': await asyncio.to_thread(duration, score)})
+        cues = decision['edit']['cues'] if decision.get('status') == 'ready' else []
+        atomic_json(root / 'music-delivery-edit.json', decision)
+        return {**policy, 'cues': cues}, score if cues else None
+
     key = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
     score, receipt, spec_path = (root / f'background-{key}{suffix}' for suffix in ('.flac', '.json', '-spec.json'))
     if receipt.exists():
         saved = json.loads(receipt.read_text(encoding='utf-8'))
         if saved.get('failed'):
-            return policy, None
+            return {**policy, 'cues': []}, None
         if score.is_file() and hashlib.sha256(score.read_bytes()).hexdigest() == saved.get('sha256'):
-            return policy, score
+            return await edited(score)
     atomic_json(spec_path, spec)
     score.unlink(missing_ok=True)
     try:
         await worker.send({'type': 'event', 'event': 'progress', 'job_id': job['id'],
-                           'progress': None, 'stage': 'Composing one continuous background score'})
+                           'progress': None, 'stage': 'Composing and editing an instrumental score'})
         await run_local_step(worker, job, f'background-{key}',
             [console_python_executable(), '-s', str(SCRIPT_DIR / 'video_sound_mix.py'),
              '--spec', str(spec_path), '--output', str(score)], 'background score')
         if not score.is_file():
             raise RuntimeError('No background score was produced')
         atomic_json(receipt, {'sha256': hashlib.sha256(score.read_bytes()).hexdigest()})
-        return policy, score
+        return await edited(score)
     except asyncio.CancelledError:
         raise
     except Exception as error:
         atomic_json(receipt, {'failed': str(error)[:500]})
         print(f'WARNING: Background music unavailable; preserving original audio: {error}', flush=True)
-        return policy, None
+        return {**policy, 'cues': []}, None
 
 
 def compose_main():

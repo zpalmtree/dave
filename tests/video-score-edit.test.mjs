@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateEdit, bypassReason, requestEdit, planScoreEdit } from '../scripts/plan-video-score-edit.mjs';
 
-const edit = () => ({ music: 'edited', reason: 'Enter at the reveal and use the answering phrase.',
+const edit = () => ({ vocal_regions: [], music: 'edited', reason: 'Enter at the reveal and use the answering phrase.',
     scene_events: [{ time: 2, description: 'The door opens.' }],
     music_events: [{ time: 5, description: 'The melody answers.' }],
     cues: [{ start: 2, end: 5, source_start: 5, gain_db: 0, fade_in: .2, fade_out: .5, reason: 'Melody answers the door reveal.' }] });
@@ -63,4 +63,13 @@ test('bypass performs no model call; receipts resist stale input reuse and concu
         await assert.rejects(planScoreEdit(options), /EEXIST/);
         assert.equal(await readFile(join(directory, 'editor.lock'), 'utf8'), 'another owner');
     } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('instrumental gate checks source clock, including a safety margin', () => {
+    const value = edit(); value.vocal_regions = [{ start: 7.8, end: 8.5, description: 'Suspected shout' }];
+    assert.throws(() => validateEdit(value, 6, 10), /vocal region/);
+    value.cues[0].source_start = 0;
+    assert.equal(validateEdit(value, 6, 10), value);
+    delete value.vocal_regions;
+    assert.throws(() => validateEdit(value, 6, 10), /Missing vocal/);
 });
