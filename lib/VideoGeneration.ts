@@ -1371,7 +1371,6 @@ export async function handleVideoRequest(
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(replacementImagePrompt
         ? `Getting your video ready and creating ${replacement?.mode === 'add' ? 'what to add' : 'the replacement'} from your description…`
-        : sceneOpening ? 'Creating the opening scene for your video…'
         : initialVideoRequestStatus(model, commandVariant));
     const plannerGuidance = [
         sourceAudio || audioVideo ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement || !character ? '' : videoCharacterPlannerGuidance(character),
