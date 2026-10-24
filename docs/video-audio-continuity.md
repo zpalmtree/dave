@@ -168,3 +168,46 @@ audible player at a time. No production composer default changes automatically.
 Official setup references:
 [ComfyUI ACE-Step guide](https://docs.comfy.org/tutorials/audio/ace-step/ace-step-v1-5)
 and [checkpoint files](https://huggingface.co/Comfy-Org/ACE-Step-1.5).
+
+
+## Production music editing (2026-10-24)
+
+The user approved rollout of the combined concrete-brief / Music3 / audiovisual
+editor pipeline. In the six-case review, four comparisons differed: the candidate
+won three, with all four graded acceptable (one still received a negative quality
+note). Two identical no-added-music comparisons carry no preference evidence.
+Future combined experiments exclude byte-identical outputs from preference review.
+This small review supports rollout, not a claim of general musical superiority.
+
+Normal recovery delivery now synchronizes and normalizes scene audio first.
+If the approved screenplay requests instrumental music, the broker watches a
+small preview and writes the same 200–450-word Music3 brief used in the reviewed
+experiment. The desktop composes one 40–60-second performance through its existing
+GPUq reservation. The broker then inspects finished footage and the full score,
+choosing cue times, source passages, attenuation and fades, or no added music.
+The renderer retains picture packets and the dry soundtrack, normalizes the whole
+score to -30 LUFS and ducks selected passages against scene audio. There is no
+looping, time stretching or per-shot music regeneration.
+
+The editor reports suspected vocal regions on the score clock; validation rejects
+cues overlapping them or their 250 ms guard intervals. This is model-based
+screening, not a guarantee of vocal detection. Explicit no-music, supplied audio,
+source-video edits and composed-song timelines bypass added music. A provider,
+composition or editing failure retains scene audio, never an unreviewed full bed.
+The legacy effects-only softening path remains available for eligible scenes.
+
+`lib/VideoMusic.ts` serves authenticated recovery operations `music-brief` and
+`music-edit`, after the worker lease and approved contract checks. API credentials
+remain broker-side; provider hooks account for requests and usage. Input hashes
+and first-attempt results live in recovery state. Each model stage allows one
+contract repair; saved failures and interrupted pending calls do not automatically
+purchase another attempt. Desktop score receipts retain the first successful
+composition. The local `music-delivery-edit.json` records the applied decision.
+
+Install desktop changes using `scripts/apply-video-music-pipeline-desktop.py`
+after `--check`; it requires audited before/after hashes and refuses unrelated
+changes. Reload the supervised worker only while dispatch is drained and no job
+is active, then resume dispatch. Deploy both server tracks with
+`scripts/deploy-bots.sh --with-broker`. Setting `VIDEO_SOUND_MIX=0` in the worker
+environment and reloading it disables optional music and softening; rollback does
+not require modifying video generation or supplied soundtracks.

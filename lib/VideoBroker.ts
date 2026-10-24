@@ -1,3 +1,4 @@
+import { recoveryMusic } from './VideoMusic.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
 import { describeVideoEditReference, validateVideoEditReference } from './VideoEditReference.js';
@@ -5180,6 +5181,10 @@ export class VideoBroker {
                 writeJson(res, 409, { error: 'Approved contract revision does not match.' });
                 return;
             }
+            if (operation === 'music-brief' || operation === 'music-edit') {
+                writeJson(res, 200, await recoveryMusic(operation, job, state, body, persist, options));
+                return;
+            }
             if (operation === 'checkpoint') {
                 // Checkpoints are restart hints only; they never count as quality approval.
                 if (!body.checkpoint || JSON.stringify(body.checkpoint).length > 128 * 1024) throw new Error('Invalid checkpoint.');
@@ -5540,7 +5545,7 @@ export class VideoBroker {
             await this.receiveWorkerSourceVideo(req, res, fetchedVideo[1]);
             return;
         }
-        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|soundtrack|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
+        const recovery = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/recovery\/(plan|local-plan|soundtrack|music-brief|music-edit|image|continuity|review|checkpoint|quality)$/.exec(url.pathname);
         if (recovery && req.method === 'POST') {
             await this.handleRecovery(req, res, recovery[1], recovery[2]);
             return;

@@ -1,0 +1,26 @@
+{
+  "video_worker.py": {
+    "before_sha256": "0e4045f59bd64dbbcad5a09b55d1be3760aa6df3b1b23629a635544a655c58f0",
+    "after_sha256": "3cb7da80f6e61164b3cb5e5b4f548ca945aa26b22445570a8b2e1bfd31fb5953"
+  },
+  "video_recovery.py": {
+    "before_sha256": "551df4b10b2b7fa2fc140f74af1a0313ce56b3ef5065d3450325214833122497",
+    "after_sha256": "a5bb44d858bb72e6ec3f359ecd0aa8ca855ce32632828299f132792e6e0d6339"
+  },
+  "video_sound_mix.py": {
+    "before_sha256": "a1efcf40d65adbc72a1415a71b71ed5c889855f4515d66bbee707dbe4866855f",
+    "after_sha256": "0a1bbc25dfe77470479eb235f7443fe8113f1e3f7773d23ed8d9940257ffc0d9"
+  },
+  "video_score_cues.py": {
+    "before_sha256": null,
+    "after_sha256": "e54edc0b8a6d101df3d49edb5a47af7a4891f44b85cc83cb4a37963423ae4635"
+  },
+  "test_video_sound_mix.py": {
+    "before_sha256": "75e50b83fd3cda1269d743d659bc2f9fcc02ea9d25860ad92b878fe38704453e",
+    "after_sha256": "64a8a40cd282411498592ebf2ee0197deacf312fe81e8e06b93927e26fd9d677"
+  },
+  "test_video_score_cues.py": {
+    "before_sha256": null,
+    "after_sha256": "b8415223763801d1a3b16c4713623f3937160b28382557ac7f17fe53db68e69f"
+  }
+}

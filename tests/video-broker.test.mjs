@@ -4201,3 +4201,29 @@ test('the heartbeat returns an expired lease nobody is working on to the queue',
         await harness.stop();
     }
 });
+
+test('music recovery endpoints require worker authentication, active lease and approved contract', async () => {
+    const harness = await startLeaseRecoveryBroker('dave-music-route-');
+    let socket;
+    try {
+        const job = await harness.submit('music-user', 'music-message');
+        const connection = await harness.connect(); socket = connection.socket;
+        socket.send(JSON.stringify({ type: 'ready', warm_model: null }));
+        const lease = await connection.take(value => value.type === 'job');
+        const prompt = 'lease recovery music-message';
+        const state = { prepared: { prompt, contract_hash: 'music-contract', contract: {prompt},
+            plan: {sound_mix: {music: 'none'}} } };
+        await harness.runSql('UPDATE video_jobs SET recovery_version=1, recovery_json=? WHERE public_id=?', [JSON.stringify(state),job.id]);
+        const post = (operation,token='worker-secret',leaseId=lease.job.lease_id,contract='music-contract') =>
+            fetch(`http://127.0.0.1:${harness.broker.listeningPort()}/v1/worker/jobs/${job.id}/recovery/${operation}`, {
+                method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json','x-video-lease':leaseId},
+                body:JSON.stringify({contract_hash:contract}) });
+        for (const operation of ['music-brief','music-edit']) {
+            assert.equal((await post(operation,'wrong')).status,401);
+            assert.equal((await post(operation,'worker-secret','stale')).status,409);
+            assert.equal((await post(operation,'worker-secret',lease.job.lease_id,'stale')).status,409);
+            const valid = await post(operation); assert.equal(valid.status,200);
+            assert.equal((await valid.json()).status,'bypassed');
+        }
+    } finally { if(socket)socket.close();await harness.stop(); }
+});

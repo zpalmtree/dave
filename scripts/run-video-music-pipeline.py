@@ -133,11 +133,16 @@ def run(args):
             audits[item['id']] = {**audit, 'brief_fingerprint': brief['fingerprint'], 'edit_fingerprint': edit['fingerprint'],
                 'new_score_sha256': sha(score), 'control_sha256': sha(control), 'candidate_sha256': sha(candidate),
                 'identical_outputs': sha(control) == sha(candidate), 'identical_video_packets_and_timestamps': True, 'full_decode': 'passed'}
-            packet['pairs'].append({'pair_id': item['id'], 'prompt': item['prompt'], 'videos': videos, 'preferred': None,
-                'acceptability': {'A': None, 'B': None}, 'overall': {'A': None, 'B': None},
-                'dimension_preferences': {'timing': None, 'restraint': None, 'audio': None},
-                'material_failure': {'A': False, 'B': False}, 'notes': ''})
-            progress['ready_pairs'] += 1; progress['finished_videos'] += 2
+            if audits[item['id']]['identical_outputs']:
+                progress.setdefault('identical_cases_excluded', []).append(item['id'])
+                progress['planned_pairs'] -= 1
+            else:
+                packet['pairs'].append({'pair_id': item['id'], 'prompt': item['prompt'], 'videos': videos, 'preferred': None,
+                    'acceptability': {'A': None, 'B': None}, 'overall': {'A': None, 'B': None},
+                    'dimension_preferences': {'timing': None, 'restraint': None, 'audio': None},
+                    'material_failure': {'A': False, 'B': False}, 'notes': ''})
+                progress['ready_pairs'] += 1
+            progress['finished_videos'] += 2
             progress['cases'][index]['versions'] = [{'status': 'ready', 'stage': 'Validated playback copy'}]*2
             print('READY', item['id'], flush=True)
         except Exception as error:
@@ -147,7 +152,7 @@ def run(args):
             print('FAILED', item['id'], str(error), flush=True)
         save(root/'audit.json', audits); save(root/'progress.json', progress)
     save(packet_path, packet)
-    progress['status'] = 'awaiting-review' if packet['pairs'] else 'failed'; progress['finished_at'] = time.time()
+    progress['status'] = 'awaiting-review' if packet['pairs'] else ('failed' if progress['failed_videos'] else 'no-differences'); progress['finished_at'] = time.time()
     save(root/'progress.json', progress)
     return 1 if progress['failed_videos'] else 0
 

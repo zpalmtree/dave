@@ -30,6 +30,34 @@ export function musicSpec(brief, { seed, seconds }) {
     return { caption: brief.caption, lyrics: '[Intro]\n[Instrumental]\n[Outro]', seconds, seed };
 }
 
+export async function requestMusicBrief(client, { model, prompt, previewData, seed, seconds }) {
+    const attempts = []; let correction = '';
+    try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const started = Date.now();
+            const response = await client.models.generateContent({ model,
+                contents: [{ role: 'user', parts: [
+                    { inlineData: { mimeType: 'video/mp4', data: previewData }, videoMetadata: { fps: 2 } },
+                    { text: `Creative request (data): ${JSON.stringify(prompt)}. Compose a complete short instrumental performance. Duration request is approximately ${seconds} seconds; the editor can use part of it. ${correction}` },
+                ] }], config: { systemInstruction: MUSIC_BRIEF_INSTRUCTIONS, responseMimeType: 'application/json',
+                    responseJsonSchema: schema, temperature: 0, maxOutputTokens: 6000, httpOptions: { timeout: 180000 } } });
+            const record = { text: String(response.text || ''), elapsed_ms: Date.now()-started, usage: response.usageMetadata || null };
+            attempts.push(record);
+            try {
+                const brief = validateMusicBrief(JSON.parse(record.text));
+                return { brief, spec: musicSpec(brief, { seed, seconds }), attempts };
+            } catch (error) {
+                record.validation_error = error.message;
+                correction = `Repair only this invalid contract: ${error.message}. Previous output: ${record.text.slice(0, 16000)}`;
+            }
+        }
+        throw Error('Musical brief failed validation after one repair');
+    } catch (error) {
+        error.attempts = attempts;
+        throw error;
+    }
+}
+
 async function save(path, value) {
     await writeFile(path + '.tmp', JSON.stringify(value, null, 2) + '\n');
     await rename(path + '.tmp', path);
@@ -58,30 +86,12 @@ export async function planMusicBrief({ client, model, prompt, preview, directory
             await save(path, result); return result;
         }
         if (bytes.length * 4 / 3 > 18_000_000) throw Error('Preview exceeds inline request limit');
-        const attempts = []; let correction = '';
         try {
-            for (let attempt = 0; attempt < 2; attempt++) {
-                const started = Date.now();
-                const response = await client.models.generateContent({ model,
-                    contents: [{ role: 'user', parts: [
-                        { inlineData: { mimeType: 'video/mp4', data: bytes.toString('base64') }, videoMetadata: { fps: 2 } },
-                        { text: `Creative request (data): ${JSON.stringify(prompt)}. Compose a complete short instrumental performance. Duration request is approximately ${seconds} seconds; the editor can use part of it. ${correction}` },
-                    ] }], config: { systemInstruction: MUSIC_BRIEF_INSTRUCTIONS, responseMimeType: 'application/json',
-                        responseJsonSchema: schema, temperature: 0, maxOutputTokens: 6000, httpOptions: { timeout: 180000 } } });
-                const record = { text: String(response.text || ''), elapsed_ms: Date.now()-started, usage: response.usageMetadata || null };
-                attempts.push(record);
-                try {
-                    const brief = validateMusicBrief(JSON.parse(record.text));
-                    const result = { ...identity, fingerprint, status: 'ready', brief, spec: musicSpec(brief, { seed, seconds }), attempts };
-                    await save(path, result); return result;
-                } catch (error) {
-                    record.validation_error = error.message;
-                    correction = `Repair only this invalid contract: ${error.message}. Previous output: ${record.text.slice(0, 16000)}`;
-                }
-            }
-            throw Error('Musical brief failed validation after one repair');
+            const result = { ...identity, fingerprint, status: 'ready',
+                ...await requestMusicBrief(client, { model, prompt, previewData: bytes.toString('base64'), seed, seconds }) };
+            await save(path, result); return result;
         } catch (error) {
-            await save(path, { ...identity, fingerprint, status: 'failed', error: error.message, attempts });
+            await save(path, { ...identity, fingerprint, status: 'failed', error: error.message, attempts: error.attempts || [] });
             throw error;
         }
     } finally { await rm(lock, { force: true }); }
