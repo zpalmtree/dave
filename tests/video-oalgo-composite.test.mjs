@@ -6,7 +6,7 @@ import test from 'node:test';
 import fetch from 'node-fetch';
 
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { composeOalgoSourceImages, oalgoSourceImageCompositePlan, oalgoCompositionFailureMessage } from '../dist/VideoOalgoComposite.js';
+import { composeOalgoSourceImages, createOalgoSceneOpening, oalgoSourceImageCompositePlan, oalgoCompositionFailureMessage } from '../dist/VideoOalgoComposite.js';
 import { createFrontierVideoKeyframe, VideoKeyframeError } from '../dist/VideoKeyframeProvider.js';
 import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
 
@@ -64,6 +64,40 @@ function storedImage(directory, name, bytes) {
     writeFileSync(path, bytes);
     return { path, bytes: bytes.length, mimeType: 'image/png' };
 }
+
+test('scene openings use a reviewed native edit and repair against the original identity', async t => {
+    const requests = providers(t, [rejected, approved]);
+    const directory = mkdtempSync(join(tmpdir(), 'oalgo-opening-'));
+    try {
+        const result = await createOalgoSceneOpening(storedImage(directory, 'portrait.png', identityBytes),
+            'argues with a cashier at the checkout', {});
+        assert.equal(result.reviewStatus, 'accepted');
+        assert.equal(result.bytes.toString(), 'openai-2');
+        assert.equal(requests.gemini.length, 0);
+        assert.equal(requests.openai.length, 2);
+        assert.match(requests.openai[0].get('prompt'), /argues with a cashier at the checkout/);
+        assert.match(requests.openai[0].get('prompt'), /Replace the reference background/);
+        assert.match(requests.openai[0].get('prompt'), /earliest useful moment/);
+        assert.deepEqual(await Promise.all(requests.openai[0].getAll('image[]').map(async item =>
+            Buffer.from(await item.arrayBuffer()))), [identityBytes]);
+        assert.match(requests.openai[1].get('prompt'), /EDIT TARGET/);
+        for (const review of requests.reviews) {
+            assert.ok(review.input[0].content.some(part => part.image_url?.endsWith(identityBytes.toString('base64'))));
+        }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('scene openings reject best-effort and unreviewed images so the portrait can be retained', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'oalgo-opening-gate-'));
+    try {
+        const base = storedImage(directory, 'portrait.png', identityBytes);
+        for (const reviewStatus of ['best_effort', 'unreviewed', undefined]) {
+            await assert.rejects(createOalgoSceneOpening(base, 'visits a shop', {}, async () => ({
+                bytes: Buffer.from('unverified'), mimeType: 'image/png', provider: 'test', model: 'test', reviewStatus,
+            })), error => error instanceof VideoKeyframeError && error.code === 'identity_review');
+        }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('production OALGO compositor repairs identity failures against both original inputs', async t => {
     const requests = providers(t, [{ ...rejected, acceptable: true, best_effort_worthy: true }, approved]);

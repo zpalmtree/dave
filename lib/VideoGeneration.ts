@@ -1365,10 +1365,13 @@ export async function handleVideoRequest(
         return;
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
+    const sceneOpening = character?.id === MEXIMUTT.id && !replacement && !compositeSourceImage
+        && !sourceAudio && !audioVideo && prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT;
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
     const pending = await msg.reply(replacementImagePrompt
         ? `Getting your video ready and creating ${replacement?.mode === 'add' ? 'what to add' : 'the replacement'} from your description…`
+        : sceneOpening ? 'Creating the opening scene for your video…'
         : initialVideoRequestStatus(model, commandVariant));
     const plannerGuidance = [
         sourceAudio || audioVideo ? VIDEO_SOURCE_AUDIO_GUIDANCE : replacement || !character ? '' : videoCharacterPlannerGuidance(character),
@@ -1395,6 +1398,7 @@ export async function handleVideoRequest(
                 command_message_id: msg.id,
                 status_message_id: pending.id,
                 source_image: sourceImage,
+                source_image_scene: sceneOpening,
                 source_video: sourceVideo,
                 video_edit_target: replacement?.target,
                 video_edit_mode: replacement?.mode,
@@ -1407,7 +1411,7 @@ export async function handleVideoRequest(
                 source_image_provider: options.compositeProvider,
                 planner_guidance: plannerGuidance || undefined,
             }),
-        }, (compositeSourceImage || sourceAudio || audioVideo || sourceVideo) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
+        }, (sceneOpening || compositeSourceImage || sourceAudio || audioVideo || sourceVideo) ? VIDEO_SOURCE_SUBMISSION_TIMEOUT_MS : 45_000);
     } catch (error) {
         await pending.edit(`Couldn’t queue your video: ${error instanceof Error ? error.message : String(error)}`);
         return;
