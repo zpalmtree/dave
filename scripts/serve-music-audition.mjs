@@ -12,11 +12,14 @@ export function validateMusicReview(state, payload) {
     return { fingerprint: state.fingerprint, choice: payload.choice, notes: payload.notes, saved_at: new Date().toISOString() };
 }
 
-export async function createMusicAuditionServer({ runDirectory, port = 4344, token = randomBytes(24).toString('hex') }) {
+export async function createMusicAuditionServer({ runDirectory, auditions, port = 4344, token = randomBytes(24).toString('hex') }) {
     if (!/^[a-f0-9]{48}$/.test(token)) throw Error('Invalid review token');
-    const statePath = resolve(runDirectory, 'state.json'), reviewPath = resolve(runDirectory, 'review.json');
-    const load = () => readFile(statePath, 'utf8').then(JSON.parse);
-    await load();
+    const entries = auditions ?? [{ id: 'default', title: 'Music audition', runDirectory }];
+    if (!entries.length || entries.some(e => !/^[a-z0-9-]+$/.test(e.id) || !e.runDirectory || typeof e.title !== 'string') || new Set(entries.map(e => e.id)).size !== entries.length) throw Error('Invalid audition collection');
+    const cases = new Map(entries.map(e => [e.id, { ...e, statePath: resolve(e.runDirectory, 'state.json'), reviewPath: resolve(e.runDirectory, 'review.json') }]));
+    const load = entry => readFile(entry.statePath, 'utf8').then(JSON.parse);
+    const loadReview = entry => readFile(entry.reviewPath, 'utf8').then(JSON.parse).catch(e => { if (e.code === 'ENOENT') return null; throw e; });
+    await Promise.all([...cases.values()].map(load));
     let saves = Promise.resolve();
     const headers = type => ({ 'content-type': type, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
         'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'" });
@@ -26,17 +29,25 @@ export async function createMusicAuditionServer({ runDirectory, port = 4344, tok
             const url = new URL(request.url || '/', 'http://localhost');
             if (url.pathname === '/favicon.ico') { response.writeHead(204); return response.end(); }
             if (url.searchParams.get('token') !== token) return send(403, { error: 'Use the private audition URL.' });
+            const entry = cases.get(url.searchParams.get('case') ?? entries[0].id);
+            if (!entry) return send(404, { error: 'Unknown audition.' });
             if (request.method === 'GET' && url.pathname === '/') { response.writeHead(200, headers('text/html; charset=utf-8')); return response.end(MUSIC_AUDITION_PAGE); }
+            if (request.method === 'GET' && url.pathname === '/api/collection') {
+                return send(200, { current: entry.id, auditions: await Promise.all([...cases.values()].map(async item => {
+                    const [state, review] = await Promise.all([load(item), loadReview(item)]);
+                    return { id: item.id, title: item.title, status: state.status, reviewed: Boolean(state.status === 'ready' && review && review.fingerprint === state.fingerprint) };
+                })) });
+            }
             if (request.method === 'GET' && url.pathname === '/api/state') {
-                const state = await load();
-                const review = await readFile(reviewPath, 'utf8').then(JSON.parse).catch(e => { if (e.code === 'ENOENT') return null; throw e; });
+                const state = await load(entry);
+                const review = await loadReview(entry);
                 return send(200, { status: state.status, stage: state.stage, brief: state.brief, seconds: state.seconds, fingerprint: state.fingerprint,
                     clips: state.status === 'ready' ? ['A', 'B'].map(label => ({ label, url: '/audio/' + label })) : [],
                     review: review?.fingerprint === state.fingerprint ? review : null });
             }
             const match = /^\/audio\/([AB])$/.exec(url.pathname);
             if (request.method === 'GET' && match) {
-                const state = await load();
+                const state = await load(entry);
                 if (state.status !== 'ready' || !state.clips?.[match[1]]) return send(404, { error: 'Audio is not ready.' });
                 const path = state.clips[match[1]], info = await stat(path);
                 let start = 0, end = info.size - 1;
@@ -59,7 +70,8 @@ export async function createMusicAuditionServer({ runDirectory, port = 4344, tok
                 for await (const chunk of request) { size += chunk.length; if (size > 20000) throw Error('Review is too large.'); chunks.push(chunk); }
                 const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')); let saved;
                 saves = saves.catch(() => {}).then(async () => {
-                    saved = validateMusicReview(await load(), payload);
+                    saved = validateMusicReview(await load(entry), payload);
+                    const reviewPath = entry.reviewPath;
                     await writeFile(reviewPath + '.tmp', JSON.stringify(saved, null, 2)); await rename(reviewPath + '.tmp', reviewPath);
                 });
                 await saves; return send(200, saved);
