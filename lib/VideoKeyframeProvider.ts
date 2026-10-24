@@ -106,7 +106,7 @@ export interface VideoKeyframeOptions extends VideoFrontierCallOptions {
     strategy?: VideoKeyframeStrategy;
     /** Source composites must be reviewed against the original identity before use. */
     requireIdentityPreservation?: boolean;
-    reviewPurpose?: 'frame-zero' | 'source-composite' | 'recovery-scene';
+    reviewPurpose?: 'frame-zero' | 'source-composite' | 'character-opening' | 'recovery-scene';
     sourceCompositeProvider?: VideoSourceCompositeProvider;
     aspectRatio?: VideoKeyframeAspectRatio;
     geminiModel?: VideoKeyframeGeminiModel;
@@ -1252,7 +1252,8 @@ async function repairReviewedOpenAIKeyframe(
 ): Promise<VideoKeyframeResult> {
     // Keep successful scene work during a source-composite repair. Always judge
     // the result against the originals, never against this rejected candidate.
-    const editTarget = options.reviewPurpose === 'source-composite' ? rejectedCandidate : undefined;
+    const editTarget = options.reviewPurpose === 'source-composite' || options.reviewPurpose === 'character-opening'
+        ? rejectedCandidate : undefined;
     const repairPrompt = [
         prompt,
         '',
@@ -1543,7 +1544,7 @@ export async function createFrontierVideoKeyframe(
         if (!references.some(reference => reference.kind === 'identity')) {
             throw new Error('Required identity review needs an original identity reference.');
         }
-        if (options.reviewPurpose === 'source-composite') {
+        if (options.reviewPurpose === 'source-composite' || options.reviewPurpose === 'character-opening') {
             // OALGO trials repeatedly lost facial/body proportions in Gemini. Use
             // native GPT Image edits with the original inputs for both attempts.
             let reviewAttempt = 0;

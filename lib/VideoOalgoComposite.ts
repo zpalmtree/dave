@@ -7,6 +7,60 @@ import { VideoProviderHooks, VideoUsagePersistenceError } from './VideoUsage.js'
 import { StoredVideoSourceImage } from './VideoSourceImage.js';
 import { MEXIMUTT, VideoCharacter } from './VideoCharacters.js';
 
+/** Stage the opening before screenplay planning, which will treat the result as frame zero. */
+export function oalgoSceneOpeningPlan(prompt: string): Record<string, unknown> {
+    return {
+        intent: prompt,
+        keyframe: {
+            recommended: true,
+            reason: 'Put Meximutt directly into the requested scene before video planning.',
+            prompt: [
+                `Create the opening instant of this video request: ${prompt}`,
+                'Use Reference 1 only as the authority for Meximutt\'s identity: preserve his exact face, hair shape, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing.',
+                'Stage him already in the requested setting, with the other participants and story-defining props needed for the first action. Replace the reference background, crop, and pose as needed for this scene.',
+                'Choose the earliest useful moment before the first action or spoken exchange. Do not show later events, the outcome, or a montage of the whole story. Do not turn dialogue into captions or speech bubbles.',
+                'Keep his face recognizable and his mouth visible for speech. Match perspective and lighting across one coherent scene, with space and clear sightlines for the opening interaction.',
+                'Keep photographic live-action texture unless the request explicitly asks for another style.',
+            ].join(' '),
+            reference_requirements: [],
+        },
+        segments: [],
+    };
+}
+
+export async function createOalgoSceneOpening(
+    base: StoredVideoSourceImage,
+    prompt: string,
+    hooks: VideoProviderHooks,
+    generator = createFrontierVideoKeyframe,
+): Promise<VideoKeyframeResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS);
+    try {
+        const result = await generator(oalgoSceneOpeningPlan(prompt), [{
+            label: 'Original Meximutt identity', kind: 'identity',
+            visualFactsToPreserve: 'Preserve the exact individual: face, hair silhouette, full cheeks and jowls, heavy body proportions, and Mexican-flag clothing. The background, pose, and camera framing may change to fit the requested opening.',
+            bytes: readFileSync(base.path), mimeType: base.mimeType,
+            sourceUrl: 'built-in:meximutt', contextUrl: 'built-in:meximutt',
+        }], {
+            ...hooks, aspectRatio: '1:1', requireIdentityPreservation: true,
+            reviewPurpose: 'character-opening', abortSignal: controller.signal,
+        });
+        // Other keyframe paths may return best effort or unreviewed images. Here
+        // the known-good portrait is preferable to an unverified replacement.
+        if (result.reviewStatus !== 'accepted') {
+            throw new VideoKeyframeError('identity_review', 'The scene opening did not pass visual and identity review.');
+        }
+        return result;
+    } catch (error) {
+        if (error instanceof VideoUsagePersistenceError) throw error;
+        if (controller.signal.aborted) throw new VideoKeyframeError('timeout', 'Scene opening generation exceeded its time limit.');
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 export function oalgoSourceImageCompositePlan(prompt: string, character: VideoCharacter = MEXIMUTT): Record<string, unknown> {
     const { name } = character;
     const requestedAction = prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT

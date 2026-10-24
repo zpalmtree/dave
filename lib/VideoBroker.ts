@@ -36,6 +36,7 @@ import {
     QwenImageModelId,
     UNFINISHED_VIDEO_STATUSES,
     VIDEO_DISCORD_BASELINE_UPLOAD_BYTES,
+    VIDEO_IMAGE_ONLY_AUTO_PROMPT,
     VIDEO_MAX_GLOBAL_JOBS,
     VIDEO_MAX_TOTAL_DURATION_SECONDS,
     VIDEO_MAX_USER_JOBS,
@@ -85,7 +86,7 @@ import {
     storeCompositedSourceImage,
     storeVideoSourceImage,
 } from './VideoSourceImage.js';
-import { composeOalgoSourceImages } from './VideoOalgoComposite.js';
+import { composeOalgoSourceImages, createOalgoSceneOpening } from './VideoOalgoComposite.js';
 import {
     MEXIMUTT,
     VideoCharacter,
@@ -1958,6 +1959,13 @@ export class VideoBroker {
         if (presetCharacter && commandCharacter && presetCharacter !== commandCharacter) {
             return { status: 400, body: { error: 'The starting-image preset belongs to another character command.' } };
         }
+        const sceneOpening = body.source_image_scene === true;
+        if ((body.source_image_scene !== undefined && typeof body.source_image_scene !== 'boolean')
+            || (sceneOpening && (presetCharacter !== MEXIMUTT || commandCharacter !== MEXIMUTT
+                || compositeDescriptor || audioDescriptor || audioVideoDescriptor || videoDescriptor
+                || prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT))) {
+            return { status: 400, body: { error: 'A scene opening requires a text-only OALGO request and its character preset.' } };
+        }
         const sourceMode = videoDescriptor ? 'video_edit' : compositeDescriptor ? 'preset_composite'
             : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset' : 'attachment') : 'generated';
         const sourceKind: VideoJobView['source_kind'] = videoDescriptor ? 'video_edit'
@@ -2126,6 +2134,37 @@ export class VideoBroker {
                 } else if (sourceDescriptor) {
                     sourceImage = await sourceImageDownloader(sourceDescriptor, directory);
                     sourceImageDownloadSeconds = (Date.now() - sourceImageStarted) / 1000;
+                    if (sceneOpening) {
+                        const openingStarted = Date.now();
+                        // Keep the original safe if generation, review, or storage fails.
+                        const base = sourceImage;
+                        try {
+                            const opening = await createOalgoSceneOpening(base, prompt, {
+                                ...submissionHooks,
+                                onAttempt: attempt => submissionHooks.onAttempt?.({
+                                    ...attempt, stage: `scene_opening_${attempt.stage}`,
+                                }),
+                                onUsage: usage => submissionHooks.onUsage?.({
+                                    ...usage, stage: `scene_opening_${usage.stage}`,
+                                }),
+                            }, this.options.keyframeGenerator);
+                            sourceImage = storeCompositedSourceImage(opening, join(directory, 'scene-opening'));
+                            sourceImageComposition = 'generated';
+                        } catch (error) {
+                            if (error instanceof VideoUsagePersistenceError) throw error;
+                            await submissionHooks.onAttempt?.({
+                                stage: 'scene_opening_fallback', attempt: 1, outcome: 'error',
+                                provider: 'broker', model: 'oalgo-opening', serviceTier: 'default',
+                                durationSeconds: (Date.now() - openingStarted) / 1000,
+                                detail: sanitizeVideoWorkerText(error instanceof Error ? error.message : String(error),
+                                    'Scene opening unavailable; using original portrait.', 1000),
+                            });
+                            console.warn('[Video] Scene opening unavailable; using the original Meximutt portrait.', error);
+                            sourceImage = base;
+                        } finally {
+                            sourceImageCompositionSeconds = (Date.now() - openingStarted) / 1000;
+                        }
+                    }
                 }
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });

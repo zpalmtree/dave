@@ -58,10 +58,23 @@ instead of a newly generated image. Every local step (planning and each opening 
 its own `gpuq` reservation on the `video-h3` profile and releases it afterward.
 Scene rendering uses the shared reservation described below.
 Saved plans that silently rewrote the request are rejected on resume.
-For a character command such as oalgo, the character's original portrait
-reference is mandatory. If it is missing or excluded, the job stops before
-rendering. For portrait-only character requests, the original portrait is also
-the required opening frame; a generated replacement keyframe is rejected.
+For character commands, the stored character starting image is mandatory. If
+it is missing or excluded, the job stops before rendering. Without an attached
+scene, that stored image is also the required opening frame; recovery cannot
+replace it with another generated keyframe.
+
+Text-only `$oalgo` and `$oalgofast` requests first create a scene-specific
+opening from the prompt, using the bundled portrait as the identity reference.
+The bot submits `source_image_scene: true`; the broker uses a native image edit
+and requires an accepted identity and composition review before saving it as
+the starting image. The screenplay is then planned from this opening, so both
+normal and recovery workers start directly in the scene. One corrective image
+is allowed by the existing review pipeline. Failed generation, review, or
+storage falls back to the original portrait; accounting failures still reject
+the submission. The original portrait file remains in the job directory.
+Image generation adds a preparation step before the job enters the render queue.
+Custom images, source audio, video edits, image-only prompts, other characters,
+and older clients retain their existing paths.
 
 Each scene gets an opening image. When the approved plan calls for the original
 portrait at frame zero, the worker uses that image directly. Continuing scenes
