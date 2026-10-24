@@ -11,6 +11,17 @@ function assertPacket(packet) {
     if (packet.rubric !== undefined && ![EXPERIENCE_DIMENSIONS, MUSIC_DIMENSIONS, SCORE_TIMING_DIMENSIONS].some(rubric => JSON.stringify(packet.rubric) === JSON.stringify(rubric))) {
         throw new Error('Unknown final-video review rubric.');
     }
+    if (packet.require_acceptability !== undefined && typeof packet.require_acceptability !== 'boolean') {
+        throw new Error('require_acceptability must be boolean.');
+    }
+}
+
+function acceptabilityChoices(value = {}) {
+    return Object.fromEntries(['A', 'B'].map(label => {
+        const choice = value?.[label] ?? null;
+        if (choice !== null && !['acceptable', 'unacceptable'].includes(choice)) throw new Error(`Invalid ${label} soundtrack acceptability.`);
+        return [label, choice];
+    }));
 }
 
 function dimensionChoices(value = {}, dimensions = EXPERIENCE_DIMENSIONS) {
@@ -40,7 +51,8 @@ function nullableRating(value) {
 export function finalVideoPacketFingerprint(packet) {
     assertPacket(packet);
     const pairs = packet.pairs.map(pair => [pair.pair_id, pair.videos?.map(video => [video.label, video.video_path])]);
-    return fingerprint(packet.rubric ? [packet.rubric, pairs] : pairs);
+    const legacy = packet.rubric ? [packet.rubric, pairs] : pairs;
+    return fingerprint(packet.require_acceptability ? [legacy, 'require_acceptability'] : legacy);
 }
 
 export function sanitizeFinalVideoPacket(packet) {
@@ -55,6 +67,7 @@ export function sanitizeFinalVideoPacket(packet) {
         schema_version: 1,
         blinded: true,
         ...(packet.rubric ? { rubric: packet.rubric } : {}),
+        ...(packet.require_acceptability ? { require_acceptability: true } : {}),
         fingerprint: finalVideoPacketFingerprint(packet),
         pairs: packet.pairs.map((pair, index) => ({
             public_id: publicId(index),
@@ -64,6 +77,7 @@ export function sanitizeFinalVideoPacket(packet) {
                 video_url: `/api/final/${publicId(index)}/video/${video.label}`,
             })),
             preferred: ['A', 'B', 'tie'].includes(pair.preferred) ? pair.preferred : null,
+            ...(packet.require_acceptability ? { acceptability: acceptabilityChoices(pair.acceptability) } : {}),
             ...(packet.rubric ? { dimension_preferences: dimensionChoices(pair.dimension_preferences, packet.rubric) } : {}),
             overall: {
                 A: nullableRating(pair.overall?.A),
@@ -108,6 +122,10 @@ export function applyFinalVideoRatings(packet, payload) {
                 B: ratingNumber(rating.overall?.B, 'overall.B'),
             };
             const dimensions = packet.rubric ? dimensionChoices(rating.dimension_preferences, packet.rubric) : null;
+            const acceptability = packet.require_acceptability ? acceptabilityChoices(rating.acceptability) : null;
+            if (preferred !== null && acceptability && Object.values(acceptability).some(value => value === null)) {
+                throw new Error('A completed pair requires soundtrack acceptability for both A and B.');
+            }
             if (preferred !== null && dimensions && Object.values(dimensions).some(value => value === null)) {
                 throw new Error(`A completed pair requires ${packet.rubric.slice(0, -1).join(', ')} and ${packet.rubric.at(-1)} preferences.`);
             }
@@ -121,6 +139,7 @@ export function applyFinalVideoRatings(packet, payload) {
             return {
                 ...pair,
                 preferred,
+                ...(acceptability ? { acceptability } : {}),
                 overall,
                 ...(dimensions ? { dimension_preferences: dimensions } : {}),
                 material_failure: {
@@ -145,6 +164,7 @@ export function finalVideoPath(packet, id, label) {
 export function finalVideoProgress(packet) {
     assertPacket(packet);
     const complete = packet.pairs.filter(pair => ['A', 'B', 'tie'].includes(pair.preferred)
+        && (!packet.require_acceptability || Object.values(acceptabilityChoices(pair.acceptability)).every(value => value !== null))
         && (packet.rubric
             ? Object.values(dimensionChoices(pair.dimension_preferences, packet.rubric)).every(value => value !== null)
             : ['A', 'B'].every(label => nullableRating(pair.overall?.[label]) !== null))).length;
