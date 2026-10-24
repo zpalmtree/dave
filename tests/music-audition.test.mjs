@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createMusicAuditionServer,validateMusicReview} from '../scripts/serve-music-audition.mjs';
@@ -11,6 +11,31 @@ test('absolute usability supports neither and rejects stale or incomplete review
  for(const value of [{choice:'tie',notes:''},{choice:'neither',notes:null},{choice:'A',notes:'x'.repeat(4001)}])assert.throws(()=>validateMusicReview(ready(),{fingerprint:ready().fingerprint,...value}));
  assert.throws(()=>validateMusicReview(ready(),{fingerprint:'old',choice:'A',notes:''}),/changed/);
  assert.throws(()=>validateMusicReview({...ready(),status:'generating'},{fingerprint:ready().fingerprint,choice:'A',notes:''}),/not ready/);
+});
+
+test('collection routes audio and votes to the selected case without leaking paths or crossing reviews',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'music-batch-'));let app;
+ try{
+  const auditions=[];
+  for(const id of ['cafe-1','car-1']){
+   const dir=join(root,id);await mkdir(dir);const state={...ready(),fingerprint:id,clips:{A:join(dir,'A.wav'),B:join(dir,'B.wav')}};
+   for(const path of Object.values(state.clips))await writeFile(path,id);
+   await writeFile(join(dir,'state.json'),JSON.stringify(state));auditions.push({id,title:id,runDirectory:dir});
+  }
+  app=await createMusicAuditionServer({auditions,port:0});
+  const url=(path,id)=>{const u=new URL(app.url);u.pathname=path;if(id)u.searchParams.set('case',id);return u};
+  assert.equal((await(await fetch(url('/api/state'))).json()).fingerprint,'cafe-1');
+  assert.equal(await(await fetch(url('/audio/A','car-1'))).text(),'car-1');
+  const post=(id,fingerprint)=>fetch(url('/api/review',id),{method:'POST',headers:{'x-review-token':app.token},body:JSON.stringify({fingerprint,choice:'both',notes:''})});
+  assert.equal((await post('car-1','cafe-1')).status,400);
+  assert.equal((await post('car-1','car-1')).status,200);
+  assert.equal((await(await fetch(url('/api/state','cafe-1'))).json()).review,null);
+  const collection=await(await fetch(url('/api/collection','car-1'))).json();
+  assert.equal(collection.current,'car-1');assert.deepEqual(collection.auditions.map(c=>c.reviewed),[false,true]);
+  assert.doesNotMatch(JSON.stringify(collection),/runDirectory|music-batch-|fingerprint|clips/);
+  assert.equal((await fetch(url('/api/state','../../private'))).status,404);
+  assert.equal((await fetch(new URL('/api/collection',app.url))).status,403);
+ }finally{await app?.close();await rm(root,{recursive:true,force:true})}
 });
 
 test('audition authenticates requests, hides composer paths, serves ranges and persists rejection',async()=>{
