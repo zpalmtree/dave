@@ -6,6 +6,13 @@ and waits for that audio before planning. It does not ask the music generator to
 Original-song requests still compose normally; an uploaded song takes precedence over lookup.
 The original recording supplies the singer's voice as well as the instrumental backing.
 
+Cover wording and YouTube links also reach the soundtrack router, including
+`$oalgo cover of this https://www.youtube.com/watch?v=J7ATTjg7tpE` with additional
+characters or scene directions. The router can request that recording without knowing its
+title or artist; it must not invent lyrics because it cannot inspect the URL. Shortened,
+Shorts, and YouTube Music links normalize to the supplied video's identity. Nonmusical
+uses of “cover” and links used only as visual context can still be classified as no song.
+
 The downloader prefers the artist's own channel or a verified official source and rejects
 unrequested covers, remixes, live performances, karaoke and altered-speed versions. A direct
 YouTube song link avoids ambiguous search results. Only HTTPS YouTube video URLs are accepted;
