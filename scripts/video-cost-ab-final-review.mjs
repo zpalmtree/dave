@@ -11,6 +11,7 @@ function assertPacket(packet) {
     if (packet.rubric !== undefined && ![EXPERIENCE_DIMENSIONS, MUSIC_DIMENSIONS, SCORE_TIMING_DIMENSIONS].some(rubric => JSON.stringify(packet.rubric) === JSON.stringify(rubric))) {
         throw new Error('Unknown final-video review rubric.');
     }
+    if (packet.acceptability_scope !== undefined && !['soundtrack', 'video'].includes(packet.acceptability_scope)) throw new Error('Unknown acceptability scope.');
     if (packet.require_acceptability !== undefined && typeof packet.require_acceptability !== 'boolean') {
         throw new Error('require_acceptability must be boolean.');
     }
@@ -52,7 +53,7 @@ export function finalVideoPacketFingerprint(packet) {
     assertPacket(packet);
     const pairs = packet.pairs.map(pair => [pair.pair_id, pair.videos?.map(video => [video.label, video.video_path])]);
     const legacy = packet.rubric ? [packet.rubric, pairs] : pairs;
-    return fingerprint(packet.require_acceptability ? [legacy, 'require_acceptability'] : legacy);
+    return fingerprint(packet.require_acceptability ? [legacy, 'require_acceptability', ...(packet.acceptability_scope === 'video' ? ['video'] : [])] : legacy);
 }
 
 export function sanitizeFinalVideoPacket(packet) {
@@ -67,7 +68,7 @@ export function sanitizeFinalVideoPacket(packet) {
         schema_version: 1,
         blinded: true,
         ...(packet.rubric ? { rubric: packet.rubric } : {}),
-        ...(packet.require_acceptability ? { require_acceptability: true } : {}),
+        ...(packet.require_acceptability ? { require_acceptability: true, ...(packet.acceptability_scope === 'video' ? { acceptability_scope: 'video' } : {}) } : {}),
         fingerprint: finalVideoPacketFingerprint(packet),
         pairs: packet.pairs.map((pair, index) => ({
             public_id: publicId(index),
