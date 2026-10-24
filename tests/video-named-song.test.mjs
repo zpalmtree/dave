@@ -5,10 +5,30 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { validatedVideoSongDecision, mayWantComposedSong } from '../dist/VideoComposedSong.js';
+import { validatedVideoSongDecision, videoSongDecisionForPrompt, mayWantComposedSong } from '../dist/VideoComposedSong.js';
 
 const recording = { title: 'Electric Feel', artist: 'MGMT', url: '' };
 const decision = { mode: 'recording', reason: 'An existing song was requested.', seconds: 0, caption: '', lyrics: '', recording };
+const coverUrl = 'https://www.youtube.com/watch?v=J7ATTjg7tpE';
+const coverPrompt = `oalgo guy cover of this with also a pack of taco bell dogs and trump eating a taco salad: ${coverUrl}`;
+
+test('cover wording and bare YouTube links reach song classification without inventing a recording identity', () => {
+    assert.ok(mayWantComposedSong(coverPrompt), 'Regression: ccaa392d skipped song classification.');
+    assert.ok(mayWantComposedSong('an acoustic cover of Electric Feel'));
+    for (const url of [coverUrl, 'https://youtu.be/J7ATTjg7tpE?t=30', 'https://www.youtube.com/shorts/J7ATTjg7tpE',
+        'https://music.youtube.com/watch?v=J7ATTjg7tpE']) {
+        const prompt = `oalgo guy does this: ${url}`;
+        assert.ok(mayWantComposedSong(prompt));
+        for (const selected of ['', url, coverUrl]) {
+            assert.deepEqual(videoSongDecisionForPrompt({ mode: 'recording', recording_url: selected }, prompt).recording,
+                { title: '', artist: '', url: coverUrl });
+        }
+    }
+    assert.throws(() => videoSongDecisionForPrompt({ mode: 'recording', recording_url: 'https://youtu.be/MmZexg8sxyk' }, coverPrompt), /could not be verified/);
+    assert.throws(() => videoSongDecisionForPrompt({ mode: 'recording', recording_url: coverUrl }, 'sing Electric Feel'), /could not be verified/);
+    assert.equal(mayWantComposedSong('look at https://youtube.com.evil.test/watch?v=J7ATTjg7tpE'), false);
+    assert.equal(videoSongDecisionForPrompt({ mode: 'none', reason: 'A book cover.' }, `animate this book cover ${coverUrl}`).mode, 'none');
+});
 
 test('named songs retain recording identity instead of becoming inspired originals', () => {
     assert.deepEqual(validatedVideoSongDecision({ mode: 'recording', reason: decision.reason,
@@ -30,7 +50,12 @@ test('named recording is fetched once, cut to the requested chorus, and never si
     const transcriptionDurations = [];
     const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'db'), resultsDir: directory,
         botToken: 'bot', workerToken: 'worker', recoveryEnabled: true, preplanQueuedJobs: false,
-        songWriter: async () => { written++; return decision; }, sourceAudioTranscriber: async audio => {
+        songWriter: async input => {
+            written++;
+            return input.prompt === coverPrompt
+                ? videoSongDecisionForPrompt({ mode: 'recording', reason: 'Use the linked recording.' }, input.prompt)
+                : decision;
+        }, sourceAudioTranscriber: async audio => {
             transcriptionDurations.push(Math.round(audio.duration));
             if (!recoverTiming) return lyrics;
             return { words: lyrics.words.map(w => ({ ...w, start: w.start - 30, end: w.end - 30 })),
@@ -45,10 +70,10 @@ test('named recording is fetched once, cut to the requested chorus, and never si
     });
     await broker.start();
     const base = `http://127.0.0.1:${broker.listeningPort()}`;
-    const submit = async id => {
+    const submit = async (id, prompt = 'Make this cat sing the chorus to Electric Feel') => {
         const response = await fetch(base + '/v1/jobs', { method: 'POST',
             headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
-            body: JSON.stringify({ model: 'minimax', prompt: 'Make this cat sing the chorus to Electric Feel',
+            body: JSON.stringify({ model: 'minimax', prompt,
                 requester_id: id, origin_bot_id: 'bot', channel_id: 'channel', command_message_id: id, status_message_id: id }),
         });
         return (await response.json()).job.id;
@@ -113,6 +138,20 @@ test('named recording is fetched once, cut to the requested chorus, and never si
         assert.equal(retry.body.lyric_lines, 1);
         assert.deepEqual(transcriptionDurations, [90, 90, 20]);
         assert.match(broker.frontierOptions(recoveredRow, true).plannerGuidance, /vocal timeline/);
+        await broker.run("UPDATE video_jobs SET status='delivered' WHERE public_id=?", [recovered]);
+        const cover = await submit('ccaa392d-regression', coverPrompt);
+        await lease(cover);
+        const beforeCover = written;
+        const coverPlan = await request(cover, 'plan');
+        assert.equal(coverPlan.status, 200, JSON.stringify(coverPlan.body));
+        assert.equal(coverPlan.body.compose_song.recording.url, coverUrl);
+        assert.equal(written, beforeCover + 1);
+        const coverRow = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [cover]);
+        assert.equal(coverRow.planner_json, null, 'The screenplay must wait for the linked recording.');
+        assert.equal(JSON.parse(coverRow.recovery_json).prepared, undefined);
+        const unavailable = await request(cover, 'soundtrack', { failed: 'YouTube recording unavailable.' });
+        assert.equal(unavailable.status, 422, 'A failed linked cover must not turn into an original song.');
+        assert.equal((await request(cover, 'plan')).status, 422);
     } finally {
         broker.worker = null;
         await broker.stop();

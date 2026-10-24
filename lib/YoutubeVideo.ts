@@ -1,6 +1,6 @@
 import type { SubmittedVideoSourceClip } from './VideoSourceClip.js';
 
-const VIDEO_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com']);
+const VIDEO_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com']);
 const TEXT_URLS = /https?:\/\/[^\s<>"`]+/gi;
 
 function youtubeVideoId(value: string): string | null {

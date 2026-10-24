@@ -1,5 +1,6 @@
 import { requestPlannerResponse, VIDEO_PLANNER_PRIMARY_MODEL, VideoPlanSourceImage } from './VideoFrontierPlanner.js';
 import { VideoFrontierCallOptions } from './VideoUsage.js';
+import { youtubeVideoFromMessage } from './YoutubeVideo.js';
 
 /**
  * A multi-scene H3 video renders each scene with its own generated soundtrack, so a sung song
@@ -21,14 +22,15 @@ export const VIDEO_COMPOSED_SONG_MIN_SECONDS = 15;
 export const VIDEO_COMPOSED_SONG_MAX_SECONDS = 45;
 const DEFAULT_SONG_SECONDS = 30;
 
-// Words that can mean a sung song. Only these requests pay for a songwriter call, which decides.
-const SONG_REQUEST = /\b(?:songs?|music[\s-]*videos?|mv|sing(?:s|ing|er)?|sung|rap(?:s|ping|per)?|ballads?|anthems?|lyrics?|jingles?|chorus|karaoke|duets?|serenades?|hymns?|lullab(?:y|ies)|cumbias?|corridos?|rancheras?|reggaeton|opera|canci[oó]n(?:es)?|cantar?|canta(?:ndo)?)\b/i;
+// Candidate words only: the songwriter distinguishes music from nonmusical uses of "cover".
+const SONG_REQUEST = /\b(?:covers?|covering|songs?|music[\s-]*videos?|mv|sing(?:s|ing|er)?|sung|rap(?:s|ping|per)?|ballads?|anthems?|lyrics?|jingles?|chorus|karaoke|duets?|serenades?|hymns?|lullab(?:y|ies)|cumbias?|corridos?|rancheras?|reggaeton|opera|canci[oó]n(?:es)?|cantar?|canta(?:ndo)?)\b/i;
 
 // Words that can mean a dialogue-free edit carried by music, which gets an instrumental score.
 const SCORE_REQUEST = /\b(?:(?:hype|phonk|fan|sports?|highlight|aura|velocity|beat)[\s-]*edits?|edits?|montages?|amv|phonk|instrumental|beat[\s-]*(?:drop|sync(?:ed)?)|(?:background|epic|hype)\s+music|trailer|highlight\s+reel|aura\s+farm(?:ing)?|danc(?:e|es|ing))\b/i;
 
 export function mayWantComposedSong(prompt: string): boolean {
-    return SONG_REQUEST.test(prompt) || SCORE_REQUEST.test(prompt) || /\b(?:lip[ -]?sync|dance\s+to|soundtrack)\b/i.test(prompt);
+    return SONG_REQUEST.test(prompt) || SCORE_REQUEST.test(prompt) || /\b(?:lip[ -]?sync|dance\s+to|soundtrack)\b/i.test(prompt)
+        || Boolean(youtubeVideoFromMessage({ content: prompt }));
 }
 
 /** Music3 has no instrumental switch; an instrumental tag in place of lyrics keeps it from singing. */
@@ -59,6 +61,8 @@ export const VIDEO_SONGWRITER_INSTRUCTIONS = `You are the songwriter for a short
 Decide mode. Choose compose when the request asks for a song, a music video, or someone singing or rapping a song. Choose score when nobody in the video speaks or sings and music carries it: a hype edit, phonk or aura-farming edit, montage, dance, workout or sports highlight, trailer, or another sequence cut to a beat, including a request for background music under such a video. Each scene would otherwise generate its own music, so a score is one original instrumental track that keeps the same groove across every cut. A score replaces all of the video's sound, so choose none when anyone talks, when the request is a skit, dialogue, narration or reaction whose characters speak, when it wants only ambience or sound effects, or when singing would be a few words inside an otherwise spoken video. When mode is none, return seconds 0 and an empty caption and lyrics.
 
 Choose recording when the request asks to sing, lip-sync, dance to, or use a specific EXISTING song or a supplied YouTube song link. Return its recording_title and recording_artist (infer the artist only when unambiguous, e.g. Electric Feel is MGMT). recording_url must be an actual YouTube URL present in the request, never an invented link. The desktop finds the recording and the broker selects the requested verse or chorus. Return empty caption and lyrics, and seconds 0; do not quote the song's lyrics or replace it with an inspired original. If an artist or version is ambiguous, leave recording_artist empty so the user can specify it or supply a link. The song's recorded voice is retained, not changed into the character's voice.
+
+"Cover of this" with a YouTube link is a recording request even without the words song or sing. Use that link with empty title and artist when its identity is unknown: the desktop can inspect and download it. Never choose compose or none merely because you cannot open the link, and never substitute invented cover lyrics. Extra requested characters, props, or comic action do not remove the requested recording. Nonmusical uses of cover (a book cover, covering an object, taking cover), or a YouTube link used only as visual or discussion context, do not by themselves request a song.
 
 For score, return empty lyrics and write only the caption: an instrumental in the genre and energy the request implies (for example aggressive drift phonk for an aura-farming or hype edit), with a strong steady beat and an arrangement that builds so cuts can land on its hits. Describe it for the whole video, not one scene.
 
@@ -133,6 +137,20 @@ export function validatedVideoSongDecision(value: any, requestedDurationSeconds?
     return { mode: 'compose', reason, seconds, caption, lyrics };
 }
 
+/** Keep a requested recording tied to the supplied video, including shortened/Shorts URLs. */
+export function videoSongDecisionForPrompt(value: any, prompt: string, requestedDurationSeconds?: number | null): VideoSongDecision {
+    if (value?.mode === 'recording') {
+        const supplied = youtubeVideoFromMessage({ content: prompt });
+        const selected = value.recording_url
+            ? youtubeVideoFromMessage({ content: String(value.recording_url) }) : null;
+        if (value.recording_url && (!supplied || selected?.clip_url !== supplied.clip_url)) {
+            throw new Error('The requested song link could not be verified. Attach the recording or provide its YouTube link.');
+        }
+        if (supplied) value = { ...value, recording_url: supplied.clip_url };
+    }
+    return validatedVideoSongDecision(value, requestedDurationSeconds);
+}
+
 /** Decides whether a request is a song and, if so, writes the song the worker composes. */
 export async function writeVideoSong(
     input: { prompt: string; sources: VideoPlanSourceImage[]; requestedDurationSeconds?: number | null },
@@ -150,10 +168,7 @@ export async function writeVideoSong(
             text: { format: { type: 'json_schema', name: 'video_song', strict: true, schema: SONG_SCHEMA } },
         }, controller.signal, 'song_writing', options);
         const value = JSON.parse(String(body.output_text || ''));
-        if (value.mode === 'recording' && value.recording_url && !input.prompt.includes(value.recording_url)) {
-            throw new Error('The requested song link could not be verified. Attach the recording or provide its YouTube link.');
-        }
-        return validatedVideoSongDecision(value, input.requestedDurationSeconds);
+        return videoSongDecisionForPrompt(value, input.prompt, input.requestedDurationSeconds);
     } finally {
         clearTimeout(timeout);
     }
