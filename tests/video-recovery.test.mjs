@@ -551,6 +551,7 @@ test('broker persists recovery and requires every recorded scene for the matchin
     const contract = approvedRecoveryContract(value, 'explorers return');
     const prepared = { plan: value, contract, contract_hash: recoveryHash(contract), prompt: contract.prompt, notice: '' };
     const originalFetch = globalThis.fetch;
+    let expectedAspect = '16:9';
     t.mock.method(globalThis, 'fetch', async (input, init) => {
         const url = String(typeof input === 'string' ? input : input.url);
         if (url.startsWith('http://127.0.0.1')) return originalFetch(input, init);
@@ -560,6 +561,7 @@ test('broker persists recovery and requires every recorded scene for the matchin
         resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
         recoveryEnabled: true, preplanQueuedJobs: false, recoveryPlanner: async () => prepared,
         keyframeGenerator: async (scenePlan, _references, options) => {
+            assert.equal(options.aspectRatio, expectedAspect);
             assert.equal(options.reviewPurpose, 'recovery-scene');
             assert.equal(scenePlan.recovery_request, contract.prompt);
             assert.equal(scenePlan.keyframe.prompt.includes(OALGO_PHOTOREAL_KEYFRAME), false);
@@ -603,6 +605,8 @@ test('broker persists recovery and requires every recorded scene for the matchin
         assert.equal((await broker.get('SELECT planner_model FROM video_jobs WHERE public_id=?', [id])).planner_model,
             'claude-opus-5-5', 'A recovery plan records the configured planner rather than the Sol constant.');
         assert.equal((await request('image', { segment_index: 0 })).status, 200);
+        expectedAspect = '1:1';
+        assert.equal((await request('image', { segment_index: 0, aspect_ratio: '1:1' })).status, 200);
         assert.equal((await request('checkpoint', { checkpoint: { scenes: { '0': { video_attempts: 1 } } } })).status, 200);
         assert.equal((await request('plan')).body.checkpoint.scenes['0'].video_attempts, 1);
         const hash = 'a'.repeat(64), resultHash = 'b'.repeat(64);

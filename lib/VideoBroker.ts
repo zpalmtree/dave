@@ -1,4 +1,5 @@
 import { recoveryMusic } from './VideoMusic.js';
+import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
 import { describeVideoEditReference, validateVideoEditReference } from './VideoEditReference.js';
@@ -5312,10 +5313,13 @@ export class VideoBroker {
                     // when none of them would draw the scene does the desktop compose the
                     // opening with local Qwen Image; an outage still waits and retries.
                     let frame: VideoKeyframeResult;
+                    const aspectRatio = await recoveryKeyframeAspect(body.aspect_ratio,
+                        index > 0 && body.identity_anchor ? decodeContinuityImage(body.identity_anchor).data
+                            : sources[sources.length - 1]?.data);
                     try {
                         frame = await (this.options.keyframeGenerator || createFrontierVideoKeyframe)(
                             { ...scenePlan, keyframe, segments: [segment], recovery_request: prepared.contract.prompt }, references,
-                            { ...options, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
+                            { ...options, aspectRatio, requireIdentityPreservation: references.length > 0, reviewPurpose: 'recovery-scene' });
                     } catch (error) {
                         if (!frontierKeyframeDeclined(error)) throw error;
                         console.log(`Image providers declined recovery scene ${index + 1} of ${id}; composing it locally.`);

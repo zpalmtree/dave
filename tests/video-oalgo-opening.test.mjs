@@ -57,6 +57,7 @@ for (const recovery of [false, true]) test(`scene opening becomes frame zero wit
         assert.deepEqual(references.map(ref => ref.bytes), [portrait]);
         assert.equal(options.requireIdentityPreservation, true);
         assert.equal(options.reviewPurpose, 'character-opening');
+        assert.equal(options.aspectRatio, '16:9', 'New scene composition uses the video canvas, not the identity portrait crop.');
         return { bytes: scene, mimeType: 'image/png', provider: 'test', model: 'test', reviewStatus: 'accepted' };
     }, recovery);
     const submitted = await submit();
