@@ -5039,6 +5039,11 @@ export class VideoBroker {
                     sourceAudioLyrics: parseVideoSourceAudioLyrics(job.source_audio_lyrics_json),
                     requireSourceIdentity: sourceRequired,
                     requireOriginalFirstFrame: originalFrameRequired,
+                    classificationReviews: state.classification_reviews,
+                    onClassificationReview: async review => {
+                        state.classification_reviews = [...(state.classification_reviews || []), review];
+                        await persist();
+                    },
                 });
             } catch (error) {
                 if (!(error instanceof RecoveryLocalPlanRequired)) throw error;

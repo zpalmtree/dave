@@ -4,6 +4,7 @@ import { VideoFrontierCallOptions, VideoPlannerRequestLimitError, VideoUsagePers
 import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
 import { VIDEO_MUSE_PLANNER_MODEL, VIDEO_MODELS, VideoModelId } from './VideoProtocol.js';
 import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
+import { classificationReviewHash, reviewVideoMinorClassification, VideoClassificationReview } from './VideoClassificationReview.js';
 
 export class RecoveryStoppedError extends Error {}
 
@@ -15,9 +16,42 @@ export class RecoveryLocalPlanRequired extends Error {
     }
 }
 
-function localPlanRequired(reasonCode: string, promptAnalysis: Record<string, any> | null, message: string): Error {
+interface ClassificationReviewContext {
+    prompt: string;
+    sources: VideoPlanSourceImage[];
+    options: VideoFrontierCallOptions;
+    classificationReviews?: VideoClassificationReview[];
+    onClassificationReview?: (review: VideoClassificationReview) => Promise<void>;
+    classificationReviewer?: typeof reviewVideoMinorClassification;
+}
+
+async function localPlanRequired(reasonCode: string, promptAnalysis: Record<string, any> | null,
+    message: string, context: ClassificationReviewContext): Promise<Error> {
     if (reasonCode === 'minor_sexualization') {
-        return new RecoveryStoppedError(`Video planner declined the request: ${message} Sexual content involving minors is never planned locally.`);
+        const input = { ...context, rejectedModel: context.options.plannerModel || configuredVideoPlannerVariant().plannerModel };
+        const hash = classificationReviewHash(input);
+        let review = context.classificationReviews?.find(item => item.input_hash === hash
+            && item.rejected_model === input.rejectedModel);
+        if (!review) {
+            try {
+                review = await (context.classificationReviewer || reviewVideoMinorClassification)(input);
+                await context.onClassificationReview?.(review);
+            } catch (error) {
+                if (error instanceof VideoUsagePersistenceError) throw error;
+                return new RecoveryStoppedError('Video planning stopped because the independent safety review could not be completed or saved. No video was rendered.');
+            }
+        }
+        if (review.verdict !== 'cleared') {
+            return new RecoveryStoppedError(review.verdict === 'confirmed'
+                ? 'Independent review confirmed sexual content involving minors; this request cannot be planned.'
+                : 'Video planning stopped because a safety classification could not be verified. No video was rendered.');
+        }
+        return new RecoveryLocalPlanRequired('classification_cleared', {
+            ...promptAnalysis,
+            frontier_handling: { disposition: 'reject', reason_code: 'classification_cleared',
+                reason: 'Independent review cleared an unsupported classification; a new local screenplay is required.' },
+            classification_review: review,
+        }, 'Independent review cleared the planner classification; continuing with local planning.');
     }
     return new RecoveryLocalPlanRequired(/^[a-z_]+$/.test(reasonCode) ? reasonCode : 'other', promptAnalysis, message);
 }
@@ -28,7 +62,7 @@ export async function prepareRecoveryPlan(input: {
     sourceAudioSeconds?: number;
     sourceAudioLyrics?: VideoSourceAudioLyrics | null;
     requireSourceIdentity?: boolean; requireOriginalFirstFrame?: boolean;
-}): Promise<any> {
+} & Pick<ClassificationReviewContext, 'classificationReviews' | 'onClassificationReview' | 'classificationReviewer'>): Promise<any> {
     if ((input.requireSourceIdentity || input.requireOriginalFirstFrame) && !input.sources.length) {
         throw new RecoveryStoppedError('The required original character reference is missing.');
     }
@@ -50,8 +84,8 @@ export async function prepareRecoveryPlan(input: {
                 });
             const handling = plan?.prompt_analysis?.frontier_handling;
             if (handling?.disposition === 'reject') {
-                throw localPlanRequired(String(handling.reason_code || 'other'), plan.prompt_analysis,
-                    'The frontier planner rejected the original request.');
+                throw await localPlanRequired(String(handling.reason_code || 'other'), plan.prompt_analysis,
+                    'The frontier planner rejected the original request.', input);
             }
             if (input.requireOriginalFirstFrame && plan.keyframe?.recommended !== false) {
                 throw new Error('The screenplay did not retain the required original portrait as its opening frame.');
@@ -68,10 +102,10 @@ export async function prepareRecoveryPlan(input: {
         } catch (error) {
             if (error instanceof VideoUsagePersistenceError) throw error;
             if (error instanceof VideoPlannerRequestLimitError) {
-                throw localPlanRequired('planner_budget_exhausted', null, error.message);
+                throw await localPlanRequired('planner_budget_exhausted', null, error.message, input);
             }
             if (error instanceof FrontierPlannerRejectedError) {
-                throw localPlanRequired(error.reasonCode, error.promptAnalysis, error.message);
+                throw await localPlanRequired(error.reasonCode, error.promptAnalysis, error.message, input);
             }
             if (error instanceof RecoveryStoppedError || error instanceof RecoveryLocalPlanRequired
                 || attempt === 1) throw error;
@@ -116,17 +150,33 @@ export async function createVideoPlanWithMuseFallback(
     sources: VideoPlanSourceImage | VideoPlanSourceImage[] | undefined,
     options: VideoFrontierCallOptions, planner = createFrontierVideoPlan,
 ): Promise<Record<string, any>> {
+    const checkedPlan = async (callOptions: VideoFrontierCallOptions, fallback = false): Promise<Record<string, any>> => {
+        try {
+            const plan = await planner(prompt, model, requester, sources, callOptions);
+            const handling = (plan.prompt_analysis as any)?.frontier_handling;
+            if (handling?.disposition === 'reject' && (fallback || handling.reason_code === 'minor_sexualization')) {
+                throw new FrontierPlannerRejectedError(handling.reason_code || 'other',
+                    'Video planner declined the request.', plan.prompt_analysis as any);
+            }
+            return plan;
+        } catch (error) {
+            if (!(error instanceof FrontierPlannerRejectedError) || error.reasonCode !== 'minor_sexualization') throw error;
+            const reviewed = await localPlanRequired(error.reasonCode, error.promptAnalysis, error.message, {
+                prompt, sources: Array.isArray(sources) ? sources : sources ? [sources] : [], options: callOptions,
+            });
+            if (reviewed instanceof RecoveryLocalPlanRequired) {
+                throw new FrontierPlannerRejectedError(reviewed.reasonCode, reviewed.message, reviewed.promptAnalysis);
+            }
+            throw new FrontierPlannerRejectedError('minor_sexualization', reviewed.message, error.promptAnalysis);
+        }
+    };
     try {
-        return await planner(prompt, model, requester, sources, options);
+        return await checkedPlan(options);
     } catch (original) {
         if (!useMuseFallback(options) || original instanceof VideoUsagePersistenceError
             || (original instanceof FrontierPlannerRejectedError && original.reasonCode === 'minor_sexualization')) throw original;
         try {
-            const plan = await planner(prompt, model, requester, sources, museFallbackOptions(options));
-            const handling = (plan.prompt_analysis as any)?.frontier_handling;
-            if (handling?.disposition === 'reject') {
-                throw new FrontierPlannerRejectedError(handling.reason_code || 'other', 'Muse declined the request.', plan.prompt_analysis as any);
-            }
+            const plan = await checkedPlan(museFallbackOptions(options), true);
             return { ...plan, _planner_model: VIDEO_MUSE_PLANNER_MODEL };
         } catch (error) {
             if (error instanceof VideoUsagePersistenceError

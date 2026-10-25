@@ -3728,3 +3728,38 @@ test('cancellation, pausing, and upload messages describe the actual state', () 
     assert.match(formatVideoJob({ ...base, status: 'running', gpu_queue_state: 'admitted' }), /in total/);
     assert.doesNotMatch(formatVideoJob({ ...base, status: 'running', gpu_queue_state: 'admitted' }), /once it starts/);
 });
+
+test('a missing count gets one focused screenplay repair with its original analysis', async t => {
+    const requests = [], attempts = [];
+    const repaired = frontierPlan();
+    repaired.segments[0].shots[0].visual += ' Five dogs run together, all 5 clearly visible.';
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        const request = JSON.parse(init.body);
+        requests.push(request);
+        return jsonResponse({ status: 'completed', output_text: JSON.stringify(requests.length === 1
+            ? { prompt_analysis: frontierAnalysis(), plan: frontierPlan() } : repaired) });
+    });
+    const result = await createFrontierVideoPlan('Show 5 dogs running through a park.', 'minimax', 'test', undefined,
+        { plannerModel: 'gpt-6-sol', plannerStrategy: 'single-pass', onAttempt: attempt => attempts.push(attempt) });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(result.prompt_analysis, frontierAnalysis());
+    assert.equal(result.planner_metrics.screenplay_attempts, 2);
+    assert.match(requests[1].input[1].content[0].text, /focused correction/);
+    assert.match(requests[1].input[1].content[0].text, /omitted explicit numbers: 5/);
+    assert.match(requests[1].input[1].content[0].text, /Previous candidate/);
+    assert.ok(attempts.some(attempt => attempt.stage === 'single_pass_correction'));
+    assert.ok(!attempts.some(attempt => attempt.stage === 'prompt_analysis'));
+    assert.match(result.segments[0].shots[0].visual, /all 5 clearly visible/);
+});
+
+test('minor classification never reaches single-pass salvage', async t => {
+    const analysis = frontierAnalysis();
+    analysis.frontier_handling = { disposition: 'reject', reason_code: 'minor_sexualization', reason: 'Fixture.' };
+    const attempts = [];
+    t.mock.method(globalThis, 'fetch', async () => jsonResponse({ status: 'completed',
+        output_text: JSON.stringify({ prompt_analysis: analysis, plan: frontierPlan() }) }));
+    await assert.rejects(createFrontierVideoPlan('A dog runs through a park.', 'minimax', 'test', undefined,
+        { plannerModel: 'gpt-6-sol', plannerStrategy: 'single-pass', onAttempt: attempt => attempts.push(attempt) }),
+    error => error instanceof FrontierPlannerRejectedError && error.reasonCode === 'minor_sexualization');
+    assert.ok(!attempts.some(attempt => attempt.stage === 'single_pass_salvage'));
+});

@@ -2388,7 +2388,7 @@ async function validatedPromptAnalysis(
             durationSeconds: 0,
             detail: reasonCode,
         });
-        if (!preserveRejectedCandidate || reasonCode === 'provider_policy') {
+        if (!preserveRejectedCandidate || reasonCode === 'provider_policy' || reasonCode === 'minor_sexualization') {
             throw new FrontierPlannerRejectedError(
                 reasonCode,
                 `Frontier planner classified this request for local fallback (${reasonCode}).`,
@@ -2572,6 +2572,8 @@ export async function createFrontierVideoPlan(
     const timeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
     let singlePassFallbackSeconds = 0;
     let singlePassAnalysis: Record<string, any> | null = null;
+    let singlePassCandidate: Record<string, any> | null = null;
+    let singlePassCorrection = '';
     try {
         const safetyIdentifier = `video_${createHash('sha256').update(requesterId).digest('hex').slice(0, 24)}`;
         if (plannerStrategy === 'single-pass' || plannerStrategy === 'hybrid-single-pass') {
@@ -2652,6 +2654,7 @@ export async function createFrontierVideoPlan(
                 if (!plan || typeof plan !== 'object' || !Array.isArray(plan.segments)) {
                     throw new Error('Video planner returned an invalid combined screenplay object.');
                 }
+                singlePassCandidate = plan;
                 expandExhaustiveSequentialPlan(plan, promptAnalysis, model);
                 stageFrontierVisibleText(plan, promptAnalysis);
                 validatePlanAgainstAnalysis(plan, promptAnalysis, prompt);
@@ -2777,13 +2780,16 @@ export async function createFrontierVideoPlan(
                 if (hybrid && !candidateReceived) throw error;
                 singlePassFallbackSeconds = Math.max(0.001, (Date.now() - singlePassStarted) / 1000);
                 const detail = error instanceof Error ? error.message : String(error);
-                console.warn(`Single-pass video planner failed validation; using two-pass baseline: ${detail}`);
+                if (singlePassAnalysis && singlePassCandidate && /^Video planner omitted explicit numbers:/.test(detail)) {
+                    singlePassCorrection = detail;
+                }
+                console.warn(`Single-pass video planner failed validation; ${singlePassCorrection ? 'repairing existing screenplay' : 'using two-pass baseline'}: ${detail}`);
                 await options.onAttempt?.({
-                    stage: 'single_pass_fallback',
+                    stage: singlePassCorrection ? 'single_pass_correction' : 'single_pass_fallback',
                     attempt: 1,
                     outcome: 'accepted',
                     provider: 'local',
-                    model: 'two-pass-video-planner',
+                    model: singlePassCorrection ? 'screenplay-correction' : 'two-pass-video-planner',
                     serviceTier: 'local',
                     durationSeconds: 0,
                     detail,
@@ -2791,7 +2797,7 @@ export async function createFrontierVideoPlan(
             }
         }
         const analysisStarted = Date.now();
-        const promptAnalysis = (plannerProvider === 'meta' && singlePassAnalysis) || await analyzePromptWithPlanner(
+        const promptAnalysis = ((plannerProvider === 'meta' || singlePassCorrection) && singlePassAnalysis) || await analyzePromptWithPlanner(
             prompt,
             model,
             plannerModel,
@@ -2841,16 +2847,17 @@ export async function createFrontierVideoPlan(
             });
         }
         const screenplayStarted = Date.now();
-        let repairFailure = '';
-        let repairCandidate = '';
+        let repairFailure = singlePassCorrection;
+        let repairCandidate = singlePassCorrection ? JSON.stringify(singlePassCandidate) : '';
         let lastParsedCandidate: any = null;
-        for (let screenplayAttempt = 1; screenplayAttempt <= 2; screenplayAttempt += 1) {
+        for (let screenplayAttempt = singlePassCorrection ? 2 : 1; screenplayAttempt <= 2; screenplayAttempt += 1) {
             const repairInput = screenplayAttempt === 1 ? [] : [{
                 role: 'user',
                 content: [{
                     type: 'input_text',
                     text: [
                         'Regenerate the complete screenplay JSON and correct the validation failure below.',
+                        ...(singlePassCorrection ? ['Make a focused correction to the existing screenplay. Preserve its scenes, dialogue, ending, and all other valid details. Stage the missing count concretely; do not merely append a number to metadata.'] : []),
                         `Validation failure: ${repairFailure}`,
                         repairCandidate
                             ? `Previous candidate (do not merely explain it):\n${repairCandidate.slice(0, 30_000)}`
