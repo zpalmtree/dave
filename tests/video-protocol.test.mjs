@@ -724,10 +724,13 @@ test('global video queue identifies same-server requesters without exposing cros
     const pausedEmbeds = globalVideoQueueEmbeds([queued], 'guild-a', 700, false, true);
     assert.deepEqual(pausedEmbeds[0].footer, { text: 'Video creation paused' });
 
-    const fullPrompt = `A complete queue prompt ${'with every requested detail '.repeat(12)}`;
-    const fullPromptChunks = globalVideoQueueChunks([{ ...queued, prompt: fullPrompt }], 'guild-a', 700);
-    assert.equal(fullPromptChunks.length, 1);
-    assert.match(fullPromptChunks[0], new RegExp(fullPrompt.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const longPrompt = `A long queue prompt ${'with every requested detail '.repeat(20)}`;
+    const longPromptChunks = globalVideoQueueChunks([{ ...queued, prompt: longPrompt }], 'guild-a', 3900);
+    assert.equal(longPromptChunks.length, 1);
+    const shownPrompt = longPromptChunks[0].split('\n> ')[1];
+    assert.equal(shownPrompt.length, 300);
+    assert.ok(shownPrompt.endsWith('…'));
+    assert.ok(longPrompt.startsWith(shownPrompt.slice(0, -1)));
 
     const crossServer = formatGlobalVideoQueueJob({
         ...queued,
