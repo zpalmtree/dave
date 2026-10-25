@@ -48,7 +48,9 @@ async function localPlanRequired(reasonCode: string, promptAnalysis: Record<stri
         }
         return new RecoveryLocalPlanRequired('classification_cleared', {
             ...promptAnalysis,
-            frontier_handling: { disposition: 'reject', reason_code: 'classification_cleared',
+            // The worker re-analyzes policy-refused contracts against the original prompt.
+            // Clearing the safety label does not certify the rejected analysis as faithful.
+            frontier_handling: { disposition: 'reject', reason_code: 'provider_policy',
                 reason: 'Independent review cleared an unsupported classification; a new local screenplay is required.' },
             classification_review: review,
         }, 'Independent review cleared the planner classification; continuing with local planning.');

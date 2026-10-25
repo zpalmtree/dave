@@ -155,3 +155,16 @@ for (const failure of ['reviewer', 'persistence']) {
         }), error => error instanceof RecoveryStoppedError && /could not be completed or saved/.test(error.message));
     });
 }
+
+test('clearing a primary flag does not certify its rejected analysis as a binding local contract', async t => {
+    t.mock.method(globalThis, 'fetch', async () => reply(cleared));
+    await assert.rejects(prepareRecoveryPlanWithMuseFallback({ prompt, model: 'minimax', requester: 'test', sources: [],
+        options: { plannerModel: 'claude-opus-5-5' },
+        planner: async (_prompt, _model, _requester, _sources, options) => {
+            throw new FrontierPlannerRejectedError(options.plannerModel === 'muse-wonder-1.0'
+                ? 'provider_policy' : 'minor_sexualization', 'Declined.', { dialogue_contract: { mode: 'none', lines: [] } });
+        },
+    }), error => error instanceof RecoveryLocalPlanRequired && error.reasonCode === 'classification_cleared'
+        && error.promptAnalysis.frontier_handling.reason_code === 'provider_policy'
+        && error.promptAnalysis.classification_review.verdict === 'cleared');
+});
