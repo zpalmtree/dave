@@ -733,6 +733,10 @@ export function formatGlobalVideoQueueJob(
     return `**${status}** · ${requester}${eta ? ` · ${eta}` : ''}\n> ${displayedDirection}`;
 }
 
+// Planner-written directions can run to whole paragraphs; the queue only
+// needs enough to recognise each job.
+const VIDEO_QUEUE_PROMPT_LENGTH = 300;
+
 export function globalVideoQueueChunks(
     jobs: VideoJobView[],
     viewerGuildId: string | null,
@@ -744,7 +748,12 @@ export function globalVideoQueueChunks(
     const chunks: string[] = [];
     let current = '';
     for (const job of jobs) {
-        let block = formatGlobalVideoQueueJob(job, viewerGuildId, undefined, revealAllRequesters);
+        let block = formatGlobalVideoQueueJob(
+            job,
+            viewerGuildId,
+            VIDEO_QUEUE_PROMPT_LENGTH,
+            revealAllRequesters,
+        );
         if (current && `${current}\n\n${block}`.length > limit) {
             chunks.push(current);
             current = '';
