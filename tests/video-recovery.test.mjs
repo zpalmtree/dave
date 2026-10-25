@@ -304,10 +304,11 @@ test('a frontier rejection routes the original brief to local planning without a
     }), error => error instanceof RecoveryLocalPlanRequired && error.promptAnalysis === rejected.prompt_analysis);
 });
 
-test('sexual content involving minors stops instead of reaching the local planner', async () => {
+test('confirmed sexual content involving minors stops instead of reaching the local planner', async () => {
     await assert.rejects(prepareRecoveryPlan({ prompt: 'The original brief', model: 'minimax', requester: 'test', sources: [], options: {},
         planner: async () => { throw new FrontierPlannerRejectedError('minor_sexualization', 'Declined.'); },
-    }), error => error instanceof RecoveryStoppedError && /never planned locally/.test(error.message));
+        classificationReviewer: async () => ({ verdict: 'confirmed' }),
+    }), error => error instanceof RecoveryStoppedError && /Independent review confirmed/.test(error.message));
 });
 
 test('an OpenAI moderation block is a frontier rejection rather than an outage', async t => {
@@ -418,6 +419,7 @@ test('Muse fallback preserves stop decisions, accounting failures, and the origi
         const analysis = plan().prompt_analysis;
         await assert.rejects(prepareRecoveryPlanWithMuseFallback({
             prompt: 'An explorer speaks.', model: 'minimax', requester: 'test', sources: [],
+            classificationReviewer: async () => ({ verdict: 'confirmed' }),
             options: { plannerModel: 'claude-opus-5-5' },
             planner: async (_prompt, _model, _requester, _images, options) => {
                 models.push(options.plannerModel);
@@ -737,7 +739,8 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
             assert.equal(input.requireSourceIdentity, true);
             assert.equal(input.requireOriginalFirstFrame, true);
             assert.equal(input.sources.length, 1);
-            if (refusal) return prepareRecoveryPlan({ ...input, planner: async () => {
+            if (refusal) return prepareRecoveryPlan({ ...input,
+                classificationReviewer: async () => ({ verdict: 'confirmed' }), planner: async () => {
                 throw new FrontierPlannerRejectedError(refusal === 'minor' ? 'minor_sexualization' : 'provider_policy',
                     'Provider refused the original request');
             } });
@@ -843,7 +846,7 @@ test(`${variant} recovery preserves identity and openings and routes refusals lo
         await reset(); refusal = 'minor';
         const stopped = await request('plan');
         assert.equal(stopped.status, 422);
-        assert.match(stopped.body.error, /never planned locally/);
+        assert.match(stopped.body.error, /Independent review confirmed/);
         await failed();
     } finally { broker.worker = null; await broker.stop(); rmSync(directory, { recursive: true, force: true }); }
 });
@@ -1153,4 +1156,78 @@ test('fixed source audio disables automatic screenplay truncation before timelin
     assert.equal(prepared.plan.duration_truncation, undefined);
     assert.equal(prepared.contract.segments.reduce((sum, segment) =>
         sum + (segment.output_seconds ?? segment.target_seconds), 0), 5);
+});
+
+test('broker persists an independently cleared Muse flag and hands the original contract to Qwen', async t => {
+    const directory = mkdtempSync(join(tmpdir(), 'video-classification-route-'));
+    const originalFetch = globalThis.fetch;
+    let reviews = 0;
+    const calls = [];
+    const original = plan().prompt_analysis;
+    const prompt = 'Five adult explorers say "We made it home."';
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        if (String(url).startsWith('http://127.0.0.1:')) return originalFetch(url, init);
+        assert.equal(url, 'https://api.openai.com/v1/responses');
+        reviews++;
+        return new Response(JSON.stringify({ status: 'completed', output_text: JSON.stringify({
+            minors: 'absent', sexual_content: 'absent', sexualized_minor: 'absent',
+            minor_evidence: [], sexual_evidence: [], reason: 'Nonsexual adult explorers returning home.',
+        }), usage: { input_tokens: 50, output_tokens: 30 } }));
+    });
+    const broker = new VideoBroker({ host: '127.0.0.1', port: 0, dbPath: join(directory, 'queue.sqlite3'),
+        resultsDir: join(directory, 'results'), botToken: 'bot', workerToken: 'worker',
+        recoveryEnabled: true, preplanQueuedJobs: false,
+        frontierPlanner: async (actualPrompt, _model, _requester, _sources, options) => {
+            assert.equal(actualPrompt, prompt);
+            calls.push(options.plannerModel);
+            throw new FrontierPlannerRejectedError(options.plannerModel === 'muse-wonder-1.0'
+                ? 'minor_sexualization' : 'provider_policy', 'Fixture rejection.', original);
+        } });
+    const frontierOptions = broker.frontierOptions.bind(broker);
+    t.mock.method(broker, 'frontierOptions', (...args) => ({ ...frontierOptions(...args), plannerModel: 'claude-opus-5-5' }));
+    try {
+        await broker.start();
+        const base = `http://127.0.0.1:${broker.listeningPort()}`;
+        const submitted = await fetch(`${base}/v1/jobs`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt, requester_id: '1', origin_bot_id: '2', channel_id: '3',
+                command_message_id: '4', status_message_id: '5' }) });
+        const id = (await submitted.json()).job.id;
+        broker.worker = { id: 'test-worker', currentJob: id, leaseId: 'lease', ready: false,
+            capabilities: ['minimax'], recoveryVersion: VIDEO_RECOVERY_VERSION, lastHeartbeat: Date.now(),
+            scheduler: { available: false }, socket: { send() {}, close() {}, terminate() {} } };
+        await broker.run("UPDATE video_jobs SET status='running', worker_id='test-worker', lease_token='lease', recovery_version=? WHERE public_id=?",
+            [VIDEO_RECOVERY_VERSION, id]);
+        const request = async (operation, body = {}) => {
+            const response = await fetch(`${base}/v1/worker/jobs/${id}/recovery/${operation}`, { method: 'POST',
+                headers: { authorization: 'Bearer worker', 'content-type': 'application/json', 'x-video-lease-id': 'lease' },
+                body: JSON.stringify(body) });
+            const value = await response.json();
+            assert.equal(response.status, 200, JSON.stringify(value));
+            return value;
+        };
+        const routed = await request('plan');
+        assert.equal(routed.local_plan_required, true);
+        assert.deepEqual(routed.prompt_analysis, original);
+        assert.equal(routed.reason_code, 'provider_policy');
+        const state = JSON.parse((await broker.get('SELECT recovery_json FROM video_jobs WHERE public_id=?', [id])).recovery_json);
+        assert.equal(state.classification_reviews[0].verdict, 'cleared');
+        assert.equal(state.classification_reviews[0].rejected_model, 'muse-wonder-1.0');
+        assert.deepEqual(await request('plan'), routed);
+        assert.equal(reviews, 1);
+        assert.deepEqual(calls, ['claude-opus-5-5', 'muse-wonder-1.0']);
+        const local = plan();
+        local.intent = 'Five adult explorers return home.';
+        local.segments[0].shots[0].visual = 'All five adult explorers arrive home and wave.';
+        const approved = await request('local-plan', { plan: local });
+        assert.equal(approved.contract.planner, 'local');
+        assert.equal(approved.plan.segments[0].shots[0].dialogue[0].text, 'We made it home.');
+        const row = await broker.get('SELECT planner_model,recovery_json FROM video_jobs WHERE public_id=?', [id]);
+        assert.equal(row.planner_model, 'hauhaucs-qwen3.8:27b-q4kp-mtp');
+        assert.equal(JSON.parse(row.recovery_json).classification_reviews.length, 1);
+    } finally {
+        broker.worker = null;
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
 });
