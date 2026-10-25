@@ -1,0 +1,216 @@
+--- a/video_recovery.py
++++ b/video_recovery.py
+@@ -144,14 +144,8 @@
+ 
+ 
+ def delivery_canvas(source: Path) -> tuple[int, int]:
+-    """Keep native landscape renders; widen portrait/square delivery without cropping."""
+-    width, height = video_canvas(source)
+-    if width <= height:
+-        # Retain every source pixel vertically instead of restoring the old
+-        # 960x720 downscale. Normalization adds side padding, never stretches.
+-        width = (height * 16 + 8) // 9
+-        width += width % 2
+-    return width, height
++    """Keep the accepted render's native canvas, including portrait and square."""
++    return video_canvas(source)
+ 
+ 
+ def normalize_clip(source: Path, destination: Path, song_frames: int | None = None,
+@@ -443,9 +437,17 @@
+     prefetch = None
+     scene_gpu = SceneGpuReservation(worker)
+ 
++    def scene_aspect(index: int) -> str:
++        from video_gen import nearest_aspect
++        opening = root / 'scene-0' / 'opening.png'
++        reference = opening if index > 0 and opening.is_file() else (source_paths[-1] if source_paths else None)
++        return nearest_aspect(reference)
++
+     async def request(operation: str, body: dict | None = None):
+         if worker.cancel_reason:
+             raise asyncio.CancelledError()
++        if operation == 'image':
++            body = {**(body or {}), 'aspect_ratio': scene_aspect(int((body or {}).get('segment_index', 0)))}
+         request_started = time.monotonic()
+         try:
+             async with worker.http_session.post(base + operation, json={'contract_hash': contract_hash, **(body or {})},
+@@ -749,6 +751,7 @@
+                     command = [console_python_executable(), '-s', str(GENERATOR), *MODEL_ARGS[renderer],
+                         *(['--source-audio', str(song)] if song else []), '--scene-offset', str(index),
+                         '--frontier-plan', str(plan_path), '--approved-plan-only', '--image', str(image), '--keyframe', 'never',
++                        '--aspect', scene_aspect(max(1, index)),
+                         '--seed', str((stable_job_seed(job['id']) + index * 101 + scene['video_attempts'] + scene.get('cycles', 0) * 1009) % (2 ** 63)),
+                         'Render the supplied approved scene.']
+                     scene['render_interrupted'] = True
+@@ -810,7 +813,7 @@
+         checkpoint['format'] = 'generated'
+         await save()
+         # Derive this once from the accepted original, never a resized delivery copy.
+-        # Resumed jobs reuse that artifact and the same horizontal delivery canvas.
++        # Resumed jobs reuse that artifact and the same native delivery canvas.
+         canvas = await asyncio.to_thread(delivery_canvas, Path(checkpoint['scenes']['0']['video_path']))
+         for index, segment in enumerate(plan['segments']):
+             scene = checkpoint['scenes'][str(index)]
+--- a/test_video_canvas.py
++++ b/test_video_canvas.py
+@@ -1,4 +1,4 @@
+-"""CPU/media regressions for native-size normalization and horizontal delivery."""
++"""CPU/media regressions for consistent native-size delivery."""
+ import asyncio
+ import copy
+ import json
+@@ -71,16 +71,16 @@
+         first = self.clip('portrait', (144, 256))
+         second = self.clip('wide', (256, 144))
+         canvas = recovery.delivery_canvas(first)
+-        self.assertEqual(canvas, (456, 256))
++        self.assertEqual(canvas, (144, 256))
+         clips = [recovery.normalize_clip(path, self.root / f'normalized-{index}.mp4', canvas=canvas)
+                  for index, path in enumerate([first, second])]
+         fitted = self.inspect(clips[1], canvas, frames=24)
+         self.assert_bands(fitted, fitted.height // 2)
++        self.assertLess(max(fitted.getpixel((72, 4))), 10)
++        self.assertLess(max(fitted.getpixel((72, 251))), 10)
+         portrait = self.inspect(clips[0], canvas, frames=24)
+-        left = (portrait.width - 144) // 2
+-        self.assert_bands(portrait.crop((left, 0, left + 144, 256)), 4)
+-        self.assertLess(max(portrait.getpixel((4, 128))), 10)
+-        self.assertLess(max(portrait.getpixel((451, 128))), 10)
++        self.assert_bands(portrait, 4)
++        self.assert_bands(portrait, 251)
+         for transition, frames in [('cut', 48), ('dissolve', 42)]:
+             output = recovery.join_clips(clips, self.root / f'{transition}.mp4',
+                 [{'transition': 'start'}, {'transition': transition, 'audio_transition': 'auto'}])
+@@ -95,9 +95,9 @@
+         output = recovery.normalize_clip(source, self.root / 'even.mp4')
+         self.inspect(output, (146, 258), frames=24)
+ 
+-    def test_delivery_keeps_native_detail_and_adds_only_side_padding(self):
+-        for size, expected in [((736, 1120), (1992, 1120)),
+-                               ((832, 832), (1480, 832)),
++    def test_delivery_preserves_native_aspect_without_adding_black_bars(self):
++        for size, expected in [((736, 1120), (736, 1120)),
++                               ((832, 832), (832, 832)),
+                                ((1120, 736), (1120, 736)),
+                                ((1344, 768), (1344, 768))]:
+             with self.subTest(size=size):
+@@ -114,10 +114,10 @@
+                     self.assertLess(max(image.getpixel((4, size[1] // 2))), 10)
+                     self.assertLess(max(image.getpixel((image.width - 5, size[1] // 2))), 10)
+ 
+-    def test_odd_portrait_delivery_is_horizontal_and_encodable(self):
++    def test_odd_portrait_delivery_preserves_aspect_and_is_encodable(self):
+         source = self.clip('odd-delivery', (145, 257), audio=False, odd=True)
+         canvas = recovery.delivery_canvas(source)
+-        self.assertEqual(canvas, (460, 258))
++        self.assertEqual(canvas, (146, 258))
+         output = recovery.normalize_clip(source, self.root / 'even-delivery.mp4', canvas=canvas)
+         self.inspect(output, canvas, frames=24)
+ 
+@@ -168,7 +168,7 @@
+             cancel_reason=None, journal={}, worker_headers=lambda: {}, begin_metrics=mock.Mock(),
+             job_metrics=None, add_span=mock.Mock(), save_journal=mock.Mock(), send=mock.AsyncMock(),
+             request_job_source_audio=mock.AsyncMock(return_value=soundtrack),
+-            prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_: path),
++            prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_, **kwargs: path),
+             upload=mock.AsyncMock(side_effect=[RuntimeError('temporary upload outage'), None]),
+             wait_and_send_terminal=mock.AsyncMock(), clear_journal=mock.Mock(), send_ready=mock.AsyncMock(),
+             fail_current=mock.AsyncMock(), finish_cancelled_job=mock.AsyncMock())
+@@ -182,7 +182,7 @@
+                 asyncio.run(recovery.run_recovery_job(worker, job))
+                 self.assertEqual(worker.upload.await_count, attempt + 1)
+                 delivered = worker.upload.await_args.args[1]
+-                self.inspect(delivered, (456, 256), frames=48)
++                self.inspect(delivered, (144, 256), frames=48)
+         worker.fail_current.assert_awaited_once_with('temporary upload outage', True)
+         worker.wait_and_send_terminal.assert_awaited_once()
+         for index, original in enumerate(originals):
+@@ -190,15 +190,15 @@
+         if song:
+             # Two exact silent scene clips become one two-second source soundtrack.
+             for index in range(2):
+-                self.inspect(job_root / f'scene-{index}' / 'normalized.mp4', (456, 256), frames=24, audio=False)
++                self.inspect(job_root / f'scene-{index}' / 'normalized.mp4', (144, 256), frames=24, audio=False)
+             with av.open(str(delivered)) as container:
+                 audio = container.streams.audio[0]
+                 self.assertAlmostEqual(float(audio.duration * audio.time_base), 2, delta=.05)
+ 
+-    def test_resumed_video_delivers_horizontal_without_rendering_again(self):
++    def test_resumed_video_preserves_canvas_without_rendering_again(self):
+         self.exercise_recovery()
+ 
+-    def test_resumed_song_delivers_horizontal_with_exact_audio_timeline(self):
++    def test_resumed_song_preserves_canvas_with_exact_audio_timeline(self):
+         self.exercise_recovery(song=True)
+ 
+ 
+--- a/test_video_recovery.py
++++ b/test_video_recovery.py
+@@ -100,6 +100,11 @@
+ 
+     def test_authored_cut_gets_a_new_opening_instead_of_inheriting_a_closeup_of_other_subjects(self):
+         self.exercise(original=True, continuation=True, authored_cut=True)
++
++    def test_square_and_portrait_canvas_survive_prefetched_cuts(self):
++        for size, aspect in [((144, 144), '1:1'), ((144, 256), '9:16')]:
++            with self.subTest(aspect=aspect):
++                self.exercise(original=True, continuation=True, prefetch_cut=True, slow_render=True, canvas=size, aspect=aspect)
+ 
+     def test_next_cut_opening_is_requested_before_current_render_finishes(self):
+         self.exercise(original=True, continuation=True, slow_render=True, prefetch_cut=True)
+@@ -321,7 +326,7 @@
+                 save_journal=mock.Mock(), send=mock.AsyncMock(), ensure_gpu_reservation=mock.AsyncMock(side_effect=admit),
+                 run_reserved_command=mock.AsyncMock(side_effect=run), create_local_plan=create_local_plan,
+                 find_output=mock.Mock(return_value=candidate), finish_gpuq_reservation=mock.AsyncMock(),
+-                stop_gpu_monitor=mock.AsyncMock(), prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_args: path),
++                stop_gpu_monitor=mock.AsyncMock(), prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_args, **kwargs: path),
+                 upload=mock.AsyncMock(), wait_and_send_terminal=mock.AsyncMock(), clear_journal=mock.Mock(),
+                 send_ready=mock.AsyncMock(), fail_current=mock.AsyncMock(), finish_cancelled_job=mock.AsyncMock())
+             fake = types.SimpleNamespace(SCRIPT_DIR=root, MODEL_ARGS={'minimax': ['--model', 'h3']},
+@@ -538,17 +543,17 @@
+     def exercise(self, original=False, render_failures=0, image_outage=False,
+                  review_outage=False, upload_outage=False, admission_outage=False, invalid_response=False,
+                  continuation=False, authored_cut=False, restart_exhausted=False, telemetry_outage=False, reanchor=False, continuity_outage=False,
+-                 slow_render=False, prefetch_cut=False, restored=False, stalled_preparation=False):
++                 slow_render=False, prefetch_cut=False, restored=False, stalled_preparation=False, canvas=(256, 144), aspect='16:9'):
+         from PIL import Image
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+             source = root / 'source.png'
+-            Image.new('RGB', (256, 144), 'blue').save(source)
++            Image.new('RGB', canvas, 'blue').save(source)
+             encoded = recovery.data_image(source)
+             redraw = root / 'redraw.png'
+             Image.new('RGB', (300, 300), 'red').save(redraw)
+             candidate = root / 'candidate.mp4'
+-            recovery.media_command(['-f', 'lavfi', '-i', 'testsrc2=size=256x144:rate=12',
++            recovery.media_command(['-f', 'lavfi', '-i', f'testsrc2=size={canvas[0]}x{canvas[1]}:rate=12',
+                 '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '1',
+                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(candidate)])
+             segment = {'title': 'Wave', 'transition': 'start', 'target_seconds': 5,
+@@ -591,6 +596,7 @@
+                                             'reason': 'The returning duck is hidden.' if reanchor else 'The duck is visible.',
+                                             **({'restored_frame': recovery.data_image(redraw)} if restored else {})}
+                     elif operation == 'image':
++                        assert json['aspect_ratio'] == aspect
+                         result.status = 503 if image_outage else 200
+                         result.value = (None if invalid_response else {'error': 'provider offline'}) if image_outage else {'image': encoded}
+                     elif operation == 'review':
+@@ -604,6 +610,7 @@
+ 
+             outcomes = iter([1] * render_failures + [0] * 4)
+             async def render(_command):
++                self.assertEqual(_command[_command.index('--aspect') + 1], aspect)
+                 if slow_render: await asyncio.sleep(0.05)
+                 if prefetch_cut:
+                     self.assertTrue(any(operation == 'image' and body['segment_index'] == 1 for operation, body in calls),
+@@ -616,7 +623,7 @@
+                 save_journal=mock.Mock(), send=mock.AsyncMock(), ensure_gpu_reservation=mock.AsyncMock(),
+                 run_reserved_command=mock.AsyncMock(side_effect=render),
+                 find_output=mock.Mock(return_value=candidate), finish_gpuq_reservation=mock.AsyncMock(),
+-                stop_gpu_monitor=mock.AsyncMock(), prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_args: path),
++                stop_gpu_monitor=mock.AsyncMock(), prepare_delivery=mock.AsyncMock(side_effect=lambda path, *_args, **kwargs: path),
+                 upload=mock.AsyncMock(side_effect=RuntimeError('upload offline') if upload_outage else None),
+                 upload_metrics=mock.AsyncMock(side_effect=RuntimeError('telemetry offline') if telemetry_outage else None),
+                 wait_and_send_terminal=mock.AsyncMock(), clear_journal=mock.Mock(), send_ready=mock.AsyncMock(),

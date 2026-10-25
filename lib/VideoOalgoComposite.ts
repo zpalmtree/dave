@@ -43,7 +43,7 @@ export async function createOalgoSceneOpening(
             bytes: readFileSync(base.path), mimeType: base.mimeType,
             sourceUrl: 'built-in:meximutt', contextUrl: 'built-in:meximutt',
         }], {
-            ...hooks, aspectRatio: '1:1', requireIdentityPreservation: true,
+            ...hooks, aspectRatio: '16:9', requireIdentityPreservation: true,
             reviewPurpose: 'character-opening', abortSignal: controller.signal,
         });
         // Other keyframe paths may return best effort or unreviewed images. Here

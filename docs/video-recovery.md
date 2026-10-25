@@ -64,7 +64,9 @@ scene, that stored image is also the required opening frame; recovery cannot
 replace it with another generated keyframe.
 
 Text-only `$oalgo` and `$oalgofast` requests first create a scene-specific
-opening from the prompt, using the bundled portrait as the identity reference.
+16:9 opening from the prompt, using the bundled portrait as the identity reference.
+The portrait crop does not constrain a newly staged scene; attached-image composites
+and required original portraits retain their existing source canvas.
 The bot submits `source_image_scene: true`; the broker uses a native image edit
 and requires an accepted identity and composition review before saving it as
 the starting image. The screenplay is then planned from this opening, so both
@@ -219,15 +221,27 @@ Actions explicitly preceding speech get their own timing so the remaining
 speaking window can hold the complete line.
 
 Completion requires approval for every scene and the exact uploaded file hash.
-Generated clips share a horizontal delivery canvas derived from the first
-accepted render, with even dimensions for H.264. Landscape renders keep their
-native size; portrait and square renders retain their native height and gain
-side padding to approximately 16:9. This preserves the full source picture
-without restoring the old 960×720 resolution cap. Later scenes fit without
-cropping or stretching. They retain the common frame rate and audio
-layout needed for cuts and dissolves; songs keep their exact frame timeline.
+Generated clips share the first accepted render's native delivery canvas, with
+even dimensions for H.264. Landscape, portrait and square videos keep their
+native size; delivery does not automatically widen square/portrait clips with
+black sidebars. Recovery opening generation, prefetch, and scene rendering use
+the first accepted opening's aspect ratio. Older workers fall back to the source
+image (or their frame-zero identity anchor) when requesting cloud openings.
+Later clips fit the shared canvas without cropping or stretching; padding remains
+available for genuinely mismatched source footage. Common frame rate and audio
+layout support cuts and dissolves, and songs retain their exact frame timeline.
 Assembly retries derive the same canvas from the accepted original. Discord's
 existing size-limit compression can still downsize an oversized delivery.
+
+Install the audited desktop patch with
+`python3 scripts/apply-video-consistent-canvas-desktop.py --check`, then without
+`--check`. Reload the supervised desktop worker while idle. Existing accepted
+scenes are not regenerated. CPU fixture showcase: <http://localhost:4327/>;
+start it with `python3 -m http.server 4327 --directory artifacts/video-canvas/showcase`.
+It compares square/portrait delivery before and after, landscape delivery,
+joined scenes and necessary source padding. The fixture videos use the real
+normalization/join functions; cloud composition is covered by broker tests.
+
 The final MP4 is fully decoded before upload. Discord delivery records the
 posted message ID before editing the progress message, so a cosmetic edit
 failure cannot trigger a render.
