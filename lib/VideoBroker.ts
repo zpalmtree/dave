@@ -2,7 +2,7 @@ import { recoveryMusic } from './VideoMusic.js';
 import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
-import { describeVideoEditReference, validateVideoEditReference } from './VideoEditReference.js';
+import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
     cutVideoSourceAudio, resolveVideoSourceExcerptLyrics, normalizeVideoSourceAudio, storeVideoSourceAudioFromClip,
@@ -5458,7 +5458,7 @@ export class VideoBroker {
         try {
             if (existsSync(path)) {
                 const cached = JSON.parse(readFileSync(path, 'utf8'));
-                if (cached.sha256 === sha256) {
+                if (cached.sha256 === sha256 && cached.version === VIDEO_EDIT_REFERENCE_VERSION) {
                     writeJson(res, 200, { description: validateVideoEditReference(cached) });
                     return;
                 }
@@ -5466,7 +5466,7 @@ export class VideoBroker {
             const description = validateVideoEditReference({ description: await (
                 this.options.videoEditReferenceDescriber || describeVideoEditReference
             )({ bytes, mimeType }, this.providerHooks(job)) });
-            writeFileSync(path, JSON.stringify({ sha256, description }, null, 2));
+            writeFileSync(path, JSON.stringify({ sha256, description, version: VIDEO_EDIT_REFERENCE_VERSION }, null, 2));
             writeJson(res, 200, { description });
         } catch (error) {
             writeJson(res, 502, { error: sanitizeVideoWorkerText(String(error), 'Could not describe the replacement image.', 500) });
