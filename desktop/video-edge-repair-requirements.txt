@@ -1,0 +1,13 @@
+# Optional directory only: do not install into ComfyUI's shared site-packages.
+# Reuses the desktop's existing torch, torchvision, numpy, scipy, Pillow and PyYAML.
+opencv-python-headless==4.11.0.86
+imageio==2.25.0
+imageio-ffmpeg==0.7.0
+matplotlib==3.10.8
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.68.0
+kiwisolver==1.5.1
+pyparsing==3.3.3
+python-dateutil==3.0.0
+six==1.17.0
