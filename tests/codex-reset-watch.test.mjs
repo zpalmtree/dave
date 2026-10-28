@@ -3,76 +3,59 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readSnapshot, readUsageFeed, pollResetSources, planResetAlerts, resetNotification, deliverResetAlerts, saveResetState, validateState } from '../dist/CodexResetWatch.js';
+import { readUsageFeed, pollResetObservations, planResetAlerts, resetNotification, deliverResetAlerts, saveResetState, validateState } from '../dist/CodexResetWatch.js';
 
 const settings = { botUserId: '123', channelId: '746507379310461010' };
-const reset = (id, overrides = {}) => ({ id, reset_type: 'regular', announced_at: '2026-10-15T06:28:13.000Z', text: 'Reset complete', source: { type: 'x_post', url: `https://x.com/thsottiaux/status/${id}` }, ...overrides });
-const scheduled = id => ({ ...reset(id), status: 'scheduled', scheduled_for: '2026-10-15T07:00:00Z' });
-const snapshot = (resets = [], upcoming = null) => ({ resets, scheduled: upcoming });
-const baseline = () => planResetAlerts(undefined, settings, snapshot([reset('old')]));
+const observation = (id, overrides = {}) => ({ id: `usage-${id}`, reset_type: 'regular', announced_at: '2026-10-15T06:28:13.000Z', text: 'Reset complete', source: { type: 'account_observed' }, ...overrides });
+const tracker = (id, type = 'x_post') => ({ ...observation(id), id, source: { type } });
+const baseline = () => planResetAlerts(undefined, settings, [observation('old')]);
 
-test('startup baselines history but announces an outstanding scheduled reset once', () => {
-    const view = snapshot([reset('old')], scheduled('new'));
-    const state = planResetAlerts(undefined, settings, view);
-    assert.deepEqual(state.pending.map(item => item.phase), ['announced']);
-    assert.deepEqual(planResetAlerts({ ...state, pending: [] }, settings, view).pending, []);
+test('startup baselines history; later observations alert once, in chronological order', () => {
+    const initial = baseline();
+    assert.deepEqual(initial.pending, []);
+    const events = [observation('later', { announced_at: '2026-10-16T00:00:00Z' }), observation('earlier', { reset_type: 'banked' }), observation('old')];
+    const state = planResetAlerts(initial, settings, events);
+    assert.deepEqual(state.pending.map(item => item.reset.id), ['usage-earlier', 'usage-later']);
+    assert.deepEqual(planResetAlerts({ ...state, pending: [] }, settings, events).pending, []);
 });
 
-test('same source ID transitions from announced to dropped, without repeating either', () => {
-    const announced = planResetAlerts(baseline(), settings, snapshot([reset('old')], scheduled('new')));
-    const dropped = planResetAlerts({ ...announced, pending: [] }, settings, snapshot([reset('new'), reset('old')]));
-    assert.deepEqual(dropped.pending.map(item => [item.phase, item.reset.id]), [['dropped', 'new']]);
-    assert.deepEqual(planResetAlerts({ ...dropped, pending: [] }, settings, snapshot([reset('new')])).pending, []);
-});
-
-test('elapsed ETA, withdrawn announcement and stale scheduled status never fabricate a drop', () => {
-    const state = planResetAlerts(baseline(), settings, snapshot([reset('old')], scheduled('new')));
-    for (const upcoming of [scheduled('new'), null]) {
-        assert.deepEqual(planResetAlerts({ ...state, pending: [] }, settings, snapshot([reset('old')], upcoming)).pending, []);
-    }
-    const dropped = planResetAlerts(state, settings, snapshot([reset('new')]));
-    assert.deepEqual(planResetAlerts({ ...dropped, pending: [] }, settings, snapshot([], scheduled('new'))).pending, []);
-});
-
-test('multiple executed resets during downtime are delivered chronologically, including observed banked credits', () => {
-    const state = planResetAlerts(baseline(), settings, snapshot([
-        reset('later', { announced_at: '2026-10-16T00:00:00Z' }),
-        reset('observed-earlier', { reset_type: 'banked', source: { type: 'observed' } }),
-    ]));
-    assert.deepEqual(state.pending.map(item => item.reset.id), ['observed-earlier', 'later']);
-    const message = resetNotification(state.pending[0]);
-    assert.match(message.embeds[0].title, /reset credit added/);
-    assert.equal(message.embeds[0].url, 'https://codex-resets.com');
-});
-
-test('all history pages are fetched; latest reset closes a status/history cache gap; forecasts ignored', async () => {
-    const paths = [];
-    const view = await readSnapshot(async path => {
-        paths.push(path);
-        if (path === '/status') return { data: { latest_reset: reset('latest'), scheduled_reset: null, active_watch: { level: 'strong' } } };
-        if (path.includes('cursor=')) return { data: [reset('older')], pagination: { has_more: false, next_cursor: null } };
-        return { data: [reset('old')], pagination: { has_more: true, next_cursor: 'next_page' } };
+test('migration discards queued tracker announcements and drops before delivery', async () => {
+    const direct = observation('pending');
+    const legacy = { ...baseline(), trackerInitialized: true, recentDrops: [tracker('past')],
+        seen: ['announced:scheduled', 'dropped:past', 'dropped:usage-pending'],
+        pending: [
+            { phase: 'announced', reset: { ...tracker('scheduled'), status: 'scheduled', scheduled_for: null } },
+            { phase: 'dropped', reset: tracker('unreliable', 'observed') },
+            { phase: 'dropped', reset: direct },
+        ] };
+    const sent = [];
+    const saved = [];
+    const result = await pollResetObservations(legacy, settings, {
+        // Even with a missing feed, old API alerts must not escape the outbox.
+        save: async state => { saved.push(JSON.parse(JSON.stringify(state))); },
+        send: async message => { sent.push(message); },
     });
-    assert.equal(paths.length, 3);
-    assert.match(paths[2], /cursor=next_page/);
-    assert.deepEqual(view.resets.map(item => item.id), ['old', 'older', 'latest']);
-    assert.equal(view.scheduled, null);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].embeds[0].title, /monitored account/);
+    assert.deepEqual(saved[0].pending, [{ phase: 'dropped', reset: direct }]);
+    assert.deepEqual(result.seen, ['dropped:usage-pending']);
+    assert.deepEqual(result.pending, []);
+    assert.equal('recentDrops' in result, false);
+    assert.equal('trackerInitialized' in result, false);
+    assert.equal(legacy.pending.length, 3);
 });
 
-test('invalid status/history and repeated cursors fail without changing durable state', async () => {
-    for (const page of [{}, { data: [{}], pagination: { has_more: false } }, { data: [], pagination: { has_more: true, next_cursor: 'loop' } }]) {
-        await assert.rejects(readSnapshot(async path => path === '/status'
-            ? { data: { latest_reset: null, scheduled_reset: null } } : page), /Invalid/);
-    }
-    await assert.rejects(readSnapshot(async () => ({ data: {} })), /Invalid/);
-    await assert.rejects(readSnapshot(async () => ({ data: { latest_reset: null, scheduled_reset: { ...scheduled('x'), scheduled_for: 'bad date' } } })), /Invalid/);
+test('old tracker history no longer suppresses fresh account observations', () => {
+    const previous = { ...baseline(), recentDrops: [tracker('same-time')] };
+    const state = planResetAlerts(previous, settings, [observation('one'), observation('two')]);
+    assert.deepEqual(state.pending.map(item => item.reset.id), ['usage-one', 'usage-two']);
 });
 
 test('persistent outbox survives restart and failed delivery; checkpoints each successful message', async t => {
     const directory = await mkdtemp(join(tmpdir(), 'codex-reset-watch-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const path = join(directory, 'state.json');
-    const state = planResetAlerts(baseline(), settings, snapshot([reset('one'), reset('two')]));
+    const state = planResetAlerts(baseline(), settings, [observation('one'), observation('two')]);
     const save = () => saveResetState(path, state);
     await save();
     let sent = 0;
@@ -80,10 +63,22 @@ test('persistent outbox survives restart and failed delivery; checkpoints each s
         if (++sent === 2) throw new Error('Discord unavailable');
     }, save), /Discord unavailable/);
     const restored = JSON.parse(await readFile(path, 'utf8'));
-    assert.deepEqual(restored.pending.map(item => item.reset.id), ['two']);
-    await deliverResetAlerts(restored, async () => {}, () => saveResetState(path, restored));
-    assert.deepEqual(JSON.parse(await readFile(path, 'utf8')).pending, []);
-    assert.deepEqual(planResetAlerts(restored, settings, snapshot([reset('one'), reset('two')])).pending, []);
+    assert.deepEqual(restored.pending.map(item => item.reset.id), ['usage-two']);
+    await pollResetObservations(restored, settings, { send: async () => {}, save: next => saveResetState(path, next) });
+    const delivered = JSON.parse(await readFile(path, 'utf8'));
+    assert.deepEqual(delivered.pending, []);
+    assert.deepEqual(planResetAlerts(delivered, settings, [observation('one'), observation('two')]).pending, []);
+});
+
+test('missing feed does not initialize; first valid feed baselines without historical pings', async () => {
+    let saves = 0;
+    const deps = { save: async () => { saves++; }, send: async () => { assert.fail('Unexpected delivery'); } };
+    assert.equal(await pollResetObservations(undefined, settings, deps), undefined);
+    assert.equal(saves, 0);
+    const state = await pollResetObservations(undefined, settings, { ...deps, observations: [observation('old')] });
+    assert.deepEqual(state.seen, ['dropped:usage-old']);
+    assert.deepEqual(state.pending, []);
+    assert.equal(saves, 1);
 });
 
 test('state cannot be sent to a different destination or by a different bot', () => {
@@ -93,85 +88,39 @@ test('state cannot be sent to a different destination or by a different bot', ()
     assert.throws(() => validateState({}, settings), /Invalid/);
 });
 
-test('both alert types ping only the codex role and retain bounded source attribution', () => {
-    for (const phase of ['announced', 'dropped']) {
-        const alert = resetNotification({ phase, reset: reset('new') });
-        assert.equal(alert.content, '<@&1560349689025532064>');
-        assert.deepEqual(alert.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
-    }
-    const message = resetNotification({ phase: 'announced', reset: { ...scheduled('new'), text: '@everyone ' + '*'.repeat(5000) } });
-    assert.deepEqual(message.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
-    assert.match(message.embeds[0].title, /announced/);
-    assert.match(message.embeds[0].fields[0].name, /estimate/);
-    assert.match(message.embeds[0].fields[0].value, /<t:\d+:f> · <t:\d+:R>/);
-    assert.match(message.embeds[0].footer.text, /Data from Codex Resets/);
-    assert.ok(message.embeds[0].description.length < 4096);
-});
-
-const observation = (id, overrides = {}) => reset(`usage-${id}`, { source: { type: 'account_observed' }, ...overrides });
-
-test('direct observations and later tracker confirmations produce one drop alert in either order', () => {
-    for (const [first, second] of [[observation('a'), reset('tracker')], [reset('tracker'), observation('a')]]) {
-        const once = planResetAlerts(planResetAlerts(undefined, settings, snapshot()), settings, snapshot([first]));
-        assert.equal(once.pending.length, 1);
-        const twice = planResetAlerts({ ...once, pending: [] }, settings, snapshot([second]));
-        assert.equal(twice.pending.length, 0);
-        assert.ok(twice.seen.includes(`dropped:${second.id}`));
-        assert.equal(planResetAlerts(twice, settings, snapshot([first, second])).pending.length, 0);
-    }
-});
-
-test('different reset types, separate direct events and distant tracker events still alert', () => {
-    const once = planResetAlerts(planResetAlerts(undefined, settings, snapshot()), settings, snapshot([observation('a')]));
-    for (const next of [reset('banked', { reset_type: 'banked' }), observation('b'),
-        reset('tomorrow', { announced_at: '2026-10-16T06:28:13Z' })]) {
-        assert.equal(planResetAlerts({ ...once, pending: [] }, settings, snapshot([next])).pending.length, 1);
-    }
-});
-
-test('account feed validates observations and labels them with account-specific evidence', () => {
+test('account feed rejects malformed and public tracker events', () => {
     const event = observation('a');
-    assert.deepEqual(readUsageFeed({ version: 1, updatedAt: event.announced_at, events: [event] }), [event]);
-    for (const invalid of [{}, { version: 1, updatedAt: event.announced_at, events: [reset('external')] }]) {
+    const feed = events => ({ version: 1, updatedAt: event.announced_at, events });
+    assert.deepEqual(readUsageFeed(feed([event])), [event]);
+    for (const invalid of [{}, feed([tracker('external')]), feed([observation('bad', { announced_at: 'invalid' })]),
+        feed([observation('bad', { id: 'not-usage' })])]) {
         assert.throws(() => readUsageFeed(invalid), /Invalid/);
     }
-    const notification = resetNotification({ phase: 'dropped', reset: event });
-    assert.match(notification.embeds[0].title, /monitored account/);
-    assert.match(notification.embeds[0].footer.text, /confirmed twice/);
-    assert.equal(notification.embeds[0].url, 'https://chatgpt.com/codex/settings/usage');
+    assert.throws(() => planResetAlerts(baseline(), settings, [tracker('external')]), /Invalid/);
 });
 
-test('direct delivery precedes tracker requests and survives tracker outages', async () => {
-    const sent = [];
-    let saved;
-    const state = await pollResetSources(planResetAlerts(undefined, settings, snapshot()), settings, {
+test('notifications ping only the codex role and keep account-specific evidence', () => {
+    for (const reset_type of ['regular', 'banked']) {
+        const message = resetNotification({ phase: 'dropped', reset: observation('a', { reset_type, text: '@everyone ' + '*'.repeat(5000) }) });
+        assert.equal(message.content, '<@&1560349689025532064>');
+        assert.deepEqual(message.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
+        assert.match(message.embeds[0].title, /monitored account/);
+        assert.match(message.embeds[0].title, reset_type === 'banked' ? /reset credit/ : /usage reset/);
+        assert.match(message.embeds[0].footer.text, /confirmed twice/);
+        assert.equal(message.embeds[0].url, 'https://chatgpt.com/codex/settings/usage');
+        assert.ok(message.embeds[0].description.length <= 1800);
+        assert.equal(message.embeds[0].fields, undefined);
+    }
+    assert.throws(() => resetNotification({ phase: 'dropped', reset: tracker('external') }), /Only confirmed/);
+    assert.throws(() => resetNotification({ phase: 'announced', reset: observation('a') }), /Only confirmed/);
+});
+
+test('save failures prevent delivery and leave previous state intact', async () => {
+    const initial = baseline();
+    await assert.rejects(pollResetObservations(initial, settings, {
         observations: [observation('live')],
-        tracker: async () => { assert.equal(sent.length, 1); throw new Error('offline'); },
-        save: async value => { saved = JSON.parse(JSON.stringify(value)); },
-        send: async message => { sent.push(message); }, trackerError: () => {},
-    });
-    assert.equal(state.pending.length, 0);
-    assert.deepEqual(JSON.parse(JSON.stringify(state)), saved);
-});
-
-test('tracker recovery after initial offline startup baselines history without losing scheduled alerts', async () => {
-    const sent = [];
-    const deps = { save: async () => {}, send: async message => { sent.push(message); }, trackerError: () => {} };
-    const initial = await pollResetSources(undefined, settings, { ...deps, observations: [],
-        tracker: async () => { throw new Error('offline'); } });
-    assert.equal(initial.trackerInitialized, false);
-    const recovered = await pollResetSources(initial, settings, { ...deps, observations: [],
-        tracker: async () => snapshot([reset('historical')], scheduled('future')) });
-    assert.equal(recovered.trackerInitialized, true);
-    assert.equal(sent.length, 1);
-    assert.match(sent[0].embeds[0].title, /announced/);
-});
-
-test('tracker backoff does not pause delivery of direct observations', async () => {
-    const sent = [];
-    await pollResetSources(planResetAlerts(undefined, settings, snapshot()), settings, {
-        observations: [observation('live')], tracker: async () => null,
-        save: async () => {}, send: async message => { sent.push(message); }, trackerError: () => {},
-    });
-    assert.equal(sent.length, 1);
+        save: async () => { throw new Error('disk full'); },
+        send: async () => { assert.fail('Must persist before delivery'); },
+    }), /disk full/);
+    assert.deepEqual(initial, baseline());
 });
