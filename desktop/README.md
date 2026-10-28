@@ -398,3 +398,35 @@ changing its comedy, dialogue or music policy. The configured default remains
 `opus-tuned`. Evaluate two reviewed regressions and fresh historical requests
 with the same renderer for both arms; keep the fixed-script frame-selection
 comparison separate when interpreting the results.
+
+## Isolated subject replacement (protocol 8)
+
+`video-edit-isolated.patch` contains the worker, crop/compositing helpers, optional
+local Wan renderer, and their regression tests. Install with
+`python3 scripts/apply-video-edit-isolated-desktop.py --check`, then omit `--check`.
+The installer checks exact before/after hashes, supports newly added modules, and
+refuses unrelated or mixed desktop revisions. Reload only the idle supervised
+worker child, preserve its supervisor, and deploy both branches with
+`scripts/deploy-bots.sh --with-broker`.
+
+New replacements use target-only source crops, retain short shots, enlarge tiny
+crops for motion generation, preserve the source soundtrack, and require still
+and per-segment motion reviews before delivery. Failed shots stop the job. Old
+workers cannot lease new replacements. Add operations keep their existing path.
+See [source editing](../docs/video-source-edit.md) for the evidence and limits.
+
+Viggle is the default. `VIDEO_EDIT_ISOLATED_RENDERER=wan` explicitly opts into the
+experimental Wan-Animate-2 backend; its portrait framing is not yet reliable.
+The pinned model manifest is `desktop/video-edit-wan-models.json` (~25 GB).
+`scripts/install-video-edit-wan-models.py` downloads and verifies those weights;
+`--check` verifies without downloading. Prefer Windows embedded Python for native
+model-disk I/O; pass `--manifest` when copying the installer outside this checkout.
+Run `gpuq gaming check --quiet` before model installation or validation, and run
+all inference through GPUq. The existing worker reservation covers both renderers.
+No hosted video API is required; existing still-image and review API usage remains.
+
+Verify the broker with `yarn test`. With the desktop environment and FFmpeg, run
+`python -m unittest test_video_edit test_video_edit_isolated test_video_edit_wan test_video_worker`.
+The October 28 regression has a passing five-second isolated motion test, but no
+passing full-clip edit. Failed still generation must not be mistaken for a usable
+replacement, and a sampled review cannot guarantee every frame is artifact-free.

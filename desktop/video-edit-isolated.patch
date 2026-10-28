@@ -1,0 +1,836 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -121,14 +121,14 @@
+     return process.stdout
+ 
+ 
+-def clip_details(path: Path) -> tuple[float, int, int]:
++def clip_details(path: Path, validate_source: bool = True) -> tuple[float, int, int]:
+     info = json.loads(command("ffprobe", "-v", "error", "-select_streams", "v:0",
+                               "-show_entries", "stream=width,height:format=duration", "-of", "json", str(path)))
+     stream = (info.get("streams") or [None])[0]
+     if not stream:
+         raise RuntimeError("Source clip has no video stream")
+     duration = float(info["format"]["duration"])
+-    if not MIN_SOURCE_SECONDS <= duration <= MAX_SOURCE_SECONDS:
++    if validate_source and not MIN_SOURCE_SECONDS <= duration <= MAX_SOURCE_SECONDS:
+         raise RuntimeError(f"Video replacement supports {MIN_SOURCE_SECONDS}–{MAX_SOURCE_SECONDS} second clips")
+     width, height = int(stream["width"]), int(stream["height"])
+     if width < 32 or height < 32:
+@@ -161,14 +161,16 @@
+     return max(124, 5 + math.ceil((needed - 5) / 17) * 17)
+ 
+ 
+-def shot_ranges(cuts: list[int], total_frames: int) -> list[tuple[int, int]]:
++def shot_ranges(cuts: list[int], total_frames: int, min_frames: int = MIN_SHOT_FRAMES) -> list[tuple[int, int]]:
+     """Shots as (start, end) frames. The shortest piece joins its shorter neighbour until
+     every shot lasts MIN_SHOT_FRAMES and there are at most MAX_SHOTS."""
+     bounds = [0, *sorted({cut for cut in cuts if 0 < cut < total_frames}), total_frames]
+     shots = [[start, end] for start, end in zip(bounds, bounds[1:])]
++    if min_frames == 1 and len(shots) > MAX_SHOTS:
++        raise RuntimeError(f"The clip has more than {MAX_SHOTS} shots; shorten it before replacing a subject.")
+     length = lambda index: shots[index][1] - shots[index][0]
+     while len(shots) > 1:
+-        short = [index for index in range(len(shots)) if length(index) < MIN_SHOT_FRAMES]
++        short = [index for index in range(len(shots)) if length(index) < min_frames]
+         if not short and len(shots) <= MAX_SHOTS:
+             break
+         index = min(short or range(len(shots)), key=length)
+@@ -178,13 +180,13 @@
+     return [(start, end) for start, end in shots]
+ 
+ 
+-def segment_plan(duration: float, cuts: list[int] = ()) -> list[tuple[int, int, int]]:
++def segment_plan(duration: float, cuts: list[int] = (), min_shot_frames: int = MIN_SHOT_FRAMES) -> list[tuple[int, int, int]]:
+     """Partition the 24 fps timeline without dropping or duplicating source frames.
+ 
+     No segment spans a shot cut, so each one is tracked and animated as a single shot.
+     """
+     result = []
+-    for shot_start, shot_end in shot_ranges(list(cuts), math.ceil(duration * 24)):
++    for shot_start, shot_end in shot_ranges(list(cuts), math.ceil(duration * 24), min_shot_frames):
+         frames = shot_end - shot_start
+         count = math.ceil(frames / MAX_SEGMENT_FRAMES)
+         common, extra = divmod(frames, count)
+@@ -215,19 +217,21 @@
+             and change[frame] >= change[max(0, frame - CUT_WINDOW_FRAMES):frame + CUT_WINDOW_FRAMES + 1].max()]
+ 
+ 
+-def edit_plan(normalized: Path, duration: float) -> tuple[list[tuple[int, int]], list[tuple[int, int, int]]]:
++def edit_plan(normalized: Path, duration: float, min_shot_frames: int = MIN_SHOT_FRAMES) -> tuple[list[tuple[int, int]], list[tuple[int, int, int]]]:
+     """The clip's shots and the segments that render them. Unreadable cuts leave one shot."""
+     total_frames = math.ceil(duration * 24)
+     try:
+         cuts = shot_cuts(normalized, total_frames)
+     except Exception as error:
++        if min_shot_frames == 1:
++            raise RuntimeError("Could not inspect shot boundaries for the isolated replacement.") from error
+         print(f"Shot detection skipped: {error}"[:500], flush=True)
+         cuts = []
+-    shots = shot_ranges(cuts, total_frames)
++    shots = shot_ranges(cuts, total_frames, min_shot_frames)
+     if len(shots) > 1:
+         print(f"Editing {len(shots)} shots separately, cut at "
+               + ", ".join(f"{start / 24:.2f}s" for start, _ in shots[1:]), flush=True)
+-    return shots, segment_plan(duration, cuts)
++    return shots, segment_plan(duration, cuts, min_shot_frames)
+ 
+ 
+ def shot_of(start: int, shots: list[tuple[int, int]]) -> int:
+@@ -814,7 +818,8 @@
+     normalized = work / "normalized.mp4"
+     print("Normalizing source clip", flush=True)
+     normalized_clip(args.clip, normalized, width, height, math.ceil(duration * 24))
+-    shots, segments = edit_plan(normalized, duration)
++    shots, segments = edit_plan(normalized, duration, min_shot_frames=1) if getattr(args, "isolated", False) \
++        else edit_plan(normalized, duration)
+     segment_shots = [shot_of(start, shots) for start, _, _ in segments]
+     edited, failures, best = [], [], {}
+     for index, (start, source_frames, model_frames) in enumerate(segments, start=1):
+@@ -853,6 +858,9 @@
+         "segments": segments, "target": args.target, "shots": shots,
+         "segment_shots": segment_shots, "edited": edited, "stills": stills,
+     }), encoding="utf-8")
++    if getattr(args, "isolated", False):
++        from video_edit_isolated import prepare
++        prepare(work)
+     print(f"Viggle still frames ready for {len(stills)} shot(s): "
+           + ", ".join(still["frame"] for still in stills), flush=True)
+ 
+@@ -978,6 +986,10 @@
+         stills = dict(zip(still_shots, args.still))
+     else:
+         raise RuntimeError(f"Viggle-Animate needs one repainted still per shot ({len(still_shots)}), got {len(args.still)}")
++    isolated = state.get("isolated", False)
++    boxes = {still["shot"]: still["box"] for still in state["stills"]} if isolated else {}
++    if isolated and (not all(tracked) or len(args.still) != len(still_shots)):
++        raise RuntimeError("Isolated replacement needs a verified still for every shot.")
+     normalized = work / "normalized.mp4"
+     run_id = uuid.uuid4().hex
+     INPUT.mkdir(parents=True, exist_ok=True)
+@@ -985,7 +997,11 @@
+     for shot, path in stills.items():
+         if path not in inputs:
+             inputs[path] = INPUT / f"video-edit-{run_id}-still-{len(inputs) + 1}{path.suffix.lower()}"
+-            inputs[path].write_bytes(path.read_bytes())
++            if isolated and getattr(args, "isolated_renderer", "viggle") != "wan":
++                from video_edit_isolated import fit_still
++                fit_still(path, inputs[path], boxes[shot])
++            else:
++                inputs[path].write_bytes(path.read_bytes())
+     has_audio = audio_codec(args.clip) is not None
+     args.output.parent.mkdir(parents=True, exist_ok=True)
+     try:
+@@ -995,7 +1011,7 @@
+             for index, (start, source_frames, model_frames) in enumerate(segments, start=1):
+                 clip = INPUT / f"video-edit-{run_id}-{index}.mp4"
+                 mask_input = INPUT / f"video-edit-mask-{run_id}-{index}.mp4"
+-                audio_input = INPUT / f"video-edit-audio-{run_id}-{index}.wav" if has_audio else None
++                audio_input = INPUT / f"video-edit-audio-{run_id}-{index}.wav" if has_audio and not isolated else None
+                 try:
+                     segment_clip(normalized, clip, start, source_frames, model_frames)
+                     if not tracked[index - 1]:
+@@ -1008,16 +1024,41 @@
+                         continue
+                     print(f"Animating replacement segment {index}/{len(segments)} with Viggle-Animate", flush=True)
+                     still = stills[segment_shots[index - 1]]
+-                    tracked_edit_mask(work / f"mask-{index:02d}.mp4", mask_input, width, height, steady=True)
++                    motion_clip = clip
++                    if isolated:
++                        from video_edit_isolated import crop_video
++                        motion_clip = INPUT / f"video-edit-{run_id}-{index}-crop.mp4"
++                        crop_video(clip, motion_clip, boxes[segment_shots[index - 1]])
++                        mask_input.write_bytes((work / f"mask-{index:02d}.mp4").read_bytes())
++                    else:
++                        tracked_edit_mask(work / f"mask-{index:02d}.mp4", mask_input, width, height, steady=True)
+                     if audio_input:
+                         audio_window("ffmpeg", args.clip, audio_input, start / 24, model_frames / 24)
+-                    rendered = run_graph(args.server, viggle_graph(
+-                        clip.name, inputs[still].name, 833969396 + index, f"video/edits/{run_id}-{index}-viggle",
+-                        audio_input.name if audio_input else None), "92", 7200)
++                    if isolated and getattr(args, "isolated_renderer", "viggle") == "wan":
++                        from video_edit_wan import render as render_wan
++                        _, crop_width, crop_height = clip_details(motion_clip)
++                        scale = min(1.0, 416 / max(crop_width, crop_height))
++                        wan_width = max(128, round(crop_width * scale / 16) * 16)
++                        wan_height = max(128, round(crop_height * scale / 16) * 16)
++                        rendered = render_wan(args.server, motion_clip, inputs[still],
++                            getattr(args, "reference_description", None) or "The character in the reference image, with the source scene's background.",
++                            wan_width, wan_height, source_frames, work / f"wan-{index:02d}.mp4", 833969396 + index)
++                    else:
++                        rendered = run_graph(args.server, viggle_graph(
++                            motion_clip.name, inputs[still].name, 833969396 + index, f"video/edits/{run_id}-{index}-viggle",
++                            audio_input.name if audio_input else None), "92", 7200)
++                    if isolated:
++                        from video_edit_isolated import place_video
++                        placed = directory / f"segment-{index:02d}-placed.mp4"
++                        place_video(rendered, placed, boxes[segment_shots[index - 1]], width, height)
++                        rendered = placed
+                     reject_blank_edit(rendered, mask_input, clip, still, source_frames / 24, width, height)
+                     matched = directory / f"segment-{index:02d}-levels.mp4"
+-                    match_render_levels(clip, rendered, work / f"mask-{index:02d}.mp4", matched,
+-                                        source_frames, width, height)
++                    if isolated:
++                        matched = rendered
++                    else:
++                        match_render_levels(clip, rendered, work / f"mask-{index:02d}.mp4", matched,
++                                            source_frames, width, height)
+                     edited = directory / f"segment-{index:02d}.mp4"
+                     composite_segment(clip, matched, mask_input, edited, source_frames)
+                     edited_segments.append(edited)
+@@ -1025,6 +1066,7 @@
+                 finally:
+                     clip.unlink(missing_ok=True)
+                     mask_input.unlink(missing_ok=True)
++                    (INPUT / f"video-edit-{run_id}-{index}-crop.mp4").unlink(missing_ok=True)
+                     if audio_input:
+                         audio_input.unlink(missing_ok=True)
+             print("Joining edited segments and restoring original soundtrack", flush=True)
+@@ -1034,16 +1076,19 @@
+         effects = still_effects(args.still[0])
+         mask = work / "subject-mask.mp4"
+         try:
+-            if has_audio or effects:
++            if (has_audio and not isolated) or effects:
+                 subject_mask(work, segments, mask)
+         except Exception as error:
+             print(f"Lip sync and effects skipped: {error}"[:500], flush=True)
+         else:
+             # Lip sync first, on the plain face, so SyncNet does not score beams crossing it.
+-            if has_audio:
++            if has_audio and not isolated:
+                 resync_lips(args.server, args.output, mask, work, duration)
+             if effects:
+                 transfer_effects(args.output, normalized, mask, effects, work, duration)
++        if isolated:
++            from video_edit_isolated import review_samples
++            review_samples(work, args.output)
+         print(f"Video replacement ready: {args.output}", flush=True)
+     finally:
+         for path in inputs.values():
+@@ -1062,6 +1107,9 @@
+     parser.add_argument("--server", default="http://127.0.0.1:8188")
+     parser.add_argument("--subjects", choices=("group", "primary"), default="group",
+                         help="replace every tracked match, or only the most prominent in each segment")
++    parser.add_argument("--isolated-renderer", choices=("viggle", "wan"), default="viggle")
++    parser.add_argument("--reference-description")
++    parser.add_argument("--isolated", action="store_true", help="crop target motion and require all shots")
+     parser.add_argument("--viggle-prepare", type=Path, metavar="WORK_DIR",
+                         help="track --target and write each shot's frame to repaint, listed in WORK_DIR/viggle.json")
+     parser.add_argument("--viggle-render", type=Path, metavar="WORK_DIR",
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -1545,7 +1545,7 @@
+                     # 1: downloads a linked YouTube video for the broker when an edit is submitted.
+                     "source_video_download_version": 1,
+                     # 7: describe the replacement image before Character Swap; Viggle/H3 remain fallbacks.
+-                    "video_edit_version": 7,
++                    "video_edit_version": 8,
+                     "recovery_version": 3,
+                     "current_job": self.current_job.get("id") if self.current_job else None,
+                     "current_lease": self.current_job.get("lease_id") if self.current_job else None,
+@@ -2207,6 +2207,7 @@
+         self.save_journal(started=started, log=str(LOG_DIR / f"{job_id}.log"),
+                           run_dir=str(output_dir), source_video=True)
+         adding = job.get("video_edit_mode") == "add"
++        isolated = bool(job.get("video_edit_isolated")) and not adding
+         try:
+             await self.send({"type": "event", "event": "plan", "job_id": job_id,
+                              "stage": f"Downloading source clip and {'addition' if adding else 'replacement'} image"})
+@@ -2249,7 +2250,19 @@
+                         code = 70
+                 render_started = time.monotonic()
+                 swap_done = False
+-                if code == 0 and not self.cancel_reason and not adding \
++                if isolated and code == 0 and not self.cancel_reason:
++                    # This also registers a locally drawn reference with the broker.
++                    description = await self.request_video_edit_reference(job, replacement)
++                    atomic_json(output_dir / "replacement-description.json", {"description": description})
++                    if self.cancel_reason:
++                        await self.finish_cancelled_job(job_id)
++                        return
++                    code = await self.run_viggle_edit(job, source_video, output, error_file, output_dir, replacement, description)
++                    if code != 0 and not self.cancel_reason:
++                        reason = error_file.read_text(encoding="utf-8") if error_file.is_file() else "Isolated replacement failed."
++                        raise RuntimeError(reason[:1000])
++                    swap_done = True
++                if not isolated and code == 0 and not self.cancel_reason and not adding \
+                         and os.environ.get("VIDEO_EDIT_CHARACTER_SWAP", "1") != "0":
+                     await self.send({"type": "event", "event": "progress", "job_id": job_id,
+                                      "stage": "Replacing the character from the source performance"})
+@@ -2311,9 +2324,16 @@
+             await self.fail_current(str(exc), False)
+ 
+     async def run_viggle_edit(self, job: dict[str, Any], source_video: Path, output: Path,
+-                              error_file: Path, output_dir: Path) -> int:
++                              error_file: Path, output_dir: Path, replacement: Path | None = None,
++                              reference_description: str = "") -> int:
+         """Track the subject, have the broker repaint its clearest frame, then animate that still."""
+         job_id = str(job["id"])
++        isolated = bool(job.get("video_edit_isolated"))
++        backend = os.environ.get("VIDEO_EDIT_ISOLATED_RENDERER", "viggle") if isolated else "viggle"
++        if backend not in {"viggle", "wan"}:
++            raise RuntimeError("Unsupported isolated video renderer.")
++        if backend == "wan" and replacement is None:
++            raise RuntimeError("The local motion renderer needs the replacement image.")
+         work = output_dir / "viggle"
+         shutil.rmtree(work, ignore_errors=True)
+         started = time.monotonic()
+@@ -2323,6 +2343,7 @@
+             console_python_executable(), "-s", str(VIDEO_EDIT_GENERATOR), "--clip", str(source_video),
+             "--target", str(job["video_edit_target"]), "--viggle-prepare", str(work),
+             "--subjects", video_edit_subjects(job), "--error-file", str(error_file),
++            *(["--isolated"] if isolated else []),
+         ])
+         if code != 0 or self.cancel_reason:
+             return code or 1
+@@ -2333,9 +2354,12 @@
+             frames = [work / str(still["frame"]) for still in state.get("stills") or []]
+         except (OSError, ValueError, TypeError, KeyError, AttributeError):
+             state, frames = None, []
++        if isolated and (not state or not state.get("isolated") or not frames):
++            raise RuntimeError("Isolated replacement preparation returned no tracked crops.")
+         frames = frames or [work / "frame.png"]
+         await self.send({"type": "event", "event": "progress", "job_id": job_id,
+-                         "stage": f"Repainting the replacement into {len(frames)} shots" if len(frames) > 1
++                         "stage": "Preparing the replacement for source-driven motion" if backend == "wan"
++                         else f"Repainting the replacement into {len(frames)} shots" if len(frames) > 1
+                          else "Repainting the replacement into a frame of the clip"})
+         limit = asyncio.Semaphore(VIDEO_EDIT_REPAINTS_AT_ONCE)
+ 
+@@ -2346,10 +2370,14 @@
+                 except Exception as exc:
+                     return exc
+ 
+-        results = await asyncio.gather(*(repaint(shot, frame) for shot, frame in enumerate(frames, start=1)))
++        results = [replacement] * len(frames) if backend == "wan" else \
++            await asyncio.gather(*(repaint(shot, frame) for shot, frame in enumerate(frames, start=1)))
+         if self.cancel_reason:
+             return 1
+         failed = [index for index, result in enumerate(results) if isinstance(result, Exception)]
++        if failed and isolated:
++            error_file.write_text(f"Replacement stopped before animation: {results[failed[0]]}"[:1000], encoding="utf-8")
++            return 1
+         if len(failed) == len(results):
+             error_file.write_text(f"Repainted frame unavailable: {results[0]}"[:1000], encoding="utf-8")
+             return 1
+@@ -2365,16 +2393,40 @@
+             atomic_json(state_file, state)
+         stills = [result for result in results if not isinstance(result, Exception)]
+         await self.send({"type": "event", "event": "progress", "job_id": job_id,
+-                         "stage": "Animating the replacement with Viggle-Animate"})
++                         "stage": "Animating the replacement from the source motion" if backend == "wan"
++                         else "Animating the replacement with Viggle-Animate"})
+         code = await self.run_reserved_command([
+             console_python_executable(), "-s", str(VIDEO_EDIT_GENERATOR), "--clip", str(source_video),
+             "--viggle-render", str(work), "--still", *map(str, stills), "--output", str(output),
+             "--error-file", str(error_file),
++            *(["--isolated-renderer", backend, "--reference-description", reference_description] if isolated else []),
+         ])
+         self.add_span("worker", "video_edit_viggle", time.monotonic() - started)
+         if code == 0 and output.is_file():
+-            shutil.rmtree(work, ignore_errors=True)
++            if isolated:
++                paths = json.loads((work / "reviews.json").read_text(encoding="utf-8"))
++                if not paths or len(paths) != len(state["segments"]):
++                    raise RuntimeError("Replacement has incomplete motion-review evidence.")
++                for name in paths:
++                    if self.cancel_reason:
++                        return 1
++                    await self.request_video_edit_review(job, work / name)
++            else:
++                shutil.rmtree(work, ignore_errors=True)
+         return code
++
++    async def request_video_edit_review(self, job: dict[str, Any], evidence: Path) -> None:
++        if not self.http_session:
++            raise RuntimeError("Broker HTTP session is unavailable.")
++        url = re.sub(r"^wss://", "https://", self.broker_url)
++        url = re.sub(r"/v1/worker$", f"/v1/worker/jobs/{job['id']}/video-edit-review", url)
++        async with self.http_session.post(url, data=evidence.read_bytes(),
++                headers={**self.worker_headers(), "Content-Type": "application/json"},
++                timeout=aiohttp.ClientTimeout(total=90, connect=20)) as response:
++            body = await response.json()
++            if response.status != 200 or body.get("accepted") is not True:
++                raise RuntimeError("Replacement failed its source-performance check: "
++                                   + str(body.get("reason") or body.get("error") or "No valid review.")[:700])
+ 
+     async def request_video_edit_reference(self, job: dict[str, Any], reference: Path) -> str:
+         if not self.http_session:
+@@ -2408,8 +2460,9 @@
+         async with self.http_session.post(
+             url,
+             data=frame.read_bytes(),
+-            headers={**self.worker_headers(), "Content-Type": "image/png", "X-Video-Edit-Shot": str(shot)},
+-            timeout=aiohttp.ClientTimeout(total=6 * 60, connect=20),
++            headers={**self.worker_headers(), "Content-Type": "image/png", "X-Video-Edit-Shot": str(shot),
++                     **({"X-Video-Edit-Isolated": "1"} if job.get("video_edit_isolated") else {})},
++            timeout=aiohttp.ClientTimeout(total=(8 if job.get("video_edit_isolated") else 6) * 60, connect=20),
+         ) as response:
+             if response.status != 200:
+                 detail = await response.text()
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -735,6 +735,82 @@
+         worker.request_video_edit_still = mock.AsyncMock(side_effect=request_still)
+         worker.request_video_edit_reference = mock.AsyncMock(return_value="a broad-faced man with short dark hair and red and green clothing")
+         return worker, commands
++
++    def test_isolated_edit_never_uses_unmasked_or_unreviewed_fallback(self):
++        for failure in ('prepare', 'still', 'review', None):
++            with self.subTest(failure=failure):
++                job = {"id": "isolated", "lease_id": "lease", "model": "minimax", "prompt": "new character",
++                       "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++                       "video_edit_target": "the animal on the left", "video_edit_isolated": True,
++                       "video_edit_repaint": True}
++                worker, commands = self.viggle_edit_worker(job,
++                    prepare_error="Could not reliably isolate target" if failure == 'prepare' else None,
++                    refused_shots=(2,) if failure == 'still' else (), shots=2)
++                legacy = worker.run_reserved_command
++                async def run(command):
++                    code = await legacy(command)
++                    if code == 0 and '--viggle-prepare' in command:
++                        work = Path(command[command.index('--viggle-prepare') + 1])
++                        path = work / 'viggle.json'
++                        state = json.loads(path.read_text())
++                        state.update(isolated=True, segments=[[0, 24, 124], [24, 24, 124]])
++                        path.write_text(json.dumps(state))
++                    if code == 0 and '--viggle-render' in command:
++                        work = Path(command[command.index('--viggle-render') + 1])
++                        (work / 'reviews.json').write_text(json.dumps(['review-01.json','review-02.json']))
++                    return code
++                worker.run_reserved_command = run
++                worker.request_video_edit_review = mock.AsyncMock(
++                    side_effect=RuntimeError('Wrong subject') if failure == 'review' else None)
++                with tempfile.TemporaryDirectory() as directory, \
++                        mock.patch.object(video_worker, 'SCRIPT_DIR', Path(directory)), \
++                        mock.patch.object(video_worker, 'LOG_DIR', Path(directory) / 'logs'), \
++                        mock.patch.dict(video_worker.os.environ, {'VIDEO_EDIT_CHARACTER_SWAP': '1'}):
++                    asyncio.run(worker.run_job(job))
++                self.assertTrue(all(str(video_worker.CHARACTER_SWAP_GENERATOR) not in cmd for cmd in commands))
++                self.assertTrue(all('--viggle-prepare' in cmd or '--viggle-render' in cmd for cmd in commands))
++                if failure:
++                    worker.finish_output.assert_not_awaited()
++                    worker.fail_current.assert_awaited_once()
++                else:
++                    worker.finish_output.assert_awaited_once()
++                    self.assertEqual(worker.request_video_edit_review.await_count, 2)
++                if failure in ('prepare', 'still'):
++                    worker.request_video_edit_review.assert_not_awaited()
++                    self.assertEqual(len(commands), 1)
++                worker.finish_gpuq_reservation.assert_awaited_once()
++
++    def test_isolated_wan_uses_reference_directly_without_cloud_repaints(self):
++        job = {"id": "wan-direct", "lease_id": "lease", "model": "minimax", "prompt": "replacement",
++               "has_source_video": True, "has_source_image": True, "video_edit_mode": "replace",
++               "video_edit_target": "the animal", "video_edit_isolated": True}
++        worker, commands = self.viggle_edit_worker(job, shots=1)
++        legacy = worker.run_reserved_command
++        async def run(command):
++            code = await legacy(command)
++            if '--viggle-prepare' in command:
++                work = Path(command[command.index('--viggle-prepare')+1])
++                path = work/'viggle.json'; state=json.loads(path.read_text())
++                state.update(isolated=True,segments=[[0,24,124]])
++                path.write_text(json.dumps(state))
++            if '--viggle-render' in command:
++                work = Path(command[command.index('--viggle-render')+1])
++                (work/'reviews.json').write_text(json.dumps(['review-01.json']))
++                self.assertEqual(command[command.index('--isolated-renderer')+1],'wan')
++                self.assertEqual(command[command.index('--still')+1],'reference.png')
++                self.assertIn('--reference-description',command)
++            return code
++        worker.run_reserved_command=run
++        worker.request_video_edit_review=mock.AsyncMock()
++        with tempfile.TemporaryDirectory() as directory, \
++                mock.patch.object(video_worker,'SCRIPT_DIR',Path(directory)), \
++                mock.patch.object(video_worker,'LOG_DIR',Path(directory)/'logs'), \
++                mock.patch.dict(video_worker.os.environ,{'VIDEO_EDIT_ISOLATED_RENDERER':'wan'}):
++            asyncio.run(worker.run_job(job))
++        worker.request_video_edit_still.assert_not_awaited()
++        worker.request_video_edit_review.assert_awaited_once()
++        worker.finish_output.assert_awaited_once()
++        worker.fail_current.assert_not_awaited()
+ 
+     def test_character_swap_is_default_and_bypasses_repaint(self):
+         job = {"id": "swap-default", "video_edit_describe_reference": True, "lease_id": "lease", "model": "minimax", "prompt": "Meximutt",
+--- /dev/null
++++ b/video_edit_isolated.py
+@@ -0,0 +1,151 @@
++"""Spatially isolated source edits; no model is allowed to choose another performer.
++
++Crops and masks come from source tracking. Renderers receive only that crop; their
++output is mapped back into the source coordinates and composited through the track.
++"""
++import base64
++import io
++import json
++from pathlib import Path
++
++import numpy as np
++from PIL import Image
++
++
++def union_box(boxes, width, height, margin=12):
++    if not boxes:
++        raise RuntimeError('Could not reliably isolate the target: empty track.')
++    left = max(0, min(box[0] for box in boxes) - margin)
++    top = max(0, min(box[1] for box in boxes) - margin)
++    right = min(width, max(box[2] for box in boxes) + margin)
++    bottom = min(height, max(box[3] for box in boxes) + margin)
++    # Even coordinates retain chroma alignment for yuv420p crop and pad.
++    return [left // 2 * 2, top // 2 * 2, min(width, (right + 1) // 2 * 2), min(height, (bottom + 1) // 2 * 2)]
++
++
++def detail_score(pixels, selected):
++    gray = np.mean(pixels.astype(np.float32), axis=2)
++    # Interior mask avoids scoring high-contrast silhouettes/background boundaries.
++    interior = selected[1:-1, 1:-1] & selected[:-2, 1:-1] & selected[2:, 1:-1] \
++        & selected[1:-1, :-2] & selected[1:-1, 2:]
++    if not interior.any():
++        return 0.0
++    detail = np.abs(gray[1:-1, :-2] - gray[1:-1, 2:]) + np.abs(gray[:-2, 1:-1] - gray[2:, 1:-1])
++    return float(np.mean(detail[interior]) * (selected.mean() ** 0.25))
++
++
++def bounds(mask):
++    rows, cols = np.nonzero(mask > 127)
++    return [int(cols.min()), int(rows.min()), int(cols.max()) + 1, int(rows.max()) + 1] if len(rows) else None
++
++
++def candidate_frames(count):
++    """Inspect every frame of short shots, and at most 25 spread across long ones."""
++    return {round(index * (count - 1) / max(1, min(count, 25) - 1))
++            for index in range(min(count, 25))}
++
++
++def prepare(work):
++    from video_edit import decoded_frames
++    state_path = work / 'viggle.json'
++    state = json.loads(state_path.read_text(encoding='utf-8'))
++    if not all(state['edited']):
++        raise RuntimeError('Could not reliably isolate the target in every segment; refusing a partial edit.')
++    w, h = state['width'], state['height']
++    boxes = {}
++    candidates = {}
++    for index, (start, count, _) in enumerate(state['segments']):
++        shot = state['segment_shots'][index]
++        selected_frames = candidate_frames(count)
++        for local, data in enumerate(decoded_frames(work / f'mask-{index + 1:02d}.mp4', 'gray', w * h, count)):
++            mask = np.frombuffer(data, dtype=np.uint8).reshape(h, w)
++            box = bounds(mask)
++            if box:
++                boxes.setdefault(shot, []).append(box)
++                if local in selected_frames:
++                    candidates[start + local] = (shot, mask > 127)
++    # Area alone selected a blurred back of the head in 8a743884. Score visible detail
++    # only INSIDE the tracked subject, with a small preference for larger detections.
++    best = {}
++    total = max(start + count for start, count, _ in state['segments'])
++    for frame, data in enumerate(decoded_frames(work / 'normalized.mp4', 'rgb24', w * h * 3, total)):
++        if frame not in candidates:
++            continue
++        shot, selected = candidates[frame]
++        pixels = np.frombuffer(data, dtype=np.uint8).reshape(h, w, 3)
++        score = detail_score(pixels, selected)
++        if score > best.get(shot, (-1, 0, None))[0]:
++            best[shot] = (score, frame, pixels.copy())
++    for still in state['stills']:
++        box = union_box(boxes.get(still['shot'], []), w, h)
++        still['box'] = box
++        if still['shot'] in best:
++            _, still['frame_index'], pixels = best[still['shot']]
++            Image.fromarray(pixels).save(work / still['frame'])
++        still['full_frame'] = still['frame']
++        crop = f'crop-{still["shot"] + 1:02d}.png'
++        with Image.open(work / still['frame']) as frame:
++            frame.crop(box).save(work / crop)
++        still['frame'] = crop
++    state['isolated'] = True
++    state_path.write_text(json.dumps(state, indent=2), encoding='utf-8')
++    return state
++
++
++def crop_canvas(box):
++    # The full-frame helper only downsizes. Using it for a small target produced
++    # 160x176 motion inputs, far below the motion model's working resolution.
++    width, height = box[2] - box[0], box[3] - box[1]
++    if width <= 0 or height <= 0:
++        raise ValueError('Empty target crop.')
++    scale = min(512 / min(width, height), 896 / max(width, height))
++    return max(32, round(width * scale / 32) * 32), max(32, round(height * scale / 32) * 32)
++
++
++def crop_video(source, destination, box):
++    from video_edit import command
++    x, y, right, bottom = box
++    w, h = crop_canvas(box)
++    command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', str(source), '-vf',
++            f'crop={right-x}:{bottom-y}:{x}:{y},scale={w}:{h}', '-an', '-c:v', 'libx264', '-crf', '18', str(destination))
++    return w, h
++
++
++def place_video(source, destination, box, width, height):
++    from video_edit import command
++    x, y, right, bottom = box
++    command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', str(source), '-vf',
++            f'scale={right-x}:{bottom-y},pad={width}:{height}:{x}:{y}:black', '-an', '-c:v', 'libx264', '-crf', '18', str(destination))
++
++
++def fit_still(source, destination, box):
++    w, h = crop_canvas(box)
++    with Image.open(source) as image:
++        image.convert('RGB').resize((w, h), Image.Resampling.LANCZOS).save(destination)
++
++
++def jpeg(pixels):
++    buffer = io.BytesIO()
++    Image.fromarray(pixels).save(buffer, format='JPEG', quality=85)
++    return base64.b64encode(buffer.getvalue()).decode('ascii')
++
++
++def review_samples(work, output):
++    """Every segment, including the first and last frame on each side of each cut."""
++    from video_edit import clip_details, rgb_frame
++    state = json.loads((work / 'viggle.json').read_text(encoding='utf-8'))
++    duration, w, h = clip_details(output)
++    if abs(duration - state['duration']) > 2 / 24 or (w, h) != (state['width'], state['height']):
++        raise RuntimeError('The replacement changed the source duration or canvas.')
++    paths = []
++    for index, (start, count, _) in enumerate(state['segments']):
++        samples = []
++        for frame in sorted({0, (count - 1) // 3, 2 * (count - 1) // 3, count - 1}):
++            t = (start + frame) / 24
++            samples.append({'source': jpeg(rgb_frame(work / 'normalized.mp4', t, w, h)),
++                            'edited': jpeg(rgb_frame(output, t, w, h)),
++                            'mask': jpeg(rgb_frame(work / f'mask-{index+1:02d}.mp4', frame / 24, w, h))})
++        path = work / f'review-{index+1:02d}.json'
++        path.write_text(json.dumps({'segment': index+1, 'samples': samples}), encoding='utf-8')
++        paths.append(path.name)
++    (work / 'reviews.json').write_text(json.dumps(paths), encoding='utf-8')
+--- /dev/null
++++ b/test_video_edit_isolated.py
+@@ -0,0 +1,89 @@
++import json
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++import numpy as np
++from PIL import Image
++import video_edit_isolated as isolated
++
++class IsolatedEditTests(unittest.TestCase):
++    def test_frame_selection_covers_short_shots_and_bounds_long_shot_work(self):
++        self.assertEqual(isolated.candidate_frames(1), {0})
++        self.assertEqual(isolated.candidate_frames(15), set(range(15)))
++        selected = isolated.candidate_frames(268)
++        self.assertEqual(len(selected), 25)
++        self.assertTrue({0, 267}.issubset(selected))
++
++    def test_small_subject_crop_is_upscaled_for_motion_model(self):
++        self.assertEqual(isolated.crop_canvas([0,318,176,512]),(512,576))
++        for box in [[0,0,50,50],[0,0,800,600],[0,0,100,400]]:
++            w,h=isolated.crop_canvas(box)
++            self.assertLessEqual(max(w,h),896)
++            self.assertEqual(w%32,0);self.assertEqual(h%32,0)
++        with self.assertRaises(ValueError):isolated.crop_canvas([0,0,0,12])
++
++    def test_short_return_shot_resets_rendering_instead_of_merging_into_previous_shot(self):
++        import video_edit
++        shots = video_edit.shot_ranges([1,122,253],268,min_frames=1)
++        self.assertEqual(shots,[(0,1),(1,122),(122,253),(253,268)])
++        segments = video_edit.segment_plan(268/24,[1,122,253],min_shot_frames=1)
++        self.assertEqual([(start,count) for start,count,_ in segments],[(0,1),(1,121),(122,131),(253,15)])
++        self.assertEqual(sum(count for _,count,_ in segments),268)
++
++    def test_track_union_preserves_position_clamps_frame_edges_and_chroma_alignment(self):
++        mask = np.zeros((96,160),dtype=np.uint8)
++        mask[43:93,1:41]=255
++        box = isolated.union_box([isolated.bounds(mask),[3,40,50,96]],160,96)
++        self.assertEqual(box,[0,28,62,96])
++        with self.assertRaisesRegex(RuntimeError,'empty track'):
++            isolated.union_box([],160,96)
++
++    def test_clear_target_wins_over_blur_and_sharp_background(self):
++        selected=np.zeros((96,160),dtype=bool); selected[40:90,:40]=True
++        blurry=np.zeros((96,160,3),dtype=np.uint8)
++        blurry[:,100::2]=255
++        clear=blurry.copy(); clear[40:90:3,:40]=180
++        self.assertGreater(isolated.detail_score(clear,selected),isolated.detail_score(blurry,selected))
++
++    def test_missing_shot_is_not_delivered_as_original_footage(self):
++        with tempfile.TemporaryDirectory() as directory:
++            work=Path(directory)
++            (work/'viggle.json').write_text(json.dumps({'edited':[True,False]}))
++            with self.assertRaisesRegex(RuntimeError,'partial edit'):
++                isolated.prepare(work)
++
++    def test_crop_is_source_derived_and_cannot_select_the_other_person(self):
++        with tempfile.TemporaryDirectory() as directory:
++            work=Path(directory)
++            frame=np.zeros((96,160,3),dtype=np.uint8)
++            frame[:,100:]=[255,0,0] # other person on the right
++            frame[40:90,:40]=[0,255,0] # intended subject lower left
++            Image.fromarray(frame).save(work/'frame-01.png')
++            state={'edited':[True], 'width':160,'height':96,'segments':[[0,24,124]],
++                   'segment_shots':[0],'stills':[{'shot':0,'frame':'frame-01.png'}]}
++            (work/'viggle.json').write_text(json.dumps(state))
++            mask=np.zeros((96,160),dtype=np.uint8); mask[40:90,:40]=255
++            with patch('video_edit.decoded_frames',side_effect=[iter([mask.tobytes()]*24),iter([frame.tobytes()]*24)]):
++                result=isolated.prepare(work)
++            with Image.open(work/result['stills'][0]['frame']) as crop:
++                self.assertEqual(np.asarray(crop)[:,:,0].max(),0)
++                self.assertEqual(np.asarray(crop)[:,:,1].max(),255)
++            self.assertEqual(result['stills'][0]['box'],[0,28,52,96])
++
++    def test_review_includes_both_sides_of_cut_and_late_segment(self):
++        with tempfile.TemporaryDirectory() as directory:
++            work=Path(directory)
++            state={'duration':2, 'width':160,'height':96,'segments':[[0,24,124],[24,24,124]]}
++            (work/'viggle.json').write_text(json.dumps(state))
++            calls=[]
++            def frame(path,t,w,h):
++                calls.append((path.name,t))
++                return np.zeros((h,w,3),dtype=np.uint8)
++            with patch('video_edit.clip_details',return_value=(2,160,96)),patch('video_edit.rgb_frame',side_effect=frame):
++                isolated.review_samples(work,work/'edited.mp4')
++            self.assertEqual(json.loads((work/'reviews.json').read_text()),['review-01.json','review-02.json'])
++            times=[t for name,t in calls if name=='edited.mp4']
++            for t in [0,23/24,1,47/24]: self.assertIn(t,times)
++
++if __name__=='__main__': unittest.main()
+--- /dev/null
++++ b/video_edit_wan.py
+@@ -0,0 +1,99 @@
++"""Local Wan-Animate-2 renderer for isolated, source-driven character motion.
++
++The original source crop is the motion input. The replacement reference supplies appearance; source framing must be
++checked in the composited output. Its expression is not a text instruction. No audio drives the face.
++"""
++MODEL = 'wan_animate_2_distill_int8_convrot.safetensors'
++TEXT = 'umt5_xxl_fp8_e4m3fn_scaled.safetensors'
++VISION = 'clip_vision_h.safetensors'
++VAE = 'wan_2.1_vae.safetensors'
++
++
++def graph(clip, reference, description, width, height, frames, prefix, seed=46):
++    from video_edit import node
++    if frames < 1 or (frames - 1) % 4:
++        raise ValueError('Wan windows must contain 4n+1 frames.')
++    return {
++        'model': node('UNETLoader', unet_name=MODEL, weight_dtype='default'),
++        'shift': node('ModelSamplingSD3', model=['model',0], shift=5.0),
++        'clip': node('CLIPLoader', clip_name=TEXT, type='wan', device='default'),
++        'positive': node('CLIPTextEncode', clip=['clip',0], text=description),
++        'negative': node('CLIPTextEncode', clip=['clip',0], text=''),
++        'motion_text': node('CLIPTextEncode', clip=['clip',0], text='The subject follows the source head movement, gaze, mouth movement and body motion. Fixed camera.'),
++        'vae': node('VAELoader', vae_name=VAE),
++        'source': node('LoadVideo', file=clip),
++        'frames': node('GetVideoComponents', video=['source',0]),
++        'first': node('ImageFromBatch', image=['frames',0], batch_index=0, length=1),
++        'reference': node('LoadImage', image=reference),
++        'vision': node('CLIPVisionLoader', clip_name=VISION),
++        'ref_vision': node('CLIPVisionEncode', clip_vision=['vision',0], image=['reference',0], crop='center'),
++        'pose_vision': node('CLIPVisionEncode', clip_vision=['vision',0], image=['first',0], crop='center'),
++        'condition': node('WanAnimate2ToVideo', positive=['positive',0], negative=['negative',0], vae=['vae',0],
++            width=width, height=height, length=frames, batch_size=1, video_frame_offset=0,
++            pose_strength=1.0, pose_start_percent=0.0, pose_end_percent=1.0, reference_image_strength=1.0,
++            reference_image=['reference',0], pose_video=['frames',0], clip_vision_output=['ref_vision',0],
++            positive_pose=['motion_text',0], clip_vision_output_pose=['pose_vision',0]),
++        'sample': node('KSampler', model=['shift',0], positive=['condition',0], negative=['condition',1],
++            latent_image=['condition',2], seed=seed, steps=10, cfg=1.0, sampler_name='euler', scheduler='simple', denoise=1.0),
++        'trim': node('TrimVideoLatent', samples=['sample',0], trim_amount=['condition',3]),
++        'decode': node('VAEDecode', samples=['trim',0], vae=['vae',0]),
++        'video': node('CreateVideo', images=['decode',0], fps=24.0),
++        'save': node('SaveVideo', video=['video',0], filename_prefix=prefix, format='mp4', codec='h264'),
++    }
++
++
++def windows(total, maximum=49):
++    """One-frame overlap carries motion inside a shot, never across a cut."""
++    if total < 1 or maximum < 5 or (maximum - 1) % 4:
++        raise ValueError('Invalid Wan window plan.')
++    start = 0
++    while start < total:
++        count = min(maximum, total - start)
++        overlap = int(start > 0)
++        yield start, count, 1 + ((count - 1 + 3) // 4) * 4, overlap
++        if start + count >= total:
++            break
++        start += count - 1
++
++
++def render(server, clip, reference, description, width, height, total_frames, destination, seed=46):
++    import json
++    import tempfile
++    import uuid
++    from pathlib import Path
++    import video_edit as edit
++    prefix = 'isolated-wan-' + uuid.uuid4().hex
++    previous = None
++    records = []
++    with tempfile.TemporaryDirectory(prefix=prefix) as temporary:
++        directory = Path(temporary)
++        segments = []
++        for index, (start, count, length, overlap) in enumerate(windows(total_frames)):
++            video = edit.INPUT / f'{prefix}-{index}.mp4'
++            continuation = edit.INPUT / f'{prefix}-{index}.png'
++            try:
++                edit.segment_clip(clip, video, start, count, length)
++                workflow = graph(video.name, reference.name, description, width, height, length,
++                                 f'video/edits/{prefix}-{index}', seed + index)
++                if previous:
++                    edit.extract_frame(previous, previous_length - 1, continuation)
++                    workflow['continuation'] = edit.node('LoadImage', image=continuation.name)
++                    workflow['condition']['inputs']['continue_motion'] = ['continuation', 0]
++                records.append({'start': start, 'count': count, 'overlap': overlap, 'workflow': workflow})
++                destination.with_suffix('.wan.json').write_text(json.dumps(records, indent=2), encoding='utf-8')
++                print(f'Wan-Animate-2 window {index + 1}, source frames {start}..{start+count-1}', flush=True)
++                output = edit.run_graph(server, workflow, 'save', 3600)
++                _, output_width, output_height = edit.clip_details(output, validate_source=False)
++                if (output_width, output_height) != (width, height):
++                    raise RuntimeError('Wan-Animate-2 returned the wrong canvas.')
++                segment = directory / f'window-{index}.mp4'
++                edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', str(output), '-vf',
++                             f'trim=start_frame={overlap}:end_frame={count},setpts=PTS-STARTPTS',
++                             '-an', '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p', str(segment))
++                segments.append(segment)
++                previous, previous_length = output, count
++            finally:
++                video.unlink(missing_ok=True)
++                continuation.unlink(missing_ok=True)
++        edit.join_segments(segments, clip, destination, total_frames / 24, directory)
++    return destination
+--- /dev/null
++++ b/test_video_edit_wan.py
+@@ -0,0 +1,29 @@
++import unittest
++from video_edit_wan import graph, windows
++
++class WanEditTests(unittest.TestCase):
++    def test_source_video_controls_pose_and_reference_controls_identity(self):
++        workflow=graph('crop.mp4','repaint.png','a replacement',384,416,49,'test')
++        self.assertEqual(workflow['condition']['inputs']['pose_video'],['frames',0])
++        self.assertEqual(workflow['condition']['inputs']['reference_image'],['reference',0])
++        self.assertEqual(workflow['pose_vision']['inputs']['image'],['first',0])
++        self.assertEqual(workflow['ref_vision']['inputs']['image'],['reference',0])
++        self.assertEqual(workflow['trim']['inputs']['trim_amount'],['condition',3])
++        self.assertEqual(workflow['video']['inputs']['fps'],24)
++        self.assertFalse(any('Audio' in item['class_type'] for item in workflow.values()))
++
++    def test_windows_preserve_exact_timeline_for_short_shots_and_continuations(self):
++        for count in [1,2,15,49,50,121,131,2880]:
++            plan=list(windows(count))
++            restored=[]
++            for start,length,model_length,overlap in plan:
++                self.assertEqual((model_length-1)%4,0)
++                self.assertGreaterEqual(model_length,length)
++                restored.extend(range(start+overlap,start+length))
++            self.assertEqual(restored,list(range(count)))
++
++    def test_non_wan_window_is_rejected_before_inference(self):
++        with self.assertRaisesRegex(ValueError,'4n'):
++            graph('crop','ref','identity',384,416,48,'test')
++
++if __name__=='__main__':unittest.main()

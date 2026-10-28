@@ -709,6 +709,7 @@ export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: s
 export const VIDEO_EDIT_STILL_ATTEMPTS = 2;
 
 type VideoEditStillOptions = VideoFrontierCallOptions & {
+    isolated?: boolean;
     abortSignal?: AbortSignal;
     /** Added to the attempt numbers, so repaints of several shots of one job record separately. */
     attemptOffset?: number;
@@ -726,7 +727,10 @@ export async function createVideoEditStill(
     request: string,
     options: VideoEditStillOptions = {},
 ): Promise<VideoKeyframeResult> {
-    const prompt = videoEditStillPrompt(target, request);
+    const prompt = options.isolated
+        ? videoEditStillPrompt('the selected subject in this tight source crop', request)
+            + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Fill the same crop; do not turn a profile into a front-facing portrait.'
+        : videoEditStillPrompt(target, request);
     const started = Date.now();
     let refusal: unknown;
     for (let attempt = 1; attempt <= VIDEO_EDIT_STILL_ATTEMPTS; attempt++) {

@@ -253,3 +253,72 @@ underlying H3 workflow uses the separate Ref2VA diffusion checkpoint, the Fun
 ControlNet Union 2.0 patch, and the SAM3.1 checkpoint on the Windows desktop.
 Union 2.0 needs the compatibility patch in `desktop/minimax-h3-fun-v2-compat.patch`
 on ComfyUI v0.37.1; apply it before restarting an idle ComfyUI server.
+
+## Isolated replacements (worker protocol 8)
+
+New replacements require a protocol-8 desktop worker. Additions keep their existing
+route. The replacement path tracks the named subject before rendering, retains
+all detected shot boundaries (including very short opening/return shots), and
+builds a fixed crop from the tracked bounds for each shot. When a clip has more
+than 24 detected shots, it fails explicitly rather than merging unrelated shots.
+The selected reference frame favors detail inside the subject's mask instead of
+simply choosing the frame with the largest mask. It inspects every frame of short
+shots and up to 25 samples per longer segment. Motion crops are enlarged to a
+512-pixel short edge, capped at 896 pixels on the long edge; tiny native crops
+previously caused dark artifacts.
+
+Only the target crop enters motion generation. Generated pixels are mapped back
+to source coordinates and composited through the tracked mask over the normalized
+source footage. The source soundtrack is restored afterward. The mixed soundtrack
+does not drive the target's mouth, and automatic whole-track lip sync is disabled
+for this path: another person's laughter or speech must not animate the target.
+
+`VIDEO_EDIT_ISOLATED_RENDERER` selects the desktop renderer:
+
+- `viggle` (default): repaint each tracked crop, check its identity and source pose, then
+  transfer motion from that shot's source crop. Every shot needs a usable still.
+- `wan` (experimental, opt-in): Wan-Animate-2 takes the replacement reference directly, with the tracked
+  source crop as its driving video. It avoids per-shot image-repainting calls.
+  Windows contain at most 49 frames with one frame of carried motion inside a
+  shot. Continuation resets at every shot boundary.
+
+The broker's narrow edit review compares matched source/output/mask samples from
+**every segment**, including its first and last frame. It checks the selected
+subject, replacement identity, source pose/expression, and surrounding scene.
+Reviews are bounded and cached by evidence, target, reference and review version.
+Missing evidence, review outages, rejected output and failed shots stop delivery.
+There is no automatic fallback to an unreviewed full-frame edit or silent delivery
+of an untouched shot. These sampled checks are useful failure detection, not a
+guarantee that every frame is artifact-free.
+
+Local references are registered through the existing lease-authenticated reference
+endpoint so that repainting and review use the exact same replacement. Review
+requests are also lease-authenticated, image-count/size limited and metered.
+Audit files remain in the job's `viggle` directory, including source masks, crop
+coordinates, shot/segment boundaries, chosen frames and paired review images.
+
+For the `8a743884` regression, the new reviewer rejected the original wrong-man
+edit and subsequent scene replacement. The first isolated Viggle run preserved
+the other man but produced artifacts with undersized inputs. After correcting
+crop resolution and the opening cut, its five-second main-shot test passed the
+sampled motion review. This is **not a passing full-clip result**: the four-shot
+run still stopped on refused or unusable reference stills. The source performance,
+including laughter, has not been validated across the complete replacement.
+
+Local Wan tests rendered successfully. Direct portrait conditioning had framing
+problems; a source-aligned still improved the short test but has not qualified
+Wan as the default. No hosted video API is configured. The existing image-repaint
+and caption/review APIs still incur usage; GPU motion generation remains local.
+
+Install the versioned desktop patch using
+`python3 scripts/apply-video-edit-isolated-desktop.py --check`, then without
+`--check`. Reload the supervised worker while idle and deploy both tracks with
+`scripts/deploy-bots.sh --with-broker`. See `desktop/README.md` for the optional
+local Wan weight installer and verification commands.
+
+Validation on October 28, 2026: the desktop suites passed 116 tests. The full
+bot suite with `--test-concurrency=1` passed 706 of 708 tests; the planner-prompt
+wording assertion and regenerated-workflow attachment assertion also fail on
+unchanged `7e2b670`. The unconstrained parallel run additionally exhausted test
+process resources. All changed-area tests passed in the serial run. Installer
+checks covered the expected baseline, already-applied files and concurrent edits.
