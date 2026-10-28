@@ -319,6 +319,6 @@ local Wan weight installer and verification commands.
 Validation on October 28, 2026: the desktop suites passed 116 tests. The full
 bot suite with `--test-concurrency=1` passed 706 of 708 tests; the planner-prompt
 wording assertion and regenerated-workflow attachment assertion also fail on
-unchanged `7e2b670`. The unconstrained parallel run additionally exhausted test
+unchanged `7de3452`. The unconstrained parallel run additionally exhausted test
 process resources. All changed-area tests passed in the serial run. Installer
 checks covered the expected baseline, already-applied files and concurrent edits.
