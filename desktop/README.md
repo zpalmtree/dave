@@ -593,3 +593,31 @@ The 152-test suite includes exact frame-order and timestamp checks for this case
 `indexed_frames(path, indices, width, height)` extracts exact review frames rather
 than seeking to rounded milliseconds, which can accidentally sample the next shot
 at a cut boundary. Use it for matched source/output evidence after assembly.
+
+## Recovering failed replacement animation tracks
+
+`video-edit-recovery.patch` adds one Wan-Animate-2 retry when an isolated Viggle
+render cannot be tracked. It retains the accepted original still and source motion
+crop. If the alternate propagated track is lost during a turn, spatial segmentation
+is repeated on each frame. Validity thresholds and final motion review are retained;
+the alternate is never recursively retried. Missing weights and unrelated service
+errors stop the job. Existing GPUq admission covers the complete edit subprocess.
+
+Apply after the caption patch:
+
+```sh
+python3 scripts/apply-video-edit-recovery-desktop.py --check
+python3 scripts/apply-video-edit-recovery-desktop.py
+```
+
+The installer verifies the baseline or already-applied hashes and refuses concurrent
+edits without writing files. The worker launches a fresh subprocess for each edit,
+so no ComfyUI or supervised-worker restart is needed. Wan weights are the existing
+audited optional installation from `video-edit-wan-models.json`.
+
+`animation-recovery-NN.json` records the attempt. The generated masks and spatial
+redetection workflows stay in the job's `viggle` directory. A `tracked` recovery
+status means only that compositing may proceed, not that the broker approved the
+video. All 74 focused desktop tests passed; the same failing clip also completed
+with cached real diffusion output, live tracking/compositing and live motion review.
+The final-frame seek regression was verified with native FFmpeg decoding.

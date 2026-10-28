@@ -15,13 +15,15 @@ is covered by the HTTP integration tests.
 Reviewed Playwright MCP captures: [desktop](desktop.png) at 1280px and
 [mobile](mobile.png) at 390px. Both include loading, primary success, fallback
 success, outage, empty output, both editors declining, unconfigured fallback,
-cancellation, usable imperfect stills and wrong-identity rejection states. Neither has horizontal overflow.
+cancellation, usable imperfect stills, motion recovery, failed animation tracking
+and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `ed02742` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `4405dd50a0cc` over `VideoKeyframeProvider.ts` and
-`VideoBroker.ts`, then `VideoEditReview.ts` in that order.
+Captured from base revision `d1f7b72` plus this change. The feature fingerprint in
+the screenshots is SHA-256 `0f8b18c0e48b` over `VideoKeyframeProvider.ts` and
+`VideoBroker.ts`, then `VideoEditReview.ts` and `desktop/video-edit-recovery.patch`
+in that order.
 
 Validation:
 
@@ -43,3 +45,13 @@ Validation:
   and private job images remain outside the public showcase and Git history.
   Visual inspection at 1.5 and 2.8 seconds also showed severe ghosting in the raw
   output; accepting the still does not establish usable animation quality.
+
+The October 28 animation-recovery follow-up passed 74 focused desktop tests and
+the installer baseline/already-applied/concurrent-edit checks. Live Wan generation
+followed the failing source turn; frame-by-frame spatial segmentation recovered
+96% tracking versus 32% with propagation. An integrated replay of the actual
+Viggle/Wan diffusion output exercised automatic fallback with live SAM,
+compositing and evidence extraction. The finished clip passed a live motion review
+and exported as a looping GIF. Visible clothing/leg/boundary distortion remains.
+The earlier 8% failure above is retained as the original test record, not the
+follow-up outcome. Public cards use fixtures; private test images remain untracked.
