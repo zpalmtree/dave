@@ -16,9 +16,13 @@ the original source and replacement images and the same edit instructions throug
 its native editing path. Its normal provider safeguards apply. If neither editor
 produces a usable image, the edit stops before animation.
 
-Alternate frames always pass the existing pose-and-identity review, including for
-older workers that do not request isolated crops. A changed crop, wrong identity
-or lost source performance can still stop the job. Each shot reserves three
+Alternate frames always pass a still-usability review, including for older workers
+that do not request isolated crops. A recognizable, coherent replacement can
+proceed with differences in expression, hand gesture, local pose, clothing or body
+shape: the source clip supplies motion in the following animation step. Unchanged
+or wrong subjects, severe corruption, unrelated scenes and major viewpoint/crop
+changes still stop the edit. Finished isolated animations receive their separate
+source-performance review; still acceptance does not bypass it. Each shot reserves three
 separate provider-attempt numbers; cancellation and accounting failures stop
 further requests. Generation is bounded to 270 seconds, leaving time for review
 within the worker's existing request timeout. JPEG replies are converted to PNG so
