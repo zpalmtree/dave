@@ -1,0 +1,30 @@
+{
+  "video_edit.py": {
+    "before_sha256": "22f5705eefdae80d70f3931bcc042da51c8dd9cb655debce82352caff9b908f9",
+    "after_sha256": "4ba057a2493f42581e6e38203013f4fb1059abcb67290a470fdcbca5f03a4ff7"
+  },
+  "video_worker.py": {
+    "before_sha256": "3cb7da80f6e61164b3cb5e5b4f548ca945aa26b22445570a8b2e1bfd31fb5953",
+    "after_sha256": "02efe66c86ffa12d999bbea378f89846ccd4858f29520835ca7df23b25c4a279"
+  },
+  "test_video_worker.py": {
+    "before_sha256": "5e8f041a30a37033a5f1f9efb995fe38481d36ec3a4a3c4e440fc3f4dc39d8d3",
+    "after_sha256": "d5d6f94b21a392831932f51eef95385ded241799f92fbb07d90f12aea71390be"
+  },
+  "video_edit_isolated.py": {
+    "before_sha256": null,
+    "after_sha256": "55cac08d59f887b7b6940013153a0faf310c40b621498d2f59029d83d7480e32"
+  },
+  "test_video_edit_isolated.py": {
+    "before_sha256": null,
+    "after_sha256": "8b2b159440083e8623247e229c4a129df07c68273c80a263b32b57e82a193828"
+  },
+  "video_edit_wan.py": {
+    "before_sha256": null,
+    "after_sha256": "f4ac8a00c307426087b8c0e05939108df58a8e29a6822e76cfa4705466e43bf8"
+  },
+  "test_video_edit_wan.py": {
+    "before_sha256": null,
+    "after_sha256": "51a00a6c57fb552db0423c36fef00102c0c06b7ea1a46a8ff8e227284ebd2348"
+  }
+}

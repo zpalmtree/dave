@@ -2,6 +2,7 @@ import { recoveryMusic } from './VideoMusic.js';
 import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
+import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReviewSample } from './VideoEditReview.js';
 import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
@@ -153,6 +154,7 @@ const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
 export const OALGO_PHOTOREAL_KEYFRAME = videoCharacterPhotorealKeyframe(MEXIMUTT);
 
 interface BrokerOptions {
+    videoEditReviewer?: typeof reviewVideoEdit;
     videoEditReferenceDescriber?: typeof describeVideoEditReference;
     videoEditGrounder?: typeof groundVideoEditTarget;
     sourceVideoDownloader?: typeof storeVideoSourceClip;
@@ -3678,6 +3680,7 @@ export class VideoBroker {
                   OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
              AND (source_video_path IS NULL OR source_image_path IS NOT NULL OR ${this.worker.videoEditVersion >= 3 ? 1 : 0} = 1)
              AND (COALESCE(video_edit_mode, 'replace') <> 'add' OR ${this.worker.videoEditVersion >= 4 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR COALESCE(video_edit_mode, 'replace') = 'add' OR ${this.worker.videoEditVersion >= 8 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -4611,6 +4614,7 @@ export class VideoBroker {
                   OR ${this.worker.videoEditVersion >= 2 ? 1 : 0} = 1)
              AND (source_video_path IS NULL OR source_image_path IS NOT NULL OR ${this.worker.videoEditVersion >= 3 ? 1 : 0} = 1)
              AND (COALESCE(video_edit_mode, 'replace') <> 'add' OR ${this.worker.videoEditVersion >= 4 ? 1 : 0} = 1)
+             AND (source_video_path IS NULL OR COALESCE(video_edit_mode, 'replace') = 'add' OR ${this.worker.videoEditVersion >= 8 ? 1 : 0} = 1)
              ORDER BY id ASC LIMIT 2`,
             this.worker.capabilities,
         );
@@ -4675,6 +4679,8 @@ export class VideoBroker {
                 video_edit_mode: row.video_edit_mode || 'replace',
                 // Jobs grounded before the field existed keep every tracked match.
                 video_edit_subjects: row.video_edit_subjects || null,
+                video_edit_isolated: this.worker.videoEditVersion >= 8
+                    && Boolean(row.source_video_path) && (row.video_edit_mode || 'replace') === 'replace',
                 video_edit_describe_reference: this.worker.videoEditVersion >= 7
                     && Boolean(row.source_video_path) && (row.video_edit_mode || 'replace') === 'replace',
                 video_replacement_reference_prompt: row.source_video_path && !row.source_image_path && row.video_replacement_prompt
@@ -5456,6 +5462,11 @@ export class VideoBroker {
         const path = join(this.options.resultsDir, publicId, 'video-edit-reference.json');
         const sha256 = createHash('sha256').update(bytes).digest('hex');
         try {
+            if (!job.source_image_path) {
+                mkdirSync(join(this.options.resultsDir, publicId), { recursive: true });
+                writeFileSync(join(this.options.resultsDir, publicId, 'video-edit-worker-reference'), bytes);
+                writeFileSync(join(this.options.resultsDir, publicId, 'video-edit-worker-reference-mime'), mimeType);
+            }
             if (existsSync(path)) {
                 const cached = JSON.parse(readFileSync(path, 'utf8'));
                 if (cached.sha256 === sha256 && cached.version === VIDEO_EDIT_REFERENCE_VERSION) {
@@ -5473,6 +5484,56 @@ export class VideoBroker {
         }
     }
 
+    private editReference(job: JobRow): { bytes: Buffer; mimeType: string } {
+        const directory = join(this.options.resultsDir, job.public_id);
+        const path = job.source_image_path || join(directory, 'video-edit-worker-reference');
+        const mimeType = job.source_image_mime || readFileSync(join(directory, 'video-edit-worker-reference-mime'), 'utf8');
+        return { bytes: readFileSync(path), mimeType };
+    }
+
+    private async handleVideoEditReview(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
+        const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+        if (!job || job.worker_id !== this.worker?.id || publicId !== this.worker.currentJob
+            || !this.workerLeaseMatches(req, job)) {
+            writeJson(res, 409, { error: 'Job is not leased to this worker.' }); return;
+        }
+        if (!job.source_video_path || (job.video_edit_mode || 'replace') !== 'replace') {
+            writeJson(res, 409, { error: 'This job is not a subject replacement.' }); return;
+        }
+        let body: any;
+        let samples: EditReviewSample[];
+        try {
+            body = await readJson(req, 16 * 1024 * 1024);
+            if (!Number.isInteger(body.segment) || body.segment < 1 || body.segment > 128
+                || !Array.isArray(body.samples) || !body.samples.length || body.samples.length > 4) throw new Error('Invalid edit samples.');
+            const image = (data: unknown) => {
+                if (typeof data !== 'string' || !data.length || data.length > 2 * 1024 * 1024
+                    || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) throw new Error('Invalid review image.');
+                const bytes = Buffer.from(data, 'base64');
+                const mimeType = bytes[0] === 0xff && bytes[1] === 0xd8 ? 'image/jpeg'
+                    : bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'image/png' : '';
+                if (!mimeType) throw new Error('Review images must be PNG or JPEG.');
+                return { bytes, mimeType };
+            };
+            samples = body.samples.map((sample: any) => ({ source: image(sample.source), edited: image(sample.edited), mask: image(sample.mask) }));
+        } catch (error) { writeJson(res, 400, { error: String(error) }); return; }
+        try {
+            const reference = this.editReference(job);
+            const sha256 = createHash('sha256').update(JSON.stringify(body)).update(reference.bytes)
+                .update(job.video_edit_target || '').digest('hex');
+            const path = join(this.options.resultsDir, publicId, `video-edit-review-${body.segment}.json`);
+            let result;
+            if (existsSync(path)) {
+                const cached = JSON.parse(readFileSync(path, 'utf8'));
+                if (cached.sha256 === sha256 && cached.version === VIDEO_EDIT_REVIEW_VERSION) result = validateEditReview(cached);
+            }
+            result ||= validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
+                job.video_edit_target || 'the subject', reference, samples, 'motion', this.providerHooks(job), body.segment));
+            writeFileSync(path, JSON.stringify({ ...result, sha256, version: VIDEO_EDIT_REVIEW_VERSION }, null, 2));
+            writeJson(res, 200, result);
+        } catch (error) { writeJson(res, 502, { error: sanitizeVideoWorkerText(String(error), 'Subject-edit review failed.', 500) }); }
+    }
+
     /** Repaint the worker's chosen source-video frame with the replacement for Viggle-Animate. */
     private async handleVideoEditStill(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
         const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
@@ -5481,8 +5542,7 @@ export class VideoBroker {
             writeJson(res, 409, { error: 'Job is not leased to this worker.' });
             return;
         }
-        if (!job.source_video_path || (job.video_edit_mode || 'replace') !== 'replace'
-            || !job.source_image_path || !job.source_image_mime || !existsSync(job.source_image_path)) {
+        if (!job.source_video_path || (job.video_edit_mode || 'replace') !== 'replace') {
             writeJson(res, 409, { error: 'This job has no replacement image to repaint into its clip.' });
             return;
         }
@@ -5514,18 +5574,33 @@ export class VideoBroker {
         writeFileSync(join(directory, `video-edit-frame${suffix}.png`), frame);
         const started = Date.now();
         try {
+            const isolated = req.headers['x-video-edit-isolated'] === '1';
+            const reference = this.editReference(job);
             const still = videoEditStillWithEffects(await (this.options.videoEditStillGenerator || createVideoEditStill)(
                 { bytes: frame, mimeType },
-                { bytes: readFileSync(job.source_image_path), mimeType: job.source_image_mime },
+                reference,
                 job.video_edit_target || 'the subject',
                 job.video_replacement_prompt || job.prompt,
                 // Usage events are keyed by attempt, so each shot numbers its own pair of attempts.
                 { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job),
-                    attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS },
+                    attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS, isolated },
             ), job.video_edit_effects || '');
             const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
             const path = join(directory, `video-edit-still${suffix}.${extension}`);
             writeFileSync(path, still.bytes);
+            if (isolated) {
+                const review = validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
+                    job.video_edit_target || 'the subject', reference, [{ source: { bytes: frame, mimeType }, edited: still }],
+                    'still', this.providerHooks(job), shot));
+                writeFileSync(join(directory, `video-edit-still-review${suffix}.json`), JSON.stringify(review, null, 2));
+                if (!review.accepted) {
+                    await this.recordMetricSpan(job.public_id, {
+                        source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
+                        metadata: { status: 'error' },
+                    });
+                    writeJson(res, 422, { error: `Replacement pose/identity check failed: ${review.reason}`, reason_code: 'edit_quality' }); return;
+                }
+            }
             await this.recordMetricSpan(job.public_id, {
                 source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
                 metadata: { status: 'ok' },
@@ -5534,7 +5609,7 @@ export class VideoBroker {
         } catch (error) {
             const moderation = isModerationFailure(error)
                 || (error instanceof VideoKeyframeError && error.code === 'moderation');
-            console.warn(`[Video] Repainting the edit frame for ${job.public_id} failed; the worker falls back to H3.`, error);
+            console.warn(`[Video] Repainting the edit frame for ${job.public_id} failed; isolated edits stop before animation.`, error);
             await this.recordMetricSpan(job.public_id, {
                 source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
                 metadata: { status: 'error' },
@@ -5705,6 +5780,10 @@ export class VideoBroker {
         if (editReference && req.method === 'POST') {
             await this.handleVideoEditReference(req, res, editReference[1]);
             return;
+        }
+        const editReview = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-review$/.exec(url.pathname);
+        if (editReview && req.method === 'POST') {
+            await this.handleVideoEditReview(req, res, editReview[1]); return;
         }
         const editStill = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-still$/.exec(url.pathname);
         if (editStill && req.method === 'POST') {

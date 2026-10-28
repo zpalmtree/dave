@@ -1,0 +1,34 @@
+[
+  {
+    "repository": "Comfy-Org/Wan-Animate-2",
+    "revision": "e7181fe1896b7f2ce34120d1a3663413548240d7",
+    "file": "clip_vision/clip_vision_h.safetensors",
+    "installed": "clip_vision/clip_vision_h.safetensors",
+    "sha256": "64a7ef761bfccbadbaa3da77366aac4185a6c58fa5de5f589b42a65bcc21f161",
+    "bytes": 1264219396
+  },
+  {
+    "repository": "Comfy-Org/Wan-Animate-2",
+    "revision": "e7181fe1896b7f2ce34120d1a3663413548240d7",
+    "file": "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "installed": "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "sha256": "c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68",
+    "bytes": 6735906897
+  },
+  {
+    "repository": "Comfy-Org/Wan-Animate-2",
+    "revision": "e7181fe1896b7f2ce34120d1a3663413548240d7",
+    "file": "diffusion_models/wan_animate_2_distill_int8_convrot.safetensors",
+    "installed": "diffusion_models/wan_animate_2_distill_int8_convrot.safetensors",
+    "sha256": "d2e566ecac3f164cb1a6b63dc7d868d6678c9affa49fbceb3abe4f9458f89c8a",
+    "bytes": 16653175528
+  },
+  {
+    "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+    "revision": "123acf1cc74bccbb9bfff8ac1ee72edc08c2341d",
+    "file": "split_files/vae/wan_2.1_vae.safetensors",
+    "installed": "vae/wan_2.1_vae.safetensors",
+    "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+    "bytes": 253815318
+  }
+]

@@ -995,7 +995,7 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
         await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
         oldWorker.socket.close();
         await new Promise(resolve => oldWorker.socket.once('close', resolve));
-        let editWorker = await connect(1);
+        let editWorker = await connect(8);
         try {
             const lease = await editWorker.take(value => value.type === 'job');
             assert.equal(lease.job.id, job.id);
@@ -1029,7 +1029,7 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
             if (recoveryMode === 'legacy-edit-lease') {
                 editWorker.socket.close();
                 await new Promise(resolve => editWorker.socket.once('close', resolve));
-                editWorker = await connect(1, job.id, lease.job.lease_id);
+                editWorker = await connect(8, job.id, lease.job.lease_id);
             }
             const completion = { type: 'event', event: 'complete', event_id: 'edit-complete',
                 job_id: job.id, lease_id: lease.job.lease_id, runtime_seconds: 30 };
@@ -1060,12 +1060,14 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
 });
 }
 
-for (const version of [4, 5, 6, 7]) {
-test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for version ${version} workers`, async () => {
+for (const version of [4, 5, 6, 7, 8]) {
+test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an upgrade from'} version ${version} workers`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-still-'));
     const repaints = [];
     const descriptions = [];
     let refuse = false;
+    let rejectEdit = false;
+    let reviewCalls = 0;
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
@@ -1083,6 +1085,10 @@ test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for versi
             const path = join(target, 'replacement.png');
             writeFileSync(path, 'replacement');
             return { path, bytes: 11, mimeType: 'image/png' };
+        },
+        videoEditReviewer: async () => {
+            reviewCalls++;
+            return { accepted: !rejectEdit, reason: rejectEdit ? 'The wrong subject was replaced.' : 'Target and source performance preserved.' };
         },
         videoEditReferenceDescriber: async (reference, hooks) => {
             descriptions.push(reference.bytes.toString());
@@ -1126,10 +1132,15 @@ test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for versi
         try {
             socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
                 capabilities: ['minimax'], current_job: null, video_edit_version: version }));
+            if (version < 8) {
+                await assert.rejects(take(value => value.type === 'job', 250), /Timed out/);
+                return;
+            }
             const lease = await take(value => value.type === 'job');
             assert.equal(lease.job.id, job.id);
             assert.equal(lease.job.video_edit_repaint, version >= 5);
             assert.equal(lease.job.video_edit_describe_reference, version >= 7);
+            assert.equal(lease.job.video_edit_isolated, version >= 8);
             if (version >= 7) {
                 const describe = (body, headers = {}) => fetch(
                     `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-reference`, {
@@ -1204,6 +1215,31 @@ test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for versi
             const attempts = await broker.all(
                 "SELECT attempt FROM video_usage_events WHERE job_public_id=? AND stage='video_edit_still' ORDER BY attempt", [job.id]);
             assert.deepEqual(attempts.map(row => row.attempt), [1, 3]);
+            if (version === 8) {
+                rejectEdit = true;
+                const badStill = await still('frame', { 'x-video-edit-isolated': '1' });
+                assert.equal(badStill.status, 422);
+                assert.equal((await badStill.json()).reason_code, 'edit_quality');
+                const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+                const sample = { source: png, edited: png, mask: png };
+                const review = (body, headers = {}) => fetch(
+                    `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-review`, {
+                        method: 'POST', body: JSON.stringify(body), headers: {
+                            authorization: 'Bearer worker-secret', 'x-video-lease': lease.job.lease_id,
+                            'content-type': 'application/json', ...headers },
+                    });
+                assert.equal((await review({ segment: 1, samples: [sample] }, { 'x-video-lease': 'old' })).status, 409);
+                assert.equal((await review({ segment: 1, samples: [] })).status, 400);
+                assert.equal((await review({ segment: 1, samples: [{ ...sample, mask: 'invalid' }] })).status, 400);
+                assert.equal((await (await review({ segment: 1, samples: [sample] })).json()).accepted, false);
+                const count = reviewCalls;
+                await review({ segment: 1, samples: [sample] });
+                assert.equal(reviewCalls, count, 'identical reviewed output uses the content-bound cache');
+                rejectEdit = false;
+                const accepted = await review({ segment: 2, samples: [sample] });
+                assert.equal((await accepted.json()).accepted, true);
+                assert.equal(reviewCalls, count + 1, 'a later segment needs its own check');
+            }
         } finally {
             socket.close();
         }
@@ -1337,7 +1373,7 @@ test('a refused replacement description queues a local Qwen reference for the up
         await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
         oldWorker.socket.close();
         await new Promise(resolve => oldWorker.socket.once('close', resolve));
-        const newWorker = await connect(3);
+        const newWorker = await connect(8);
         try {
             const lease = await newWorker.take(value => value.type === 'job');
             assert.equal(lease.job.id, body.job.id);
@@ -1560,7 +1596,7 @@ test('short and long replacement clips wait for the updated edit worker', async 
             await assert.rejects(oldWorker.take(value => value.type === 'job', 250), /Timed out/);
             oldWorker.socket.close();
             await new Promise(resolve => oldWorker.socket.once('close', resolve));
-            const newWorker = await connect(2);
+            const newWorker = await connect(8);
             try {
                 const lease = await newWorker.take(value => value.type === 'job');
                 assert.equal(lease.job.id, job.id);
