@@ -11,6 +11,7 @@ import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, Stor
 import { mayWantComposedSong, videoComposedSongEnabled, VideoSongDecision, writeVideoSong } from './VideoComposedSong.js';
 import { extractVideoSourceRange, selectVideoSourceAudioExcerpt, videoSourceRange, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { sourceClipDescriptor, storeVideoSourceClip, StoredVideoSourceClip, SubmittedVideoSourceClip, VIDEO_EDIT_LEGACY_MIN_SECONDS, VIDEO_EDIT_MAX_BYTES, VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS } from './VideoSourceClip.js';
+import { videoOutputFormatForSources, VideoOutputFormat } from './VideoGifDelivery.js';
 import { VIDEO_RECOVERY_VERSION, VIDEO_RECOVERY_MAX_RENDER_ATTEMPTS, UnapprovedLocalRecoveryPlanError, approvedLocalRecoveryContract, continueUnbrokenLocalSegments, recoveryHash, recoveryLimitReached, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
 import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback, RecoveryLocalPlanRequired, RecoveryStoppedError } from './VideoRecoveryService.js';
 import { checkVideoCharacterContinuity, checkVideoOpeningIdentity, decodeContinuityImage, recoveryReferenceRole, recoverySceneReferenceRole,
@@ -305,6 +306,7 @@ interface JobRow {
     requested_at: number | null;
     requested_duration_seconds: number | null;
     delivery_limit_bytes: number;
+    output_format: VideoOutputFormat;
     prompt_tease: string | null;
     requester_id: string;
     origin_bot_id: string;
@@ -820,6 +822,7 @@ export class VideoBroker {
             await this.run(`ALTER TABLE video_jobs ADD COLUMN delivery_limit_bytes INTEGER NOT NULL DEFAULT ${VIDEO_DISCORD_BASELINE_UPLOAD_BYTES}`);
         }
         for (const [name, definition] of [
+            ['output_format', "TEXT NOT NULL DEFAULT 'mp4'"],
             ['experiment_id', 'TEXT'],
             ['variant_id', "TEXT NOT NULL DEFAULT 'production-v1'"],
             ['planner_fingerprint', 'TEXT'],
@@ -2217,7 +2220,7 @@ export class VideoBroker {
                     `INSERT INTO video_jobs(
                         public_id, idempotency_key, model, prompt, planner_guidance,
                         requested_duration_seconds,
-                        delivery_limit_bytes,
+                        delivery_limit_bytes, output_format,
                         requester_id, origin_bot_id,
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
@@ -2227,7 +2230,7 @@ export class VideoBroker {
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2236,6 +2239,7 @@ export class VideoBroker {
                         plannerGuidance,
                         requestedDuration,
                         deliveryLimit,
+                        videoOutputFormatForSources(videoDescriptor, compositeDescriptor, sourceDescriptor),
                         String(body.requester_id),
                         String(body.origin_bot_id),
                         String(body.channel_id),
@@ -3826,6 +3830,7 @@ export class VideoBroker {
                 prompt: row.prompt,
                 requested_duration_seconds: row.requested_duration_seconds,
                 delivery_limit_bytes: row.delivery_limit_bytes,
+                output_format: row.output_format || 'mp4',
                 prompt_tease: row.prompt_tease,
                 planned_intent: plannedIntent(row),
                 generation_notice: generationNotice(row),

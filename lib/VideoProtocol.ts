@@ -208,6 +208,8 @@ export interface VideoJobView {
     prompt: string;
     requested_duration_seconds?: number | null;
     delivery_limit_bytes?: number;
+    /** Requested delivery format; the original MP4 retains workflow metadata. */
+    output_format?: 'mp4' | 'gif';
     prompt_tease?: string | null;
     planned_intent?: string | null;
     generation_notice?: string | null;

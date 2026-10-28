@@ -15,6 +15,7 @@ import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterPostFromMessage } from './TwitterVideo.js';
 import { youtubeVideoFromMessage } from './YoutubeVideo.js';
 import { gifVideoFromMessage, stripGifVideoLinks } from './GifVideo.js';
+import { prepareVideoDelivery, VideoOutputFormat } from './VideoGifDelivery.js';
 import { existsSync } from 'fs';
 import { videoWorkflowArchive } from './VideoWorkflow.js';
 import { handleWorkflowDownload, saveWorkflowDownload, workflowDownloadDirectory } from './VideoWorkflowDownload.js';
@@ -285,10 +286,10 @@ export function completedVideoPost(job: VideoJobView): string {
     return formatVideoReplyWithFullPrompt(result, job, true);
 }
 
-export function completedVideoAttachmentName(job: VideoJobView): string {
+export function completedVideoAttachmentName(job: VideoJobView, format: VideoOutputFormat = job.output_format || 'mp4'): string {
     // Discord hides attachments whose filename starts with SPOILER_.
     const teased = sanitizeVideoWorkerText(job.prompt_tease, '', 120).trim();
-    return `${teased ? 'SPOILER_' : ''}${job.model}-${shortJobId(job.id)}.mp4`;
+    return `${teased ? 'SPOILER_' : ''}${job.model}-${shortJobId(job.id)}.${format}`;
 }
 
 function videoFailureDetail(job: VideoJobView, maxLength: number): string {
@@ -970,18 +971,20 @@ export class VideoGenerationService {
             const reposted = await this.existingRepost(job, channel, existing.id);
             if (reposted) return reposted;
         }
-        const name = completedVideoAttachmentName(job);
+        const media = await prepareVideoDelivery(job);
+        const name = completedVideoAttachmentName(job, media.format);
         let workflows: { attachment: Buffer; name: string } | null = null;
         if (job.result_path && existsSync(job.result_path)) {
             try {
-                workflows = await videoWorkflowArchive(job.result_path, name);
+                workflows = await videoWorkflowArchive(job.result_path, completedVideoAttachmentName(job, 'mp4'));
             } catch (error) {
                 console.warn(`[Video] Could not archive workflows for ${job.id}: ${String(error)}`);
             }
         }
         const payload = {
-            content: completedVideoPost(job),
-            files: [{ attachment: job.result_path, name }],
+            content: completedVideoPost(media.notice ? { ...job,
+                generation_notice: [job.generation_notice, media.notice].filter(Boolean).join('\n') } : job),
+            files: [{ attachment: media.path, name }],
             components: workflows ? [await saveWorkflowDownload(workflows, this.workflowDirectory)] : [],
             allowedMentions: { repliedUser: true },
         };

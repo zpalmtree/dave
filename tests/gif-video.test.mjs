@@ -153,6 +153,7 @@ test('broker normalizes one GIF loop into playable MP4 with motion, duration, od
                 assert.equal(response.status, 201, JSON.stringify(body));
                 assert.equal(body.job.source_kind, 'video_edit');
                 assert.equal(body.job.has_source_video, true);
+                assert.equal(body.job.output_format, 'gif');
                 const row = await broker.get('SELECT source_video_path, source_video_seconds FROM video_jobs WHERE public_id=?', [body.job.id]);
                 assert.match(row.source_video_path, /source-video\.mp4$/);
                 assert.ok(Math.abs(row.source_video_seconds - 2) < 0.11);
