@@ -10,6 +10,24 @@ $oalgo make him a robot lol
 $oalgo swap that dude
 ```
 
+Source links are not limited to a provider list. Public HTTP/HTTPS links on
+standard ports can supply MP4, MOV, M4V, WebM, MKV or GIF files, including
+extensionless downloads identified by their content type. Discord video embeds,
+Open Graph video metadata, Twitter player stream metadata and HTML video/source
+tags can supply media from any public host. Relative page media URLs are resolved.
+Existing YouTube/Twitter extractors and GIF-provider shortcuts remain available.
+A GIF provider's playable MP4 still requests GIF output even on a new CDN.
+
+Downloads validate DNS and every redirect, pin the validated address for the
+socket, reject private/reserved addresses and credentials, and retain the 100 MiB
+clip limit. Page reads have a 3 MiB/15-second budget; downloads have a 120-second
+budget and at most four redirects. FFmpeg receives local files with only plain
+video demuxers and local protocols enabled. Source links are removed from the
+edit prompt. Login-only pages, script-only players, streaming playlists and DRM
+are not general-purpose inputs; use a direct downloadable media URL or attachment.
+The resolver/showcase is at <http://localhost:4347> (`node
+scripts/serve-gif-video-showcase.mjs`).
+
 Replacement-frame preparation prefers GPT Image, with one retry after a refusal,
 then tries Gemini if the preferred editor cannot produce a frame. Gemini receives
 the original source and replacement images and the same edit instructions through

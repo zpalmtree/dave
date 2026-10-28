@@ -899,9 +899,9 @@ test('video clip starting images accept Discord and resolved Twitter MP4s only',
         assert.equal((await broker.views([stored]))[0].source_kind, 'video_frame');
         assert.deepEqual(descriptors, [{ clip_url: clipUrl, name: 'clip.mov' }]);
 
-        const rejected = await submit('foreign', { clip_url: 'https://example.com/clip.mp4', name: 'clip.mp4' });
+        const rejected = await submit('private', { clip_url: 'https://127.0.0.1/clip.mp4', name: 'clip.mp4' });
         assert.equal(rejected.status, 400);
-        assert.match((await rejected.json()).error, /not a Discord attachment/);
+        assert.match((await rejected.json()).error, /public HTTP/);
         assert.equal(descriptors.length, 1);
         const twitter = await submit('twitter-clip', {
             clip_url: 'https://video.twimg.com/amplify_video/123/vid/clip.mp4', name: 'twitter.mp4',
@@ -1055,8 +1055,8 @@ test(`replacement jobs retain their inputs and complete without screenplay recov
         await broker.stop();
         rmSync(directory, { recursive: true, force: true });
     }
-    assert.throws(() => sourceClipDescriptor({ ...clip, clip_url: 'https://example.com/clip.mp4' }),
-        /Discord attachment/);
+    assert.equal(sourceClipDescriptor({ ...clip, clip_url: 'https://example.com/clip.mp4' }).clip_url, 'https://example.com/clip.mp4');
+    assert.throws(() => sourceClipDescriptor({ ...clip, clip_url: 'https://127.0.0.1/clip.mp4' }), /public HTTP/);
 });
 }
 

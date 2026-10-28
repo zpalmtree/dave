@@ -1,3 +1,4 @@
+import { publicVideoFromMessage, stripResolvedVideoLinks } from './PublicVideo.js';
 import { fetchProcessableMessage } from './Privacy.js';
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
 import { VideoStickerSourceImage, videoStickerSourceImage } from './VideoSticker.js';
@@ -324,6 +325,7 @@ export interface SubmittedVideoPresetSourceImage {
 
 export interface SubmittedVideoClipSourceImage {
     clip_url: string;
+    source_page_url?: string;
     name: string;
     bytes?: number;
 }
@@ -441,6 +443,7 @@ export async function videoSourcesFromMessages(
     replacement: boolean,
     resolveLink = twitterPostFromMessage,
     resolveGif = gifVideoFromMessage,
+    resolvePublic = publicVideoFromMessage,
 ): Promise<{ image: SubmittedVideoAttachmentOrClipSourceImage | null; clip: SubmittedVideoClipSourceImage | null; postText?: string }> {
     let postText = '';
     let image = replacement ? videoAttachmentImageFromMessages(commandMessage, referencedMessage) : null;
@@ -460,7 +463,7 @@ export async function videoSourcesFromMessages(
             image ||= post.image;
         }
         const clip = attachedClip || post?.clip || await resolveGif(message)
-            || (replacement ? youtubeVideoFromMessage(message) : null);
+            || (replacement ? youtubeVideoFromMessage(message) : null) || await resolvePublic(message);
         if (clip) return replacement ? { image, clip, ...context } : { image: clip, clip: null, ...context };
     }
     return { image, clip: null, ...(postText ? { postText } : {}) };
@@ -507,9 +510,10 @@ export function videoPromptFromMessages(
     referencedMessage: Pick<Message, 'content'> & Partial<Pick<Message, 'channel'>> | null,
     channel?: Message['channel'],
     postText = '',
+    source?: SubmittedVideoClipSourceImage | null,
 ): string {
-    const current = videoPromptPlainText(stripGifVideoLinks(stripTwitterPostLinks(commandPrompt)), channel).trim();
-    let referenced = [videoPromptPlainText(stripGifVideoLinks(stripTwitterPostLinks(referencedMessage?.content || '')), referencedMessage?.channel).trim(),
+    const current = videoPromptPlainText(stripGifVideoLinks(stripTwitterPostLinks(stripResolvedVideoLinks(commandPrompt, source))), channel).trim();
+    let referenced = [videoPromptPlainText(stripGifVideoLinks(stripTwitterPostLinks(stripResolvedVideoLinks(referencedMessage?.content || '', source))), referencedMessage?.channel).trim(),
         postText ? `Twitter/X post text (source context):\n${videoPromptPlainText(postText, channel)}` : ''].filter(Boolean).join('\n\n');
     const contextHeading = 'Context from the replied message:\n';
     const instructionHeading = '\n\nCurrent instruction (takes priority):\n';
@@ -1288,7 +1292,14 @@ export async function resolveVideoEditRequest(
         if (!gifs.has(message)) gifs.set(message, gifVideoFromMessage(message));
         return gifs.get(message)!;
     };
-    const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink, resolveGif);
+    const publicLinks = new Map<Parameters<typeof publicVideoFromMessage>[0], ReturnType<typeof publicVideoFromMessage>>();
+    const resolvePublic: typeof publicVideoFromMessage = message => {
+        if (!publicLinks.has(message)) publicLinks.set(message, publicVideoFromMessage(message));
+        return publicLinks.get(message)!;
+    };
+    const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink, resolveGif, resolvePublic);
+    prompt = stripResolvedVideoLinks(prompt, candidates.clip);
+    replacement = parseVideoReplacement(prompt);
     if (!replacement && candidates.clip) {
         const intent = await classify({ request: prompt, context: [context, candidates.postText].filter(Boolean).join('\n\n'),
             hasReplacementImage: Boolean(candidates.image), hasPreset: Boolean(preset), presetName: preset?.name }, {
@@ -1305,7 +1316,7 @@ export async function resolveVideoEditRequest(
     if (replacement) return { replacement, sources: candidates };
     // Retain established attachment precedence for requests to make a new video.
     return { replacement: null, sources: { ...(candidates.postText ? { postText: candidates.postText } : {}),
-        ...await resolveSources(commandMessage, referencedMessage, false, resolveLink, resolveGif) } };
+        ...await resolveSources(commandMessage, referencedMessage, false, resolveLink, resolveGif, resolvePublic) } };
 }
 
 // Meximutt's guidance under the name the benchmarks and tests know it by.
@@ -1344,7 +1355,7 @@ export async function handleVideoRequest(
         const sources = resolved.sources;
         postText = 'postText' in sources ? sources.postText || '' : '';
         sourceVideo = sources.clip;
-        if (replacement && !sourceVideo) throw new Error('Attach a video or GIF, or include a Discord GIF, Tenor/Giphy/Klipy, Twitter/X or YouTube link to edit. You can also reply to a message containing one.');
+        if (replacement && !sourceVideo) throw new Error('Attach a video or GIF, paste a public media or video-page link, or reply to a message containing one.');
         attachedSourceImage = sources.image;
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         // An explicit song attachment wins; otherwise extract the selected clip's soundtrack.
@@ -1377,7 +1388,7 @@ export async function handleVideoRequest(
         await msg.reply(`Attach an image or video, or reply to one, to combine it with ${character?.name || 'the character'} using --image-provider.`);
         return;
     }
-    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel, postText);
+    prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel, postText, sourceVideo || audioVideo || (isVideoClipSourceImage(attachedSourceImage) ? attachedSourceImage : null));
     if (replacement && !prompt) prompt = "Use the replacement image as the new subject while preserving the source clip's action, background, camera movement, and timing.";
     if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {
