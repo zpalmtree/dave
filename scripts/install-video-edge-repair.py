@@ -9,6 +9,13 @@ import subprocess
 import urllib.request
 
 
+# Audited first release (1c5a318). Only these exact files may be upgraded.
+PREVIOUS_TOOL_HASHES = {
+    'video_edge_repair.py': '43348c92c4358a94af22972bba98cd77f9a9e11e10252103f926fa82c8009c13',
+    'test_video_edge_repair.py': 'fdcf899632fa520a6bc19adcb6c2cce984d1f83b27ab754fadd142849369710f',
+}
+
+
 def digest(path):
     value = hashlib.sha256()
     with path.open('rb') as stream:
@@ -46,12 +53,18 @@ def main():
             partial.replace(target)
         if not target.exists() or target.stat().st_size != record['size'] or digest(target) != record['sha256']:
             raise RuntimeError(f'Missing or unexpected checkpoint: {target.name}')
-    for name in ['video_edge_repair.py', 'test_video_edge_repair.py']:
+    updates = []
+    for name, previous in PREVIOUS_TOOL_HASHES.items():
         target = args.directory / name
-        if not target.exists() and not args.check:
-            shutil.copyfile(archive / name, target)
-        if not target.exists() or digest(target) != digest(archive / name):
+        current = digest(target) if target.exists() else None
+        if current == digest(archive / name):
+            continue
+        if args.check or current not in (None, previous):
             raise RuntimeError(f'Missing or unexpected tool revision: {name}')
+        updates.append((archive / name, target))
+    # Validate both files before replacing either, preserving concurrent edits.
+    for source, target in updates:
+        shutil.copyfile(source, target)
     print('Verified experimental repair tool, upstream revision and checkpoint hashes.')
     print('Install the optional requirements separately as documented. Worker defaults are unchanged.')
 
