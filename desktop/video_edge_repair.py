@@ -7,11 +7,58 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 import numpy as np
 from scipy.ndimage import binary_dilation
+
+
+def repair_frame_count(duration):
+    # Motion generation uses overlapping 124-frame windows, but a continuous
+    # shot can span several windows. Keep matting state through that whole shot.
+    frames = round(duration * 24)
+    if frames < 1 or frames > 360:
+        raise ValueError('Repair one normalized segment of 1–360 frames at a time.')
+    return frames
+
+
+def assemble_segments(segments, source, destination, work):
+    """Join repaired shots with a continuous clock, including one-frame cuts."""
+    from video_edit import command, audio_codec
+    if not segments or destination.exists():
+        raise ValueError('Assembly needs segments and a new output path.')
+    listing = work / 'repair-segments.txt'
+    listing.write_text(''.join("file '" + path.resolve().as_posix().replace("'", "'\\''")
+                               + "'\n" for path in segments), encoding='utf-8')
+    # Stream-copy joins can overlap DTS when a one-frame shot precedes a GOP
+    # with B-frames. Rebuild timestamps from decoded frame order, not packet DTS.
+    command('ffmpeg', '-nostdin', '-v', 'error', '-f', 'concat', '-safe', '0',
+            '-i', str(listing), '-i', str(source), '-map', '0:v:0', '-map', '1:a:0?',
+            '-vf', 'setpts=N/(24*TB)', '-r', '24', '-fps_mode', 'cfr',
+            '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p',
+            '-colorspace', 'bt709', '-color_primaries', 'bt709',
+            '-color_trc', 'iec61966-2-1', '-color_range', 'tv',
+            '-c:a', 'copy' if audio_codec(source) == 'aac' else 'aac',
+            '-b:a', '192k', '-movflags', '+faststart', str(destination))
+
+
+def indexed_frames(path, indices, width, height):
+    """Extract exact normalized frame indices; rounded seeks can cross a cut."""
+    selected = sorted(set(indices))
+    if not selected or any(not isinstance(index, int) or index < 0 for index in selected):
+        raise ValueError('Review requires nonnegative frame indices.')
+    expression = '+'.join(f'eq(n,{index})' for index in selected)
+    result = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-i', str(path),
+        '-vf', f"select='{expression}',scale={width}:{height}", '-fps_mode', 'passthrough',
+        '-frames:v', str(len(selected)), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+        capture_output=True, check=True)
+    frame_bytes = width*height*3
+    if len(result.stdout) != len(selected)*frame_bytes:
+        raise ValueError('Review video does not cover every requested frame.')
+    pixels = np.frombuffer(result.stdout, np.uint8).reshape(len(selected), height, width, 3)
+    return {index: pixels[offset].copy() for offset, index in enumerate(selected)}
 
 
 def repair_mask(source, replacement, alpha, box):
@@ -91,6 +138,19 @@ def blend_frame_boundary(prediction, padded_prediction, mask):
     return np.uint8(np.clip(prediction*(1-weight) + context*weight + .5, 0, 255))
 
 
+def inpaint_inputs(work):
+    """A one-frame shot needs a duplicate for the video model's optical flow."""
+    frames = sorted((work / 'frames').glob('*.png'))
+    if len(frames) != 1:
+        return work
+    context = work / 'single-frame-context'
+    for name in ['frames', 'masks']:
+        (context / name).mkdir(parents=True)
+        for index in range(2):
+            shutil.copyfile(work / name / frames[0].name, context / name / f'{index:04}.png')
+    return context
+
+
 def inpaint_worker(root, work):
     """Isolate upstream module names from the video worker's Python packages."""
     import runpy
@@ -100,10 +160,15 @@ def inpaint_worker(root, work):
     utils = types.ModuleType('utils'); utils.__path__ = [str(repo / 'utils')]
     sys.modules['utils'] = utils
     os.chdir(repo)
-    sys.argv = ['inference_propainter.py', '--video', str(work / 'frames'),
-                '--mask', str(work / 'masks'), '--output', str(work / 'inpaint'),
+    inputs = inpaint_inputs(work)
+    sys.argv = ['inference_propainter.py', '--video', str(inputs / 'frames'),
+                '--mask', str(inputs / 'masks'), '--output', str(inputs / 'inpaint'),
                 '--mask_dilation', '0', '--subvideo_length', '40', '--fp16', '--save_frames']
     runpy.run_path(str(repo / 'inference_propainter.py'), run_name='__main__')
+    if inputs != work:
+        destination = work / 'inpaint/frames/frames'
+        destination.mkdir(parents=True)
+        shutil.copyfile(inputs / 'inpaint/frames/frames/0000.png', destination / '0000.png')
 
 
 def run(args):
@@ -119,20 +184,19 @@ def run(args):
                   ['ProPainter.pth', 'raft-things.pth', 'recurrent_flow_completion.pth']]]
     if any(not path.is_file() for path in required):
         raise ValueError('Install the documented optional local models first.')
-    duration, width, height = edit.clip_details(args.composite)
-    frames = round(duration * 24)
-    if frames < 1 or frames > 124:
-        raise ValueError('Repair one normalized segment of 1–124 frames at a time.')
+    # These are shot segments, which may be shorter than the upload minimum.
+    duration, width, height = edit.clip_details(args.composite, validate_source=False)
+    frames = repair_frame_count(duration)
     probe = json.loads(edit.command('ffprobe', '-v', 'error', '-select_streams', 'v:0',
                        '-show_entries', 'stream=avg_frame_rate', '-of', 'json', str(args.composite)))
     rate = probe['streams'][0]['avg_frame_rate'].split('/')
     if abs(float(rate[0]) / float(rate[1]) - 24) > .001:
         raise ValueError('Repair requires a normalized 24-fps segment.')
     for path in [args.source_mask, args.replacement_mask]:
-        d, w, h = edit.clip_details(path)
+        d, w, h = edit.clip_details(path, validate_source=False)
         if (w, h) != (width, height) or d + .5 / 24 < duration:
             raise ValueError('Mask canvas or timeline does not cover the segment.')
-    motion_duration, mw, mh = edit.clip_details(args.motion)
+    motion_duration, mw, mh = edit.clip_details(args.motion, validate_source=False)
     if motion_duration + .5 / 24 < duration:
         raise ValueError('Generated motion is shorter than the composite.')
     work.mkdir(parents=True)

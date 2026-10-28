@@ -477,6 +477,40 @@ border. Across repaired left-edge rows, mean outer-column brightness excess over
 column four fell from 20.16 to -0.44 on the 0–255 RGB scale. Enlarged comparisons
 at the beginning, middle and end no longer show the thin bright line.
 
+Full-video regeneration exposed a separate duration constraint: the close-up is
+131 frames, longer than the evaluation tool's original 124-frame cap. Repair now
+accepts one continuous normalized segment up to 360 frames (the planner's
+15-second limit), keeping recurrent matting state throughout the shot. Inpainting
+still processes 40-frame subvideos; shot boundaries remain separate repair jobs.
+Internal shot segments also bypass the upload-only 0.5-second minimum. A one-frame
+shot gets a duplicate frame and mask solely as optical-flow context, then keeps
+only the original frame in its output. The opening cut is neither dropped nor
+lengthened. The desktop suite now passes 151 tests, and real one-frame and
+131-frame segments completed matting, both inpainting passes and final encoding.
+The repaired-shot assembler also rebuilds a continuous 24-fps clock from decoded
+frame order. Stream-copy concatenation after a one-frame shot can overlap B-frame
+timestamps despite retaining the frame count. The new assembler preserves each
+decoded frame and copies source AAC audio, with a regression checking frame
+colours and every timestamp across a one-frame cut. All 152 desktop tests pass.
+Review evidence uses decoded frame indices: rounding a boundary timestamp to
+milliseconds can sample the adjacent shot. The same regression checks exact
+sampled frame content and rejects evidence extending beyond the video.
+
+The full `8a743884` candidate now contains all four shots (1, 121, 131 and 15
+frames), 268 frames total at exactly 24 fps. Its 11.166667-second video retains
+the original 11.136-second audio packets unchanged. The accepted five-second
+section is reused. Existing approved stills supply the opening and close-up;
+the ending uses a source-coordinate crop from the accepted motion. An upright
+ending reference was rejected. Tracking the small ending at native crop resolution
+resolved an empty full-canvas replacement mask before mapping it back to source.
+
+This is not a clean automated quality pass. Exact-frame review accepts the new
+close-up, flags a rectangular blend in the one-frame opening and unclear identity
+in the blurred ending, and also rejects the middle section already accepted by
+the user. Those flags are retained with the full-length preview for visual review.
+There was no automatic Discord delivery. Local motion/repair used GPUq; evaluation
+used the existing image-review service, with no hosted video editor.
+
 Upstream implementations: [MatAnyone 2](https://github.com/pq-yang/MatAnyone2),
 [RVM](https://github.com/PeterL1n/RobustVideoMatting), and
 [ProPainter](https://github.com/sczhou/ProPainter). Only RVM and ProPainter are

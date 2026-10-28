@@ -1,12 +1,50 @@
 import unittest
 import tempfile
+import subprocess
+import json
 from pathlib import Path
 import numpy as np
 from PIL import Image
-from video_edge_repair import repair_mask, restore_protected, boundary_context, blend_frame_boundary
+from video_edge_repair import repair_mask, restore_protected, boundary_context, blend_frame_boundary, repair_frame_count, inpaint_inputs, assemble_segments, indexed_frames
 
 
 class RepairTests(unittest.TestCase):
+    def test_one_frame_cut_assembly_retains_every_frame_at_constant_rate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory); clips = []
+            for index, count in enumerate([1, 15]):
+                path = work / f'{index}.mp4'
+                subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                    f'color=c={"red" if index == 0 else "blue"}:s=64x64:r=24',
+                    '-frames:v', str(count), '-c:v', 'libx264', str(path)], check=True)
+                clips.append(path)
+            output = work / 'joined.mp4'
+            assemble_segments(clips, clips[1], output, work)
+            probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
+                '-select_streams', 'v:0', '-show_frames', '-show_streams',
+                '-of', 'json', str(output)]))
+            self.assertEqual(probe['streams'][0]['avg_frame_rate'], '24/1')
+            self.assertEqual(len(probe['frames']), 16)
+            for i, frame in enumerate(probe['frames']):
+                self.assertAlmostEqual(float(frame['best_effort_timestamp_time']), i/24, places=5)
+            raw = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(output),
+                '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+            pixels = np.frombuffer(raw, np.uint8).reshape(16, 64, 64, 3)
+            self.assertGreater(pixels[0, 32, 32, 0], 200)
+            self.assertTrue(np.all(pixels[1:, 32, 32, 2] > 200))
+            sampled = indexed_frames(output, [0, 1, 15], 64, 64)
+            for index in [0, 1, 15]:
+                np.testing.assert_array_equal(sampled[index], pixels[index])
+            with self.assertRaisesRegex(ValueError, 'every requested frame'):
+                indexed_frames(output, [16], 64, 64)
+
+    def test_continuous_shot_can_span_motion_windows_but_remains_bounded(self):
+        for count in [1, 124, 131, 360]:
+            self.assertEqual(repair_frame_count(count/24), count)
+        for count in [0, -1, 361]:
+            with self.assertRaisesRegex(ValueError, '1–360'):
+                repair_frame_count(count/24)
+
     def fixture(self):
         source = np.zeros((160, 240), np.uint8); source[60:120, 45:95] = 255
         replacement = np.zeros_like(source); replacement[65:135, 60:115] = 255
@@ -100,6 +138,20 @@ class RepairTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_one_frame_shot_gets_flow_context_without_changing_original_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for name in ['frames', 'masks']:
+                (work / name).mkdir()
+                Image.fromarray(np.full((40, 40), 123, np.uint8)).save(work / name / '0000.png')
+            context = inpaint_inputs(work)
+            for name in ['frames', 'masks']:
+                self.assertEqual(len(list((work / name).glob('*.png'))), 1)
+                for index in range(2):
+                    self.assertEqual((work / name / '0000.png').read_bytes(),
+                                     (context / name / f'{index:04}.png').read_bytes())
+            self.assertEqual(inpaint_inputs(context), context)
+
     def test_all_edges_corrected_without_changing_interior_or_protected_pixels(self):
         original = np.full((40, 40, 3), 80, np.uint8)
         padded = np.full((104, 104, 3), 20, np.uint8)

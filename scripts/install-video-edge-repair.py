@@ -9,12 +9,14 @@ import subprocess
 import urllib.request
 
 
-# Audited releases 1c5a318 and 02c13ec. Only these exact files may be upgraded.
+# Audited releases 1c5a318, 02c13ec and 01565b4. Only exact files may be upgraded.
 PREVIOUS_TOOL_HASHES = {
     'video_edge_repair.py': {'43348c92c4358a94af22972bba98cd77f9a9e11e10252103f926fa82c8009c13',
-                             '9ed10a9d34c6b783aabe6df8cab7a8a1bdec39dbd0cffcb44c96c174bc9eaa5d'},
+                             '9ed10a9d34c6b783aabe6df8cab7a8a1bdec39dbd0cffcb44c96c174bc9eaa5d',
+                             '8cd1c9ba39eae751dadda731b1f055a2ae24ae6ae52169081decc91c31c78e4e'},
     'test_video_edge_repair.py': {'fdcf899632fa520a6bc19adcb6c2cce984d1f83b27ab754fadd142849369710f',
-                                  '10c668b84297133f57861da1e55d4e9ba0367b728dc8b975bf02b978bc35d93d'},
+                                  '10c668b84297133f57861da1e55d4e9ba0367b728dc8b975bf02b978bc35d93d',
+                                  'ae412cca24022325116d7f8f37142b081cd4547821f2ddb4ce3c36f30d293e32'},
 }
 
 
