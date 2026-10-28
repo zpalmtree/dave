@@ -5586,14 +5586,14 @@ export class VideoBroker {
                 reference,
                 job.video_edit_target || 'the subject',
                 job.video_replacement_prompt || job.prompt,
-                // Usage events are keyed by attempt, so each shot numbers its own pair of attempts.
+                // Usage events are keyed by attempt, so each shot reserves all editor attempts.
                 { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job),
                     attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS, isolated },
             ), job.video_edit_effects || '');
             const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
             const path = join(directory, `video-edit-still${suffix}.${extension}`);
             writeFileSync(path, still.bytes);
-            if (isolated) {
+            if (isolated || still.provider !== 'openai') {
                 const review = validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
                     job.video_edit_target || 'the subject', reference, [{ source: { bytes: frame, mimeType }, edited: still }],
                     'still', this.providerHooks(job), shot));
