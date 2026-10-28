@@ -1,0 +1,35 @@
+{
+  "experimental": true,
+  "propainter": {
+    "repository": "https://github.com/sczhou/ProPainter.git",
+    "revision": "326782529a63d997cab80ab21439b92ed422b3d3",
+    "license": "S-Lab License 1.0 (non-commercial use; see upstream license)"
+  },
+  "models": [
+    {
+      "path": "optional/ProPainter/weights/ProPainter.pth",
+      "url": "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/ProPainter.pth",
+      "sha256": "12c070c4b48f374c91d8a2a17851140b85c159621080989f9e191bbc18bd6591",
+      "size": 157780510
+    },
+    {
+      "path": "optional/ProPainter/weights/raft-things.pth",
+      "url": "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/raft-things.pth",
+      "sha256": "fcfa4125d6418f4de95d84aec20a3c5f4e205101715a79f193243c186ac9a7e1",
+      "size": 21108000
+    },
+    {
+      "path": "optional/ProPainter/weights/recurrent_flow_completion.pth",
+      "url": "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/recurrent_flow_completion.pth",
+      "sha256": "22939a1a7900da878dbe1ccd011d646b1bfb30b8290039d8ff0e0c2fefbfd283",
+      "size": 20348681
+    },
+    {
+      "path": "optional/rvm_mobilenetv3_fp32.torchscript",
+      "url": "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.torchscript",
+      "size": 15501891,
+      "sha256": "f01e0c9338b9a6a31b881ea6d4360d70c1e549701b3792e14c9ed88d6196c5a1",
+      "license": "GPL-3.0; https://github.com/PeterL1n/RobustVideoMatting"
+    }
+  ]
+}

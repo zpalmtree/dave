@@ -472,3 +472,38 @@ check reused identical diffusion and SAM outputs and ran all changed compositing
 and review-evidence extraction live. The inspected five-second comparison reduces
 the brown/grey arc around the face; it does not establish full-clip success or fix
 the renderer's facial performance.
+
+## Experimental background-gap repair (not a worker default)
+
+`video_edge_repair.py` is a reusable local evaluation tool for the remaining halo
+behind replacement hair. It uses RVM to protect confident foreground, then
+ProPainter to repair only the tracked background gap. It refuses missing or
+partial foreground, mismatched inputs and overbroad repair masks. Final assembly
+restores protected pixels from the input composite before encoding and copies its
+audio. Nothing invokes this tool from the normal worker; this candidate is still
+too soft in the October 28 regression to promote automatically.
+
+Install/check the tool, pinned upstream code and ~215 MB of weights with
+`python3 scripts/install-video-edge-repair.py` / `--check`. The installer refuses
+unknown files. Install `desktop/video-edge-repair-requirements.txt` with the
+Windows embedded interpreter using `pip install --no-deps --target
+D:\AI\ComfyUI_windows_portable\video_gen\optional\matting-deps -r <requirements-path>`.
+Dependencies stay outside shared ComfyUI packages. These packages assume the
+existing desktop Torch, Torchvision, NumPy, SciPy, Pillow and PyYAML environment.
+ProPainter uses the upstream S-Lab non-commercial license; RVM uses GPL-3.0.
+See the upstream licenses linked in `video-edge-repair-models.json` before reuse.
+
+Run a single normalized segment (at most 124 frames) through GPUq, supplying its
+current composite, raw generated crop, source mask, replacement SAM mask and crop
+coordinates. Always use a new work directory and output file:
+
+```text
+gpuq run --source codex --profile video-h3 --priority normal --when-gaming hold --on-preempt fail -- D:\AI\ComfyUI_windows_portable\python_embeded\python.exe -s D:\AI\ComfyUI_windows_portable\video_gen\video_edge_repair.py --composite <segment.mp4> --motion <raw-crop.mp4> --source-mask <source-mask.mp4> --replacement-mask <replacement-mask.mp4> --box <left> <top> <right> <bottom> --work <new-directory> --output <candidate.mp4>
+```
+
+Check `gpuq status` first. Review the complete candidate before selecting it;
+nonempty masks do not establish good hair matting. Run `python -m unittest
+test_video_edge_repair` with the desktop environment for protection/validation
+regressions. The existing desktop suites plus these seven tests passed 140 tests;
+the generic CLI also completed the 121-frame regression with its audio intact.
+See [the evaluation record](../docs/video-source-edit.md#remaining-hair-halo-evaluation).

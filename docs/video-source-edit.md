@@ -390,3 +390,44 @@ unresolved; this is a compositing improvement to the five-second test.
 Apply after the composite patch and verify the current desktop revision with
 `python3 scripts/apply-video-edit-halo-desktop.py --check`. The supervised worker
 uses a new edit subprocess per job, so the next edit loads this correction.
+
+## Remaining hair halo evaluation
+
+Further feedback identified the soft patch behind the hair where the orangutan
+used to be. Hard SAM masks include some generated background as foreground; the
+old-subject erasure area is also larger than the new head. More feathering or
+colour correction alone does not separate those layers reliably.
+
+Local controlled tests on the same 121 generated frames, October 28, 2026:
+
+| Candidate | Observed result | Decision |
+| --- | --- | --- |
+| Harmonic background-colour fit | Patch becomes more obvious | Reject |
+| Temporal median background plus hard SAM outline | Sharp cutout and incorrect inferred background | Reject |
+| MatAnyone 2, first-frame seed | Empty foreground in 18/121 frames | Reject |
+| MatAnyone 2, later seed and bidirectional propagation | Empty foreground in 52/121 frames | Reject |
+| RVM matte plus full ProPainter source removal | No empty mattes, but a new pale background patch | Reject |
+| RVM-protected background-gap inpainting | Some halo reduction; residual softness behind hair | Experimental only |
+
+The final approach is preserved as the generic `desktop/video_edge_repair.py`
+tool, not hardcoded to this job. It takes existing normalized segment assets,
+protects confident replacement pixels, limits repair to the original/generated
+track region, runs local inpainting, and restores every protected pixel from the
+input composite before encoding. It checks foreground overlap with the tracked
+replacement rather than accepting a merely nonempty matte. Missing inputs or
+incomplete predictions stop the candidate instead of producing a partial result.
+It never overwrites existing outputs or work directories. Source audio is copied.
+
+Seven new regression tests cover foreground loss, mismatched evidence, invalid
+alpha, overbroad repair and protected-pixel preservation. All 140 desktop tests
+passed, and the actual generic CLI processed all 121 frames with the audio track
+preserved. The comparison uses the same cached diffusion output; matting and
+inpainting ran locally under GPUq. No hosted API calls or Discord sends were made.
+The normal worker remains on the earlier halo correction. This experiment does
+not fix facial performance or establish success on the full original clip.
+
+Upstream implementations: [MatAnyone 2](https://github.com/pq-yang/MatAnyone2),
+[RVM](https://github.com/PeterL1n/RobustVideoMatting), and
+[ProPainter](https://github.com/sczhou/ProPainter). Only RVM and ProPainter are
+needed for the reusable experimental tool; model hashes and the ProPainter source
+revision are pinned in `desktop/video-edge-repair-models.json`.
