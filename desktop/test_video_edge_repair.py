@@ -15,7 +15,40 @@ class RepairTests(unittest.TestCase):
         self.assertTrue(mask[70, 45])
         self.assertFalse(mask[80, 80])
         self.assertFalse(mask[0, 230])
-        self.assertFalse(mask[80, 59])  # two-pixel protection around confident head
+        self.assertTrue(mask[80, 59])  # background beside the head is repairable
+
+    def test_partial_foreground_protected_without_fixed_background_ring(self):
+        source, replacement, alpha, box = self.fixture()
+        alpha[70:110, 59] = 160  # antialiased hair/face boundary
+        alpha[70:110, 58] = 64   # contaminated background fringe
+        mask = repair_mask(source, replacement, alpha, box)
+        self.assertFalse(mask[80, 59])
+        self.assertTrue(mask[80, 58])
+        self.assertTrue(mask[80, 57])
+
+    def test_broad_uncertain_halo_is_not_protected_as_foreground(self):
+        source, replacement, alpha, box = self.fixture()
+        alpha[70:110, 50:60] = 160
+        mask = repair_mask(source, replacement, alpha, box)
+        self.assertFalse(mask[80, 58])  # narrow supported edge
+        self.assertTrue(mask[80, 57])   # uncertain patch outside the core's edge
+        self.assertTrue(mask[80, 50])
+
+    def test_soft_matte_alone_does_not_pass_foreground_loss_check(self):
+        source, replacement, alpha, box = self.fixture()
+        alpha[alpha > 0] = 160
+        with self.assertRaisesRegex(ValueError, 'lost'):
+            repair_mask(source, replacement, alpha, box)
+
+    def test_boundary_follows_moving_foreground_without_trailing_protection(self):
+        source, replacement, alpha, box = self.fixture()
+        before = repair_mask(source, replacement, alpha, box)
+        replacement = np.roll(replacement, 8, axis=1)
+        alpha = np.roll(alpha, 8, axis=1)
+        after = repair_mask(source, replacement, alpha, box)
+        self.assertFalse(before[80, 63])
+        self.assertTrue(after[80, 63])
+        self.assertFalse(after[80, 120])
 
     def test_empty_and_partial_foreground_fail_closed(self):
         source, replacement, alpha, box = self.fixture()

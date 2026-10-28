@@ -35,7 +35,11 @@ def repair_mask(source, replacement, alpha, box):
         raise ValueError('Foreground matting lost the tracked replacement.')
     radius = max(6, min(24, round(min(right-x, bottom-y) * .10)))
     region = binary_dilation(source > 127, iterations=radius) | binary_dilation(subject, iterations=3)
-    protected = binary_dilation(confident, iterations=2)
+    # Retain a narrow antialiased edge only where the matte supports foreground.
+    # An unconditional ring preserves background halo; the opaque core alone
+    # cuts facial contours. Limit partial-alpha protection to two pixels from
+    # the core so broad uncertain background patches cannot become foreground.
+    protected = binary_dilation(confident, iterations=2) & (alpha > 128)
     repair = region & ~protected
     if repair.sum() > .35 * h * w:
         raise ValueError('Repair would affect too much of the frame.')

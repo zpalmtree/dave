@@ -426,6 +426,28 @@ inpainting ran locally under GPUq. No hosted API calls or Discord sends were mad
 The normal worker remains on the earlier halo correction. This experiment does
 not fix facial performance or establish success on the full original clip.
 
+The next controlled refinement replaces unconditional two-pixel protection with
+a matte-supported edge: opaque foreground (alpha > 230) remains protected, and
+partial foreground (alpha > 128) is protected only within two pixels of that
+core. This allows repair of low-alpha background previously preserved as a halo.
+The stricter opaque-core overlap check remains independent. No frame history is
+used, so protection cannot trail a moving head. The scope is boundary cleanup,
+not stabilization of flicker already inside the generated subject.
+
+Two alternatives were rejected: protecting only opaque pixels softened facial
+contours; protecting all half-opacity pixels preserved a broad uncertain patch
+in early frames. The bounded edge gives a modest improvement in the inspected
+comparison, with residual background softness. Four additional regression tests
+cover partial edges, broad uncertain halos, foreground loss and moving subjects.
+All 144 desktop tests passed. The installer upgrades only the exact audited first
+release or already-current files and validates both files before changing either;
+unknown concurrent edits are preserved. The tool remains experimental.
+The updated generic CLI completed all 121 frames at 608×512/24 fps; its masks
+matched the controlled prototype. Every confident foreground pixel was excluded
+from repair, protected pixels were restored exactly before encoding, and copied
+audio packet hashes matched the input. Only 67–190 extra boundary pixels per
+frame became eligible for repair compared with the previous candidate.
+
 Upstream implementations: [MatAnyone 2](https://github.com/pq-yang/MatAnyone2),
 [RVM](https://github.com/PeterL1n/RobustVideoMatting), and
 [ProPainter](https://github.com/sczhou/ProPainter). Only RVM and ProPainter are

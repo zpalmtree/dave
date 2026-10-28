@@ -507,3 +507,11 @@ test_video_edge_repair` with the desktop environment for protection/validation
 regressions. The existing desktop suites plus these seven tests passed 140 tests;
 the generic CLI also completed the 121-frame regression with its audio intact.
 See [the evaluation record](../docs/video-source-edit.md#remaining-hair-halo-evaluation).
+
+The current refinement preserves partial-alpha edge pixels only within two pixels
+of confident foreground, rather than protecting an unconditional background ring.
+It keeps the strict foreground-loss check and uses no temporal mask carryover.
+All 144 desktop tests pass, including four added boundary regressions. Re-running
+the installer upgrades the exact audited first release; `--check` requires the
+current version. Both tool files are validated before either is changed. This is
+still an optional evaluation path, not an automatic worker stage.
