@@ -72,11 +72,11 @@ You can disable functions in `lib/CommandDefinitions.ts` if you can't be bothere
 
 ## Codex reset alerts
 
-The optional watcher polls the [Codex Resets public API](https://codex-resets.com/api/docs)
-every 60 seconds. It announces explicit scheduled resets and separately reports executed
-resets, including banked credits. Forecasts and elapsed ETAs never count as execution.
-Both alert types ping the `@codex` role (`1560349689025532064`) and link back to
-Codex Resets and the source post. All other mentions are disabled.
+The optional watcher uses direct account polling as its only source. The desktop
+monitor checks the signed-in Codex account every 60 seconds and forwards confirmed
+usage resets and banked credit increases to the bot. Alerts ping the `@codex` role
+(`1560349689025532064`) and link to the Codex usage page. All other mentions are
+disabled. There are no public tracker requests or scheduled-reset announcements.
 
 Create `~/.config/dave-codex-resets.json` (or set `CODEX_RESET_WATCH_CONFIG_FILE`):
 
@@ -93,13 +93,13 @@ The `@codex` role must be mentionable, or the bot must have Mention Everyone per
 Restart the bots after configuring it. No API key is required.
 
 The adjacent `.state.json` file stores seen events and a persistent delivery queue.
-Keep it across restarts. First startup silently baselines executed history but announces
-any currently scheduled reset. Later polls page through history to catch resets missed
-during downtime and retry failed deliveries. Missing configuration disables the watcher;
-invalid state fails closed. Use a new config/state path when changing the destination.
-The public tracker remains the fallback source. An optional local account monitor can
-detect resets before the tracker confirms them, without moving Codex credentials to
-the bot server.
+Keep it across restarts. The first valid observation feed silently baselines history;
+later polls catch observations missed during bot downtime and retry failed deliveries.
+Missing configuration disables the watcher; invalid state fails closed. Use a new
+config/state path when changing the destination. Upgrading automatically discards
+queued public tracker alerts and correlation history while preserving account-event
+deduplication and pending confirmed observations. Missing or invalid feeds are logged;
+confirmed queued alerts still retry, but no new resets are inferred.
 
 ### Direct Codex account monitoring
 
@@ -117,17 +117,15 @@ usage-reset alerts. Complete, unchanged credit IDs also allow detection on accou
 with banked credits. Grants can be account-specific; all direct alerts explicitly
 say they were observed on the monitored account, not verified globally. Very small
 usage drops, resets while the desktop is offline, or resets without comparable
-account data may be missed; the public tracker still works independently.
+account data may be missed. The desktop monitor must be running to detect new resets.
 
 The monitor keeps its baseline, pending confirmation, and seven days of observations
 in `~/.local/state/dave-codex-usage.json` (mode 0600). It forwards only confirmed
 observations over SSH to `dave:~/.config/dave-codex-resets.json.usage.json`, using an
 atomic replacement. Credentials, account IDs, credit IDs, and usage percentages are
 never forwarded. Delivery failures retry from saved observations on the next run.
-The bot reads this feed independently of public tracker availability. Same-kind
-events from the two sources within six hours of each other are treated as one reset
-to avoid a second ping when the tracker catches up; this correlation is heuristic
-because there is no shared event ID.
+The bot reads this feed every 60 seconds and deduplicates by observation ID. Separate
+confirmed account events remain separate alerts, even when they occur close together.
 
 On the signed-in WSL desktop, build the project, verify batch SSH access to `dave`,
 then install the supplied user timer:
