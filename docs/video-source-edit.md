@@ -10,6 +10,25 @@ $oalgo make him a robot lol
 $oalgo swap that dude
 ```
 
+Replacement-frame preparation prefers GPT Image, with one retry after a refusal,
+then tries Gemini if the preferred editor cannot produce a frame. Gemini receives
+the original source and replacement images and the same edit instructions through
+its native editing path. Its normal provider safeguards apply. If neither editor
+produces a usable image, the edit stops before animation.
+
+Alternate frames always pass the existing pose-and-identity review, including for
+older workers that do not request isolated crops. A changed crop, wrong identity
+or lost source performance can still stop the job. Each shot reserves three
+separate provider-attempt numbers; cancellation and accounting failures stop
+further requests. Generation is bounded to 270 seconds, leaving time for review
+within the worker's existing request timeout. JPEG replies are converted to PNG so
+subject-effect metadata is retained.
+
+The editor-routing showcase uses the real shared editor and message formatters
+with synthetic provider responses: run `yarn build && node
+scripts/serve-edit-fallback-showcase.mjs` and open <http://localhost:4348>.
+Desktop/mobile captures and verification notes are in `docs/showcases/edit-fallback/`.
+
 GIF attachments and Tenor/Giphy share links also work, including a reply to a
 Discord GIF-picker message. Reply with:
 

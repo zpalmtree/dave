@@ -1066,6 +1066,7 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
     const repaints = [];
     const descriptions = [];
     let refuse = false;
+    let repaintProvider = 'openai';
     let rejectEdit = false;
     let reviewCalls = 0;
     const broker = new VideoBroker({
@@ -1105,7 +1106,7 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 error.code = 'moderation';
                 throw error;
             }
-            return { bytes: Buffer.from('repainted'), mimeType: 'image/png', provider: 'openai', model: 'gpt-image-test' };
+            return { bytes: Buffer.from('repainted'), mimeType: 'image/png', provider: repaintProvider, model: 'gpt-image-test' };
         },
     });
     await broker.start();
@@ -1214,7 +1215,18 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-frame.png'), 'utf8'), 'frame');
             const attempts = await broker.all(
                 "SELECT attempt FROM video_usage_events WHERE job_public_id=? AND stage='video_edit_still' ORDER BY attempt", [job.id]);
-            assert.deepEqual(attempts.map(row => row.attempt), [1, 3]);
+            assert.deepEqual(attempts.map(row => row.attempt), [1, 4]);
+            // An alternate editor needs the pose/identity gate even without the isolated header.
+            repaintProvider = 'gemini';
+            const beforeAlternate = reviewCalls;
+            assert.equal((await still('frame')).status, 200);
+            assert.equal(reviewCalls, beforeAlternate + 1);
+            rejectEdit = true;
+            const rejectedAlternate = await still('frame');
+            assert.equal(rejectedAlternate.status, 422);
+            assert.equal((await rejectedAlternate.json()).reason_code, 'edit_quality');
+            repaintProvider = 'openai';
+            rejectEdit = false;
             if (version === 8) {
                 rejectEdit = true;
                 const badStill = await still('frame', { 'x-video-edit-isolated': '1' });
