@@ -109,7 +109,9 @@ once per invocation. It starts no model turns and never redeems reset credits.
 Two samples at least 30 seconds apart must confirm either an early usage drop or an
 increase in available reset credits. Usage must drop by at least five percentage
 points to at most 5%, before its normal reset time. The confirmation may include
-new usage as long as it stays below the pre-reset usage.
+new usage as long as it stays below the pre-reset usage. A fresh window's reset
+deadline may advance while it settles, but by no more than the elapsed time between
+checks (rounded up to a whole second); backward or larger jumps are rejected.
 
 Normal rollovers, account/plan/window changes, polling gaps over five minutes,
 unknown credit inventories, and observed personal credit redemptions do not trigger

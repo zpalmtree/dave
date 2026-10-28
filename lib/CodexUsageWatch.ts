@@ -78,7 +78,11 @@ function regularDrop(before: UsageSample, first: UsageSample, current = first): 
             return next && confirmed && next.minutes === old.minutes && confirmed.minutes === old.minutes
                 // A scheduled rollover (or a polling gap around one) is not a surprise reset.
                 && old.resetsAt > current.at + 90 && next.resetsAt > current.at
-                && confirmed.resetsAt === next.resetsAt
+                // An unused new window can report a moving deadline until usage
+                // anchors it. Allow only forward movement bounded by elapsed time
+                // (deadlines are whole seconds, sample times can be fractional).
+                && confirmed.resetsAt >= next.resetsAt
+                && confirmed.resetsAt - next.resetsAt <= Math.ceil(current.at - first.at)
                 && old.used >= 5 && next.used <= 5 && old.used - next.used >= 5
                 && confirmed.used < old.used;
         });
