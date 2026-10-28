@@ -322,3 +322,38 @@ wording assertion and regenerated-workflow attachment assertion also fail on
 unchanged `7de3452`. The unconstrained parallel run additionally exhausted test
 process resources. All changed-area tests passed in the serial run. Installer
 checks covered the expected baseline, already-applied files and concurrent edits.
+
+## Covering the replacement outline
+
+The follow-up `video-edit-composite.patch` addresses human feedback about blending,
+flicker and leftover source anatomy. The isolated renderer now also segments its
+own output, using a spatial SAM prompt derived from the source track. This avoids
+asking a text detector to choose another performer. The composite alpha covers
+the union of the original and generated silhouettes, fills small cracks and
+interior holes, and feathers outward. Source foreground stays opaque instead of
+being blended back into the replacement. An original subject outside the generated
+crop is an error; alpha is clamped after filtering so padded black pixels cannot
+leak across crop boundaries. Alpha files use lossless grayscale FFV1.
+
+Brightness matching is restored for isolated edits. It fits shared background
+only inside the generated crop, excludes both subjects' silhouettes, and smooths
+the gain/offset over time. Full-frame black padding and untouched people cannot
+bias the fit. Masks, tracking workflows and final review pairs remain available
+beside each job. This adds local SAM tracking and CPU compositing, with no new
+hosted API call. It does not fix facial motion, identity drift or flicker already
+present inside the generated subject.
+
+For the same five-second `8a743884` Viggle render, the old track had 11 empty
+frames; the corrected source track had none. About 14.6% of the generated-person
+mask lay outside the unpadded source silhouette. The new composite removes the
+obvious remaining orangutan outline in the inspected comparisons. This is a
+controlled comparison of identical diffusion output, not a new full-clip success.
+The earlier automated acceptance did not establish acceptable visual quality.
+
+Validation: 126 desktop tests passed, including coverage of both silhouettes,
+interior holes, crop-edge black padding, empty/short tracks, lossless masks,
+spatial tracking and crop-limited exposure fitting. The integrated renderer was
+also run with the cached diffusion output and live SAM/compositing/review-evidence
+extraction. No additional image repaint or video generation was needed for that
+comparison. Apply this patch after the isolated-edit patch; verify the latest
+revision with `python3 scripts/apply-video-edit-composite-desktop.py --check`.

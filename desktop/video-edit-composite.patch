@@ -1,0 +1,304 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -256,13 +256,14 @@
+ 
+ 
+ def composite_segment(source: Path, rendered: Path, mask: Path,
+-                      destination: Path, source_frames: int, dilate: bool = True) -> None:
++                      destination: Path, source_frames: int, dilate: bool = True, feather: bool = True) -> None:
+     # The H3 result may drift outside the tracked subject. Keep every source
+     # pixel beyond the expanded mask and emit only this segment's source frames.
+     # An add-mode alpha is already feathered and must not grow into the anchor.
+     grow = ",".join(["dilation"] * 6) + "," if dilate else ""
+-    filter_graph = ("[2:v]format=gray," + grow +
+-                    "gblur=sigma=2[mask];[1:v][mask]alphamerge[edited];" +
++    soften = "gblur=sigma=2" if feather else "null"
++    filter_graph = ("[2:v]format=gray," + grow + soften +
++                    "[mask];[1:v][mask]alphamerge[edited];" +
+                     "[0:v][edited]overlay=shortest=1:format=auto[v]")
+     command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+             "-i", str(rendered), "-i", str(mask), "-filter_complex", filter_graph,
+@@ -314,7 +315,7 @@
+ 
+ 
+ def match_render_levels(source: Path, rendered: Path, tracked: Path, destination: Path,
+-                        frames: int, width: int, height: int) -> None:
++                        frames: int, width: int, height: int, region: list[int] | None = None) -> None:
+     """Fit the render's brightness to the source over the background both show.
+ 
+     A Viggle render comes out darker than its source, which reads as a dark overlay
+@@ -324,13 +325,21 @@
+     rgb_bytes, gray_bytes = width * height * 3, width * height
+     # Background at least 16 px from the tracked subject, where both should agree.
+     away = "format=gray," + ",".join(["dilation"] * 16)
++    valid = np.ones((height, width), dtype=bool)
++    if region is not None:
++        x, y, right, bottom = region
++        if not (0 <= x < right <= width and 0 <= y < bottom <= height):
++            raise ValueError("Invalid brightness matching region.")
++        valid[:] = False
++        valid[y:bottom, x:right] = True
++    valid = valid.ravel()[::4]
+     fits = []
+     for source_data, rendered_data, mask_data in zip(
+             decoded_frames(source, "rgb24", rgb_bytes, frames),
+             decoded_frames(rendered, "rgb24", rgb_bytes, frames),
+             decoded_frames(tracked, "gray", gray_bytes, frames, away)):
+-        background = np.frombuffer(mask_data, dtype=np.uint8)[::4] <= 127
+-        if np.mean(background) < 0.02:
++        background = (np.frombuffer(mask_data, dtype=np.uint8)[::4] <= 127) & valid
++        if np.count_nonzero(background) < max(16, 0.02 * np.count_nonzero(valid)):
+             fits.append((1.0, 0.0))
+             continue
+         luma = [np.frombuffer(data, dtype=np.uint8).reshape(-1, 3)[::4][background] @ LUMA / 255
+@@ -1055,12 +1064,23 @@
+                     reject_blank_edit(rendered, mask_input, clip, still, source_frames / 24, width, height)
+                     matched = directory / f"segment-{index:02d}-levels.mp4"
+                     if isolated:
+-                        matched = rendered
++                        from video_edit_composite import track_replacement, build_matte
++                        box = boxes[segment_shots[index - 1]]
++                        replacement_mask = work / f"replacement-mask-{index:02d}.mp4"
++                        track_replacement(args.server, rendered, mask_input, box, width, height,
++                                          source_frames, replacement_mask)
++                        matte = work / f"composite-alpha-{index:02d}.mkv"
++                        build_matte(mask_input, replacement_mask, matte, box, width, height, source_frames)
++                        # Fit only background pixels inside the generated crop. The
++                        # placed video's black padding must never bias the exposure.
++                        match_render_levels(clip, rendered, matte, matched,
++                                            source_frames, width, height, region=box)
+                     else:
+                         match_render_levels(clip, rendered, work / f"mask-{index:02d}.mp4", matched,
+                                             source_frames, width, height)
+                     edited = directory / f"segment-{index:02d}.mp4"
+-                    composite_segment(clip, matched, mask_input, edited, source_frames)
++                    composite_segment(clip, matched, matte if isolated else mask_input, edited,
++                                      source_frames, dilate=not isolated, feather=not isolated)
+                     edited_segments.append(edited)
+                     print(f"Completed segment {index}/{len(segments)}", flush=True)
+                 finally:
+--- /dev/null
++++ b/video_edit_composite.py
+@@ -0,0 +1,103 @@
++"""Cover both subject silhouettes without blending the original performer back in."""
++import tempfile
++import uuid
++from pathlib import Path
++
++import numpy as np
++from scipy.ndimage import binary_closing, binary_dilation, binary_fill_holes, distance_transform_edt
++
++
++def replacement_graph(clip, box, prefix):
++    from video_edit import node, segmentation_graph
++    graph = segmentation_graph(clip, '', prefix)
++    del graph['target']
++    graph['track']['inputs'].pop('conditioning')
++    graph['first'] = node('ImageFromBatch', image=['frames', 0], batch_index=0, length=1)
++    x, y, right, bottom = box
++    graph['box'] = node('PrimitiveBoundingBox', x=x, y=y, width=right-x, height=bottom-y)
++    graph['detect'] = node('SAM3_Detect', model=['sam', 0], image=['first', 0], bboxes=['box', 0],
++                           threshold=0.5, refine_iterations=2, individual_masks=False)
++    graph['track']['inputs']['initial_mask'] = ['detect', 0]
++    return graph
++
++
++def track_replacement(server, rendered, source_mask, box, width, height, frames, destination):
++    import video_edit as edit
++    from video_edit_isolated import bounds, union_box
++    # A spatial prompt works for humans, animals and objects. Do not ask a second
++    # text detector to choose the most prominent performer in the original scene.
++    first = next(edit.decoded_frames(source_mask, 'gray', width * height, 1), None)
++    if first is None:
++        raise RuntimeError('Missing source mask for replacement compositing.')
++    source_box = bounds(np.frombuffer(first, np.uint8).reshape(height, width))
++    seed = union_box([source_box], width, height) if source_box else list(box)
++    seed = [max(seed[0], box[0]), max(seed[1], box[1]), min(seed[2], box[2]), min(seed[3], box[3])]
++    if seed[2] <= seed[0] or seed[3] <= seed[1]:
++        raise RuntimeError('Replacement track lies outside its source crop.')
++    name = 'edit-matte-' + uuid.uuid4().hex
++    clip = edit.INPUT / (name + '.mp4')
++    try:
++        clip.write_bytes(Path(rendered).read_bytes())
++        graph = replacement_graph(clip.name, seed, 'video/edits/' + name)
++        import json
++        destination.with_suffix('.json').write_text(json.dumps(graph, indent=2), encoding='utf-8')
++        result = edit.run_graph(server, graph, 'save_mask', 1800)
++        edit.validate_tracking_mask(result, 'the rendered replacement', frames)
++        destination.write_bytes(result.read_bytes())
++    finally:
++        clip.unlink(missing_ok=True)
++
++
++def composite_alpha(source, replacement, box, padding=3, feather=4):
++    """Opaque union with an outward feather, clipped AFTER filtering to render support."""
++    source = source > 127
++    replacement = replacement > 127
++    if source.shape != replacement.shape or source.ndim != 2:
++        raise ValueError('Source and replacement masks must have identical dimensions.')
++    height, width = source.shape
++    x, y, right, bottom = box
++    if not (0 <= x < right <= width and 0 <= y < bottom <= height):
++        raise ValueError('Invalid replacement crop.')
++    support = np.zeros((height, width), bool)
++    support[y:bottom, x:right] = True
++    if np.any(source & ~support):
++        raise RuntimeError('Source subject extends outside the generated crop.')
++    core = (source | replacement) & support
++    if not core.any():
++        return np.zeros((height, width), np.uint8)
++    # Closing removes little cracks without eroding subjects that reach a frame edge.
++    closed = binary_closing(np.pad(core, 2, mode='edge'), structure=np.ones((5, 5), bool))[2:-2, 2:-2]
++    core |= binary_fill_holes(closed)
++    hard = binary_dilation(core, iterations=padding) if padding else core
++    distance = distance_transform_edt(~hard)
++    alpha = np.clip(1 - distance / max(1, feather), 0, 1)
++    alpha = alpha * alpha * (3 - 2 * alpha)
++    # Black padding outside a placed render is not image content. Growing/blurring
++    # the alpha after this clamp would produce the visible black rectangle again.
++    alpha[~support] = 0
++    return np.round(alpha * 255).astype(np.uint8)
++
++
++def build_matte(source, replacement, destination, box, width, height, frames):
++    import video_edit as edit
++    from itertools import zip_longest
++    if frames < 1:
++        raise ValueError('A composite needs at least one frame.')
++    frame_bytes = width * height
++    with tempfile.TemporaryDirectory(prefix='edit-alpha-') as directory:
++        raw = Path(directory) / 'alpha.gray'
++        count = 0
++        with raw.open('wb') as stream:
++            for a, b in zip_longest(edit.decoded_frames(source, 'gray', frame_bytes, frames),
++                                   edit.decoded_frames(replacement, 'gray', frame_bytes, frames)):
++                if a is None or b is None:
++                    raise RuntimeError('Replacement masks do not cover the same timeline.')
++                alpha = composite_alpha(np.frombuffer(a, np.uint8).reshape(height, width),
++                                        np.frombuffer(b, np.uint8).reshape(height, width), box)
++                stream.write(alpha.tobytes())
++                count += 1
++        if count != frames:
++            raise RuntimeError('Replacement masks are shorter than the source segment.')
++        edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'gray',
++                     '-video_size', f'{width}x{height}', '-framerate', '24', '-i', str(raw),
++                     '-an', '-c:v', 'ffv1', '-pix_fmt', 'gray', str(destination))
+--- /dev/null
++++ b/test_video_edit_composite.py
+@@ -0,0 +1,116 @@
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++import numpy as np
++import video_edit
++from video_edit_composite import composite_alpha, build_matte, replacement_graph
++
++
++class CompositeTests(unittest.TestCase):
++    def test_covers_both_silhouettes_and_fills_interior_holes(self):
++        source = np.zeros((64, 96), np.uint8)
++        source[20:50, 10:35] = 255
++        source[28:32, 20:24] = 0
++        rendered = np.zeros_like(source)
++        rendered[15:48, 25:48] = 255
++        alpha = composite_alpha(source, rendered, [0, 0, 70, 64])
++        self.assertTrue(np.all(alpha[source > 0] == 255))
++        self.assertTrue(np.all(alpha[rendered > 0] == 255))
++        self.assertEqual(alpha[29, 21], 255)
++        self.assertTrue(np.any((alpha > 0) & (alpha < 255)))
++
++    def test_filters_never_reveal_black_padding_outside_rendered_crop(self):
++        source = np.zeros((64, 96), np.uint8)
++        source[20:50, 10:35] = 255
++        rendered = np.zeros_like(source)
++        rendered[10:50, 25:60] = 255
++        alpha = composite_alpha(source, rendered, [0, 10, 60, 64])
++        self.assertFalse(alpha[:10].any())
++        self.assertFalse(alpha[:, 60:].any())
++        self.assertEqual(alpha[20, 59], 255)
++
++    def test_empty_occluded_frame_has_no_spurious_alpha(self):
++        blank = np.zeros((64, 96), np.uint8)
++        self.assertFalse(composite_alpha(blank, blank, [0, 0, 96, 64]).any())
++
++    def test_uncovered_original_subject_stops_instead_of_leaving_it_in_video(self):
++        source = np.zeros((64, 96), np.uint8)
++        source[20:50, 10:50] = 255
++        with self.assertRaisesRegex(RuntimeError, 'outside the generated crop'):
++            composite_alpha(source, source, [0, 0, 40, 64])
++
++    def test_no_history_from_previous_shot_is_used(self):
++        left = np.zeros((64, 96), np.uint8); left[10:50, 5:30] = 255
++        right = np.zeros_like(left); right[10:50, 65:90] = 255
++        composite_alpha(left, left, [0, 0, 96, 64])
++        alpha = composite_alpha(right, right, [0, 0, 96, 64])
++        self.assertFalse(alpha[:, :40].any())
++
++    def test_spatial_tracking_does_not_choose_a_second_subject_by_text(self):
++        graph = replacement_graph('clip.mp4', [8, 12, 80, 100], 'test/matte')
++        self.assertNotIn('target', graph)
++        self.assertNotIn('conditioning', graph['track']['inputs'])
++        self.assertEqual(graph['track']['inputs']['initial_mask'], ['detect', 0])
++        self.assertEqual(graph['box']['inputs'], {'x': 8, 'y': 12, 'width': 72, 'height': 88})
++
++    def test_short_or_mismatched_tracks_fail_before_encoding(self):
++        frame = np.zeros((64, 96), np.uint8).tobytes()
++        with tempfile.TemporaryDirectory() as d:
++            for source, rendered in [([frame], [frame, frame]), ([frame], [frame])]:
++                with patch('video_edit.decoded_frames', side_effect=[iter(source), iter(rendered)]), \
++                     patch('video_edit.command') as encode:
++                    with self.assertRaisesRegex(RuntimeError, 'timeline|shorter'):
++                        build_matte(Path('source'), Path('render'), Path(d)/'alpha.mkv', [0, 0, 96, 64], 96, 64, 2)
++                    encode.assert_not_called()
++
++    def test_lossless_alpha_keeps_every_frame_and_exact_crop_boundary(self):
++        mask = np.zeros((64, 96), np.uint8); mask[16:48, 8:48] = 255
++        frame = mask.tobytes()
++        with tempfile.TemporaryDirectory() as d:
++            output = Path(d)/'alpha.mkv'
++            with patch('video_edit.decoded_frames', side_effect=[iter([frame]*3), iter([frame]*3)]):
++                build_matte(Path('source'), Path('render'), output, [0, 0, 48, 64], 96, 64, 3)
++            decoded = list(video_edit.decoded_frames(output, 'gray', 96*64, 4))
++            self.assertEqual(len(decoded), 3)
++            for data in decoded:
++                alpha = np.frombuffer(data, np.uint8).reshape(64, 96)
++                self.assertFalse(alpha[:, 48:].any())
++                self.assertTrue(np.all(alpha[mask > 0] == 255))
++
++    def test_brightness_fit_ignores_black_padding_and_untouched_people(self):
++        w, h = 96, 64
++        rendered = np.zeros((h, w, 3), np.uint8)
++        rendered[:, :48] = np.linspace(55, 145, 48, dtype=np.uint8)[None, :, None]
++        source = np.full_like(rendered, 255)  # unrelated bright scene outside crop
++        source[:, :48] = np.clip(rendered[:, :48] * 1.2 + 10, 0, 255)
++        mask = np.zeros((h, w), np.uint8)
++        def frames(path, pixel_format, frame_bytes, count, filters=None):
++            value = source if str(path) == 'source' else rendered if str(path) == 'rendered' else mask
++            return iter([value.tobytes()] * count)
++        fits = []
++        actual_fit = video_edit.fit_levels
++        def fit(a, b):
++            fits.append((a, b))
++            return actual_fit(a, b)
++        with tempfile.TemporaryDirectory() as d, patch('video_edit.decoded_frames', side_effect=frames), \
++             patch('video_edit.fit_levels', side_effect=fit):
++            video_edit.match_render_levels(Path('source'), Path('rendered'), Path('mask'), Path(d)/'out.mp4',
++                                           2, w, h, region=[0, 0, 48, 64])
++        self.assertEqual(len(fits), 2)
++        for source_samples, rendered_samples in fits:
++            self.assertLess(source_samples.max(), 0.8)
++            self.assertGreater(rendered_samples.min(), 0.15)
++
++    def test_prepared_alpha_is_not_blurred_or_grown_again(self):
++        with patch('video_edit.command') as command:
++            video_edit.composite_segment(Path('source'), Path('render'), Path('alpha'), Path('out'),
++                                         5, dilate=False, feather=False)
++        graph = command.call_args.args[command.call_args.args.index('-filter_complex') + 1]
++        self.assertNotIn('dilation', graph)
++        self.assertNotIn('gblur', graph)
++
++
++if __name__ == '__main__':
++    unittest.main()
