@@ -15,28 +15,31 @@ is covered by the HTTP integration tests.
 Reviewed Playwright MCP captures: [desktop](desktop.png) at 1280px and
 [mobile](mobile.png) at 390px. Both include loading, primary success, fallback
 success, outage, empty output, both editors declining, unconfigured fallback,
-cancellation and quality-rejection states. Neither has horizontal overflow.
+cancellation, usable imperfect stills and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `5099159` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `4e0ce9fe89e7` over `VideoKeyframeProvider.ts` and
-`VideoBroker.ts` in that order.
+Captured from base revision `ed02742` plus this change. The feature fingerprint in
+the screenshots is SHA-256 `4405dd50a0cc` over `VideoKeyframeProvider.ts` and
+`VideoBroker.ts`, then `VideoEditReview.ts` in that order.
 
 Validation:
 
 - TypeScript build passed.
-- The editor, edit-review, broker and video-protocol suites ran 174 tests: 173
-  passed. The only failure is an unchanged planner-wording assertion expecting
-  `physical source, material or timbre`; the existing planner says
-  `physical source, material, acoustic space and timing`. Neither that planner
-  nor its assertion was changed here.
+- The editor, edit-review and broker suites passed all 64 tests. The still and
+  motion reviewer use separate contracts; admitting a usable still does not
+  override a rejected finished animation.
 - Tests cover original image/prompt preservation, separate shot accounting,
   direct fallback after outages, missing configuration, empty/corrupt output,
   PNG conversion for effect metadata, cancellation, hook failures, deadline
-  exhaustion and broker rejection of an alternate frame with bad pose/identity.
-- A live Gemini-only check used a cached source/reference pair, replaying the
-  recorded preferred-editor rejection locally. Gemini produced an image, but
-  the existing review rejected its expression/pose fidelity. This validates
-  editor routing and the retained quality stop, not a successful finished edit.
-  No video was rendered or sent to Discord. Private job images are excluded.
+  exhaustion and broker rejection of an alternate frame that fails review.
+- Live review with the revised still contract accepted the user-approved Nano
+  Banana output and rejected the unchanged source as a negative control. The
+  reference identity, scene and composition were recognized despite pose and
+  expression differences. Generation and motion quality are separate decisions.
+- A GPU-admitted local animation test rendered that still through Viggle-Animate,
+  then stopped during replacement-mask tracking (only 8% of frames had a usable
+  track). No finished composite or Discord delivery is claimed. The raw animation
+  and private job images remain outside the public showcase and Git history.
+  Visual inspection at 1.5 and 2.8 seconds also showed severe ghosting in the raw
+  output; accepting the still does not establish usable animation quality.

@@ -45,15 +45,16 @@ const cases = [
     ['error', 'Error · both editors decline', await run(provider => provider === 'openai' ? rejected : [200,{promptFeedback:{blockReason:'SAFETY'}}])],
     ['disabled', 'Disabled · alternate editor not configured', await run(() => rejected, false)],
     ['cancelled', 'Edge · cancellation', await run(() => primary, true, true)],
-    ['quality', 'Error · pose review rejects the result', {message:failedVideoPost({...job, error:'Replacement pose/identity check failed: The source expression changed.'})}],
+    ['usable', 'Success · usable imperfect still', {message:'A recognizable, coherent replacement may proceed with a different expression, hand gesture or clothing. Source-driven animation and its separate motion review come next.'}],
+    ['quality', 'Error · wrong replacement identity', {message:failedVideoPost({...job, error:'Replacement pose/identity check failed: The reference identity is missing.'})}],
 ];
 const revision = execFileSync('git',['rev-parse','--short','HEAD']).toString().trim();
-const fingerprint = createHash('sha256').update(readFileSync(new URL('../lib/VideoKeyframeProvider.ts',import.meta.url))).update(readFileSync(new URL('../lib/VideoBroker.ts',import.meta.url))).digest('hex').slice(0,12);
+const fingerprint = createHash('sha256').update(readFileSync(new URL('../lib/VideoKeyframeProvider.ts',import.meta.url))).update(readFileSync(new URL('../lib/VideoBroker.ts',import.meta.url))).update(readFileSync(new URL('../lib/VideoEditReview.ts',import.meta.url))).digest('hex').slice(0,12);
 const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Replacement editor fallback showcase</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#101317;color:#eef1f5;font:16px/1.6 system-ui,sans-serif}main{max-width:1080px;margin:auto;padding:32px 24px}h1{font-size:clamp(28px,5vw,40px);line-height:1.15}h2{font-size:18px;margin:0 0 12px}p{color:#bac3cf}section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:24px 0}article{border:1px solid #35414d;border-radius:8px;padding:20px;min-width:0}pre{font:14px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#cce4db}.trace,footer{font-size:13px;color:#99a5b3}.tag{color:#9cdbc8;font-size:13px}nav{display:flex;flex-wrap:wrap;gap:12px}a{color:#9cdbc8}@media(max-width:650px){main{padding:24px 16px}section{grid-template-columns:1fr}}</style>
 <main><div class="tag">Dave · replacement editor showcase</div><h1>Another editor when the first cannot finish.</h1>
-<p>The bot preserves the original source and replacement images when trying Gemini. Every alternate frame must pass the existing pose-and-identity review before animation.</p>
+<p>The bot preserves the original source and replacement images when trying Gemini. Every alternate frame must pass a usability check before animation. Recognizable, coherent replacements can proceed despite expression or gesture differences; the finished animation gets a separate motion review.</p>
 <p>These fixtures run the real editor routing and shared bot message formatters. Provider replies are simulated; no image quality or finished video is claimed.</p>
 <nav>${cases.map(([id])=>`<a href="#${id}">${id}</a>`).join('')}</nav>
 <section>${cases.map(([id,title,result])=>`<article id="${id}"><h2>${escape(title)}</h2><pre>${escape(result.message)}</pre>${result.editor ? `<p>Editor: ${escape(result.editor)}</p>`:''}${result.attempts ? `<p class="trace">${escape(result.attempts.join(' → ') || 'No provider requests')}</p>`:''}</article>`).join('')}</section>
