@@ -11,10 +11,13 @@ import { videoSourcesFromMessages, videoSourceImageFromMessage, videoClipSourceI
     resolveVideoEditRequest, videoReplacementUsesPreset, videoPromptFromMessages } from '../dist/VideoGeneration.js';
 import { sourceClipDescriptor, storeVideoSourceClip } from '../dist/VideoSourceClip.js';
 import { MEXIMUTT } from '../dist/VideoCharacters.js';
+import { videoOutputFormatForSources } from '../dist/VideoGifDelivery.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
 
 const tenor = 'https://tenor.com/view/referee-gif-123456';
 const giphy = 'https://giphy.com/gifs/referee-abc123';
+const klipy = 'https://klipy.com/gifs/gatling-gun-shoot-them';
+const klipyMedia = 'https://static.klipy.com/ii/example/90/b7/animation.mp4';
 const media = 'https://media.tenor.com/abc/referee.mp4';
 const gif = { url: 'https://cdn.discordapp.com/attachments/1/2/referee.gif', name: 'referee.gif', contentType: 'image/gif', size: 321 };
 const portrait = { url: 'https://cdn.discordapp.com/attachments/1/2/portrait.png', name: 'portrait.png', contentType: 'image/png', size: 123 };
@@ -52,8 +55,8 @@ test('referee replacement uses replied GIF motion and Meximutt portrait; explici
     assert.throws(() => videoClipSourceImageFromMessage(message('', [gif, own])), /just one video/);
 });
 
-test('Tenor/Giphy content and embed links use playable media without fetching when available', async () => {
-    for (const page of [tenor, giphy]) {
+test('Tenor/Giphy/Klipy content and embed links use playable media without fetching when available', async () => {
+    for (const page of [tenor, giphy, klipy]) {
         const reply = message(page, [], [{ url: page, video: { url: media }, image: { url: media.replace('.mp4', '.gif') } }]);
         assert.equal((await gifVideoFromMessage(reply, noFetch)).clip_url, media);
         const sources = await videoSourcesFromMessages(message(), reply, true, noTwitter);
@@ -67,8 +70,31 @@ test('Tenor/Giphy content and embed links use playable media without fetching wh
     assert.equal(videoPromptFromMessages('replace the referee with meximutt', { content: giphy }), 'replace the referee with meximutt');
 });
 
+test('Klipy replies use the playable video rather than the WebP thumbnail and retain GIF delivery', async () => {
+    const embed = {url: klipy, video: {url: klipyMedia}, thumbnail: {url: klipyMedia.replace('.mp4', '.webp')}};
+    const prompt = 'replace the man holding the gun with meximutt';
+    for (const reply of [message(klipy, [], [embed]), message('', [], [embed]),
+        message('https://www.klipy.com/gifs/gatling-gun-shoot-them/', [], [embed]), message(klipyMedia)]) {
+        assert.equal((await gifVideoFromMessage(reply, noFetch)).clip_url, klipyMedia);
+        const result = await resolveVideoEditRequest(prompt, message(prompt), reply, '', MEXIMUTT, noFetch);
+        assert.equal(result.replacement.target, 'the man holding the gun');
+        assert.equal(sourceClipDescriptor(result.sources.clip).clip_url, klipyMedia);
+        assert.equal(videoOutputFormatForSources(result.sources.clip), 'gif');
+        assert.equal(videoPromptFromMessages(prompt, reply), prompt);
+        assert.equal((await videoSourcesFromMessages(message('', [gif]), reply, true, noTwitter)).clip.clip_url, gif.url);
+    }
+    for (const url of ['https://static.klipy.com.evil.test/a.mp4', 'https://klipy.com/a.mp4',
+        'http://static.klipy.com/a.mp4', 'https://user@static.klipy.com/a.mp4',
+        'https://static.klipy.com:444/a.mp4', 'https://static.klipy.com/a.webp',
+        'https://klipy.com.evil.test/gifs/example']) {
+        assert.equal(isGifVideoUrl(url), false);
+        assert.equal(await gifVideoFromMessage(message(url), noFetch), null);
+    }
+    await assert.rejects(gifVideoFromMessage(message(`${klipy} ${tenor}`), noFetch), /exactly one/);
+});
+
 test('missing embeds resolve bounded share-page metadata and prefer animation over thumbnails', async () => {
-    for (const page of [tenor, giphy]) {
+    for (const page of [tenor, giphy, klipy]) {
         const source = await gifVideoFromMessage(message(page), async (url, options) => {
             assert.equal(url, page);
             assert.equal(options.redirect, 'error');

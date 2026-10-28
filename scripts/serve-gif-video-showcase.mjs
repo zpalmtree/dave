@@ -35,6 +35,10 @@ const linked = summarize(await resolve(message('https://tenor.com/view/referee-g
 const giphy = summarize(await resolve(message('https://giphy.com/gifs/referee-example', [], [{
     url: 'https://giphy.com/gifs/referee-example', video: { url: 'https://media.giphy.com/media/example/giphy.mp4' },
 }])));
+const klipy = summarize(await resolve(message('https://klipy.com/gifs/referee-example', [], [{
+    url: 'https://klipy.com/gifs/referee-example', video: { url: 'https://static.klipy.com/ii/example/referee.mp4' },
+    thumbnail: { url: 'https://static.klipy.com/ii/example/referee.webp' },
+}])));
 const empty = await resolve(message());
 const image = await videoSourcesFromMessages(message('', [portrait]), message('', [gif]), true, async () => null);
 const frame = await videoSourcesFromMessages(message('animate this'), message('', [gif]), false, async () => null);
@@ -63,6 +67,7 @@ const cases = [
     ['Success · uploaded GIF', 'The full animation is selected for replacement.', uploaded],
     ['Success · Tenor reply', 'A GIF-picker embed supplies its playable clip.', linked],
     ['Success · Giphy reply', 'The same replacement path accepts Giphy media.', giphy],
+    ['Success · Klipy reply', 'The playable video supplies motion; the WebP thumbnail is only a preview.', klipy],
     ['Success · custom portrait', 'A PNG on the command stays the replacement image; the replied GIF supplies motion.', image],
     ['Edge · new-video request', 'A request to animate uses a starting frame, preserving existing behavior.', frame],
     ['Empty · no source', 'The resolver finds no clip. The command asks for a video or GIF.', { source: empty.sources.clip }],
@@ -80,8 +85,8 @@ const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="v
 <title>GIF input and output showcase</title><style>
 *{box-sizing:border-box}body{margin:0;background:#101317;color:#eef1f5;font:16px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 24px}h1{font-size:clamp(28px,5vw,44px);line-height:1.12;margin:12px 0}h2{font-size:18px;margin:0 0 8px}p{color:#bac3cf;margin:10px 0 18px}.eyebrow{color:#9cdbc8;font-size:13px;letter-spacing:.08em;text-transform:uppercase}.command{padding:18px;background:#1c252c;border-left:3px solid #9cdbc8;overflow-wrap:anywhere}code,pre{font:13px/1.65 ui-monospace,monospace}section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:28px}article{padding:22px;border:1px solid #35414d;border-radius:8px;min-width:0}article p{font-size:14px}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#cce4db}footer{margin-top:28px;color:#99a5b3;font-size:13px}@media(max-width:650px){main{padding:24px 16px}section{grid-template-columns:1fr}article{padding:18px}}
 </style><main><div class="eyebrow">Dave · shared resolver and delivery showcase</div><h1>GIF in. GIF out.</h1>
-<p>Reply to a GIF upload, pasted Discord GIF link or Tenor/Giphy message with:</p><div class="command"><code>$oalgo ${escape(prompt)}</code></div>
-<p>GIF uploads, Discord GIF links and Tenor/Giphy replies receive a looping GIF. These fixtures exercise the real resolver and delivery converter without starting a model render. If conversion fails or cannot fit Discord’s upload limit, the bot attaches the MP4 and explains why.</p>
+<p>Reply to a GIF upload, pasted Discord GIF link or Tenor/Giphy/Klipy message with:</p><div class="command"><code>$oalgo ${escape(prompt)}</code></div>
+<p>GIF uploads, Discord GIF links and Tenor/Giphy/Klipy replies receive a looping GIF. These fixtures exercise the real resolver and delivery converter without starting a model render. If conversion fails or cannot fit Discord’s upload limit, the bot attaches the MP4 and explains why.</p>
 <img src="/demo.gif" width="320" height="180" style="max-width:100%;height:auto" alt="Silent looping test animation converted by the actual GIF delivery code">
 <h2 style="margin-top:32px">Keep source captions above replacement characters</h2>
 <p>Actual CPU compositor output from a synthetic fixture. The blue replacement crosses the caption; the letters remain in front, with the open spaces between and inside them still editable. Fixed captions are detected automatically. Moving, changing, low-confidence or multicolour text may not be detected.</p>
