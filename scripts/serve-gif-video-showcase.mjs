@@ -1,0 +1,59 @@
+// Fixture view of the actual bot input resolver. No Discord posts or GPU jobs.
+import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolveVideoEditRequest, videoSourcesFromMessages, videoReplacementUsesPreset,
+    initialVideoRequestStatus } from '../dist/VideoGeneration.js';
+import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
+import { MEXIMUTT } from '../dist/VideoCharacters.js';
+
+const gif = { url: 'https://cdn.discordapp.com/attachments/1/2/referee.gif', name: 'referee.gif', contentType: 'image/gif', size: 321 };
+const portrait = { ...gif, url: gif.url.replace('.gif', '.png'), name: 'portrait.png', contentType: 'image/png' };
+const message = (content = '', attachments = [], embeds = []) => ({ content, attachments: new Map(attachments.map((value, i) => [i, value])), embeds });
+const prompt = 'replace the referee with meximutt, keeping the same movements, background, and timing';
+const command = message(prompt);
+const noNetwork = async () => { throw new Error('This showcase uses fixtures only.'); };
+const resolve = reply => resolveVideoEditRequest(prompt, command, reply, '', MEXIMUTT, noNetwork);
+const summarize = result => ({ target: result.replacement.target,
+    source: sourceClipDescriptor(result.sources.clip),
+    replacement: videoReplacementUsesPreset(result.replacement.prompt, MEXIMUTT) ? 'Built-in Meximutt portrait' : 'Description' });
+const uploaded = summarize(await resolve(message('', [gif])));
+const linked = summarize(await resolve(message('https://tenor.com/view/referee-gif-123456', [], [{
+    url: 'https://tenor.com/view/referee-gif-123456', video: { url: 'https://media.tenor.com/example/referee.mp4' },
+}])));
+const giphy = summarize(await resolve(message('https://giphy.com/gifs/referee-example', [], [{
+    url: 'https://giphy.com/gifs/referee-example', video: { url: 'https://media.giphy.com/media/example/giphy.mp4' },
+}])));
+const empty = await resolve(message());
+const image = await videoSourcesFromMessages(message('', [portrait]), message('', [gif]), true, async () => null);
+const frame = await videoSourcesFromMessages(message('animate this'), message('', [gif]), false, async () => null);
+let error;
+try { await resolve(message('', [gif, gif])); } catch (caught) { error = caught.message; }
+const cases = [
+    ['Success · uploaded GIF', 'The full animation is selected for replacement.', uploaded],
+    ['Success · Tenor reply', 'A GIF-picker embed supplies its playable clip.', linked],
+    ['Success · Giphy reply', 'The same replacement path accepts Giphy media.', giphy],
+    ['Success · custom portrait', 'A PNG on the command stays the replacement image; the replied GIF supplies motion.', image],
+    ['Edge · new-video request', 'A request to animate uses a starting frame, preserving existing behavior.', frame],
+    ['Empty · no source', 'The resolver finds no clip. The command asks for a video or GIF.', { source: empty.sources.clip }],
+    ['Loading · preparation', 'Actual shared bot status formatter; no job is started in this showcase.', initialVideoRequestStatus('minimax', 'oalgo')],
+    ['Error · multiple GIFs', 'An ambiguous reply asks for one clip.', error],
+];
+const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD']).toString().trim();
+const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no']).toString().trim();
+const sourceHash = createHash('sha256');
+for (const file of ['GifVideo', 'VideoGeneration', 'VideoSourceClip', 'VideoSourceImage']) sourceHash.update(readFileSync(new URL(`../lib/${file}.ts`, import.meta.url)));
+const fingerprint = sourceHash.digest('hex').slice(0, 12);
+const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GIF video input showcase</title><style>
+*{box-sizing:border-box}body{margin:0;background:#101317;color:#eef1f5;font:16px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 24px}h1{font-size:clamp(28px,5vw,44px);line-height:1.12;margin:12px 0}h2{font-size:18px;margin:0 0 8px}p{color:#bac3cf;margin:10px 0 18px}.eyebrow{color:#9cdbc8;font-size:13px;letter-spacing:.08em;text-transform:uppercase}.command{padding:18px;background:#1c252c;border-left:3px solid #9cdbc8;overflow-wrap:anywhere}code,pre{font:13px/1.65 ui-monospace,monospace}section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:28px}article{padding:22px;border:1px solid #35414d;border-radius:8px;min-width:0}article p{font-size:14px}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#cce4db}footer{margin-top:28px;color:#99a5b3;font-size:13px}@media(max-width:650px){main{padding:24px 16px}section{grid-template-columns:1fr}article{padding:18px}}
+</style><main><div class="eyebrow">Dave · shared resolver showcase</div><h1>A GIF can supply the motion.</h1>
+<p>Reply to a GIF upload or a Tenor/Giphy message with:</p><div class="command"><code>$oalgo ${escape(prompt)}</code></div>
+<p>These are real resolver and status outputs from synthetic Discord fixtures. This view does not generate a replacement video. GIF inputs become MP4 before editing; delivery is MP4.</p>
+<section>${cases.map(([title, detail, value]) => `<article><h2>${escape(title)}</h2><p>${escape(detail)}</p><pre>${escape(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre></article>`).join('')}</section>
+<footer>Source revision: ${escape(revision)}${dirty ? ' + working changes' : ''}; input code SHA-256: ${fingerprint}. No playback, credentials, private messages, or live requests. This read-only fixture view has no disabled controls.</footer></main></html>`;
+const server = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(html); });
+server.listen(4347, '0.0.0.0', () => console.log('GIF input showcase: http://localhost:4347'));
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close());

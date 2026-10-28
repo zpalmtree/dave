@@ -54,7 +54,7 @@ export function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | 
     }
     if (value.clip_url !== undefined) {
         const clipUrl = String(value.clip_url);
-        if (!isVideoSourceClipUrl(clipUrl)) throw new Error('The video clip is not a Discord attachment or resolved Twitter/X MP4.');
+        if (!isVideoSourceClipUrl(clipUrl)) throw new Error('The video clip is not a Discord attachment or a supported resolved video/GIF link.');
         return { clip_url: clipUrl, name: String(value.name || 'clip').slice(0, 255) };
     }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
@@ -160,7 +160,7 @@ async function downloadSourceImage(
 // arbitrary URLs through the broker.
 const VIDEO_CLIP_FFMPEG_INPUT_ARGS = [
     '-protocol_whitelist', 'https,tls,tcp',
-    '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm',
+    '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif',
     '-rw_timeout', '30000000',
 ];
 // Middle first; a nearly black frame (a fade or cut) tries the quarter points.
@@ -245,7 +245,7 @@ export async function extractVideoClipSourceImage(
         throw new Error('ffmpeg produced no frame.');
     } catch (error) {
         if (!isDiscordAttachmentUrl(descriptor.clip_url)) {
-            throw new Error('Could not extract a starting frame from the Twitter/X video. Try attaching the video directly.');
+            throw new Error('Could not extract a starting frame from the linked video/GIF. Try attaching it directly.');
         }
         console.warn(`[Video] Could not extract a frame from ${descriptor.name} with ffmpeg; using Discord's first frame.`, error);
         return downloadSourceImage({

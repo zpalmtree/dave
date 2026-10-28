@@ -14,6 +14,7 @@ import { VIDEO_CLIP_EXTENSIONS } from './VideoSourceClip.js';
 import { withTyping } from './Typing.js';
 import { stripTwitterPostLinks, twitterPostFromMessage } from './TwitterVideo.js';
 import { youtubeVideoFromMessage } from './YoutubeVideo.js';
+import { gifVideoFromMessage, stripGifVideoLinks } from './GifVideo.js';
 import { existsSync } from 'fs';
 import { videoWorkflowArchive } from './VideoWorkflow.js';
 import { handleWorkflowDownload, saveWorkflowDownload, workflowDownloadDirectory } from './VideoWorkflowDownload.js';
@@ -347,6 +348,7 @@ function inferredImageMime(name: string | null | undefined): string | null {
 export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachmentSourceImage | VideoStickerSourceImage | null {
     const candidates = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
+        if (mime === 'image/gif' || inferredImageMime(attachment.name) === 'image/gif') return false;
         return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
     });
     if (candidates.length > 1) {
@@ -381,13 +383,16 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
     const clips = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         const extension = attachment.name?.split('.').pop()?.toLowerCase();
-        return Boolean(mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.has(extension)));
+        return Boolean(mime === 'image/gif' || mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.has(extension)));
     });
     if (clips.length > 1) {
         throw new Error('Please attach just one video clip.');
     }
     if (!clips.length) return null;
-    return { clip_url: clips[0].url, name: clips[0].name || 'clip', bytes: clips[0].size };
+    const attachment = clips[0];
+    const name = attachment.contentType?.split(';')[0].toLowerCase() === 'image/gif'
+        && !/\.gif$/i.test(attachment.name || '') ? 'clip.gif' : attachment.name || 'clip';
+    return { clip_url: attachment.url, name, bytes: attachment.size };
 }
 
 export function videoAttachmentImageFromMessages(
@@ -434,6 +439,7 @@ export async function videoSourcesFromMessages(
     referencedMessage: Message | null,
     replacement: boolean,
     resolveLink = twitterPostFromMessage,
+    resolveGif = gifVideoFromMessage,
 ): Promise<{ image: SubmittedVideoAttachmentOrClipSourceImage | null; clip: SubmittedVideoClipSourceImage | null; postText?: string }> {
     let postText = '';
     let image = replacement ? videoAttachmentImageFromMessages(commandMessage, referencedMessage) : null;
@@ -452,7 +458,7 @@ export async function videoSourcesFromMessages(
             if (!replacement) return { image: post.image, clip: null, ...context };
             image ||= post.image;
         }
-        const clip = attachedClip || post?.clip
+        const clip = attachedClip || post?.clip || await resolveGif(message)
             || (replacement ? youtubeVideoFromMessage(message) : null);
         if (clip) return replacement ? { image, clip, ...context } : { image: clip, clip: null, ...context };
     }
@@ -501,8 +507,8 @@ export function videoPromptFromMessages(
     channel?: Message['channel'],
     postText = '',
 ): string {
-    const current = videoPromptPlainText(stripTwitterPostLinks(commandPrompt), channel).trim();
-    let referenced = [videoPromptPlainText(stripTwitterPostLinks(referencedMessage?.content || ''), referencedMessage?.channel).trim(),
+    const current = videoPromptPlainText(stripGifVideoLinks(stripTwitterPostLinks(commandPrompt)), channel).trim();
+    let referenced = [videoPromptPlainText(stripGifVideoLinks(stripTwitterPostLinks(referencedMessage?.content || '')), referencedMessage?.channel).trim(),
         postText ? `Twitter/X post text (source context):\n${videoPromptPlainText(postText, channel)}` : ''].filter(Boolean).join('\n\n');
     const contextHeading = 'Context from the replied message:\n';
     const instructionHeading = '\n\nCurrent instruction (takes priority):\n';
@@ -1274,7 +1280,12 @@ export async function resolveVideoEditRequest(
         if (!links.has(message)) links.set(message, twitterPostFromMessage(message));
         return links.get(message)!;
     };
-    const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink);
+    const gifs = new Map<Parameters<typeof gifVideoFromMessage>[0], ReturnType<typeof gifVideoFromMessage>>();
+    const resolveGif: typeof gifVideoFromMessage = message => {
+        if (!gifs.has(message)) gifs.set(message, gifVideoFromMessage(message));
+        return gifs.get(message)!;
+    };
+    const candidates = await resolveSources(commandMessage, referencedMessage, true, resolveLink, resolveGif);
     if (!replacement && candidates.clip) {
         const intent = await classify({ request: prompt, context: [context, candidates.postText].filter(Boolean).join('\n\n'),
             hasReplacementImage: Boolean(candidates.image), hasPreset: Boolean(preset), presetName: preset?.name }, {
@@ -1291,7 +1302,7 @@ export async function resolveVideoEditRequest(
     if (replacement) return { replacement, sources: candidates };
     // Retain established attachment precedence for requests to make a new video.
     return { replacement: null, sources: { ...(candidates.postText ? { postText: candidates.postText } : {}),
-        ...await resolveSources(commandMessage, referencedMessage, false, resolveLink) } };
+        ...await resolveSources(commandMessage, referencedMessage, false, resolveLink, resolveGif) } };
 }
 
 // Meximutt's guidance under the name the benchmarks and tests know it by.
@@ -1313,7 +1324,7 @@ export async function handleVideoRequest(
     let sourceVideo: SubmittedVideoClipSourceImage | null = null;
     let audioVideo: SubmittedVideoClipSourceImage | null = null;
     let postText = '';
-    prompt = stripTwitterPostLinks(prompt);
+    prompt = stripGifVideoLinks(stripTwitterPostLinks(prompt));
     // A time range such as "1:05-1:50" picks the part of a long song or source video to use.
     const promptWithRange = prompt;
     const extracted = extractVideoSourceRange(prompt);

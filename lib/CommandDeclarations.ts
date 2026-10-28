@@ -147,7 +147,7 @@ function characterVideoCommands(character: VideoCharacter): Command[] {
             primaryCommand: {
                 argsFormat: Args.Combined,
                 implementation: characterVideoHandler(character, 'minimax'),
-                description: `Make a video starring ${character.name}. Attach an image or clip for the scene, or use “replace” to edit someone in a video.`,
+                description: `Make a video starring ${character.name}. Attach an image or clip for the scene, or use “replace” to edit someone in a video or GIF.`,
                 examples: [{ value: `${minimax.variant} ${character.example}` },
                     { value: `${minimax.variant} --image-provider grok reacts to the attached image` },
                     { value: `${minimax.variant} replace the dancer with ${character.name}, keeping the same moves` }],
@@ -192,7 +192,7 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleMinimaxVideo,
-            description: 'Make a video from your idea or image. Add “replace” to edit a subject in a video; otherwise a clip supplies one starting frame.',
+            description: 'Make a video from your idea or image. Add “replace” to edit a subject in a video or GIF; otherwise a clip supplies one starting frame.',
             examples: [{ value: 'minimax an arcade kart race between historical figures' },
                 { value: 'minimax replace the red car with the blue car in the attached image' }],
         },
