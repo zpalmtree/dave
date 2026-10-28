@@ -12,20 +12,28 @@ node scripts/serve-gif-video-showcase.mjs
 The page invokes the real shared Discord source resolver, clip validator,
 replacement-preset selector, preparation-status formatter and GIF delivery
 converter using synthetic fixtures. It creates a silent test animation and
-converts it to a looping GIF. It does not post to Discord or run a model render.
+converts it to a looping GIF. It also invokes the installed desktop compositor
+on synthetic source/replacement footage and shows the actual source, generated
+subject and protected-caption result. Install the caption patch first (see
+`desktop/README.md`); Python, NumPy, SciPy, Pillow, FFmpeg and CPU Tesseract are
+required. `VIDEO_DESKTOP_DIR` can select another audited desktop installation.
+It does not post to Discord or run a model render.
 
 The reviewed [desktop capture](desktop.png) is 1280 CSS pixels wide; the
 [mobile capture](mobile.png) is 390 CSS pixels wide. Both include upload,
 Tenor, Giphy, custom portrait, starting-frame, empty, preparation, GIF delivery,
-upload-limit fallback and error states. There are no interactive controls or
+upload-limit fallback and error states. Caption cases show successful protection,
+no detected caption, and an actual injected OCR failure with its production
+error report. There are no interactive controls or
 disabled states. Neither viewport
 has horizontal overflow. The shared Chrome profile logged an unrelated wallet
 extension injection error; the page itself has no client JavaScript.
 
-Capture source: base revision `0c54805` plus this feature. The concatenated
+Capture source: base revision `7ae0cf3` plus caption protection. The concatenated
 `GifVideo.ts`, `VideoGeneration.ts`, `VideoSourceClip.ts` and
 `VideoSourceImage.ts`, followed by `VideoGifDelivery.ts`, `VideoProtocol.ts`
-and `VideoBroker.ts`, SHA-256 prefix is `4f0179087f89`, also displayed in the
+and `VideoBroker.ts`, then `desktop/video_edit_captions.py` and
+`desktop/video-edit-captions.patch`, SHA-256 prefix is `3e94ae4012bc`, also displayed in the
 captures. This fingerprints the exact input implementation independently of the
 later commit that stores these screenshots.
 
@@ -35,7 +43,9 @@ host validation, reply precedence and broker submission for both commands.
 Public Tenor and Giphy share links downloaded successfully; a direct Tenor GIF
 converted to MP4 with its 1.2-second duration preserved, and its representative
 starting-frame extraction succeeded. These checks do not claim replacement
-render quality; the existing model pipeline is unchanged. GIF-output checks
+render quality; model generation is unchanged. The compositor now preserves
+automatically detected fixed captions, with 68 native Windows desktop tests
+passing (including eight new caption tests). GIF-output checks
 cover infinite looping, retained duration/motion, file-size adaptation, unchanged
 original MP4/audio, cache invalidation after regeneration, explicit MP4 fallback,
 matching Discord filenames and the private workflow button. All 64 targeted

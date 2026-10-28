@@ -1,0 +1,18 @@
+{
+  "video_edit.py": {
+    "before_sha256": "481e1d7364fe1735b4212c1772bf5a7efc566837d909d760702e6ffd20f386f7",
+    "after_sha256": "fbf620bab79155468199b5863a61a44c40cbbe345e1753ad0ba8498df340d40e"
+  },
+  "test_video_edit_composite.py": {
+    "before_sha256": "346ffda2fbd9fb6bb702ff8558e4f85ba722f92071f1f53ecaa72dd452611f29",
+    "after_sha256": "7d73d230f3e9c7ad1fe7649b4f24706d01d831ee341dd5873e6f6da61e159c40"
+  },
+  "video_edit_captions.py": {
+    "before_sha256": null,
+    "after_sha256": "dac7bbc38880a9246cfaab01db8655f44d5301509c3cf8ceb30e6e9707c89da4"
+  },
+  "test_video_edit_captions.py": {
+    "before_sha256": null,
+    "after_sha256": "510dabd8c7a6736c8cccfba202d6392a1adcd1dc1d110a79f1c33c2f8adca9f2"
+  }
+}

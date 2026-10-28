@@ -35,8 +35,24 @@ private workflow download remain intact. Ordinary video inputs and existing jobs
 continue to deliver MP4. Requests for new videos still use a representative
 starting frame, with GIF delivery when that starting frame came from a GIF.
 
-The showcase runs the actual shared source resolver and GIF delivery converter
-with synthetic fixtures; it does not start a GPU render. Run
+The default subject-edit compositor also detects fixed source captions and keeps
+their glyphs and outlines above the replacement. It excludes this protection
+from the final alpha **after** subject-mask growth and feathering, so generated
+feet cannot paint over detected letters. It does not restore whole text boxes:
+letter counters and gaps remain editable. Detection uses source frames and the
+original subject track, excluding clothing text; no caption wording, colour,
+position or ending frame is supplied by the user. It applies to both commands'
+default isolated edits and the shared masked H3/add compositing paths.
+
+This is conservative fixed-caption detection, not a guarantee for animated,
+changing, low-confidence or multicolour text. A disappearing caption releases
+its protection rather than freezing earlier source pixels. OCR or decode errors
+stop that edit and produce a caption report. Timing, audio restoration and GIF
+delivery remain unchanged. Installation and tests are documented in
+`desktop/README.md` under “Source caption protection”.
+
+The showcase runs the actual shared source resolver, GIF delivery converter and
+installed desktop compositor with synthetic fixtures; it does not start a GPU render. Run
 `yarn build && node scripts/serve-gif-video-showcase.mjs`, then open
 <http://localhost:4347>. Captures and revision details live in
 `docs/showcases/gif-video/`.
