@@ -357,3 +357,36 @@ also run with the cached diffusion output and live SAM/compositing/review-eviden
 extraction. No additional image repaint or video generation was needed for that
 comparison. Apply this patch after the isolated-edit patch; verify the latest
 revision with `python3 scripts/apply-video-edit-composite-desktop.py --check`.
+
+## Blurred source fringe and coloured halos
+
+Further human review found a halo after the silhouette update. Comparing the raw
+Viggle output with its composite showed a brown/grey arc introduced by blending:
+the original orangutan's blurred fringe extended beyond its hard SAM mask. A
+tighter feather alone exposed more of it. The `video-edit-halo.patch` therefore
+expands original-subject erasure by 5.5% of the shorter crop dimension, bounded
+to 3–12 source pixels, before applying the outward feather. Generated facial
+detail remains opaque, and alpha is still clipped to the generated crop.
+
+The existing brightness-matching encode pass also fits a local RGB residual from
+clean nearby background outside both silhouettes and the expanded source blur.
+Correction is capped at 38/255 per channel, smoothed within each shot, and faded
+away inside the replacement boundary to preserve facial detail. Insufficient
+background evidence skips correction and clears its history. This addresses
+background tint without requiring another video render or hosted service. The
+constants are conservative defaults validated on this case, not a guarantee for
+every blur width, occlusion or background.
+
+Validation on October 28, 2026: 133 desktop tests passed. New regressions cover
+blur erasure, colour contamination, facial-interior preservation, correction
+bounds, temporal smoothing, absent evidence and invalid crop history. An
+integration run through the production renderer reused the same cached diffusion
+and SAM outputs while running changed compositing and review-frame extraction
+live. Inspection at 0.1, 1, 3 and 4.8 seconds showed a reduced halo, particularly
+around the mouth and chin. No new image/video generation or API review was used
+for this comparison. The full original clip and faithful laughter remain
+unresolved; this is a compositing improvement to the five-second test.
+
+Apply after the composite patch and verify the current desktop revision with
+`python3 scripts/apply-video-edit-halo-desktop.py --check`. The supervised worker
+uses a new edit subprocess per job, so the next edit loads this correction.
