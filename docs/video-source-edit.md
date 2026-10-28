@@ -448,6 +448,35 @@ from repair, protected pixels were restored exactly before encoding, and copied
 audio packet hashes matched the input. Only 67–190 extra boundary pixels per
 frame became eligible for repair compared with the previous candidate.
 
+### Frame-edge seam
+
+The next review isolated a thin light line at the left canvas edge. Comparing
+the source, placed render, composite and repaired frames located it in ProPainter
+output; it was absent from the input composite. The optional repair tool now
+detects repair masks touching any canvas edge. For those segments it runs a second
+local inpainting pass with 32 pixels of reflected image and mask context on each
+side. Model-edge artifacts then fall outside the delivered canvas.
+
+Only masked pixels in a 12-pixel strip at an affected edge use that extra pass:
+the outer four pixels use the contextual prediction, with a smooth transition
+back to the accepted prediction by pixel 12. Protected foreground and the interior
+remain exact before final video encoding. Nonedge repairs skip the extra pass.
+This keeps the approved hair/background result while correcting the frame border;
+it does not crop or enlarge the delivered video. Missing or wrong-sized contextual
+predictions fail the candidate. The additional local pass has no API cost but
+adds inference time for segments whose repair reaches an edge.
+
+All 149 desktop tests passed, including all four borders, partial transitions,
+protected pixels, unchanged interiors, reflected mask alignment, invalid output
+dimensions and skipping unnecessary context. The optional tool is still separate
+from the normal worker.
+The real CLI completed all 121 frames with unchanged dimensions and copied audio
+packet hashes. Comparing lossless assembly against the previous candidate found
+exact matches for protected foreground and the interior beyond the 12-pixel
+border. Across repaired left-edge rows, mean outer-column brightness excess over
+column four fell from 20.16 to -0.44 on the 0–255 RGB scale. Enlarged comparisons
+at the beginning, middle and end no longer show the thin bright line.
+
 Upstream implementations: [MatAnyone 2](https://github.com/pq-yang/MatAnyone2),
 [RVM](https://github.com/PeterL1n/RobustVideoMatting), and
 [ProPainter](https://github.com/sczhou/ProPainter). Only RVM and ProPainter are

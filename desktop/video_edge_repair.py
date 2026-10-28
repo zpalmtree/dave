@@ -52,6 +52,45 @@ def restore_protected(original, prediction, mask):
     return np.where(mask[:, :, None], prediction, original)
 
 
+def touches_frame_edge(mask):
+    return any(np.any(edge) for edge in (mask[0], mask[-1], mask[:, 0], mask[:, -1]))
+
+
+def boundary_context(work):
+    """Reflect image AND repair support, moving model padding outside the canvas."""
+    from PIL import Image
+    masks = sorted((work / 'masks').glob('*.png'))
+    if not any(touches_frame_edge(np.array(Image.open(path)) > 127) for path in masks):
+        return None
+    context = work / 'boundary-context'
+    for name in ['frames', 'masks']:
+        (context / name).mkdir(parents=True)
+        for path in masks:
+            pixels = np.array(Image.open(work / name / path.name))
+            padding = ((32, 32), (32, 32)) + (((0, 0),) if pixels.ndim == 3 else ())
+            Image.fromarray(np.pad(pixels, padding, mode='reflect')).save(context / name / path.name)
+    return context
+
+
+def blend_frame_boundary(prediction, padded_prediction, mask):
+    """Use extra context only in repaired pixels within 12px of an active edge."""
+    h, w = mask.shape
+    if prediction.shape != (h, w, 3) or padded_prediction.shape != (h+64, w+64, 3):
+        raise ValueError('Boundary prediction dimensions changed.')
+    distance = np.full((h, w), 12, dtype=np.float32)
+    for active, edge_distance in [
+            (np.any(mask[:, 0]), np.arange(w)[None, :]),
+            (np.any(mask[:, -1]), np.arange(w-1, -1, -1)[None, :]),
+            (np.any(mask[0]), np.arange(h)[:, None]),
+            (np.any(mask[-1]), np.arange(h-1, -1, -1)[:, None])]:
+        if active:
+            distance = np.minimum(distance, edge_distance)
+    t = np.clip((distance-3)/9, 0, 1)
+    weight = ((1-t*t*(3-2*t))*mask)[:, :, None]
+    context = padded_prediction[32:32+h, 32:32+w]
+    return np.uint8(np.clip(prediction*(1-weight) + context*weight + .5, 0, 255))
+
+
 def inpaint_worker(root, work):
     """Isolate upstream module names from the video worker's Python packages."""
     import runpy
@@ -134,17 +173,27 @@ def run(args):
     torch.cuda.empty_cache()
     subprocess.run([sys.executable, '-s', str(Path(__file__).resolve()), '--inpaint-worker',
                     '--root', str(root), '--work', str(work)], check=True)
+    context = boundary_context(work)
+    if context is not None:
+        subprocess.run([sys.executable, '-s', str(Path(__file__).resolve()), '--inpaint-worker',
+                        '--root', str(root), '--work', str(context)], check=True)
     # Restore every protected pixel from the input composite, using lossless PNG
     # predictions instead of a twice-compressed upstream preview.
     predictions = work / 'inpaint/frames/frames'
     if len(list(predictions.glob('*.png'))) != frames:
         raise ValueError('Inpainting did not return every frame.')
+    context_predictions = context / 'inpaint/frames/frames' if context is not None else None
+    if context_predictions is not None and len(list(context_predictions.glob('*.png'))) != frames:
+        raise ValueError('Boundary inpainting did not return every frame.')
     raw = work / 'candidate.rgb'
     with raw.open('wb') as out:
         for i in range(frames):
             original = np.array(Image.open(work / 'frames' / f'{i:04}.png').convert('RGB'))
             mask = np.array(Image.open(work / 'masks' / f'{i:04}.png')) > 127
             prediction = np.array(Image.open(predictions / f'{i:04}.png').convert('RGB'))
+            if context_predictions is not None:
+                padded = np.array(Image.open(context_predictions / f'{i:04}.png').convert('RGB'))
+                prediction = blend_frame_boundary(prediction, padded, mask)
             out.write(restore_protected(original, prediction, mask).tobytes())
     output.parent.mkdir(parents=True, exist_ok=True)
     edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
@@ -155,7 +204,8 @@ def run(args):
                  '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', str(output))
     raw.unlink()
     (work / 'candidate.json').write_text(json.dumps({'experimental': True, 'frames': frames,
-        'box': args.box, 'output': str(output), 'default_worker_changed': False}, indent=2))
+        'box': args.box, 'output': str(output), 'boundary_context': context is not None,
+        'default_worker_changed': False}, indent=2))
     print('Experimental candidate ready. Visual review is still required:', output)
 
 

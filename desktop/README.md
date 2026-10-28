@@ -515,3 +515,12 @@ All 144 desktop tests pass, including four added boundary regressions. Re-runnin
 the installer upgrades the exact audited first release; `--check` requires the
 current version. Both tool files are validated before either is changed. This is
 still an optional evaluation path, not an automatic worker stage.
+
+Frame-edge repair now uses an additional local pass only when a repair mask
+touches the canvas boundary. A 32-pixel reflected border provides context, and
+only the outer 12 pixels of active repaired edges use its result. The accepted
+interior and protected foreground are restored unchanged before encoding; output
+dimensions and audio are preserved. Intermediate reflected frames and predictions
+are saved under `boundary-context`, and `candidate.json` records whether the pass
+ran. All 149 desktop tests pass. The installer accepts both audited earlier tool
+revisions and refuses unrecognized edits.
