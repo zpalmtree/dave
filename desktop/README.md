@@ -430,3 +430,24 @@ Verify the broker with `yarn test`. With the desktop environment and FFmpeg, run
 The October 28 regression has a passing five-second isolated motion test, but no
 passing full-clip edit. Failed still generation must not be mistaken for a usable
 replacement, and a sampled review cannot guarantee every frame is artifact-free.
+
+## Replacement silhouette and blending update
+
+After installing isolated subject replacement, apply
+`python3 scripts/apply-video-edit-composite-desktop.py --check`, then omit `--check`.
+This incremental patch requires the audited isolated-edit revision and existing
+SciPy/SAM3 nodes (already present on the desktop). It adds local spatial tracking
+of the generated subject, an opaque union of both silhouettes with an outward
+feather, strict crop support, and crop-aware smoothed brightness matching.
+
+Use this newest installer's hash check after applying it; the older isolated
+installer intentionally no longer matches the changed `video_edit.py`. No ComfyUI
+restart is necessary. The worker starts a fresh `video_edit.py` subprocess for
+each edit, so existing worker protocol 8 loads the changes on its next edit without
+interrupting active work. Deploy both server tracks with `--with-broker` as usual.
+
+Run `python -m unittest test_video_edit test_video_edit_isolated
+ test_video_edit_composite test_video_edit_wan test_video_worker` with the desktop
+Python/FFmpeg environment. The 126 tests and a cached-diffusion/live-compositing
+integration check passed. The full original clip remains unresolved; the updated
+five-second comparison addresses visible blending defects, not all motion quality.
