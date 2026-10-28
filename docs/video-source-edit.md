@@ -28,6 +28,30 @@ further requests. Generation is bounded to 270 seconds, leaving time for review
 within the worker's existing request timeout. JPEG replies are converted to PNG so
 subject-effect metadata is retained.
 
+If an isolated Viggle animation cannot be tracked for compositing, the worker
+retries that segment once with the installed Wan-Animate-2 renderer, retaining the
+accepted still, source motion crop, timing and final motion review. The alternate
+renderer can recover a lost propagated track by segmenting each generated frame
+inside the same source-selected spatial box. Mask validity thresholds remain
+unchanged. Missing alternate weights, failed recovery and unrelated service errors
+still stop the edit. This adds local GPU time only when this tracking failure occurs.
+
+The `a3b75a0e` regression lost tracking on the distorted Viggle output. Increasing
+Viggle sampling steps did not restore its turn. Wan followed the turn, but its
+propagated track covered only 32% of frames; spatial redetection recovered 96%.
+An integrated replay of both real diffusion outputs ran the new fallback routing,
+SAM segmentation, compositing, caption protection and review-frame extraction.
+The final result passed a live motion review and exported as a GIF. Some clothing,
+leg and boundary distortion remains; sampled acceptance does not establish perfect
+motion or edge fidelity. No test output was posted to Discord.
+
+Final-frame review now seeks at microsecond precision, just before the desired
+timestamp, so rounding `70/24` to `2.917` cannot skip the last frame. The 74 focused
+desktop tests passed, including actual last-frame decoding, bounded recovery,
+failure propagation and preservation of source selection and the accepted still.
+Install/check with `python3 scripts/apply-video-edit-recovery-desktop.py --check`;
+the supervised worker loads the module in a fresh subprocess on its next edit.
+
 The editor-routing showcase uses the real shared editor and message formatters
 with synthetic provider responses: run `yarn build && node
 scripts/serve-edit-fallback-showcase.mjs` and open <http://localhost:4348>.

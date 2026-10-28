@@ -1,0 +1,308 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -631,7 +631,7 @@
+     return samples
+ 
+ 
+-def validate_tracking_mask(path: Path, target: str, source_frames: int) -> float:
++def validate_tracking_mask(path: Path, target: str, source_frames: int, *, generated: bool = False) -> float:
+     samples = mask_frame_coverages(path)
+     if len(samples) < source_frames:
+         raise RuntimeError("Tracked replacement mask is shorter than the source segment")
+@@ -640,6 +640,12 @@
+     coverage = float(np.mean(samples))
+     tracked_fraction = sum(0.003 <= value <= 0.85 for value in samples) / len(samples)
+     if not 0.003 <= coverage <= 0.85 or tracked_fraction < 0.5:
++        if generated:
++            raise RuntimeError(
++                "Animation was generated, but the replacement could not be isolated for compositing "
++                f"(selected pixels {coverage:.2%}; usable tracking in {tracked_fraction:.0%} of frames). "
++                "No finished video was produced."
++            )
+         raise RuntimeError(
+             f"Could not reliably isolate '{target}' in the source clip "
+             f"(selected pixels {coverage:.2%}; usable tracking in {tracked_fraction:.0%} of frames). "
+@@ -793,8 +799,10 @@
+ 
+ 
+ def rgb_frame(path: Path, seconds: float, width: int, height: int) -> np.ndarray:
++    # Millisecond rounding can seek PAST the final frame (70/24 -> 2.917).
++    # Stay one microsecond before the requested timestamp at FFmpeg's precision.
+     process = subprocess.run(
+-        ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seconds:.3f}",
++        ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{max(0, seconds - 0.000001):.6f}",
+          "-i", str(path), "-frames:v", "1", "-vf", f"scale={width}:{height}",
+          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+         capture_output=True, check=False,
+@@ -1101,11 +1109,20 @@
+                     reject_blank_edit(rendered, mask_input, clip, still, source_frames / 24, width, height)
+                     matched = directory / f"segment-{index:02d}-levels.mp4"
+                     if isolated:
+-                        from video_edit_composite import track_replacement, build_matte
++                        from video_edit_composite import track_replacement, build_matte, ReplacementTrackingError
+                         box = boxes[segment_shots[index - 1]]
+                         replacement_mask = work / f"replacement-mask-{index:02d}.mp4"
+-                        track_replacement(args.server, rendered, mask_input, box, width, height,
+-                                          source_frames, replacement_mask)
++                        renderer = getattr(args, "isolated_renderer", "viggle")
++                        try:
++                            track_replacement(args.server, rendered, mask_input, box, width, height,
++                                              source_frames, replacement_mask, redetect=renderer == "wan")
++                        except ReplacementTrackingError:
++                            if renderer != "viggle":
++                                raise
++                            from video_edit_recovery import recover_animation
++                            rendered = recover_animation(args.server, motion_clip, still, clip, mask_input,
++                                box, width, height, source_frames, work, replacement_mask, index,
++                                getattr(args, "reference_description", None))
+                         matte = work / f"composite-alpha-{index:02d}.mkv"
+                         build_matte(mask_input, replacement_mask, matte, box, width, height, source_frames)
+                         # Fit only background pixels inside the generated crop. The
+--- a/video_edit_composite.py
++++ b/video_edit_composite.py
+@@ -21,7 +21,24 @@
+     return graph
+ 
+ 
+-def track_replacement(server, rendered, source_mask, box, width, height, frames, destination):
++class ReplacementTrackingError(RuntimeError):
++    """Generated-pixel tracking failed, after source selection and animation."""
++
++
++def redetection_graph(clip, box, frames, prefix):
++    """Segment each rendered frame spatially when a propagated track is lost."""
++    from video_edit import node
++    graph = replacement_graph(clip, box, prefix)
++    for name in ('track', 'mask', 'first'):
++        del graph[name]
++    graph['all_frames'] = graph['frames']
++    graph['frames'] = node('ImageFromBatch', image=['all_frames', 0], batch_index=0, length=frames)
++    graph['detect']['inputs']['image'] = ['frames', 0]
++    graph['mask_image']['inputs']['mask'] = ['detect', 0]
++    return graph
++
++
++def track_replacement(server, rendered, source_mask, box, width, height, frames, destination, *, redetect=False):
+     import video_edit as edit
+     from video_edit_isolated import bounds, union_box
+     # A spatial prompt works for humans, animals and objects. Do not ask a second
+@@ -42,8 +59,21 @@
+         import json
+         destination.with_suffix('.json').write_text(json.dumps(graph, indent=2), encoding='utf-8')
+         result = edit.run_graph(server, graph, 'save_mask', 1800)
+-        edit.validate_tracking_mask(result, 'the rendered replacement', frames)
+         destination.write_bytes(result.read_bytes())
++        try:
++            edit.validate_tracking_mask(result, 'the rendered replacement', frames, generated=True)
++        except RuntimeError as error:
++            if not redetect:
++                raise ReplacementTrackingError(str(error)) from error
++            print('Replacement track lost; segmenting each rendered frame within the source-selected box', flush=True)
++            graph = redetection_graph(clip.name, seed, frames, 'video/edits/' + name + '-redetect')
++            destination.with_name(destination.stem + '-redetect.json').write_text(json.dumps(graph, indent=2), encoding='utf-8')
++            result = edit.run_graph(server, graph, 'save_mask', 1800)
++            destination.write_bytes(result.read_bytes())
++            try:
++                edit.validate_tracking_mask(result, 'the rendered replacement', frames, generated=True)
++            except RuntimeError as final_error:
++                raise ReplacementTrackingError(str(final_error)) from final_error
+     finally:
+         clip.unlink(missing_ok=True)
+ 
+--- /dev/null
++++ b/video_edit_recovery.py
+@@ -0,0 +1,48 @@
++"""One local motion-model retry after generated-subject tracking fails.
++
++Source selection, the accepted still and timing are retained. The normal compositor
++and broker motion review still decide whether the resulting video can be delivered.
++"""
++import json
++import uuid
++
++
++def recover_animation(server, motion_clip, still, source_clip, source_mask, box,
++                      width, height, frames, work, replacement_mask, index, description=None):
++    import video_edit as edit
++    import video_edit_wan as wan
++    from video_edit_isolated import place_video
++    from video_edit_composite import track_replacement
++
++    required = [('diffusion_models', wan.MODEL), ('text_encoders', wan.TEXT),
++                ('clip_vision', wan.VISION), ('vae', wan.VAE)]
++    if any(not any((root / category / name).is_file() for root in (edit.COMFY / 'models', edit.FAST_MODELS))
++           for category, name in required):
++        raise RuntimeError('Animation tracking failed and the local alternate renderer is unavailable. No finished video was produced.')
++    audit = work / f'animation-recovery-{index:02d}.json'
++    record = {'primary': 'viggle', 'fallback': 'wan', 'reason': 'replacement_tracking_failed', 'status': 'running'}
++    audit.write_text(json.dumps(record, indent=2), encoding='utf-8')
++    reference = edit.INPUT / ('edit-recovery-' + uuid.uuid4().hex + still.suffix.lower())
++    try:
++        # Use the accepted original still, not an independently generated image.
++        reference.write_bytes(still.read_bytes())
++        _, crop_width, crop_height = edit.clip_details(motion_clip)
++        scale = min(1.0, 416 / max(crop_width, crop_height))
++        wan_width = max(128, round(crop_width * scale / 16) * 16)
++        wan_height = max(128, round(crop_height * scale / 16) * 16)
++        print('Generated replacement tracking failed; retrying this segment once with Wan-Animate-2', flush=True)
++        raw = wan.render(server, motion_clip, reference,
++            description or "The character in the reference image, with the source scene's background.",
++            wan_width, wan_height, frames, work / f'wan-recovery-{index:02d}.mp4', 833969396 + index)
++        placed = work / f'recovered-render-{index:02d}.mp4'
++        place_video(raw, placed, box, width, height)
++        edit.reject_blank_edit(placed, source_mask, source_clip, still, frames / 24, width, height)
++        track_replacement(server, placed, source_mask, box, width, height, frames, replacement_mask, redetect=True)
++        record['status'] = 'tracked'
++        return placed
++    except Exception as error:
++        record.update(status='failed', error=str(error)[:1000])
++        raise
++    finally:
++        reference.unlink(missing_ok=True)
++        audit.write_text(json.dumps(record, indent=2), encoding='utf-8')
+--- /dev/null
++++ b/test_video_edit_recovery.py
+@@ -0,0 +1,143 @@
++import argparse
++from contextlib import ExitStack
++import json
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++
++import numpy as np
++from PIL import Image
++import video_edit as edit
++import video_edit_composite as composite
++import video_edit_recovery as recovery
++import video_edit_wan as wan
++
++
++class RecoveryTests(unittest.TestCase):
++    def test_review_reads_the_actual_final_frame_without_rounding_past_eof(self):
++        with tempfile.TemporaryDirectory() as directory:
++            clip = Path(directory) / 'last.mp4'
++            edit.command('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=black:s=64x64:r=24:d=3',
++                '-vf', "drawbox=x=0:y=0:w=64:h=64:color=red:t=fill:enable='eq(n,70)'",
++                '-frames:v', '71', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(clip))
++            self.assertGreater(edit.rgb_frame(clip, 70 / 24, 64, 64)[:, :, 0].mean(), 230)
++            self.assertLess(edit.rgb_frame(clip, 69 / 24, 64, 64).mean(), 5)
++
++    def test_generated_tracking_error_does_not_blame_the_user_source_description(self):
++        with patch.object(edit, 'mask_frame_coverages', return_value=[0.1] * 3 + [0] * 17):
++            with self.assertRaisesRegex(RuntimeError, 'Animation was generated') as caught:
++                edit.validate_tracking_mask(Path('mask'), 'replacement', 20, generated=True)
++            self.assertNotIn('Describe', str(caught.exception))
++            self.assertIn('15%', str(caught.exception))
++            with self.assertRaisesRegex(RuntimeError, 'visible appearance and position'):
++                edit.validate_tracking_mask(Path('mask'), 'source subject', 20)
++
++    def test_redetection_is_bounded_and_does_not_override_a_second_failed_mask(self):
++        for retry, final_error, expected_calls in [(False, False, 1), (True, False, 2), (True, True, 2)]:
++            with self.subTest(retry=retry, final_error=final_error), tempfile.TemporaryDirectory() as directory:
++                root = Path(directory)
++                rendered = root / 'render.mp4'; rendered.write_bytes(b'video')
++                mask = root / 'mask.mp4'; mask.write_bytes(b'mask')
++                source = np.zeros((64, 96), np.uint8); source[10:60, 5:70] = 255
++                decisions = [RuntimeError('lost'), RuntimeError('still lost') if final_error else .2]
++                with patch.object(edit, 'INPUT', root), \
++                     patch.object(edit, 'decoded_frames', return_value=iter([source.tobytes()])), \
++                     patch.object(edit, 'run_graph', return_value=mask) as run, \
++                     patch.object(edit, 'validate_tracking_mask', side_effect=decisions):
++                    call = lambda: composite.track_replacement('server', rendered, mask, [0, 0, 80, 64],
++                        96, 64, 24, root / 'replacement.mp4', redetect=retry)
++                    if not retry or final_error:
++                        with self.assertRaises(composite.ReplacementTrackingError): call()
++                    else: call()
++                self.assertEqual(run.call_count, expected_calls)
++                if retry:
++                    graph = run.call_args.args[1]
++                    self.assertNotIn('track', graph)
++                    self.assertEqual(graph['frames']['inputs']['length'], 24)
++                    self.assertEqual(graph['detect']['inputs']['image'], ['frames', 0])
++                    self.assertEqual(graph['box']['inputs'], run.call_args_list[0].args[1]['box']['inputs'])
++                self.assertFalse(list(root.glob('edit-matte-*.mp4')))
++
++    def test_recovery_preserves_the_original_still_crop_timing_and_checks_the_new_track(self):
++        for fail in (False, True):
++            with self.subTest(fail=fail), tempfile.TemporaryDirectory() as directory:
++                root = Path(directory)
++                for category, name in [('diffusion_models', wan.MODEL), ('text_encoders', wan.TEXT),
++                                       ('clip_vision', wan.VISION), ('vae', wan.VAE)]:
++                    path = root / 'models' / category / name
++                    path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')
++                still = root / 'still.png'; still.write_bytes(b'accepted-original')
++                seen = []
++                def render(*args):
++                    seen.append(args)
++                    self.assertEqual(args[2].read_bytes(), still.read_bytes())
++                    return root / 'wan.mp4'
++                with patch.object(edit, 'COMFY', root), patch.object(edit, 'FAST_MODELS', root / 'none'), \
++                     patch.object(edit, 'INPUT', root), patch.object(edit, 'clip_details', return_value=(3, 512, 704)), \
++                     patch.object(wan, 'render', side_effect=render), patch('video_edit_isolated.place_video') as place, \
++                     patch.object(edit, 'reject_blank_edit') as blank, \
++                     patch.object(composite, 'track_replacement', side_effect=composite.ReplacementTrackingError('lost') if fail else None) as track:
++                    call = lambda: recovery.recover_animation('server', root / 'motion.mp4', still, root / 'source.mp4',
++                        root / 'mask.mp4', [0, 68, 440, 672], 448, 672, 71, root, root / 'new-mask.mp4', 1)
++                    if fail:
++                        with self.assertRaises(composite.ReplacementTrackingError): call()
++                    else:
++                        self.assertEqual(call(), root / 'recovered-render-01.mp4')
++                    self.assertEqual(len(seen), 1)
++                    self.assertEqual(seen[0][1], root / 'motion.mp4')
++                    self.assertEqual(seen[0][4:7], (304, 416, 71))
++                    self.assertEqual(place.call_args.args[2:], ([0, 68, 440, 672], 448, 672))
++                    blank.assert_called_once()
++                    self.assertTrue(track.call_args.kwargs['redetect'])
++                self.assertEqual(json.loads((root / 'animation-recovery-01.json').read_text())['status'], 'failed' if fail else 'tracked')
++                self.assertFalse(list(root.glob('edit-recovery-*')))
++
++    def test_missing_alternate_models_do_not_start_another_render(self):
++        with tempfile.TemporaryDirectory() as directory, patch.object(wan, 'render') as render, \
++             patch.object(edit, 'COMFY', Path(directory)), patch.object(edit, 'FAST_MODELS', Path(directory)):
++            with self.assertRaisesRegex(RuntimeError, 'alternate renderer is unavailable'):
++                recovery.recover_animation(None, None, None, None, None, None, 0, 0, 0, None, None, 1)
++            render.assert_not_called()
++
++    def test_only_failed_generated_tracking_retries_and_composites_recovered_pixels(self):
++        for renderer, error in [('viggle', None), ('viggle', composite.ReplacementTrackingError('lost')),
++                                ('viggle', RuntimeError('service down')), ('wan', composite.ReplacementTrackingError('lost'))]:
++            with self.subTest(renderer=renderer, error=error), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
++                root = Path(directory); work = root / 'work'; work.mkdir()
++                Image.new('RGB', (160, 96), 'green').save(root / 'still.png')
++                (work / 'mask-01.mp4').write_bytes(b'mask')
++                (work / 'viggle.json').write_text(json.dumps({'duration':1,'width':160,'height':96,
++                    'segments':[[0,24,124]],'isolated':True,'stills':[{'shot':0,'box':[0,0,160,96]}]}))
++                args = argparse.Namespace(viggle_render=work, still=[root/'still.png'], clip=root/'source.mp4',
++                    output=root/'result.mp4', server='server', isolated_renderer=renderer)
++                stack.enter_context(patch.object(edit, 'INPUT', root / 'input'))
++                for name in ('required_viggle_models', 'segment_clip', 'reject_blank_edit', 'match_render_levels'):
++                    stack.enter_context(patch.object(edit, name))
++                stack.enter_context(patch.object(edit, 'audio_codec', return_value=None))
++                stack.enter_context(patch.object(edit, 'still_effects', return_value=''))
++                stack.enter_context(patch.object(edit, 'run_graph', return_value=root/'primary.mp4'))
++                stack.enter_context(patch.object(edit, 'clip_details', return_value=(1, 160, 96)))
++                stack.enter_context(patch.object(wan, 'render', return_value=root/'wan.mp4'))
++                stack.enter_context(patch('video_edit_isolated.crop_video'))
++                stack.enter_context(patch('video_edit_isolated.place_video'))
++                review = stack.enter_context(patch('video_edit_isolated.review_samples'))
++                stack.enter_context(patch.object(composite, 'track_replacement', side_effect=error))
++                stack.enter_context(patch.object(composite, 'build_matte'))
++                recovered = stack.enter_context(patch.object(recovery, 'recover_animation', return_value=root/'recovered.mp4'))
++                levels = stack.enter_context(patch.object(edit, 'match_render_levels'))
++                stack.enter_context(patch.object(edit, 'composite_segment'))
++                stack.enter_context(patch.object(edit, 'join_segments', side_effect=lambda *a: args.output.write_bytes(b'output')))
++                if type(error) is RuntimeError or (renderer == 'wan' and error):
++                    with self.assertRaises(RuntimeError): edit.viggle_render(args)
++                    review.assert_not_called()
++                else:
++                    edit.viggle_render(args)
++                    review.assert_called_once_with(work, args.output)
++                self.assertEqual(recovered.call_count, int(renderer == 'viggle' and isinstance(error, composite.ReplacementTrackingError)))
++                if recovered.called:
++                    self.assertEqual(recovered.call_args.args[2], root/'still.png')
++                    self.assertEqual(levels.call_args.args[1], root/'recovered.mp4')
++
++
++if __name__ == '__main__': unittest.main()
