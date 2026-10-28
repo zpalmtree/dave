@@ -105,6 +105,16 @@ image hash and saved as `video-edit-reference.json` on the broker and
 described after generation. A failed description stops before Character Swap;
 it does not silently render with the old generic prompt.
 
+Reference captions describe stable appearance, excluding the portrait's expression,
+emotion, gaze and mouth state. Caption cache version 2 invalidates older captions
+even when the image hash is unchanged. Job `8a743884` exposed the distinction:
+its caption included furrowed brows and downturned lips while the source man was
+laughing. Removing those conflicting cues does not establish faithful facial
+animation. That job also replaced the man despite a correctly grounded orangutan
+target and lost the source scene after a real cut at frame 122 (about 5.1 seconds).
+Those are renderer failures, not evidence that target grounding or cut detection
+chose incorrectly; this caption correction alone does not fix them.
+
 It applies the primary Character Swap LoRA and the matching
 Ref2VA DMD accelerator to the H3 Ref2VA base model. The source frames enter
 `MiniMaxH3AddGuide` at frame zero; the replacement image enters native reference

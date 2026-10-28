@@ -22,6 +22,7 @@ import { OALGO_VIDEO_PLANNER_GUIDANCE } from '../dist/VideoGeneration.js';
 import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtocol.js';
 import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
 import { VideoStallMonitor } from '../dist/VideoStallAlerts.js';
+import { VIDEO_EDIT_REFERENCE_VERSION } from '../dist/VideoEditReference.js';
 
 test('authenticated owner submissions bypass the personal limit but retain the global cap', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-owner-limit-'));
@@ -1149,6 +1150,18 @@ test(`replace edits ${version >= 5 ? 'offer' : 'omit'} repaint support for versi
                 const recorded = JSON.parse(readFileSync(join(directory, 'results', job.id, 'video-edit-reference.json')));
                 assert.match(recorded.sha256, /^[a-f0-9]{64}$/);
                 assert.match(recorded.description, /red and green/);
+                assert.equal(recorded.version, VIDEO_EDIT_REFERENCE_VERSION);
+                const cachePath = join(directory, 'results', job.id, 'video-edit-reference.json');
+                for (const version of [undefined, VIDEO_EDIT_REFERENCE_VERSION - 1]) {
+                    writeFileSync(cachePath, JSON.stringify({ ...recorded, version,
+                        description: 'a frowning man with furrowed brows and downturned lips' }));
+                    const refreshed = await describe('locally generated reference');
+                    assert.equal(refreshed.status, 200);
+                    assert.doesNotMatch((await refreshed.json()).description, /frowning|furrowed|downturned/);
+                }
+                assert.equal(descriptions.length, 4, 'Old expression-bearing captions must be regenerated.');
+                assert.equal((await describe('locally generated reference')).status, 200);
+                assert.equal(descriptions.length, 4, 'The current caption remains cached.');
             }
 
             assert.equal(lease.job.video_edit_subjects, 'primary');
