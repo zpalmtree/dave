@@ -33,7 +33,7 @@ with synthetic provider responses: run `yarn build && node
 scripts/serve-edit-fallback-showcase.mjs` and open <http://localhost:4348>.
 Desktop/mobile captures and verification notes are in `docs/showcases/edit-fallback/`.
 
-GIF attachments and Tenor/Giphy share links also work, including a reply to a
+GIF attachments and Tenor/Giphy/Klipy share links also work, including a reply to a
 Discord GIF-picker message. Reply with:
 
 ```text
@@ -41,14 +41,14 @@ $oalgo replace the referee with meximutt
 ```
 
 GIFs are clip sources, not replacement portraits. You can attach a separate PNG,
-JPEG or WebP replacement image to `$minimax`. Tenor/Giphy embeds use their playable
+JPEG or WebP replacement image to `$minimax`. Tenor/Giphy/Klipy embeds use their playable
 media; if the embed is missing, the bot reads the public share page's media metadata.
 Only the providers' media CDNs are accepted, with bounded downloads and no redirects.
 Unavailable links ask for a direct GIF upload. GIF attachments are converted to
 H.264 MP4 on the broker before grounding and dispatch, keeping one full animation
 cycle (not the GIF's infinite loop), padding odd dimensions when needed. The usual
 half-second minimum, 100 MiB input limit and source time-range rules apply.
-GIF inputs, including Tenor/Giphy MP4 renditions, now receive a looping GIF.
+GIF inputs, including Tenor/Giphy/Klipy MP4 renditions, now receive a looping GIF.
 The broker persists that choice before normalizing the source, so retries and
 restarts retain it. Rendering remains MP4; delivery converts with an adaptive
 palette and reduces resolution/frame rate if needed to fit Discord's upload

@@ -22,7 +22,7 @@ It does not post to Discord or run a model render.
 The reviewed [desktop capture](desktop.png) is 1280 CSS pixels wide; the
 [mobile capture](mobile.png) is 390 CSS pixels wide. Both include upload,
 pasted Discord GIF links with signed thumbnails, missing embeds, ambiguous links,
-Tenor, Giphy, custom portrait, starting-frame, empty, preparation, GIF delivery,
+Tenor, Giphy, Klipy, custom portrait, starting-frame, empty, preparation, GIF delivery,
 upload-limit fallback and error states. Caption cases show successful protection,
 no detected caption, and an actual injected OCR failure with its production
 error report. There are no interactive controls or
@@ -30,11 +30,11 @@ disabled states. Neither viewport
 has horizontal overflow. The shared Chrome profile logged an unrelated wallet
 extension injection error; the page itself has no client JavaScript.
 
-Capture source: base revision `77e70ad` plus Discord GIF link support. The concatenated
+Capture source: base revision `647a807` plus Klipy link support. The concatenated
 `GifVideo.ts`, `VideoGeneration.ts`, `VideoSourceClip.ts` and
 `VideoSourceImage.ts`, followed by `VideoGifDelivery.ts`, `VideoProtocol.ts`
 and `VideoBroker.ts`, then `desktop/video_edit_captions.py` and
-`desktop/video-edit-captions.patch`, SHA-256 prefix is `fd01bbb35403`, also displayed in the
+`desktop/video-edit-captions.patch`, SHA-256 prefix is `7490cd6f0740`, also displayed in the
 captures. This fingerprints the exact input implementation independently of the
 later commit that stores these screenshots.
 
@@ -62,3 +62,11 @@ its tiny GIF preview omits it. Source selection is unchanged. The local repair
 holds the edited clip's last clean frame for two final frames (56–57, zero-based)
 at 24 fps, retaining all 58 frames, and also exports a GIF. This is a repair of
 that specific delivered clip, not a global rule that discards video endings.
+
+Klipy validation: the exact reported Discord reply resolves its `static.klipy.com`
+MP4, downloads 308,467 bytes and probes as a one-second clip. GIF output intent is
+retained. The build and all 13 GIF input/delivery tests pass, covering reply and
+embed-only resolution, WebP thumbnail exclusion, direct media, URL restrictions,
+ambiguous sources and attachment precedence. Public share-page requests from this
+environment encountered a bot challenge; the observed Discord embed path needs
+no share-page fetch. No Discord message or model render was started by this check.

@@ -46,7 +46,7 @@ export function isVideoSourceClipUrl(value: string): boolean {
 export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object' || !isVideoSourceClipUrl(String(value.clip_url || ''))) {
-        throw new Error('The source video must be a Discord attachment, a resolved Twitter/X or Tenor/Giphy clip, or a YouTube video link.');
+        throw new Error('The source video must be a Discord attachment, a resolved Twitter/X or Tenor/Giphy/Klipy clip, or a YouTube video link.');
     }
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();

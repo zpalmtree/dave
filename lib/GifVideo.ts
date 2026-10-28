@@ -5,6 +5,7 @@ const TEXT_URLS = /https?:\/\/[^\s<>"`]+/gi;
 const MEDIA_HOSTS = new Set([
     'media.tenor.com', 'media1.tenor.com', 'c.tenor.com',
     'media.giphy.com', 'i.giphy.com',
+    'static.klipy.com',
     ...[0, 1, 2, 3, 4].map(index => `media${index}.giphy.com`),
 ]);
 
@@ -42,6 +43,9 @@ function gifPage(value: string): string | null {
     }
     if (host === 'giphy.com' && /^\/(?:gifs|stickers)\/[\w-]+\/?$/.test(url.pathname)) {
         return `https://giphy.com${url.pathname.replace(/\/$/, '')}`;
+    }
+    if (host === 'klipy.com' && /^\/gifs\/[\w-]+\/?$/.test(url.pathname)) {
+        return `https://klipy.com${url.pathname.replace(/\/$/, '')}`;
     }
     return null;
 }
@@ -117,6 +121,6 @@ export async function gifVideoFromMessage(message: GifMessage, fetcher: typeof f
         if (result) return result.source;
         throw new Error('No playable media');
     } catch {
-        throw new Error('Could not load that Tenor/Giphy GIF. Try again or upload the GIF directly.');
+        throw new Error('Could not load that GIF link. Try again or upload the GIF directly.');
     } finally { clearTimeout(timeout); }
 }
