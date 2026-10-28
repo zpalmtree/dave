@@ -493,7 +493,7 @@ existing desktop Torch, Torchvision, NumPy, SciPy, Pillow and PyYAML environment
 ProPainter uses the upstream S-Lab non-commercial license; RVM uses GPL-3.0.
 See the upstream licenses linked in `video-edge-repair-models.json` before reuse.
 
-Run a single normalized segment (at most 124 frames) through GPUq, supplying its
+Run a single normalized segment (at most 360 frames / 15 seconds) through GPUq, supplying its
 current composite, raw generated crop, source mask, replacement SAM mask and crop
 coordinates. Always use a new work directory and output file:
 
@@ -524,3 +524,22 @@ dimensions and audio are preserved. Intermediate reflected frames and prediction
 are saved under `boundary-context`, and `candidate.json` records whether the pass
 ran. All 149 desktop tests pass. The installer accepts both audited earlier tool
 revisions and refuses unrecognized edits.
+
+Repair retains recurrent matting state across a complete shot segment, including
+shots longer than a 124-frame motion-generation window. The bounded limit is 360
+frames, matching the edit planner's 15-second segment limit. ProPainter retains
+its existing 40-frame processing windows. The frame-count regression covers the
+131-frame close-up from the full-video regeneration as well as the upper bound.
+Internal segments can also be shorter than the 0.5-second upload minimum. For a
+one-frame shot, the inpainting model receives a duplicated frame/mask as flow
+context; only one output frame is retained. This does not change the source upload
+rules. All 151 desktop tests pass; one-frame and 131-frame real renders completed.
+
+Use `video_edge_repair.assemble_segments(segments, source, destination, work)` to
+join repaired video segments with the source soundtrack. It rebuilds 24-fps
+timestamps from decoded frame order, avoiding overlapping DTS after one-frame
+cuts, and copies AAC audio. Assembly encodes video once; `destination` must be new.
+The 152-test suite includes exact frame-order and timestamp checks for this case.
+`indexed_frames(path, indices, width, height)` extracts exact review frames rather
+than seeking to rounded milliseconds, which can accidentally sample the next shot
+at a cut boundary. Use it for matched source/output evidence after assembly.
