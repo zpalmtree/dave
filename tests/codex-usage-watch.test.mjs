@@ -38,6 +38,43 @@ test('normal rollover, near-boundary rollover, noise, and unconfirmed transient 
     assert.equal(sequence(sample(0), sample(60, 0), sample(120, 60)).events.length, 0);
 });
 
+test('early reset confirms when a fresh window deadline advances before anchoring', () => {
+    const before = sample(0, 99);
+    const first = sample(60, 0);
+    first.windows.primary.resetsAt = first.at + 7 * 86400;
+    const current = sample(120, 1);
+    current.windows.primary.resetsAt = first.windows.primary.resetsAt + 35;
+    const pending = sequence(before, first);
+    assert.deepEqual(pending.candidate.types, ['regular']);
+    const state = advanceUsageWatch(JSON.parse(JSON.stringify(pending)), current);
+    assert.equal(state.events.length, 1);
+    assert.equal(state.events[0].reset_type, 'regular');
+    assert.equal(state.events[0].announced_at, new Date(first.at * 1000).toISOString());
+    assert.equal(advanceUsageWatch(state, { ...current, at: at + 180 }).events.length, 1);
+});
+
+test('deadline movement is bounded by elapsed time and keeps rollover/redemption protections', () => {
+    for (const shift of [-1, 61, 86400]) {
+        const current = sample(120, 1);
+        current.windows.primary.resetsAt += shift;
+        assert.equal(sequence(sample(0), sample(60, 0), current).events.length, 0);
+    }
+    const first = sample(60, 0);
+    const current = sample(120, 1);
+    current.windows.primary.resetsAt += 60;
+    assert.equal(sequence(sample(0), first, current).events.length, 1);
+    const rollover = sample(0);
+    rollover.windows.primary.resetsAt = at + 180;
+    assert.equal(sequence(rollover, first, current).events.length, 0);
+    assert.equal(sequence(sample(0, 60, 1), first, current).events.length, 0);
+    const unknown = sample(0); unknown.credits = null;
+    assert.equal(sequence(unknown, first, current).events.length, 0);
+    // Account reads have fractional timestamps; reset deadlines have integer seconds.
+    first.at += 0.8;
+    current.at += 0.1;
+    assert.equal(sequence(sample(0), first, current).events.length, 1);
+});
+
 test('account, plan, window changes and stale samples rebaseline without alerts', () => {
     for (const mutate of [s => { s.account = 'other'; }, s => { s.plan = 'plus'; },
         s => { s.windows.primary.minutes = 300; }, s => { s.at += 600; }]) {
