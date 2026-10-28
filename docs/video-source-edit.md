@@ -14,7 +14,7 @@ GIF attachments and Tenor/Giphy share links also work, including a reply to a
 Discord GIF-picker message. Reply with:
 
 ```text
-$oalgo replace the referee with meximutt, keeping the same movements, background, and timing
+$oalgo replace the referee with meximutt
 ```
 
 GIFs are clip sources, not replacement portraits. You can attach a separate PNG,
@@ -24,11 +24,19 @@ Only the providers' media CDNs are accepted, with bounded downloads and no redir
 Unavailable links ask for a direct GIF upload. GIF attachments are converted to
 H.264 MP4 on the broker before grounding and dispatch, keeping one full animation
 cycle (not the GIF's infinite loop), padding odd dimensions when needed. The usual
-half-second minimum, 100 MiB input limit and source time-range rules apply. Output
-is an MP4. Requests for new videos still use a representative starting frame.
+half-second minimum, 100 MiB input limit and source time-range rules apply.
+GIF inputs, including Tenor/Giphy MP4 renditions, now receive a looping GIF.
+The broker persists that choice before normalizing the source, so retries and
+restarts retain it. Rendering remains MP4; delivery converts with an adaptive
+palette and reduces resolution/frame rate if needed to fit Discord's upload
+limit, without shortening the animation. If GIF conversion fails or remains too
+large, the bot sends the MP4 with an explanation. The original MP4, audio and
+private workflow download remain intact. Ordinary video inputs and existing jobs
+continue to deliver MP4. Requests for new videos still use a representative
+starting frame, with GIF delivery when that starting frame came from a GIF.
 
-The input-routing showcase runs the actual shared source resolver with public,
-synthetic fixtures; it does not start a GPU render. Run
+The showcase runs the actual shared source resolver and GIF delivery converter
+with synthetic fixtures; it does not start a GPU render. Run
 `yarn build && node scripts/serve-gif-video-showcase.mjs`, then open
 <http://localhost:4347>. Captures and revision details live in
 `docs/showcases/gif-video/`.
