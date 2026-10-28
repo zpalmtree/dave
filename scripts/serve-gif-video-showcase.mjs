@@ -9,6 +9,8 @@ import { resolveVideoEditRequest, videoSourcesFromMessages, videoReplacementUses
     initialVideoRequestStatus, completedVideoAttachmentName } from '../dist/VideoGeneration.js';
 import { prepareVideoDelivery, videoOutputFormatForSources } from '../dist/VideoGifDelivery.js';
 import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
+import { Response } from 'node-fetch';
+import { publicVideoFromMessage } from '../dist/PublicVideo.js';
 import { MEXIMUTT } from '../dist/VideoCharacters.js';
 
 const gif = { url: 'https://cdn.discordapp.com/attachments/1/2/referee.gif', name: 'referee.gif', contentType: 'image/gif', size: 321 };
@@ -39,6 +41,17 @@ const klipy = summarize(await resolve(message('https://klipy.com/gifs/referee-ex
     url: 'https://klipy.com/gifs/referee-example', video: { url: 'https://static.klipy.com/ii/example/referee.mp4' },
     thumbnail: { url: 'https://static.klipy.com/ii/example/referee.webp' },
 }])));
+const publicDirect = summarize(await resolve(message('https://video.example.org/clip.gif')));
+const publicEmbed = summarize(await resolve(message('https://example.org/watch', [], [{
+    url: 'https://example.org/watch', video: {url: 'https://cdn.example.net/clip.mp4'},
+}])));
+const publicPage = await publicVideoFromMessage(message('https://example.org/share'), async () => new Response(
+    '<video controls><source src="/clip.webm" type="video/webm"></video>',
+    {url: 'https://example.org/share', headers: {'content-type': 'text/html'}}));
+const scriptPage = await publicVideoFromMessage(message('https://example.org/player'), async () => new Response(
+    '<script>loadPlayer()</script>', {headers: {'content-type': 'text/html'}}));
+let privateLink;
+try { await resolve(message('http://127.0.0.1/private.mp4')); } catch (caught) { privateLink = caught.message; }
 const empty = await resolve(message());
 const image = await videoSourcesFromMessages(message('', [portrait]), message('', [gif]), true, async () => null);
 const frame = await videoSourcesFromMessages(message('animate this'), message('', [gif]), false, async () => null);
@@ -54,6 +67,11 @@ const deliveryJob = { id: 'demo1234-fixture', model: 'minimax', output_format: '
 const delivered = await prepareVideoDelivery(deliveryJob);
 const fallback = await prepareVideoDelivery({ ...deliveryJob, delivery_limit_bytes: 1 });
 const cases = [
+    ['Success · any public media host', 'A direct GIF URL needs no provider registration.', publicDirect],
+    ['Success · public video embed', 'A page and its video can use different public hosts.', publicEmbed],
+    ['Success · public HTML video page', 'The general resolver extracts the relative HTML video source.', publicPage],
+    ['Empty · script-only player', 'Pages requiring login or JavaScript need an extractor or a direct media link.', {source: scriptPage}],
+    ['Error · private address', 'Internal addresses are rejected; downloads also check DNS and every redirect.', privateLink],
     ['Success · pasted Discord GIF', 'A Discord image embed supplies the signed GIF download URL, even with no uploaded attachment.', discordLink],
     ['Edge · Discord link without embed', 'The direct GIF URL remains usable when Discord provides no embed.', discordUnsigned],
     ['Error · multiple GIF links', 'Different attachment links need an explicit choice of source.', multipleLinks],
@@ -78,14 +96,14 @@ const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;
 const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD']).toString().trim();
 const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no']).toString().trim();
 const sourceHash = createHash('sha256');
-for (const file of ['GifVideo', 'VideoGeneration', 'VideoSourceClip', 'VideoSourceImage', 'VideoGifDelivery', 'VideoProtocol', 'VideoBroker']) sourceHash.update(readFileSync(new URL(`../lib/${file}.ts`, import.meta.url)));
+for (const file of ['PublicMedia', 'PublicVideo', 'GifVideo', 'VideoGeneration', 'VideoSourceClip', 'VideoSourceImage', 'VideoGifDelivery', 'VideoProtocol', 'VideoBroker']) sourceHash.update(readFileSync(new URL(`../lib/${file}.ts`, import.meta.url)));
 for (const file of ['video_edit_captions.py', 'video-edit-captions.patch']) sourceHash.update(readFileSync(new URL(`../desktop/${file}`, import.meta.url)));
 const fingerprint = sourceHash.digest('hex').slice(0, 12);
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>GIF input and output showcase</title><style>
 *{box-sizing:border-box}body{margin:0;background:#101317;color:#eef1f5;font:16px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 24px}h1{font-size:clamp(28px,5vw,44px);line-height:1.12;margin:12px 0}h2{font-size:18px;margin:0 0 8px}p{color:#bac3cf;margin:10px 0 18px}.eyebrow{color:#9cdbc8;font-size:13px;letter-spacing:.08em;text-transform:uppercase}.command{padding:18px;background:#1c252c;border-left:3px solid #9cdbc8;overflow-wrap:anywhere}code,pre{font:13px/1.65 ui-monospace,monospace}section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:28px}article{padding:22px;border:1px solid #35414d;border-radius:8px;min-width:0}article p{font-size:14px}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#cce4db}footer{margin-top:28px;color:#99a5b3;font-size:13px}@media(max-width:650px){main{padding:24px 16px}section{grid-template-columns:1fr}article{padding:18px}}
-</style><main><div class="eyebrow">Dave · shared resolver and delivery showcase</div><h1>GIF in. GIF out.</h1>
-<p>Reply to a GIF upload, pasted Discord GIF link or Tenor/Giphy/Klipy message with:</p><div class="command"><code>$oalgo ${escape(prompt)}</code></div>
+</style><main><div class="eyebrow">Dave · shared resolver and delivery showcase</div><h1>Public video links. GIF replies.</h1>
+<p>Reply to a video/GIF upload, public media link or video page with:</p><div class="command"><code>$oalgo ${escape(prompt)}</code></div>
 <p>GIF uploads, Discord GIF links and Tenor/Giphy/Klipy replies receive a looping GIF. These fixtures exercise the real resolver and delivery converter without starting a model render. If conversion fails or cannot fit Discord’s upload limit, the bot attaches the MP4 and explains why.</p>
 <img src="/demo.gif" width="320" height="180" style="max-width:100%;height:auto" alt="Silent looping test animation converted by the actual GIF delivery code">
 <h2 style="margin-top:32px">Keep source captions above replacement characters</h2>

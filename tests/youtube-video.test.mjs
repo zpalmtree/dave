@@ -34,7 +34,8 @@ test('YouTube videos and Shorts resolve to one canonical watch link', () => {
     assert.equal(isYoutubeVideoUrl(`${canonical}&list=abc`), false);
     assert.deepEqual(sourceClipDescriptor({ clip_url: canonical, name: 'youtube-GG1d35jpizo.mp4' }),
         { clip_url: canonical, name: 'youtube-GG1d35jpizo.mp4' });
-    assert.throws(() => sourceClipDescriptor({ clip_url: 'https://www.youtube.com/shorts/GG1d35jpizo', name: 'clip.mp4' }), /YouTube video link/);
+    assert.equal(sourceClipDescriptor({ clip_url: 'https://www.youtube.com/shorts/GG1d35jpizo', name: 'clip.mp4' }).clip_url,
+        'https://www.youtube.com/shorts/GG1d35jpizo');
 });
 
 test('a YouTube link is an edit source only: other requests keep it for the song router', async () => {

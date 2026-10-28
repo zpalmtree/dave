@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -8,7 +8,7 @@ import fetch from 'node-fetch';
 
 import { VIDEO_SOURCE_IMAGE_MAX_BYTES, VIDEO_SOURCE_IMAGE_MIME_TYPES } from './VideoProtocol.js';
 import { VideoStickerSourceImage, videoStickerSourceImage, videoStickerFrameUrl } from './VideoSticker.js';
-import { isVideoSourceClipUrl } from './VideoSourceClip.js';
+import { isVideoSourceClipUrl, storeVideoSourceClip, LOCAL_VIDEO_INPUT_ARGS } from './VideoSourceClip.js';
 import { isTwitterImageUrl } from './TwitterVideo.js';
 import { imageExtension } from './VideoImageMime.js';
 import type { VideoKeyframeResult } from './VideoKeyframeProvider.js';
@@ -54,8 +54,8 @@ export function sourceImageDescriptor(value: any): VideoSourceImageDescriptor | 
     }
     if (value.clip_url !== undefined) {
         const clipUrl = String(value.clip_url);
-        if (!isVideoSourceClipUrl(clipUrl)) throw new Error('The video clip is not a Discord attachment or a supported resolved video/GIF link.');
-        return { clip_url: clipUrl, name: String(value.name || 'clip').slice(0, 255) };
+        if (!isVideoSourceClipUrl(clipUrl)) throw new Error('The video clip must use a public HTTP or HTTPS media link.');
+        return { clip_url: clipUrl, name: String(value.name || 'clip.mp4').slice(0, 255) };
     }
     const mimeType = String(value.mime_type || '').split(';')[0].toLowerCase();
     const bytes = value.bytes === undefined && isTwitterImageUrl(String(value.url || ''))
@@ -155,14 +155,8 @@ async function downloadSourceImage(
     }
 }
 
-// Discord attachments are untrusted media, so ffmpeg may only read HTTPS and
-// may only demux plain video containers; playlists could otherwise fetch
-// arbitrary URLs through the broker.
-const VIDEO_CLIP_FFMPEG_INPUT_ARGS = [
-    '-protocol_whitelist', 'https,tls,tcp',
-    '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif',
-    '-rw_timeout', '30000000',
-];
+// Decode bounded local downloads only; embedded playlists cannot access the network.
+const VIDEO_CLIP_FFMPEG_INPUT_ARGS = LOCAL_VIDEO_INPUT_ARGS;
 // Middle first; a nearly black frame (a fade or cut) tries the quarter points.
 const VIDEO_CLIP_FRAME_POSITIONS = [0.5, 0.25, 0.75];
 const VIDEO_CLIP_BLACK_FRAME_LUMA = 20;
@@ -211,21 +205,18 @@ async function extractVideoClipFrame(
 export async function extractVideoClipSourceImage(
     descriptor: VideoClipSourceImageDescriptor,
     directory: string,
+    fetcher?: typeof fetch,
 ): Promise<StoredVideoSourceImage> {
     mkdirSync(directory, { recursive: true });
+    const temporary = mkdtempSync(join(directory, 'clip-input-'));
     try {
-        const duration = Number((await runVideoTool('ffprobe', [
-            '-v', 'error',
-            ...VIDEO_CLIP_FFMPEG_INPUT_ARGS,
-            '-show_entries', 'format=duration',
-            '-of', 'default=nw=1:nk=1',
-            descriptor.clip_url,
-        ])).trim());
+        const local = await storeVideoSourceClip(descriptor, temporary, null, undefined, { fullSource: true, fetcher });
+        const duration = local.duration;
         const destination = join(directory, 'source.png');
         for (const position of VIDEO_CLIP_FRAME_POSITIONS) {
             const seconds = Number.isFinite(duration) && duration > 0 ? duration * position : 0;
             rmSync(destination, { force: true });
-            const luma = await extractVideoClipFrame(descriptor.clip_url, seconds, destination, []);
+            const luma = await extractVideoClipFrame(local.path, seconds, destination, []);
             if (!existsSync(destination)) continue;
             if (luma !== null && luma < VIDEO_CLIP_BLACK_FRAME_LUMA && position !== VIDEO_CLIP_FRAME_POSITIONS.at(-1)) {
                 continue;
@@ -233,7 +224,7 @@ export async function extractVideoClipSourceImage(
             let stored: StoredVideoSourceImage = { path: destination, mimeType: 'image/png', bytes: statSync(destination).size };
             if (stored.bytes > VIDEO_SOURCE_IMAGE_MAX_BYTES) {
                 const jpeg = join(directory, 'source.jpg');
-                await extractVideoClipFrame(descriptor.clip_url, seconds, jpeg, ['-q:v', '2']);
+                await extractVideoClipFrame(local.path, seconds, jpeg, ['-q:v', '2']);
                 rmSync(destination, { force: true });
                 stored = { path: jpeg, mimeType: 'image/jpeg', bytes: statSync(jpeg).size };
             }
@@ -254,6 +245,8 @@ export async function extractVideoClipSourceImage(
             bytes: 1,
             name: descriptor.name,
         }, directory);
+    } finally {
+        rmSync(temporary, { recursive: true, force: true });
     }
 }
 

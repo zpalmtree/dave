@@ -1,4 +1,5 @@
-import fetch from 'node-fetch';
+import { RequestInit, Response } from 'node-fetch';
+import { fetchPublicMedia, publicMediaUrl, discardMediaResponse } from './PublicMedia.js';
 import type { SubmittedVideoSourceClip } from './VideoSourceClip.js';
 
 const TEXT_URLS = /https?:\/\/[^\s<>"`]+/gi;
@@ -21,7 +22,7 @@ function isDiscordGif(url: URL): boolean {
         && /^\/attachments\/\d+\/\d+\/[^/]+\.gif$/i.test(url.pathname);
 }
 
-/** Restrict downloads to media files on the providers' actual CDNs. */
+/** Recognize known GIF providers to preserve GIF output intent. Other hosts use PublicVideo. */
 export function isGifVideoUrl(value: string): boolean {
     const url = safeUrl(value);
     return Boolean(url && (isDiscordGif(url)
@@ -50,9 +51,13 @@ function gifPage(value: string): string | null {
     return null;
 }
 
+export function isGifPageUrl(value: string): boolean {
+    return Boolean(gifPage(value));
+}
+
 function clip(value: string): SubmittedVideoSourceClip | null {
-    if (!isGifVideoUrl(value)) return null;
-    const url = safeUrl(value)!;
+    const url = publicMediaUrl(value);
+    if (!url || !/\.(?:gif|mp4|webm)$/i.test(url.pathname)) return null;
     return { clip_url: url.toString(), name: url.pathname.split('/').pop()! };
 }
 
@@ -70,7 +75,7 @@ type GifMessage = { content?: string; embeds?: ReadonlyArray<{
 }> };
 
 /** Prefer Discord's playable embed; fetch public share-page metadata when it is absent. */
-export async function gifVideoFromMessage(message: GifMessage, fetcher: typeof fetch = fetch): Promise<SubmittedVideoSourceClip | null> {
+export async function gifVideoFromMessage(message: GifMessage, fetcher: (url: string, options?: RequestInit) => Promise<Response> = fetchPublicMedia): Promise<SubmittedVideoSourceClip | null> {
     const content = (message.content || '').match(TEXT_URLS) || [];
     const candidates = content.filter(value => gifPage(value) || isGifVideoUrl(value));
     const embeds = message.embeds || [];
@@ -98,13 +103,13 @@ export async function gifVideoFromMessage(message: GifMessage, fetcher: typeof f
     for (const embed of embeds) {
         if (gifPage(embed.url || '') !== link) continue;
         const media = clip(embed.video?.url || '') || clip(embed.image?.url || '');
-        if (media) return media;
+        if (media) return { ...media, source_page_url: link };
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
         const response = await fetcher(link, { signal: controller.signal, redirect: 'error', size: 3 * 1024 * 1024 });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) { discardMediaResponse(response); throw new Error(`HTTP ${response.status}`); }
         const html = await response.text();
         const media: Array<{ property: string; source: SubmittedVideoSourceClip }> = [];
         for (const tag of html.match(/<meta\b[^>]*>/gi) || []) {
@@ -118,7 +123,7 @@ export async function gifVideoFromMessage(message: GifMessage, fetcher: typeof f
             if (source) media.push({ property, source });
         }
         const result = media.find(value => value.property.startsWith('og:video')) || media[0];
-        if (result) return result.source;
+        if (result) return { ...result.source, source_page_url: link };
         throw new Error('No playable media');
     } catch {
         throw new Error('Could not load that GIF link. Try again or upload the GIF directly.');

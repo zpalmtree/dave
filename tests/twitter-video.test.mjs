@@ -73,7 +73,9 @@ test('only recognized post hosts trigger lookup and only Twitter CDN MP4s are ac
     assert.equal(isTwitterVideoUrl(mp4), true);
     for (const url of ['http://video.twimg.com/clip.mp4', 'https://video.twimg.com.evil.test/clip.mp4', 'https://video.twimg.com:444/clip.mp4', 'https://user@video.twimg.com/clip.mp4', 'https://video.twimg.com/clip.m3u8', 'file:///tmp/clip.mp4']) {
         assert.equal(isTwitterVideoUrl(url), false);
-        assert.throws(() => sourceClipDescriptor({ clip_url: url, name: 'clip.mp4' }), /Discord attachment/);
+        if (/user@|:444|^file:/.test(url)) {
+            assert.throws(() => sourceClipDescriptor({ clip_url: url, name: 'clip.mp4' }), /public HTTP/);
+        } else assert.equal(sourceClipDescriptor({ clip_url: url, name: 'clip.mp4' }).clip_url, url);
     }
     assert.deepEqual(sourceClipDescriptor({ clip_url: mp4, name: 'clip.mp4' }), { clip_url: mp4, name: 'clip.mp4' });
     assert.throws(() => sourceClipDescriptor({ clip_url: mp4, name: 'clip.mp4', bytes: 101 * 1024 * 1024 }), /100 MiB/);

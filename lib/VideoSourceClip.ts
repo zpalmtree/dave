@@ -5,9 +5,8 @@ import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import fetch from 'node-fetch';
 import { VIDEO_MAX_TOTAL_DURATION_SECONDS } from './VideoProtocol.js';
-import { isTwitterVideoUrl } from './TwitterVideo.js';
 import { isYoutubeVideoUrl } from './YoutubeVideo.js';
-import { isGifVideoUrl } from './GifVideo.js';
+import { fetchPublicMedia, publicMediaUrl, discardMediaResponse } from './PublicMedia.js';
 import { rangeVideoSourceExcerpt, VIDEO_SOURCE_INPUT_MAX_SECONDS, VideoSourceExcerpt, VideoSourceRange } from './VideoSourceExcerpt.js';
 
 export const VIDEO_EDIT_MIN_SECONDS = 0.5;
@@ -19,6 +18,7 @@ export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv'
 
 export interface SubmittedVideoSourceClip {
     clip_url: string;
+    source_page_url?: string;
     name: string;
     bytes?: number;
 }
@@ -35,18 +35,13 @@ export interface StoredVideoSourceClip {
 export type YoutubeVideoFetcher = (url: string, destination: string) => Promise<void>;
 
 export function isVideoSourceClipUrl(value: string): boolean {
-    if (isTwitterVideoUrl(value) || isYoutubeVideoUrl(value) || isGifVideoUrl(value)) return true;
-    try {
-        const url = new URL(value);
-        return url.protocol === 'https:' && !url.port && !url.username && !url.password &&
-            ['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname);
-    } catch { return false; }
+    return Boolean(publicMediaUrl(value));
 }
 
 export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | null {
     if (value === null || value === undefined) return null;
     if (!value || typeof value !== 'object' || !isVideoSourceClipUrl(String(value.clip_url || ''))) {
-        throw new Error('The source video must be a Discord attachment, a resolved Twitter/X or Tenor/Giphy/Klipy clip, or a YouTube video link.');
+        throw new Error('The source video must use a public HTTP or HTTPS media link.');
     }
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();
@@ -54,15 +49,18 @@ export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | nul
         throw new Error('The source video must be MP4, MOV, M4V, WebM, MKV, or GIF.');
     }
     const bytes = Number(value.bytes || 0);
-    if (bytes && (!Number.isInteger(bytes) || bytes > VIDEO_EDIT_MAX_BYTES)) {
+    if (bytes && (!Number.isInteger(bytes) || bytes < 0 || bytes > VIDEO_EDIT_MAX_BYTES)) {
         throw new Error('The source video must be no larger than 100 MiB.');
     }
     return { clip_url: String(value.clip_url), name, ...(bytes ? { bytes } : {}) };
 }
 
+export const LOCAL_VIDEO_INPUT_ARGS = ['-protocol_whitelist', 'file,pipe',
+    '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif'];
+
 async function probeDuration(path: string): Promise<number> {
     const output = await new Promise<string>((resolve, reject) => execFile('ffprobe', [
-        '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_type:format=duration',
+        '-v', 'error', ...LOCAL_VIDEO_INPUT_ARGS, '-select_streams', 'v:0', '-show_entries', 'stream=codec_type:format=duration',
         '-of', 'json', path,
     ], { timeout: 30_000, maxBuffer: 64 * 1024 }, (error, stdout) =>
         error ? reject(new Error('Could not decode the source video.')) : resolve(String(stdout))));
@@ -93,7 +91,7 @@ export async function cutVideoSourceClip(input: string, output: string, excerpt:
     const length = excerpt.end_seconds - excerpt.start_seconds;
     // Re-encoding keeps the cut frame-accurate; a stream copy would snap to keyframes.
     await new Promise<void>((resolve, reject) => execFile('ffmpeg', ['-nostdin', '-v', 'error', '-y',
-        ...(gif ? ['-ignore_loop', '1'] : []),
+        ...LOCAL_VIDEO_INPUT_ARGS, ...(gif ? ['-ignore_loop', '1'] : []),
         '-ss', excerpt.start_seconds.toFixed(3), '-i', input, '-t', length.toFixed(3),
         ...(gif ? ['-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2'] : []),
         '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p',
@@ -124,11 +122,13 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
             bytes = statSync(temporary).size;
             if (bytes > VIDEO_EDIT_MAX_BYTES) throw new Error('The source video exceeds 100 MiB.');
         } else {
-            const response = await (options.fetcher || fetch)(source.clip_url, { signal: controller.signal, redirect: 'manual' });
-            if (!response.ok || !response.body || !isVideoSourceClipUrl(response.url)) {
+            const response = await (options.fetcher || fetchPublicMedia)(source.clip_url, { signal: controller.signal, redirect: 'manual' });
+            if (!response.ok || !response.body || !isVideoSourceClipUrl(response.url || source.clip_url)) {
+                discardMediaResponse(response);
                 throw new Error(`Could not download the source video (HTTP ${response.status}).`);
             }
             if (Number(response.headers.get('content-length') || 0) > VIDEO_EDIT_MAX_BYTES) {
+                discardMediaResponse(response);
                 throw new Error('The source video exceeds 100 MiB.');
             }
             const meter = new Transform({ transform(chunk, _encoding, callback) {

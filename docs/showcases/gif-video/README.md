@@ -1,4 +1,4 @@
-# GIF input and output for video replacement
+# Public video links and GIF output for video replacement
 
 Showcase: <http://localhost:4347>
 
@@ -22,7 +22,9 @@ It does not post to Discord or run a model render.
 The reviewed [desktop capture](desktop.png) is 1280 CSS pixels wide; the
 [mobile capture](mobile.png) is 390 CSS pixels wide. Both include upload,
 pasted Discord GIF links with signed thumbnails, missing embeds, ambiguous links,
-Tenor, Giphy, Klipy, custom portrait, starting-frame, empty, preparation, GIF delivery,
+Tenor, Giphy, Klipy, arbitrary public media hosts, public video embeds, relative HTML
+video sources, script-only pages, private-address rejection, custom portrait,
+starting-frame, empty, preparation, GIF delivery,
 upload-limit fallback and error states. Caption cases show successful protection,
 no detected caption, and an actual injected OCR failure with its production
 error report. There are no interactive controls or
@@ -30,13 +32,23 @@ disabled states. Neither viewport
 has horizontal overflow. The shared Chrome profile logged an unrelated wallet
 extension injection error; the page itself has no client JavaScript.
 
-Capture source: base revision `647a807` plus Klipy link support. The concatenated
-`GifVideo.ts`, `VideoGeneration.ts`, `VideoSourceClip.ts` and
-`VideoSourceImage.ts`, followed by `VideoGifDelivery.ts`, `VideoProtocol.ts`
-and `VideoBroker.ts`, then `desktop/video_edit_captions.py` and
-`desktop/video-edit-captions.patch`, SHA-256 prefix is `7490cd6f0740`, also displayed in the
-captures. This fingerprints the exact input implementation independently of the
-later commit that stores these screenshots.
+Capture source: base revision `3f36612` plus general public video URL support.
+The concatenated `PublicMedia.ts`, `PublicVideo.ts`, `GifVideo.ts`,
+`VideoGeneration.ts`, `VideoSourceClip.ts`, `VideoSourceImage.ts`,
+`VideoGifDelivery.ts`, `VideoProtocol.ts`, `VideoBroker.ts`,
+`desktop/video_edit_captions.py` and `desktop/video-edit-captions.patch`
+SHA-256 prefix is `6a3acdb42445`, also displayed in the captures.
+This fingerprints the implementation independently of the commit storing the images.
+
+General URL validation covers public address classification, private/encoded IPs,
+DNS pinning, mixed public/private DNS answers, every redirect, redirect limits,
+credential exclusion, cancellation during DNS, bounded page reads, MIME detection,
+relative metadata, prompt stripping, attachment precedence, local frame extraction,
+size limits and playlist rejection. A real Mozilla-hosted MP4 downloaded 1,128,375
+bytes, probed at 5.055 seconds, and produced a representative PNG frame through the
+same bounded downloader. No provider registration, Discord post or GPU render was
+needed. Login/JavaScript-only pages and streaming playlists remain unsupported by
+the general path. Known GIF sites can use an unlisted public CDN and retain GIF output.
 
 Validation includes real FFmpeg conversion of an infinitely looping GIF with
 odd dimensions, frame motion and timing checks, excerpt handling, corrupt input,
@@ -70,3 +82,9 @@ embed-only resolution, WebP thumbnail exclusion, direct media, URL restrictions,
 ambiguous sources and attachment precedence. Public share-page requests from this
 environment encountered a bot challenge; the observed Discord embed path needs
 no share-page fetch. No Discord message or model render was started by this check.
+
+General-link verification: the TypeScript build passed. All 121 targeted cases
+passed across the regression suite and focused reruns (35 routing tests after
+fixing YouTube Shorts song routing). One parallel ETA test crossed a one-second
+clock boundary; its serial rerun passed. Desktop/mobile captures were reviewed
+and have no horizontal overflow. All task browser tabs were closed.

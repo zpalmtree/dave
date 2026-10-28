@@ -110,6 +110,17 @@ test('missing embeds resolve bounded share-page metadata and prefer animation ov
     assert.equal(source.name, 'ref.gif');
 });
 
+test('known GIF share pages can move their media to an unlisted public CDN', async () => {
+    const clipUrl = 'https://another-public-cdn.example.org/animation.mp4';
+    const source = await gifVideoFromMessage(message(klipy, [], [{ url: klipy, video: { url: clipUrl } }]), noFetch);
+    assert.equal(source.clip_url, clipUrl);
+    const page = await gifVideoFromMessage(message(klipy), async () => new Response(
+        `<meta property="og:video" content="${clipUrl}">`));
+    assert.equal(page.clip_url, clipUrl);
+    assert.equal(videoOutputFormatForSources(source), 'gif');
+    assert.equal(videoOutputFormatForSources(page), 'gif');
+});
+
 test('pasted Discord GIF replies use the matching signed thumbnail and retain GIF edit behavior', async () => {
     const signed = `${gif.url}?ex=123&is=456&hm=fixture&`;
     const reply = message(gif.url, [], [{ type: 'image', url: gif.url, thumbnail: { url: signed } }]);
@@ -155,7 +166,9 @@ test('GIF resolution rejects ambiguous, unavailable, redirected and untrusted so
         'https://user@media.tenor.com/a.gif', 'https://media.tenor.com:444/a.gif', 'https://media.tenor.com/a.m3u8',
         'file:///tmp/a.gif', 'https://127.0.0.1/a.gif']) {
         assert.equal(isGifVideoUrl(url), false);
-        assert.throws(() => sourceClipDescriptor({ clip_url: url, name: 'a.gif' }), /Discord attachment/);
+        if (/user@|:444|^file:|127\.0\.0\.1/.test(url)) {
+            assert.throws(() => sourceClipDescriptor({ clip_url: url, name: 'a.gif' }), /public HTTP/);
+        } else assert.equal(sourceClipDescriptor({ clip_url: url, name: 'a.gif' }).clip_url, url);
         assert.equal(await gifVideoFromMessage(message(url), noFetch), null);
     }
     for (const resolve of [async () => new Response('missing', { status: 404 }),
