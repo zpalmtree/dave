@@ -1,0 +1,230 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -315,7 +315,8 @@
+ 
+ 
+ def match_render_levels(source: Path, rendered: Path, tracked: Path, destination: Path,
+-                        frames: int, width: int, height: int, region: list[int] | None = None) -> None:
++                        frames: int, width: int, height: int, region: list[int] | None = None,
++                        edge_masks: tuple[Path, Path] | None = None) -> None:
+     """Fit the render's brightness to the source over the background both show.
+ 
+     A Viggle render comes out darker than its source, which reads as a dark overlay
+@@ -325,6 +326,8 @@
+     rgb_bytes, gray_bytes = width * height * 3, width * height
+     # Background at least 16 px from the tracked subject, where both should agree.
+     away = "format=gray," + ",".join(["dilation"] * 16)
++    if edge_masks is not None and region is None:
++        raise ValueError("Edge colour matching requires a generated crop.")
+     valid = np.ones((height, width), dtype=bool)
+     if region is not None:
+         x, y, right, bottom = region
+@@ -360,12 +363,31 @@
+              "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(destination)],
+             stdin=subprocess.PIPE, stderr=errors,
+         ) as encoder:
+-            for index, data in enumerate(decoded_frames(rendered, "rgb24", rgb_bytes, frames)):
+-                pixels = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 3) / np.float32(255)
+-                at = min(index, len(fits) - 1)
+-                keep = np.clip((pixels.max(axis=2, keepdims=True) - 0.8) / 0.2, 0, 1)
+-                matched = (pixels * gains[at] + offsets[at]) * (1 - keep) + pixels * keep
+-                encoder.stdin.write((np.clip(matched, 0, 1) * 255 + 0.5).astype(np.uint8).tobytes())
++            edge_streams = ([decoded_frames(source, "rgb24", rgb_bytes, frames),
++                             decoded_frames(edge_masks[0], "gray", gray_bytes, frames),
++                             decoded_frames(edge_masks[1], "gray", gray_bytes, frames)] if edge_masks else [])
++            previous_edge = None
++            try:
++                for index, data in enumerate(decoded_frames(rendered, "rgb24", rgb_bytes, frames)):
++                    pixels = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 3) / np.float32(255)
++                    at = min(index, len(fits) - 1)
++                    keep = np.clip((pixels.max(axis=2, keepdims=True) - 0.8) / 0.2, 0, 1)
++                    matched = np.clip((pixels * gains[at] + offsets[at]) * (1 - keep) + pixels * keep, 0, 1) * 255
++                    if edge_streams:
++                        from video_edit_composite import match_edge_background
++                        evidence = [next(stream, None) for stream in edge_streams]
++                        if any(value is None for value in evidence):
++                            raise RuntimeError("Edge matching evidence is shorter than the render.")
++                        original = np.frombuffer(evidence[0], np.uint8).reshape(height, width, 3)
++                        masks = [np.frombuffer(value, np.uint8).reshape(height, width) for value in evidence[1:]]
++                        x, y, right, bottom = region
++                        matched[y:bottom, x:right], previous_edge = match_edge_background(
++                            original[y:bottom, x:right], matched[y:bottom, x:right],
++                            masks[0][y:bottom, x:right], masks[1][y:bottom, x:right], previous_edge)
++                    encoder.stdin.write((matched + 0.5).astype(np.uint8).tobytes())
++            finally:
++                for stream in edge_streams:
++                    stream.close()
+             encoder.stdin.close()
+             code = encoder.wait()
+         if code:
+@@ -1074,7 +1096,7 @@
+                         # Fit only background pixels inside the generated crop. The
+                         # placed video's black padding must never bias the exposure.
+                         match_render_levels(clip, rendered, matte, matched,
+-                                            source_frames, width, height, region=box)
++                                            source_frames, width, height, region=box, edge_masks=(mask_input, replacement_mask))
+                     else:
+                         match_render_levels(clip, rendered, work / f"mask-{index:02d}.mp4", matched,
+                                             source_frames, width, height)
+--- a/video_edit_composite.py
++++ b/video_edit_composite.py
+@@ -4,7 +4,7 @@
+ from pathlib import Path
+ 
+ import numpy as np
+-from scipy.ndimage import binary_closing, binary_dilation, binary_fill_holes, distance_transform_edt
++from scipy.ndimage import binary_closing, binary_dilation, binary_erosion, binary_fill_holes, distance_transform_edt, gaussian_filter
+ 
+ 
+ def replacement_graph(clip, box, prefix):
+@@ -48,7 +48,13 @@
+         clip.unlink(missing_ok=True)
+ 
+ 
+-def composite_alpha(source, replacement, box, padding=3, feather=4):
++def source_blur_padding(box):
++    # Source masks describe opaque anatomy, not its blurred fringe. Scale the
++    # erasure allowance to the crop, with a cap to avoid widening large subjects.
++    return max(3, min(12, round(min(box[2]-box[0], box[3]-box[1]) * 0.055)))
++
++
++def composite_alpha(source, replacement, box, padding=1, feather=4):
+     """Opaque union with an outward feather, clipped AFTER filtering to render support."""
+     source = source > 127
+     replacement = replacement > 127
+@@ -65,6 +71,9 @@
+     core = (source | replacement) & support
+     if not core.any():
+         return np.zeros((height, width), np.uint8)
++    # Cover the original subject's motion blur before feathering. Shrinking this
++    # region exposes the old face as a brown/grey contour around the replacement.
++    core |= binary_dilation(source, iterations=source_blur_padding(box)) & support
+     # Closing removes little cracks without eroding subjects that reach a frame edge.
+     closed = binary_closing(np.pad(core, 2, mode='edge'), structure=np.ones((5, 5), bool))[2:-2, 2:-2]
+     core |= binary_fill_holes(closed)
+@@ -101,3 +110,44 @@
+         edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'gray',
+                      '-video_size', f'{width}x{height}', '-framerate', '24', '-i', str(raw),
+                      '-an', '-c:v', 'ffv1', '-pix_fmt', 'gray', str(destination))
++
++
++def match_edge_background(source, rendered, source_mask, replacement_mask, previous=None):
++    """Match nearby clean background colour; keep the replacement's interior intact.
++
++    Inputs are one crop in RGB 0..255 and its two masks. The returned state belongs
++    to this segment only. No original subject pixels may supply the colour fit.
++    """
++    source = np.asarray(source, dtype=np.float32)
++    rendered = np.asarray(rendered, dtype=np.float32)
++    if source.shape != rendered.shape or source.ndim != 3 or source.shape[2] != 3:
++        raise ValueError('Edge matching requires equal RGB crops.')
++    height, width = source.shape[:2]
++    if source_mask.shape != (height, width) or replacement_mask.shape != (height, width):
++        raise ValueError('Edge matching masks do not match the crop.')
++    original = source_mask > 127
++    replacement = replacement_mask > 127
++    if not (original | replacement).any():
++        return rendered, None
++    covered = binary_dilation(original, iterations=source_blur_padding([0, 0, width, height])) | replacement
++    distance = distance_transform_edt(~covered)
++    samples = (distance >= 3) & (distance <= 16)
++    if np.count_nonzero(samples) < 64:
++        return rendered, None
++    # A local RGB fit addresses a coloured halo that whole-crop luma matching
++    # cannot fix. Ignore the old subject AND its blur when estimating residuals.
++    weights = gaussian_filter(samples.astype(np.float32), 8)
++    residual = (source - rendered) * samples[:, :, None]
++    field = gaussian_filter(residual, (8, 8, 0)) / np.maximum(weights[:, :, None], 0.0001)
++    field[weights < 0.01] = 0
++    field = np.clip(field, -38, 38)
++    if previous is not None:
++        if previous.shape != field.shape:
++            raise ValueError('Edge matching state belongs to another crop.')
++        field = 0.75 * previous + 0.25 * field
++    # Fade the correction through the antialiased boundary, never through facial
++    # detail in the interior. The alpha compositor still controls the final scope.
++    protected = binary_erosion(replacement, iterations=2, border_value=1)
++    edge = np.clip(distance_transform_edt(~protected) / 6, 0, 1)
++    edge = edge * edge * (3 - 2 * edge)
++    return np.clip(rendered + field * edge[:, :, None], 0, 255), field
+--- a/test_video_edit_composite.py
++++ b/test_video_edit_composite.py
+@@ -5,7 +5,7 @@
+ 
+ import numpy as np
+ import video_edit
+-from video_edit_composite import composite_alpha, build_matte, replacement_graph
++from video_edit_composite import composite_alpha, build_matte, replacement_graph, match_edge_background, source_blur_padding
+ 
+ 
+ class CompositeTests(unittest.TestCase):
+@@ -112,5 +112,69 @@
+         self.assertNotIn('gblur', graph)
+ 
+ 
++class HaloTests(unittest.TestCase):
++    def fixture(self):
++        mask = np.zeros((120, 160), np.uint8); mask[40:85, 35:80] = 255
++        source = np.full((120, 160, 3), [80, 90, 110], np.float32)
++        rendered = np.full_like(source, [100, 80, 85])
++        source[mask > 0] = [240, 120, 20]  # different original subject; never colour evidence
++        rendered[mask > 0] = [160, 80, 60]
++        return source, rendered, mask
++
++    def test_original_blurred_fringe_is_erased_before_feathering(self):
++        mask = np.zeros((194, 176), np.uint8); mask[50:140, 30:90] = 255
++        alpha = composite_alpha(mask, mask, [0, 0, 176, 194])
++        # A brown fringe six pixels outside the hard mask was previously blended
++        # back into the frame. It must now receive only the generated background.
++        self.assertEqual(alpha[90, 95], 255)
++        self.assertEqual(alpha[90, 110], 0)
++        self.assertEqual(source_blur_padding([0, 0, 176, 194]), 10)
++        self.assertLessEqual(source_blur_padding([0, 0, 2000, 2000]), 12)
++
++    def test_background_tint_is_reduced_without_changing_face_interior(self):
++        source, rendered, mask = self.fixture()
++        matched, _ = match_edge_background(source, rendered, mask, mask)
++        sample = (55, 100)
++        self.assertLess(np.linalg.norm(matched[sample]-source[sample]),
++                        np.linalg.norm(rendered[sample]-source[sample]) * 0.2)
++        np.testing.assert_array_equal(matched[50:75, 45:70], rendered[50:75, 45:70])
++
++    def test_source_blur_is_excluded_from_colour_samples(self):
++        from scipy.ndimage import binary_dilation
++        source, rendered, mask = self.fixture()
++        blurred = binary_dilation(mask > 0, iterations=source_blur_padding([0, 0, 160, 120]))
++        changed = source.copy(); changed[blurred] = [0, 255, 0]
++        clean, _ = match_edge_background(source, rendered, mask, mask)
++        contaminated, _ = match_edge_background(changed, rendered, mask, mask)
++        np.testing.assert_allclose(clean, contaminated)
++
++    def test_no_background_evidence_clears_history_instead_of_guessing(self):
++        source, rendered, _ = self.fixture()
++        full = np.full((120, 160), 255, np.uint8)
++        result, state = match_edge_background(source, rendered, full, full, np.ones_like(rendered))
++        np.testing.assert_array_equal(result, rendered)
++        self.assertIsNone(state)
++
++    def test_correction_is_bounded_and_temporally_smoothed(self):
++        source, rendered, mask = self.fixture()
++        _, first = match_edge_background(source, rendered, mask, mask)
++        changed = source.copy(); changed[mask == 0] = 255
++        _, direct = match_edge_background(changed, rendered, mask, mask)
++        _, carried = match_edge_background(changed, rendered, mask, mask, first)
++        self.assertLessEqual(np.abs(direct).max(), 38)
++        self.assertLess(np.mean(np.abs(carried-first)), np.mean(np.abs(direct-first)))
++
++    def test_empty_masks_do_not_create_an_edge(self):
++        source, rendered, mask = self.fixture(); mask[:] = 0
++        result, state = match_edge_background(source, rendered, mask, mask)
++        np.testing.assert_array_equal(result, rendered)
++        self.assertIsNone(state)
++
++    def test_wrong_crop_history_is_rejected(self):
++        source, rendered, mask = self.fixture()
++        with self.assertRaisesRegex(ValueError, 'another crop'):
++            match_edge_background(source, rendered, mask, mask, np.zeros((10, 10, 3)))
++
++
+ if __name__ == '__main__':
+     unittest.main()

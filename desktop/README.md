@@ -451,3 +451,24 @@ Run `python -m unittest test_video_edit test_video_edit_isolated
 Python/FFmpeg environment. The 126 tests and a cached-diffusion/live-compositing
 integration check passed. The full original clip remains unresolved; the updated
 five-second comparison addresses visible blending defects, not all motion quality.
+
+## Source blur and edge halo correction
+
+Apply `python3 scripts/apply-video-edit-halo-desktop.py --check`, then omit
+`--check`, after the composite patch. This newest incremental installer verifies
+the prior composite revision and refuses unrelated desktop edits. Use its hash
+check after installation; the older composite installer is now superseded.
+
+The compositor expands source erasure to include its blurred fringe, while
+keeping the replacement interior opaque and clamping all alpha to render support.
+Local RGB matching samples outside the source blur and replacement masks, bounds
+and smooths colour corrections, and protects replacement facial detail. It adds
+CPU processing in the existing encoding pass, without new models or API calls.
+The worker loads it on the next edit without a restart. Deploy both server tracks
+with `--with-broker`.
+
+The same desktop test command above passed 133 tests. A production-path integration
+check reused identical diffusion and SAM outputs and ran all changed compositing
+and review-evidence extraction live. The inspected five-second comparison reduces
+the brown/grey arc around the face; it does not establish full-clip success or fix
+the renderer's facial performance.
