@@ -1,0 +1,436 @@
+diff --git a/video_edit.py b/video_edit.py
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -256,19 +256,34 @@
+ 
+ 
+ def composite_segment(source: Path, rendered: Path, mask: Path,
+-                      destination: Path, source_frames: int, dilate: bool = True, feather: bool = True) -> None:
++                      destination: Path, source_frames: int, dilate: bool = True, feather: bool = True,
++                      subject_mask: Path | None = None, caption_report: Path | None = None) -> None:
+     # The H3 result may drift outside the tracked subject. Keep every source
+     # pixel beyond the expanded mask and emit only this segment's source frames.
+     # An add-mode alpha is already feathered and must not grow into the anchor.
+     grow = ",".join(["dilation"] * 6) + "," if dilate else ""
+     soften = "gblur=sigma=2" if feather else "null"
+-    filter_graph = ("[2:v]format=gray," + grow + soften +
+-                    "[mask];[1:v][mask]alphamerge[edited];" +
+-                    "[0:v][edited]overlay=shortest=1:format=auto[v]")
+-    command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+-            "-i", str(rendered), "-i", str(mask), "-filter_complex", filter_graph,
+-            "-map", "[v]", "-frames:v", str(source_frames), "-an", "-c:v", "libx264",
+-            "-crf", "18", "-pix_fmt", "yuv420p", str(destination))
++    from video_edit_captions import prepare_caption_mask
++    with tempfile.TemporaryDirectory(prefix="edit-captions-") as temporary:
++        protection = None
++        if source != rendered:
++            protection = prepare_caption_mask(source, subject_mask or mask,
++                Path(temporary) / "protection.mkv", source_frames,
++                report=caption_report or destination.with_suffix('.captions.json'))
++        # Caption glyphs are a source foreground layer. Subtract them AFTER every
++        # dilation/feather operation; growing the mask afterward would erase them.
++        filter_graph = "[2:v]format=gray," + grow + soften
++        if protection:
++            filter_graph += ("[expanded];[3:v]format=gray[protected];"
++                             "[expanded][protected]blend=all_expr='A*(1-B/255)'")
++        filter_graph += ("[mask];[1:v][mask]alphamerge[edited];"
++                         "[0:v][edited]overlay=shortest=1:format=auto[v]")
++        command("ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
++                "-i", str(rendered), "-i", str(mask),
++                *(["-i", str(protection)] if protection else []),
++                "-filter_complex", filter_graph,
++                "-map", "[v]", "-frames:v", str(source_frames), "-an", "-c:v", "libx264",
++                "-crf", "18", "-pix_fmt", "yuv420p", str(destination))
+ 
+ 
+ def decoded_frames(path: Path, pixel_format: str, frame_bytes: int, frames: int,
+@@ -1102,7 +1117,9 @@
+                                             source_frames, width, height)
+                     edited = directory / f"segment-{index:02d}.mp4"
+                     composite_segment(clip, matched, matte if isolated else mask_input, edited,
+-                                      source_frames, dilate=not isolated, feather=not isolated)
++                                      source_frames, dilate=not isolated, feather=not isolated,
++                                      subject_mask=work / f"mask-{index:02d}.mp4",
++                                      caption_report=work / f"captions-{index:02d}.json")
+                     edited_segments.append(edited)
+                     print(f"Completed segment {index}/{len(segments)}", flush=True)
+                 finally:
+@@ -1225,9 +1242,13 @@
+                                       source_frames / 24, width, height)
+                     edited = directory / f"segment-{index:02d}.mp4"
+                     if args.mode == "add":
+-                        composite_segment(clip, rendered, alpha_input, edited, source_frames, dilate=False)
++                        composite_segment(clip, rendered, alpha_input, edited, source_frames, dilate=False,
++                                          subject_mask=mask_file,
++                                          caption_report=args.output.with_suffix(f'.captions-{index:02d}.json'))
+                     else:
+-                        composite_segment(clip, rendered, mask_input, edited, source_frames)
++                        composite_segment(clip, rendered, mask_input, edited, source_frames,
++                                          subject_mask=mask_file,
++                                          caption_report=args.output.with_suffix(f'.captions-{index:02d}.json'))
+                     edited_segments.append(edited)
+                     print(f"Completed segment {index}/{len(segments)}", flush=True)
+                 finally:
+diff --git a/test_video_edit_composite.py b/test_video_edit_composite.py
+--- a/test_video_edit_composite.py
++++ b/test_video_edit_composite.py
+@@ -104,7 +104,8 @@
+             self.assertGreater(rendered_samples.min(), 0.15)
+ 
+     def test_prepared_alpha_is_not_blurred_or_grown_again(self):
+-        with patch('video_edit.command') as command:
++        with patch('video_edit.command') as command, \
++             patch('video_edit_captions.prepare_caption_mask', return_value=None):
+             video_edit.composite_segment(Path('source'), Path('render'), Path('alpha'), Path('out'),
+                                          5, dilate=False, feather=False)
+         graph = command.call_args.args[command.call_args.args.index('-filter_complex') + 1]
+diff --git a/video_edit_captions.py b/video_edit_captions.py
+new file mode 100644
+--- /dev/null
++++ b/video_edit_captions.py
+@@ -0,0 +1,197 @@
++"""CPU detection of fixed caption glyphs for source-video compositing.
++
++Detect text on temporally consistent colour planes, not a hard-coded colour,
++rectangle, caption string or frame range. Only recognized glyphs and their thin
++outline are protected; the counters and space between letters remain editable.
++Text belonging to the tracked subject is not a foreground caption.
++"""
++from __future__ import annotations
++
++import csv
++import io
++import json
++import math
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import time
++
++import numpy as np
++from PIL import Image
++from scipy.ndimage import binary_dilation, gaussian_filter, label, find_objects
++
++MAX_COLOURS = 12
++MAX_ANALYSIS_SIZE = 640
++OCR_TIMEOUT = 5
++ANALYSIS_SECONDS = 25
++COLOUR_TOLERANCE = 36
++
++
++def ocr_words(mask, timeout=OCR_TIMEOUT):
++    """Read a binary colour plane. Windows uses the existing Ubuntu CPU tools."""
++    executable = shutil.which('tesseract')
++    command = ([executable] if executable else
++               ['wsl.exe', '-d', os.environ.get('VIDEO_LIPSYNC_DISTRO', 'Ubuntu'),
++                '--exec', 'env', 'OMP_THREAD_LIMIT=1', 'timeout', str(math.ceil(timeout)), 'tesseract'] if os.name == 'nt' else
++               ['tesseract'])
++    buffer = io.BytesIO()
++    # OCR needs a quiet margin even when a caption touches the frame edge.
++    padded = np.pad(np.uint8(~mask) * 255, 16, constant_values=255)
++    Image.fromarray(padded).save(buffer, format='PNG')
++    result = subprocess.run([*command, 'stdin', 'stdout', '--psm', '11', 'tsv'],
++                            input=buffer.getvalue(), capture_output=True, timeout=timeout + 1,
++                            check=True, env={**os.environ, 'OMP_THREAD_LIMIT': '1'})
++    words = []
++    for row in csv.DictReader(io.StringIO(result.stdout.decode('utf-8')), delimiter='\t'):
++        text = row.get('text', '').strip()
++        if float(row['conf']) >= 80 and sum(c.isalnum() for c in text) >= 3:
++            x, y, w, h = (int(row[key]) for key in ('left', 'top', 'width', 'height'))
++            if w > 0 and h >= 8:
++                words.append((max(0, x-16), max(0, y-16),
++                              min(mask.shape[1], x+w-16), min(mask.shape[0], y+h-16)))
++    return words
++
++
++def detect_layers(samples, subject_masks, recognize=None):
++    """Return colour/glyph layers. State is local to one source segment."""
++    recognize = recognize or ocr_words
++    samples = np.asarray(samples, dtype=np.int16)
++    masks = np.asarray(subject_masks)
++    if samples.ndim != 4 or samples.shape[-1] != 3 or masks.shape != samples.shape[:-1]:
++        raise ValueError('Caption samples and subject masks must share the same timeline and canvas.')
++    if len(samples) < 3:
++        return []
++    median = np.median(samples, axis=0).astype(np.int16)
++    quantized = median // 32
++    codes = quantized[:, :, 0] * 64 + quantized[:, :, 1] * 8 + quantized[:, :, 2]
++    colours, counts = np.unique(codes, return_counts=True)
++    centres = []
++    for code in colours[np.argsort(counts)[::-1]]:
++        centre = np.median(median[codes == code], axis=0)
++        if any(np.linalg.norm(centre - old) < COLOUR_TOLERANCE for old in centres):
++            continue
++        centres.append(centre)
++        if len(centres) == MAX_COLOURS:
++            break
++    occupied = np.any(masks > 127, axis=0)
++    layers = []
++    covered = np.zeros(median.shape[:2], bool)
++    deadline = time.monotonic() + ANALYSIS_SECONDS
++    for centre in centres:
++        if time.monotonic() >= deadline:
++            raise TimeoutError('Caption analysis exceeded its budget.')
++        near = np.max(abs(samples - centre), axis=3) < COLOUR_TOLERANCE
++        stable = near.mean(axis=0) >= 0.85
++        if stable.sum() < 32:
++            continue
++        # A stationary shirt label is still part of the subject, not a caption.
++        evidence = stable & ~occupied
++        if evidence.sum() < 32:
++            continue
++        components, _ = label(evidence)
++        bounds = find_objects(components)
++        for x, y, right, bottom in recognize(evidence, min(OCR_TIMEOUT, max(0.1, deadline-time.monotonic()))):
++            height, width = stable.shape
++            if not (0 <= x < right <= width and 0 <= y < bottom <= height):
++                continue
++            glyphs = np.zeros_like(stable)
++            # A background colour can OCR as inverse text. Its component runs
++            # beyond the word; reject it rather than restoring an opaque box.
++            for component in np.unique(components[y:bottom, x:right]):
++                if not component:
++                    continue
++                rows, columns = bounds[component-1]
++                if (rows.start >= y-2 and rows.stop <= bottom+2 and
++                        columns.start >= x-2 and columns.stop <= right+2):
++                    glyphs[rows, columns] |= components[rows, columns] == component
++            pixels = int(glyphs.sum())
++            density = pixels / ((right-x) * (bottom-y))
++            if pixels < 32 or not 0.08 <= density <= 0.8:
++                continue
++            if np.mean(occupied[glyphs]) > 0.05 or np.mean(covered[glyphs]) > 0.5:
++                continue
++            covered |= glyphs
++            layers.append({'colour': centre, 'glyphs': glyphs,
++                           'outline': max(1, min(3, round((bottom-y) * 0.035))),
++                           'box': [x, y, right, bottom]})
++    return layers
++
++
++def protection_frame(frame, layers):
++    """Drop a layer when its text disappears; never freeze a sampled frame."""
++    height, width = frame.shape[:2]
++    protection = np.zeros((height, width), np.uint8)
++    for layer in layers:
++        glyphs = layer['glyphs']
++        if glyphs.shape != (height, width):
++            raise ValueError('Caption layer belongs to a different canvas.')
++        near = np.max(abs(frame.astype(np.int16) - layer['colour']), axis=2) < COLOUR_TOLERANCE
++        if np.mean(near[glyphs]) < 0.8:
++            continue
++        hard = binary_dilation(glyphs, iterations=layer['outline'])
++        soft = gaussian_filter(hard.astype(np.float32), 0.65)
++        soft[hard] = 1
++        soft[soft < 0.005] = 0
++        protection = np.maximum(protection, np.rint(soft * 255).astype(np.uint8))
++    return protection
++
++
++def prepare_caption_mask(source, subject_mask, destination, frames, report=None):
++    """Build lossless per-frame protection, returning None when no caption exists.
++
++    Decode errors and missing OCR are surfaced rather than silently claiming the
++    edit preserved its captions. Model padding is excluded from detection/output.
++    """
++    import video_edit as edit
++    report = Path(report) if report else Path(destination).with_suffix('.json')
++    started = time.monotonic()
++    record = {'status': 'analyzing', 'source_frames': frames, 'layers': []}
++    try:
++        _, width, height = edit.clip_details(source)
++        scale = min(1, MAX_ANALYSIS_SIZE / max(width, height))
++        w, h = max(1, round(width*scale)), max(1, round(height*scale))
++        indices = sorted(set(np.linspace(0, frames-1, min(7, frames), dtype=int).tolist()))
++        select = '+'.join(f'eq(n\\,{index})' for index in indices)
++        filters = f'select={select},setpts=N/(24*TB),scale={w}:{h}'
++        samples = [np.frombuffer(data, np.uint8).reshape(h, w, 3) for data in
++                   edit.decoded_frames(source, 'rgb24', w*h*3, len(indices), filters)]
++        masks = [np.frombuffer(data, np.uint8).reshape(h, w) for data in
++                 edit.decoded_frames(subject_mask, 'gray', w*h, len(indices), filters + ':flags=neighbor')]
++        if len(samples) != len(indices) or len(masks) != len(indices):
++            raise RuntimeError('Caption analysis is missing source or subject-mask frames.')
++        layers = detect_layers(samples, masks)
++        for layer in layers:
++            record['layers'].append({'box': layer['box'], 'analysis_canvas': [w, h],
++                                     'glyph_pixels': int(layer['glyphs'].sum())})
++            if (w, h) != (width, height):
++                layer['glyphs'] = np.array(Image.fromarray(layer['glyphs']).resize(
++                    (width, height), Image.Resampling.NEAREST), dtype=bool)
++                layer['outline'] = max(1, round(layer['outline'] / scale))
++        if not layers:
++            record['status'] = 'no_fixed_caption_detected'
++            return None
++        raw = Path(destination).with_suffix('.gray')
++        try:
++            count = 0
++            with raw.open('wb') as stream:
++                for data in edit.decoded_frames(source, 'rgb24', width*height*3, frames):
++                    frame = np.frombuffer(data, np.uint8).reshape(height, width, 3)
++                    stream.write(protection_frame(frame, layers).tobytes())
++                    count += 1
++            if count != frames:
++                raise RuntimeError('Caption protection is shorter than the source segment.')
++            edit.command('ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'gray',
++                         '-video_size', f'{width}x{height}', '-framerate', '24', '-i', str(raw),
++                         '-an', '-c:v', 'ffv1', '-pix_fmt', 'gray', str(destination))
++        finally:
++            raw.unlink(missing_ok=True)
++        record['status'] = 'protected'
++        return Path(destination)
++    except Exception as error:
++        record.update(status='error', error=str(error)[:300])
++        raise RuntimeError('Source caption protection failed; inspect the caption report before retrying.') from error
++    finally:
++        record['seconds'] = round(time.monotonic() - started, 3)
++        report.write_text(json.dumps(record, indent=2), encoding='utf-8')
++        print(f'Source captions: {record["status"]} ({len(record["layers"])} layers)', flush=True)
+diff --git a/test_video_edit_captions.py b/test_video_edit_captions.py
+new file mode 100644
+--- /dev/null
++++ b/test_video_edit_captions.py
+@@ -0,0 +1,143 @@
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++from unittest.mock import patch
++from scipy.ndimage import binary_fill_holes, binary_dilation
++
++import numpy as np
++from PIL import Image, ImageDraw, ImageFont
++
++import video_edit
++from video_edit_captions import detect_layers, protection_frame, prepare_caption_mask
++
++
++def caption_fixture(colour=(245, 180, 5), position=(40, 112), text='HELLO', frames=12):
++    """A moving source, a person, and text; replacement intentionally crosses text."""
++    font_path = ('C:/Windows/Fonts/arialbd.ttf' if os.name == 'nt' else
++                 '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf')
++    font = ImageFont.truetype(font_path, 36)
++    glyph_image = Image.new('L', (320, 180))
++    ImageDraw.Draw(glyph_image).text(position, text, font=font, fill=255, anchor='lt')
++    glyphs = np.array(glyph_image) > 240
++    source, render, masks = [], [], []
++    for i in range(frames):
++        y, x = np.indices((180, 320))
++        scene = np.stack((120 + (x+i*3) % 70, 110 + (y+i*4) % 70,
++                          140 + (x+y+i*5) % 60), axis=-1).astype(np.uint8)
++        mask = np.zeros((180, 320), np.uint8)
++        mask[25:108, 102+i:143+i] = 255
++        original = scene.copy(); original[mask > 0] = [180, 30, 50]
++        im = Image.fromarray(original)
++        ImageDraw.Draw(im).text(position, text, font=font, fill=tuple(colour),
++                               stroke_width=2, stroke_fill=(20, 20, 20), anchor='lt')
++        source.append(np.array(im))
++        replacement = scene.copy()
++        replacement[20:165, 95:175] = [15, 35, 240]
++        render.append(replacement)
++        mask[np.array(glyph_image) > 0] = 0  # foreground caption occludes the person
++        masks.append(mask)
++    return np.array(source), np.array(render), np.array(masks), glyphs
++
++
++def encode(path, frames):
++    height, width = frames.shape[1:3]
++    pixel_format = 'gray' if frames.ndim == 3 else 'rgb24'
++    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', pixel_format,
++                    '-s', f'{width}x{height}', '-r', '24', '-i', '-', '-an', '-c:v', 'ffv1',
++                    str(path)], input=frames.tobytes(), capture_output=True, check=True)
++
++
++def write_fixture(directory):
++    source, render, masks, glyphs = caption_fixture()
++    paths = {key: Path(directory) / f'{key}.mkv' for key in ('source', 'render', 'subject', 'alpha')}
++    for key, frames in [('source', source), ('render', render), ('subject', masks)]:
++        encode(paths[key], frames)
++    # The generated subject and source erasure both enter the caption band.
++    alpha = np.zeros_like(masks); alpha[:, 20:165, 95:175] = 255
++    encode(paths['alpha'], alpha)
++    return paths, source, render, masks, glyphs
++
++
++class CaptionTests(unittest.TestCase):
++    def test_real_ocr_varied_colours_and_positions(self):
++        for colour, position in [((245, 180, 5), (40, 112)), ((250, 250, 250), (25, 5)),
++                                 ((5, 5, 5), (50, 140)), ((0, 220, 230), (150, 135))]:
++            with self.subTest(colour=colour, position=position):
++                source, _, masks, glyphs = caption_fixture(colour, position)
++                layers = detect_layers(source[::2], masks[::2])
++                protected = protection_frame(source[-1], layers)
++                self.assertGreater(np.mean(protected[glyphs] == 255), 0.95)
++                # Font counters / gaps are not an opaque OCR rectangle.
++                x, y = position
++                self.assertLess(np.mean(protected[y:y+30, x:min(x+135, 320)] > 0), 0.9)
++
++    def test_text_on_original_subject_is_not_preserved(self):
++        source, _, masks, _ = caption_fixture(position=(80, 45))
++        masks[:, 35:90, 70:240] = 255
++        self.assertEqual(detect_layers(source[::2], masks[::2]), [])
++
++    def test_moving_text_and_no_text_do_not_make_a_static_layer(self):
++        source, _, masks, _ = caption_fixture()
++        moving = np.array([np.roll(frame, i*15, axis=1) for i, frame in enumerate(source)])
++        self.assertEqual(detect_layers(moving[::2], np.zeros_like(masks[::2])), [])
++        plain = np.full_like(source, [80, 100, 140])
++        self.assertEqual(detect_layers(plain[::2], masks[::2]), [])
++
++    def test_caption_disappearance_does_not_cut_holes_in_replacement(self):
++        source, _, masks, _ = caption_fixture()
++        layers = detect_layers(source[::2], masks[::2])
++        self.assertTrue(layers)
++        blank = np.full_like(source[0], [80, 100, 140])
++        self.assertFalse(protection_frame(blank, layers).any())
++
++    def test_bad_geometry_and_short_samples(self):
++        source, _, masks, _ = caption_fixture()
++        with self.assertRaises(ValueError):
++            detect_layers(source, masks[:2])
++        self.assertEqual(detect_layers(source[:2], masks[:2]), [])
++
++    def test_real_compositor_protects_text_after_dilation_and_feather(self):
++        with tempfile.TemporaryDirectory() as directory:
++            paths, source, render, _, glyphs = write_fixture(directory)
++            for expand in (False, True):
++                output = Path(directory) / f'result-{expand}.mp4'
++                video_edit.composite_segment(paths['source'], paths['render'], paths['alpha'],
++                    output, len(source), dilate=expand, feather=expand, subject_mask=paths['subject'])
++                decoded = np.array([np.frombuffer(data, np.uint8).reshape(180, 320, 3) for data in
++                    video_edit.decoded_frames(output, 'rgb24', 180*320*3, len(source)+1)])
++                self.assertEqual(len(decoded), len(source))
++                # Full caption pixels agree with the source even under the new feet.
++                self.assertLess(np.abs(decoded[:, glyphs].astype(float)-source[:, glyphs]).mean(), 12)
++                counters = binary_fill_holes(glyphs) & ~binary_dilation(glyphs, iterations=4)
++                counters[:, :95] = False; counters[:, 175:] = False
++                self.assertTrue(counters.any())
++                self.assertLess(np.abs(decoded[:, counters].astype(float)-render[:, counters]).mean(), 15)
++                # Face/interior stays generated, not frozen original footage.
++                self.assertLess(np.abs(decoded[:, 40:90, 115:135].astype(float)-render[:, 40:90, 115:135]).mean(), 8)
++                report = json.loads(output.with_suffix('.captions.json').read_text())
++                self.assertEqual(report['status'], 'protected')
++
++    def test_missing_ocr_stops_edit_with_a_report(self):
++        with tempfile.TemporaryDirectory() as directory:
++            paths, source, *_ = write_fixture(directory)
++            output = Path(directory) / 'result.mp4'
++            with patch('video_edit_captions.ocr_words', side_effect=FileNotFoundError('tesseract')):
++                with self.assertRaisesRegex(RuntimeError, 'caption protection failed'):
++                    video_edit.composite_segment(paths['source'], paths['render'], paths['alpha'],
++                        output, len(source), subject_mask=paths['subject'])
++            self.assertFalse(output.exists())
++            self.assertEqual(json.loads(output.with_suffix('.captions.json').read_text())['status'], 'error')
++
++    def test_short_source_mask_fails_instead_of_truncating_video(self):
++        with tempfile.TemporaryDirectory() as directory:
++            paths, source, _, masks, _ = write_fixture(directory)
++            encode(paths['subject'], masks[:3])
++            with self.assertRaisesRegex(RuntimeError, 'caption protection failed'):
++                prepare_caption_mask(paths['source'], paths['subject'], Path(directory)/'mask.mkv', len(source))
++
++
++if __name__ == '__main__':
++    unittest.main()

@@ -1,5 +1,55 @@
 # Desktop video optimization changes
 
+## Source caption protection
+
+`video-edit-captions.patch` adds foreground caption layers to the shared subject
+compositor. Seven source samples, bounded to a 640-pixel analysis canvas, expose
+temporally stable colour planes. CPU Tesseract recognizes candidate words;
+connected glyph components provide protection, including a thin outline. Source
+subject masks reject clothing text. Background components extending beyond the
+word are rejected so inverse text cannot accidentally restore a rectangular
+piece of the old scene. Caption protection is subtracted from the edit alpha
+after dilation and feathering. Each output frame uses its own source pixels;
+the mask releases when the caption disappears. Only real source frames are
+sampled and encoded, excluding model padding.
+
+This runs automatically for both commands' default isolated edits (Viggle/Wan)
+and the shared masked H3/add path. The separate legacy Character Swap backend
+does not use this compositor. Fixed captions with recognizable single-colour
+glyphs are supported; moving, changing, low-confidence and multicolour text can
+be missed. This does not fix artifacts already present in the source animation.
+
+Apply `python3 scripts/apply-video-edit-captions-desktop.py --check`, then omit
+`--check`. This hash-checked update requires the audited halo revision. The new
+helper uses existing NumPy, SciPy, Pillow and FFmpeg plus Tesseract 5 (English
+data). On Windows, a native Tesseract is preferred; otherwise it invokes the
+installed Ubuntu `tesseract-ocr` through WSL using `VIDEO_LIPSYNC_DISTRO` (default
+`Ubuntu`). OCR uses one CPU thread, at most twelve colour planes, a five-second
+per-call deadline and a 25-second recognition budget. No GPU or API call is added.
+Missing OCR, decode failures and timeouts stop the edit with a retained JSON
+report rather than silently bypassing protection. Successful and empty detection
+are also recorded per segment. The worker loads the updated subprocess on its
+next edit; no worker or ComfyUI restart is needed. Deploy both server tracks with
+`scripts/deploy-bots.sh --with-broker` after syncing the commit.
+
+All 68 tests passed in the Windows embedded Python/FFmpeg runtime:
+`python -m unittest test_video_edit test_video_edit_isolated
+test_video_edit_composite test_video_edit_captions test_video_edit_wan`.
+Tests cover multiple caption colours/positions, frame-edge text, clothing text,
+moving/disappearing text, empty scenes, missing OCR, incomplete masks, exact frame
+counts, source letters, editable counters and unchanged replacement interiors
+through the real compositor, both with and without mask growth/feathering.
+Linux runs have two pre-existing platform differences in the older edit suite
+(Windows drive mapping and the FFmpeg `gradients speed=0` fixture); the native
+runtime passes both. The 25 caption/composite tests also pass under Linux.
+
+Replaying the compositor against the cached `e02575b8` source, subject track,
+replacement and alpha automatically recognized the caption and retained all 58
+frames. No caption-specific coordinates, colours or wording entered detection,
+and no diffusion render was rerun. The reviewed showcase uses synthetic fixtures
+through this same installed compositor: <http://localhost:4347>, started with
+`node scripts/serve-gif-video-showcase.mjs` after building the bot.
+
 ## Bounded delivery audio/video sync
 
 `video-delivery-sync.patch` checks generated videos before loudness normalization

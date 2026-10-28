@@ -36,12 +36,17 @@ let error;
 try { await resolve(message('', [gif, gif])); } catch (caught) { error = caught.message; }
 const temporary = mkdtempSync(join(tmpdir(), 'gif-showcase-'));
 process.once('exit', () => rmSync(temporary, { recursive: true, force: true }));
+execFileSync('python3', ['scripts/generate-caption-showcase.py', '--output', temporary], { timeout: 60_000 });
+const captions = JSON.parse(readFileSync(join(temporary, 'caption-cases.json'), 'utf8'));
 const videoPath = join(temporary, 'result.mp4');
 execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24:duration=1.5', '-c:v', 'libx264', videoPath]);
 const deliveryJob = { id: 'demo1234-fixture', model: 'minimax', output_format: 'gif', result_path: videoPath, delivery_limit_bytes: 1024 * 1024 };
 const delivered = await prepareVideoDelivery(deliveryJob);
 const fallback = await prepareVideoDelivery({ ...deliveryJob, delivery_limit_bytes: 1 });
 const cases = [
+    ['Success · captions stay in front', 'The installed compositor detects fixed caption glyphs and excludes them after mask expansion and feathering.', captions.success],
+    ['Empty · no fixed caption', 'A plain source keeps the normal subject composite.', captions.empty],
+    ['Error · caption analysis unavailable', 'The production path stops and records an error; it does not silently deliver an unprotected edit.', captions.error],
     ['Success · GIF delivery', 'A real conversion of the synthetic animation below, using the same delivery code as the bot.',
         { attachment: completedVideoAttachmentName(deliveryJob, delivered.format), format: delivered.format, bytes: statSync(delivered.path).size, loops: true }],
     ['Edge · upload limit', 'A one-byte fixture limit exercises the fallback without truncating the animation.',
@@ -60,6 +65,7 @@ const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD']).toString(
 const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no']).toString().trim();
 const sourceHash = createHash('sha256');
 for (const file of ['GifVideo', 'VideoGeneration', 'VideoSourceClip', 'VideoSourceImage', 'VideoGifDelivery', 'VideoProtocol', 'VideoBroker']) sourceHash.update(readFileSync(new URL(`../lib/${file}.ts`, import.meta.url)));
+for (const file of ['video_edit_captions.py', 'video-edit-captions.patch']) sourceHash.update(readFileSync(new URL(`../desktop/${file}`, import.meta.url)));
 const fingerprint = sourceHash.digest('hex').slice(0, 12);
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>GIF input and output showcase</title><style>
@@ -68,9 +74,13 @@ const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="v
 <p>Reply to a GIF upload or a Tenor/Giphy message with:</p><div class="command"><code>$oalgo ${escape(prompt)}</code></div>
 <p>GIF uploads and Tenor/Giphy replies receive a looping GIF. These fixtures exercise the real resolver and delivery converter without starting a model render. If conversion fails or cannot fit Discord’s upload limit, the bot attaches the MP4 and explains why.</p>
 <img src="/demo.gif" width="320" height="180" style="max-width:100%;height:auto" alt="Silent looping test animation converted by the actual GIF delivery code">
+<h2 style="margin-top:32px">Keep source captions above replacement characters</h2>
+<p>Actual CPU compositor output from a synthetic fixture. The blue replacement crosses the caption; the letters remain in front, with the open spaces between and inside them still editable. Fixed captions are detected automatically. Moving, changing, low-confidence or multicolour text may not be detected.</p>
+<section style="margin-top:12px">${[['caption-source', 'Source'], ['caption-render', 'Generated subject before compositing'], ['caption-result', 'Final shared compositor output']].map(([file, label]) => `<article><h2>${label}</h2><img src="/${file}.png" width="320" height="180" style="max-width:100%;height:auto" alt="${label}: synthetic caption occlusion fixture"></article>`).join('')}</section>
 <section>${cases.map(([title, detail, value]) => `<article><h2>${escape(title)}</h2><p>${escape(detail)}</p><pre>${escape(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre></article>`).join('')}</section>
 <footer>Source revision: ${escape(revision)}${dirty ? ' + working changes' : ''}; feature code SHA-256: ${fingerprint}. Silent synthetic animation; no credentials, private messages, or live requests. This read-only fixture view has no disabled controls.</footer></main></html>`;
 const server = createServer((request, response) => {
+    if (['/caption-source.png', '/caption-render.png', '/caption-result.png'].includes(request.url)) { response.writeHead(200, { 'content-type': 'image/png' }); response.end(readFileSync(join(temporary, request.url.slice(1)))); return; }
     if (request.url === '/demo.gif') { response.writeHead(200, { 'content-type': 'image/gif' }); response.end(readFileSync(delivered.path)); return; }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(html);
 });
