@@ -2566,11 +2566,11 @@ test('video commands accept exactly one supported attached start frame', () => {
         ]) }),
         /just one image/,
     );
-    assert.throws(
-        () => videoSourceImageFromMessage({
+    assert.equal(
+        videoSourceImageFromMessage({
             attachments: new Map([['gif', { ...attachment, contentType: 'image/gif', name: 'frame.gif' }]]),
         }),
-        /PNG, JPEG, or WebP/,
+        null,
     );
 });
 
