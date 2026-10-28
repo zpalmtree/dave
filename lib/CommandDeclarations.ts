@@ -41,7 +41,6 @@ import {
     handleQuery,
     handleExchange,
     handleAvatar,
-    handleNikocado,
     handleImage,
     handleYoutube,
     handleReady,
@@ -58,17 +57,13 @@ import {
     handleChickenFried,
     handleDot,
     handleGooning,
-    handleMilton,
 } from './CommandImplementations.js';
 
 import {
     handleChatGPT,
-    handleGLADOS,
     handleDrunk,
-    handleDoctor,
     handleTranscribe,
     handleBuggles,
-    handleO3,
     handleTranslate,
     handleCImage,
     handleRemoveBg,
@@ -576,14 +571,6 @@ const sharedCommands: Command[] = [
             argsFormat: Args.DontNeed,
             implementation: handleImgur.bind(undefined, 'r/pizza'),
             description: 'Get a random r/pizza picture',
-        },
-    },
-    {
-        aliases: ['tortle'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleImgur.bind(undefined, 'r/turtle'),
-            description: 'Get a random r/turtle picture',
         },
     },
     {
@@ -1102,25 +1089,7 @@ const sharedCommands: Command[] = [
             description: 'Ask ChatGPT something',
         },
         relatedCommands: [
-            'glados',
             'drunk',
-            'doctor',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['glados'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGLADOS,
-            description: 'Ask GLaDOS something',
-        },
-        relatedCommands: [
-            'chatgpt',
-            'drunk',
-            'doctor',
         ],
         commandGates: [
             slugUserGate,
@@ -1135,24 +1104,6 @@ const sharedCommands: Command[] = [
         },
         relatedCommands: [
             'chatgpt',
-            'glados',
-            'doctor',
-        ],
-        commandGates: [
-            slugUserGate,
-        ],
-    },
-    {
-        aliases: ['doctor'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleDoctor,
-            description: 'Ask the doctor something',
-        },
-        relatedCommands: [
-            'chatgpt',
-            'glados',
-            'drunk',
         ],
         commandGates: [
             slugUserGate,
@@ -1204,35 +1155,11 @@ const sharedCommands: Command[] = [
             description: 'Ask Claude something',
         },
         relatedCommands: [
-            'glados',
             'drunk',
-            'doctor',
         ],
         commandGates: [
             slugUserGate,
         ],
-    },
-    {
-        aliases: ['o3'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleO3,
-            description: 'Ask GPT o3 something',
-        },
-        relatedCommands: [
-            'glados',
-            'drunk',
-            'claude',
-            'chatgpt',
-        ],
-    },
-    {
-        aliases: ['milton'],
-        primaryCommand: {
-            argsFormat: Args.DontNeed,
-            implementation: handleMilton,
-            description: 'Track milton',
-        },
     },
     {
         aliases: ['grok'],
