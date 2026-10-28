@@ -563,7 +563,6 @@ export async function handleImgur(gallery: string, msg: Message): Promise<void> 
         // seems to loop around to page 0 if given a page > final page
         const finalPage = ({
             'r/pizza': 14,
-            'r/turtle': 3,
         } as any)[gallery];
 
         const index = Math.floor(Math.random() * (finalPage + 1));
@@ -835,17 +834,6 @@ export async function handleAvatar(msg: Message): Promise<void> {
             size: 4096,
         }));
     }
-}
-
-export async function handleNikocado(msg: Message): Promise<void> {
-    const nikocados = [
-        "ORLINS BACK!",
-        "Orlins leaving!",
-        "I'm a vegan again!",
-        "I sharted the bed!",
-    ];
-
-    await msg.reply(pickRandomItem(nikocados));
 }
 
 export async function handleYoutube(msg: Message, args: string): Promise<void> {
@@ -1753,13 +1741,4 @@ export async function handleDot(msg: Message, arg: string): Promise<void> {
         embeds: [embed],
         files: [dotAttachment, dotGraphAttachment],
     });
-}
-
-function getRandomInt(min: number, max: number) {
-    return Math.floor(Math.random() * (max - min) + min); // The maximum is exclusive and the minimum is inclusive
-}
-
-export async function handleMilton(msg: Message) {
-    const bust = getRandomInt(0, Number.MAX_SAFE_INTEGER);
-    await (msg.channel as TextChannel).send(`https://cdn.star.nesdis.noaa.gov/FLOATER/AL142024/Sandwich/500x500.jpg?cachebuster=${bust}`);
 }

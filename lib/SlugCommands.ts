@@ -32,12 +32,6 @@ interface BurnWindow {
 
 /* Slugs burnt between start and end (inclusive) earn one slug of the next
  * generation per burnsPerSlug burnt. */
-const GEN3_WINDOW: BurnWindow = {
-    start: new Date('2022-01-01'),
-    end: new Date('2022-11-14'),
-    burnsPerSlug: 3,
-};
-
 const GEN4_WINDOW: BurnWindow = {
     start: new Date('2022-11-14'),
     end: new Date('2024-10-25'),
@@ -123,40 +117,6 @@ async function walletArgument(msg: Message, args: string): Promise<string | unde
     }
 
     return address;
-}
-
-async function handleGen3CountLegacy(msg: Message, args: string): Promise<void> {
-    const address = await walletArgument(msg, args);
-
-    if (address === undefined) {
-        return;
-    }
-
-    if (address === '') {
-        await replyWithMention(msg, `The Generation 3 slug supply will be 800.`);
-        return;
-    }
-
-    const data = await fetchSlugStats();
-
-    if (!data) {
-        await msg.reply('Failed to fetch Gen3 count from API!');
-        return;
-    }
-
-    const { burns, slugs } = tallyBurns(data.burnStats.users, GEN3_WINDOW, address, []);
-
-    if (slugs === 0) {
-        await replyWithMention(
-            msg,
-            `You have ${burns} eligible ${pluralize(burns, 'burn')}. Unfortunately, you missed out on the gen 3 burn period!`,
-        );
-    } else {
-        await replyWithMention(
-            msg,
-            `You are currently set to receive ${slugs} generation 3 ${pluralize(slugs, 'slug')}! You have ${burns} eligible burns.`,
-        );
-    }
 }
 
 async function handleGen4Count(msg: Message, args: string): Promise<void> {
@@ -407,14 +367,6 @@ export const slugCommands: Command[] = [
         'Displays the current Generation 3 slug supply',
         `Generation 3 slugs can be found by filtering for Shipwreck, Submarine, Fish Tank, Underwater Cult, and Night Shift backgrounds. They are part of the same slugs collection, with new, rarer, underwater themed traits. They were awarded to users who burnt three slugs.`,
     ),
-    {
-        aliases: ['gen3legacy'],
-        primaryCommand: {
-            argsFormat: Args.Combined,
-            implementation: handleGen3CountLegacy,
-            description: 'Displays the historical Generation 3 eligiblity',
-        },
-    },
     {
         aliases: ['gen4', 'gen4count', 'gen4supply'],
         primaryCommand: {
