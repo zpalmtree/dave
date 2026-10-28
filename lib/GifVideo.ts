@@ -15,10 +15,22 @@ function safeUrl(value: string): URL | null {
     } catch { return null; }
 }
 
+function isDiscordGif(url: URL): boolean {
+    return ['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname)
+        && /^\/attachments\/\d+\/\d+\/[^/]+\.gif$/i.test(url.pathname);
+}
+
 /** Restrict downloads to media files on the providers' actual CDNs. */
 export function isGifVideoUrl(value: string): boolean {
     const url = safeUrl(value);
-    return Boolean(url && MEDIA_HOSTS.has(url.hostname) && /\.(?:gif|mp4|webm)$/i.test(url.pathname));
+    return Boolean(url && (isDiscordGif(url)
+        || (MEDIA_HOSTS.has(url.hostname) && /\.(?:gif|mp4|webm)$/i.test(url.pathname))));
+}
+
+/** Discord's original and signed/proxied embed URLs identify the same attachment. */
+function gifIdentity(value: string): string {
+    const url = safeUrl(value)!;
+    return isDiscordGif(url) ? `discord:${url.pathname}` : gifPage(value) || url.toString();
 }
 
 function gifPage(value: string): string | null {
@@ -50,6 +62,7 @@ type GifMessage = { content?: string; embeds?: ReadonlyArray<{
     url?: string | null;
     video?: { url?: string | null } | null;
     image?: { url?: string | null } | null;
+    thumbnail?: { url?: string | null } | null;
 }> };
 
 /** Prefer Discord's playable embed; fetch public share-page metadata when it is absent. */
@@ -59,15 +72,23 @@ export async function gifVideoFromMessage(message: GifMessage, fetcher: typeof f
     const embeds = message.embeds || [];
     if (!candidates.length) {
         for (const embed of embeds) {
-            const value = [embed.url, embed.video?.url, embed.image?.url]
+            const value = [embed.url, embed.video?.url, embed.image?.url, embed.thumbnail?.url]
                 .find(value => value && (gifPage(value) || isGifVideoUrl(value)));
             if (value) candidates.push(value);
         }
     }
-    const links = [...new Set(candidates.map(value => gifPage(value) || safeUrl(value)!.toString()))];
+    const links = [...new Map(candidates.map(value => [gifIdentity(value), gifPage(value) || safeUrl(value)!.toString()])).values()];
     if (!links.length) return null;
-    if (links.length > 1) throw new Error('Use exactly one Tenor/Giphy GIF for the source.');
+    if (links.length > 1) throw new Error('Use exactly one GIF link for the source.');
     const link = links[0];
+    if (isDiscordGif(safeUrl(link)!)) {
+        // Pasted attachment links may lack the signature required for downloading.
+        // Discord supplies a signed URL in its image embed's thumbnail instead.
+        const matching = [...embeds.flatMap(embed => [embed.video?.url, embed.image?.url, embed.thumbnail?.url, embed.url]), ...candidates]
+            .filter((value): value is string => Boolean(value && isGifVideoUrl(value) && gifIdentity(value) === gifIdentity(link)));
+        const signed = matching.find(value => ['ex', 'is', 'hm'].every(key => safeUrl(value)!.searchParams.has(key)));
+        return clip(signed || link);
+    }
     const direct = clip(link);
     if (direct) return direct;
     for (const embed of embeds) {

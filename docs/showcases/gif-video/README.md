@@ -21,6 +21,7 @@ It does not post to Discord or run a model render.
 
 The reviewed [desktop capture](desktop.png) is 1280 CSS pixels wide; the
 [mobile capture](mobile.png) is 390 CSS pixels wide. Both include upload,
+pasted Discord GIF links with signed thumbnails, missing embeds, ambiguous links,
 Tenor, Giphy, custom portrait, starting-frame, empty, preparation, GIF delivery,
 upload-limit fallback and error states. Caption cases show successful protection,
 no detected caption, and an actual injected OCR failure with its production
@@ -29,11 +30,11 @@ disabled states. Neither viewport
 has horizontal overflow. The shared Chrome profile logged an unrelated wallet
 extension injection error; the page itself has no client JavaScript.
 
-Capture source: base revision `7ae0cf3` plus caption protection. The concatenated
+Capture source: base revision `77e70ad` plus Discord GIF link support. The concatenated
 `GifVideo.ts`, `VideoGeneration.ts`, `VideoSourceClip.ts` and
 `VideoSourceImage.ts`, followed by `VideoGifDelivery.ts`, `VideoProtocol.ts`
 and `VideoBroker.ts`, then `desktop/video_edit_captions.py` and
-`desktop/video-edit-captions.patch`, SHA-256 prefix is `3e94ae4012bc`, also displayed in the
+`desktop/video-edit-captions.patch`, SHA-256 prefix is `fd01bbb35403`, also displayed in the
 captures. This fingerprints the exact input implementation independently of the
 later commit that stores these screenshots.
 
@@ -49,7 +50,10 @@ passing (including eight new caption tests). GIF-output checks
 cover infinite looping, retained duration/motion, file-size adaptation, unchanged
 original MP4/audio, cache invalidation after regeneration, explicit MP4 fallback,
 matching Discord filenames and the private workflow button. All 64 targeted
-input, delivery and broker regression tests passed.
+input, delivery and broker regression tests passed for the preceding caption change.
+The Discord GIF link change passed the build and all 12 targeted GIF input and
+delivery tests, including signed CDN/proxy selection, matching attachment identity,
+embed-only messages, missing embeds, rejected hosts, ambiguity and reply precedence.
 
 The reported `e02575b8` ending artifacts were traced to the public Tenor source
 `https://tenor.com/view/repost-ddmf-penalty-flag-referee-gif-16152028`.

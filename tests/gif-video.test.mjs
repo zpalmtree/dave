@@ -84,6 +84,45 @@ test('missing embeds resolve bounded share-page metadata and prefer animation ov
     assert.equal(source.name, 'ref.gif');
 });
 
+test('pasted Discord GIF replies use the matching signed thumbnail and retain GIF edit behavior', async () => {
+    const signed = `${gif.url}?ex=123&is=456&hm=fixture&`;
+    const reply = message(gif.url, [], [{ type: 'image', url: gif.url, thumbnail: { url: signed } }]);
+    assert.deepEqual(await gifVideoFromMessage(reply, noFetch), { clip_url: signed, name: gif.name });
+    const prompt = 'replace peach with meximutt';
+    const result = await resolveVideoEditRequest(prompt, message(prompt), reply, '', MEXIMUTT, noFetch);
+    assert.equal(result.replacement.target, 'peach');
+    assert.equal(result.sources.clip.clip_url, signed);
+    assert.equal(sourceClipDescriptor(result.sources.clip).name, gif.name);
+    assert.equal(result.sources.image, null);
+    assert.equal(videoReplacementUsesPreset(result.replacement.prompt, MEXIMUTT), true);
+    assert.equal(videoPromptFromMessages(prompt, reply), prompt);
+    assert.equal((await videoSourcesFromMessages(message('animate this'), reply, false, noTwitter)).image.clip_url, signed);
+    assert.equal((await videoSourcesFromMessages(message('', [gif]), reply, true, noTwitter)).clip.clip_url, gif.url);
+    assert.equal(stripGifVideoLinks(`${prompt} (<${gif.url}>)`), prompt);
+});
+
+test('Discord GIF links support signed proxies, embed-only replies and unsigned fallback without confusing attachments', async () => {
+    const signed = `${gif.url.replace('cdn.discordapp.com', 'media.discordapp.net')}?ex=123&is=456&hm=fixture&`;
+    for (const reply of [message(signed), message(`${signed} ${gif.url}`),
+        message(gif.url, [], [{ thumbnail: { url: signed } }]),
+        message('', [], [{ url: gif.url, thumbnail: { url: signed } }]),
+        message('', [], [{ thumbnail: { url: signed } }])]) {
+        assert.equal((await gifVideoFromMessage(reply, noFetch)).clip_url, signed);
+    }
+    const unrelated = signed.replace('referee.gif', 'another.gif');
+    assert.equal((await gifVideoFromMessage(message(gif.url, [], [{ thumbnail: { url: unrelated } }]), noFetch)).clip_url, gif.url);
+    assert.equal((await gifVideoFromMessage(message(gif.url), noFetch)).clip_url, gif.url);
+    assert.equal((await gifVideoFromMessage(message(gif.url.replace('.gif', '.GIF')), noFetch)).name, 'referee.GIF');
+    await assert.rejects(gifVideoFromMessage(message(`${gif.url} ${unrelated}`), noFetch), /exactly one/);
+    await assert.rejects(gifVideoFromMessage(message(`${gif.url} ${tenor}`), noFetch), /exactly one/);
+    for (const url of [gif.url.replace('https:', 'http:'), gif.url.replace('cdn.discordapp.com', 'cdn.discordapp.com.evil.test'),
+        gif.url.replace('https://', 'https://user@'), gif.url.replace('.com/', '.com:444/'),
+        gif.url.replace('/attachments/', '/other/'), gif.url.replace('.gif', '.png'), gif.url.replace('.gif', '.mp4')]) {
+        assert.equal(isGifVideoUrl(url), false);
+        assert.equal(await gifVideoFromMessage(message(url), noFetch), null);
+    }
+});
+
 test('GIF resolution rejects ambiguous, unavailable, redirected and untrusted sources', async () => {
     await assert.rejects(gifVideoFromMessage(message(`${tenor} ${giphy}`), noFetch), /exactly one/);
     for (const url of ['http://media.tenor.com/a.gif', 'https://media.tenor.com.evil.test/a.gif',

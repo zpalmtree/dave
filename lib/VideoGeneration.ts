@@ -1344,7 +1344,7 @@ export async function handleVideoRequest(
         const sources = resolved.sources;
         postText = 'postText' in sources ? sources.postText || '' : '';
         sourceVideo = sources.clip;
-        if (replacement && !sourceVideo) throw new Error('Attach a video or include a Twitter/X or YouTube video link to edit. You can also reply to a message containing one.');
+        if (replacement && !sourceVideo) throw new Error('Attach a video or GIF, or include a Discord GIF, Tenor/Giphy, Twitter/X or YouTube link to edit. You can also reply to a message containing one.');
         attachedSourceImage = sources.image;
         sourceAudio = videoSourceAudioFromMessages(msg, referencedMessage);
         // An explicit song attachment wins; otherwise extract the selected clip's soundtrack.
