@@ -33,7 +33,7 @@ test('a regenerated video is posted as a new reply, leaving the earlier delivery
     await assert.rejects(service.postDelivery(job, { channel }), /temporary Discord outage/);
 });
 
-test('a ready video with a deleted progress message posts without a reply and retries acknowledgement without duplicates', async t => {
+test('a ready video with a deleted progress message replies to the command and retries acknowledgement without duplicates', async t => {
     const directory = await mkdtemp(join(tmpdir(), 'video-delivery-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const resultPath = join(directory, 'result.mp4');
@@ -45,17 +45,22 @@ test('a ready video with a deleted progress message posts without a reply and re
     let sends = 0;
     let acknowledgements = 0;
     let collectorStopped = false;
+    let commandReplies = 0;
     const channel = {
         isTextBased: () => true,
         messages: { fetch: async input => {
             if (input === 'deleted') throw Object.assign(new Error('Unknown Message'), { code: 10008 });
-            assert.deepEqual(input, { limit: 100 }, 'Must not fetch the command to reply');
+            if (input === 'command') return { reply: async payload => {
+                commandReplies++;
+                return channel.send(payload);
+            } };
+            assert.deepEqual(input, { limit: 100 });
             return { find: predicate => posted && predicate(posted) ? posted : undefined };
         } },
         send: async payload => {
             sends++;
             assert.equal(payload.files[0].attachment, resultPath);
-            assert.equal(payload.reply, undefined);
+            assert.equal(payload.content, 'Video **d8572423** complete.');
             posted = { id: 'delivery', content: payload.content, author: { id: 'bot' } };
             return posted;
         },
@@ -76,6 +81,7 @@ test('a ready video with a deleted progress message posts without a reply and re
     await assert.rejects(service.updateJob(job), /temporary broker outage/);
     await service.updateJob(job);
     assert.equal(sends, 1);
+    assert.equal(commandReplies, 1);
     assert.equal(acknowledgements, 2);
     assert.equal(collectorStopped, true);
     assert.equal(service.rendered.has(job.id), false);
@@ -85,4 +91,33 @@ test('an unavailable delivery channel leaves the job unacknowledged for retry', 
     const service = new VideoGenerationService({ user: { id: 'bot' }, channels: { fetch: async () => null } });
     service.acknowledge = () => assert.fail('Unavailable deliveries must not be acknowledged');
     await assert.rejects(service.postDelivery({ id: 'job', channel_id: 'missing' }, null), /delivery channel is unavailable/);
+});
+
+for (const content of ['Minimax video **d8572423** is ready.', 'Video **d8572423** complete.']) {
+    test(`delivery retries recognize existing message: ${content}`, async () => {
+        const service = new VideoGenerationService({ user: { id: 'bot' } });
+        const existing = { id: '200', content, author: { id: 'bot' } };
+        const job = { id: 'd8572423-test', status_message_id: '100' };
+        const channel = { messages: { fetch: async () => ({ find: predicate => [
+            { ...existing, id: '100' },
+            { ...existing, author: { id: 'other-user' } },
+            existing,
+        ].find(predicate) }) } };
+        assert.equal(await service.postDelivery(job, { channel }), existing);
+    });
+}
+
+test('delivery falls back to the channel if the original command was deleted', async () => {
+    const service = new VideoGenerationService({ user: { id: 'bot' } });
+    const job = { id: 'd8572423-test', model: 'minimax', prompt: 'A duck waves.',
+        result_path: '/tmp/result.mp4', command_message_id: 'deleted' };
+    const sent = { id: '200' };
+    const channel = { messages: { fetch: async input => {
+        if (input === 'deleted') throw Object.assign(new Error('Unknown Message'), { code: 10008 });
+        return { find: () => undefined };
+    } }, send: async payload => {
+        assert.equal(payload.content, 'Video **d8572423** complete.');
+        return sent;
+    } };
+    assert.equal(await service.postDelivery(job, { channel }), sent);
 });
