@@ -1,5 +1,20 @@
 # Desktop video optimization changes
 
+## Repaint requests survive short broker restarts
+
+`video-edit-repaint-retry.patch` retries the same shot after HTTP 502/503/504
+or a dropped broker connection, with waits of 5, 10 and 20 seconds (four requests
+maximum). Provider timeouts, content refusals and other HTTP failures remain
+final. Cancellation during backoff prevents another request. These retries
+occur while the tracking GPU reservation is already released.
+
+Apply `python3 scripts/apply-video-edit-repaint-retry-desktop.py --check`, then
+omit `--check`; reload the idle worker. Run `python -m unittest
+test_video_edit_repaint_retry test_video_edit_backend test_video_edit_reservation
+test_video_reservation` in the installed runtime. Deploy both branches with
+`scripts/deploy-bots.sh --with-broker`; wait for active edit requests to finish
+before planned broker restarts, then resume dispatch after worker verification.
+
 ## Source-edit backend failures
 
 `video-edit-backend.patch` requests `--evict-cache-before-run` through gpuq for

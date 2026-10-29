@@ -1,0 +1,45 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -80,6 +80,10 @@
+ LOUDNESS_TARGET_I = -16.0
+ LOUDNESS_TARGET_TP = -1.5
+ LOUDNESS_TARGET_LRA = 11.0
++
++
++class VideoEditServiceUnavailable(RuntimeError):
++    """The repaint endpoint is temporarily unavailable, for example during deploy."""
+ 
+ 
+ class FrontierPlanRejected(RuntimeError):
+@@ -2479,6 +2483,21 @@
+ 
+     async def request_video_edit_still(self, job: dict[str, Any], frame: Path, destination: Path,
+                                        shot: int = 1) -> Path:
++        for attempt in range(4):
++            if self.cancel_reason:
++                raise RuntimeError("Video edit cancelled.")
++            try:
++                return await self.request_video_edit_still_once(job, frame, destination, shot)
++            except (VideoEditServiceUnavailable, aiohttp.ClientConnectionError) as exc:
++                # Do not repeat a long provider timeout or a content rejection.
++                if isinstance(exc, asyncio.TimeoutError) or attempt == 3:
++                    raise
++                print("Repaint service temporarily unavailable; retrying the same shot", flush=True)
++                await asyncio.sleep(5 * 2 ** attempt)
++        raise AssertionError("Unreachable repaint retry state")
++
++    async def request_video_edit_still_once(self, job: dict[str, Any], frame: Path, destination: Path,
++                                            shot: int = 1) -> Path:
+         if not self.http_session:
+             raise RuntimeError("Broker HTTP session is unavailable.")
+         url = re.sub(r"^wss://", "https://", self.broker_url)
+@@ -2496,6 +2515,9 @@
+                     detail = str(json.loads(detail).get("error") or detail)
+                 except (ValueError, AttributeError):
+                     pass
++                if response.status in {502, 503, 504}:
++                    raise VideoEditServiceUnavailable(
++                        detail[:500] or f"Repaint service returned HTTP {response.status}.")
+                 raise RuntimeError(detail[:500] or f"Repaint service returned HTTP {response.status}.")
+             mime_type = str(response.headers.get("content-type") or "").split(";", 1)[0].lower()
+             if mime_type not in {"image/png", "image/jpeg", "image/webp"}:
