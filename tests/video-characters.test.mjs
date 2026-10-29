@@ -134,7 +134,7 @@ for (const character of VIDEO_CHARACTERS) {
             const job = { ...base, source_kind };
             assert.ok(formatVideoJob(job).includes(`**${label} · `));
             assert.ok(formatVideoJob(job).includes(description));
-            assert.ok(completedVideoPost(job).includes(description));
+            assert.equal(completedVideoPost(job), 'Video **096444e4** complete.');
         }
     });
 

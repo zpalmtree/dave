@@ -154,25 +154,20 @@ function promptWithoutLinkPreviews(prompt: string): string {
 function formatVideoReplyWithFullPrompt(
     prefix: string,
     job: VideoJobView,
-    includePromptTease = false,
 ): string {
     const direction = promptWithoutLinkPreviews(videoJobDirection(job));
     // Discord's multiline quote keeps blank lines and later paragraphs inside
     // the prompt instead of making them look like the bot's own commentary.
     const separator = direction.includes('\n') ? '\n>>> ' : '\n> ';
-    const promptTease = includePromptTease
-        ? sanitizeVideoWorkerText(job.prompt_tease, '', 120).trim()
-        : '';
-    const tease = promptTease ? `\n${promptTease}` : '';
     // Reserve the status before the repeated prompt: cutting status text can
     // split a Discord timestamp or hide the reason a job is waiting.
-    const availableBodyLength = DISCORD_MESSAGE_CONTENT_LIMIT - separator.length - tease.length;
+    const availableBodyLength = DISCORD_MESSAGE_CONTENT_LIMIT - separator.length;
     const displayedPrefix = truncatePrompt(prefix, Math.max(0, availableBodyLength - 1));
     const displayedDirection = truncatePrompt(
         direction,
         Math.max(0, availableBodyLength - displayedPrefix.length),
     ).replace(/<https?:\/\/[^>]*$/i, '…'); // Never leave a truncated URL unsuppressed.
-    return `${displayedPrefix}${tease}${separator}${displayedDirection}`;
+    return `${displayedPrefix}${separator}${displayedDirection}`;
 }
 
 const DEFAULT_SINGLE_VIDEO_RESPONDER_CHANNEL_ID = '483470443001413675';
@@ -280,11 +275,14 @@ function completedVideoTiming(job: Pick<VideoJobView,
 export function completedVideoPost(job: VideoJobView): string {
     const timing = completedVideoTiming(job);
     const notice = sanitizeVideoWorkerText(job.generation_notice, '', 1000).trim();
-    const source = videoSourceDescription(job);
-    const result = `${videoJobDisplayName(job)} video **${shortJobId(job.id)}** is ready${
+    return `Video **${shortJobId(job.id)}** complete${
         timing ? ` — ${timing}` : ''
-    }.${source ? `\n${source}.` : ''}${notice ? `\n${notice}` : ''}`;
-    return formatVideoReplyWithFullPrompt(result, job, true);
+    }.${notice ? `\n${notice}` : ''}`;
+}
+
+function isCompletedVideoPost(content: string | undefined, job: VideoJobView): boolean {
+    return Boolean(content?.includes(`Video **${shortJobId(job.id)}** complete`)
+        || content?.includes(`video **${shortJobId(job.id)}** is ready`));
 }
 
 export function completedVideoAttachmentName(job: VideoJobView, format: VideoOutputFormat = job.output_format || 'mp4'): string {
@@ -928,10 +926,9 @@ export class VideoGenerationService {
         try {
             if (job.delivery_message_id) return await channel.messages.fetch(job.delivery_message_id);
             const recent = await channel.messages.fetch({ limit: 100 });
-            const marker = `video **${shortJobId(job.id)}** is ready`;
             return recent.find((candidate: any) => candidate.id !== job.status_message_id
                 && candidate.author?.id === this.client.user?.id
-                && candidate.content?.includes(marker)) || null;
+                && isCompletedVideoPost(candidate.content, job)) || null;
         } catch (error) {
             if (job.delivery_message_id && Number((error as any)?.code) !== 10008) throw error;
             console.warn(`[Video] Could not check for an existing delivery of ${job.id}: ${String(error)}`);
@@ -942,11 +939,10 @@ export class VideoGenerationService {
     /** A regenerated delivery already posted after the earlier one, when its acknowledgement was lost. */
     private async existingRepost(job: VideoJobView, channel: any, earlierId: string): Promise<any | null> {
         const recent = await channel.messages.fetch({ limit: 100 });
-        const marker = `video **${shortJobId(job.id)}** is ready`;
         return recent.find((candidate: any) => candidate.id !== job.status_message_id
             && BigInt(candidate.id) > BigInt(earlierId)
             && candidate.author?.id === this.client.user?.id
-            && candidate.content?.includes(marker)) || null;
+            && isCompletedVideoPost(candidate.content, job)) || null;
     }
 
     private async existingFailure(job: VideoJobView, channel: any): Promise<any | null> {
@@ -992,7 +988,6 @@ export class VideoGenerationService {
             components: workflows ? [await saveWorkflowDownload(workflows, this.workflowDirectory)] : [],
             allowedMentions: { repliedUser: true },
         };
-        if (!statusMessage) return channel.send(payload);
         try {
             const commandMessage = await channel.messages.fetch(job.command_message_id);
             return await commandMessage.reply(payload);

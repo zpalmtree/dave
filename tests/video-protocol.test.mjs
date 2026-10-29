@@ -423,7 +423,7 @@ test('video runtime is formatted for the delivered post', () => {
         model: 'minimaxdraft',
         runtime_seconds: 65.6,
         prompt: 'A historical completed request',
-    }), /^Retired video model video/);
+    }), /^Video \*\*legacy-d\*\* complete/);
     assert.match(completedVideoPost({
         id: 'a1869ead-bbac-4733-abc8-c07f4cfec52a',
         model: 'minimaxfast',
@@ -470,12 +470,12 @@ test('video replies preserve the full accepted prompt when it fits alongside the
     const status = formatVideoStatusPost(job);
     const completed = completedVideoPost(job);
     const failed = failedVideoPost(job);
-    for (const reply of [status, completed, failed]) {
+    for (const reply of [status, failed]) {
         assert.ok(reply.length <= 1999);
         assert.ok(reply.endsWith(`> ${prompt}`));
     }
     assert.doesNotMatch(status, /Pervert/);
-    assert.match(completed, /\nPervert\.\n> /);
+    assert.equal(completed, 'Video **a1869ead** complete — took **1m 6s**.\nThe screenplay was prepared successfully.');
     assert.doesNotMatch(failed, /Pervert/);
     assert.equal(completedVideoAttachmentName(job), 'SPOILER_minimax-a1869ead.mp4');
     assert.equal(completedVideoAttachmentName({ ...job, prompt_tease: null }), 'minimax-a1869ead.mp4');
@@ -517,7 +517,7 @@ test('video replies keep multiline prompts inside a Discord multiline quote', ()
         worker_online: true,
         expected_finish_at: 2_000_000_450,
     };
-    for (const format of [formatVideoStatusPost, completedVideoPost, failedVideoPost]) {
+    for (const format of [formatVideoStatusPost, failedVideoPost]) {
         const reply = format(job);
         assert.ok(reply.endsWith(`\n>>> ${job.prompt}`));
         assert.ok(reply.length <= 1999);
@@ -551,7 +551,6 @@ test('video replies fit when a referenced prompt uses Discord\'s full content al
 
     const replies = [
         formatVideoStatusPost(job),
-        completedVideoPost(job),
         failedVideoPost(job),
     ];
     for (const reply of replies) {
@@ -3707,7 +3706,7 @@ test('source labels distinguish video edits, extracted frames, and built-in port
     ]) {
         const job = { ...base, source_kind };
         assert.ok(formatVideoJob(job).includes(label));
-        assert.ok(completedVideoPost(job).includes(label));
+        assert.equal(completedVideoPost(job), 'Video **096444e4** complete.');
         assert.match(formatVideoJob(job), /Oalgo/);
         assert.doesNotMatch(formatVideoJob(job), /user start frame|auto-directed/);
     }
