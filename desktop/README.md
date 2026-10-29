@@ -1,5 +1,30 @@
 # Desktop video optimization changes
 
+## Source-edit backend failures
+
+`video-edit-backend.patch` requests `--evict-cache-before-run` through gpuq for
+each source-video edit admission. This starts a fresh managed ComfyUI backend
+and avoids carrying cached SAM3 model weights between tracking and animation
+admissions or later edits. Ordinary video generation retains its warm cache.
+The tradeoff is additional backend startup time for edits. This is a workaround
+for the native DynamicVRAM abort observed in `restore_loaded_backups` during
+job `1d4756d0`, not a change to ComfyUI's memory manager.
+
+History polling tolerates two consecutive transport failures while retaining
+the same prompt ID and the overall render deadline. A third failed read reports
+backend unavailability. Source edits now use the broker's bounded readiness
+retries for that error and gpuq's ComfyUI startup timeout. Tracking, quality,
+render deadline and API validation failures remain final. A failed prompt POST
+is never automatically resubmitted because its acceptance may be unknown.
+
+Apply `python3 scripts/apply-video-edit-backend-desktop.py --check`, then omit
+`--check`. Reload the worker while idle or safely waiting for admission. Run
+`python -m unittest test_video_edit_backend test_video_edit_reservation
+test_video_reservation test_video_edit` in the desktop runtime; all 56 tests
+pass. Sync both branches and deploy with `scripts/deploy-bots.sh --with-broker`.
+The bot's stall monitor also preserves an existing alert through worker
+disconnect/reconnect, avoiding a false recovery followed by another first alert.
+
 ## Release GPU admission during source-edit repainting
 
 `video-edit-reservation.patch` closes and clears the tracking reservation before
