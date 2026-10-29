@@ -652,3 +652,24 @@ status means only that compositing may proceed, not that the broker approved the
 video. All 74 focused desktop tests passed; the same failing clip also completed
 with cached real diffusion output, live tracking/compositing and live motion review.
 The final-frame seek regression was verified with native FFmpeg decoding.
+
+## Recover source tracking after camera movement
+
+Apply `python3 scripts/apply-video-edit-source-recovery-desktop.py --check`, then
+without `--check`, after the animation-recovery update. The installer checks both
+existing renderer hashes, rejects unexpected helper files and concurrent changes,
+and supports repeat installs. No worker restart is needed: each edit starts a new
+renderer process. Deploy both bot tracks with `scripts/deploy-bots.sh --with-broker`.
+
+A failed source track gets one reverse pass. A still-fragmented primary track can
+seed one object from a sustained detection and propagate it in both directions,
+without text redetection. The original coverage checks still apply. Empty source
+masks now suppress generated alpha. Source frame order, duration, padding, target
+text and primary/group selection remain intact; group edits cannot use the
+single-object seed fallback. JSON recovery records remain in the edit work folder.
+
+Run `python -m unittest test_video_edit_source_recovery test_video_edit
+ test_video_edit_isolated test_video_edit_composite test_video_edit_recovery` in the
+Windows desktop runtime. All 74 tests passed. Fresh preparation of the full
+17-second regression clip passed both shots; final replacement generation and
+delivery were not replayed. See `docs/video-source-edit.md` for the evidence.
