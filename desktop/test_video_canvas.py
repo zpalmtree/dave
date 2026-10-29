@@ -81,7 +81,7 @@ class NativeCanvasTests(unittest.TestCase):
         portrait = self.inspect(clips[0], canvas, frames=24)
         self.assert_bands(portrait, 4)
         self.assert_bands(portrait, 251)
-        for transition, frames in [('cut', 48), ('dissolve', 42)]:
+        for transition, frames in [('cut', 42), ('continue', 48), ('dissolve', 42)]:
             output = recovery.join_clips(clips, self.root / f'{transition}.mp4',
                 [{'transition': 'start'}, {'transition': transition, 'audio_transition': 'auto'}])
             self.inspect(output, canvas, frames=frames)
@@ -182,7 +182,7 @@ class NativeCanvasTests(unittest.TestCase):
                 asyncio.run(recovery.run_recovery_job(worker, job))
                 self.assertEqual(worker.upload.await_count, attempt + 1)
                 delivered = worker.upload.await_args.args[1]
-                self.inspect(delivered, (144, 256), frames=48)
+                self.inspect(delivered, (144, 256), frames=48 if song else 42)
         worker.fail_current.assert_awaited_once_with('temporary upload outage', True)
         worker.wait_and_send_terminal.assert_awaited_once()
         for index, original in enumerate(originals):

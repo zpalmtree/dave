@@ -2,6 +2,7 @@
 import array
 import copy
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -148,6 +149,7 @@ class RecoveryAssemblyTests(unittest.TestCase):
         self.assertGreater(frame[0], 30)
         self.assertGreater(frame[2], 30, 'The boundary must blend red and blue, not hard-cut.')
 
+    @mock.patch.dict(os.environ, {'VIDEO_SHOT_BLEND_SECONDS': '0'})
     def test_recovery_auto_audio_edit_softens_seam_without_changing_runtime(self):
         levels = {}
         for mode in ['cut', 'auto', 'fade']:
