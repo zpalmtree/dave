@@ -1,5 +1,27 @@
 # Desktop video optimization changes
 
+## Release GPU admission during source-edit repainting
+
+`video-edit-reservation.patch` closes and clears the tracking reservation before
+waiting for remote shot repaints. Animation obtains fresh admission with a new
+idempotency scope derived from the tracking reservation. Cancellation skips
+readmission; a rejected admission never starts animation. Local Wan edits keep
+their reservation because they have no remote repaint wait.
+
+This fixes `GPU reservation ended in state succeeded`: the reservation child
+exits after 60 seconds without another command following a completed result,
+but repainting can take several minutes. In job `204552f8`, tracking completed
+at 4:24:19 PM EDT on October 29, 2026; its replacement still arrived at
+4:25:40 PM EDT, after that timeout. The successful reservation described the
+tracking subprocess, not a completed video.
+
+Apply `python3 scripts/apply-video-edit-reservation-desktop.py --check`, then
+without `--check`; reload the supervised worker while idle. Run
+`python -m unittest test_video_edit_reservation test_video_reservation` from
+the installed desktop runtime. The regression fails against the previous worker
+and passes with the patch. Sync both branches and deploy with
+`scripts/deploy-bots.sh --with-broker`.
+
 ## Short blends between generated shots
 
 `video-shot-blend.patch` makes ordinary `cut` boundaries between independently
