@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planUpdates as planEmbeds, planPullRequests, notificationOptions, deliverPending, listBranches, watchTargets, saveState } from '../dist/GitHubCommitWatch.js';
+import { planUpdates as planEmbeds, planPullRequests, planIssues, notificationOptions, deliverPending, listBranches, watchTargets, saveState } from '../dist/GitHubCommitWatch.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -401,4 +401,60 @@ test('mixed-author PR merge can display the explicitly identified merger avatar'
         return {...pr,merged_by:{login:'xaz',avatar_url:'https://avatars.githubusercontent.com/u/1'}};
     });
     assert.equal(result.pending[0].embeds[0].thumbnail.url,'https://avatars.githubusercontent.com/u/1');
+});
+
+const pingUser = '1213306439175766031';
+const issue = number => ({ number, title: 'Bug @everyone', state: 'open', user: openedPR(1).user });
+test('new PRs and issues ping only the configured user; commits and legacy messages never ping', async () => {
+    const pulls = await planPullRequests({ ...state({}), lastPullRequestNumber: 0 }, async () => [openedPR(1)]);
+    const issues = await planIssues({ ...state({}), lastIssueNumber: 0 }, async () => [issue(2)]);
+    for (const item of [...pulls.pending, ...issues.pending]) {
+        const sent = notificationOptions(JSON.parse(JSON.stringify(item)), pingUser);
+        assert.equal(sent.content, `<@${pingUser}>`);
+        assert.deepEqual(sent.allowedMentions, { parse: [], users: [pingUser] });
+        assert.equal(sent.event, undefined);
+        assert.deepEqual(notificationOptions(item).allowedMentions, { parse: [] });
+    }
+    const commits = await integration();
+    for (const item of [...commits.pending, `<@${pingUser}> @everyone`]) {
+        const sent = notificationOptions(item, pingUser);
+        assert.deepEqual(sent.allowedMentions, { parse: [] });
+        if (typeof item !== 'string') assert.equal(sent.content, undefined);
+    }
+});
+test('issue tracking baselines without posts, skips PRs, and announces each new issue once', async () => {
+    const baseline = await planIssues(state({}), async () => [{ ...issue(4), pull_request: {} }, issue(3)]);
+    assert.equal(baseline.lastIssueNumber, 4);
+    assert.deepEqual(baseline.pending, []);
+    const next = await planIssues(baseline, async () => [issue(7), { ...issue(6), pull_request: {} }, { ...issue(5), state: 'closed' }, issue(3)]);
+    assert.equal(next.lastIssueNumber, 7);
+    assert.equal(next.pending.length, 2);
+    assert.match(next.pending[0].embeds[0].description, /Already closed/);
+    assert.equal(next.pending[0].embeds[0].url, `https://github.com/${repo}/issues/5`);
+    const again = await planIssues({ ...next, pending: [] }, async () => [issue(7), issue(5)]);
+    assert.deepEqual(again.pending, []);
+});
+test('issue pagination crosses a full page of PRs without duplicate PR notifications', async () => {
+    const before = { ...state({}), lastIssueNumber: 1 };
+    const next = await planIssues(before, async path => path.endsWith('page=1')
+        ? Array.from({ length: 100 }, (_, i) => ({ ...issue(102-i), pull_request: {} }))
+        : [issue(2), issue(1)]);
+    assert.equal(next.lastIssueNumber, 102);
+    assert.equal(next.pending.length, 1);
+});
+test('issue permission failures preserve pending commits and transient failures preserve the cursor', async () => {
+    const before = { ...state({}), lastIssueNumber: 4, pending: ['commit'] };
+    for (const status of [403, 404, 410]) assert.deepEqual(await planIssues(before, async () => { throw Object.assign(new Error('denied'), { status }); }), before);
+    await assert.rejects(planIssues(before, async () => { throw new Error('timeout'); }), /timeout/);
+    assert.equal(before.lastIssueNumber, 4);
+});
+test('per-repository ping and issue options are validated and do not affect existing destinations', () => {
+    const targets = watchTargets({ ...watchSettings, additionalRepositories: [{ ...roundAndRound, mentionUserId: pingUser, trackIssues: true }] }, '/config/watch.json');
+    assert.equal(targets[0].mentionUserId, undefined);
+    assert.equal(targets[0].trackIssues, undefined);
+    assert.equal(targets[1].mentionUserId, pingUser);
+    assert.equal(targets[1].trackIssues, true);
+    for (const invalid of [{ mentionUserId: '@everyone' }, { mentionUserId: 123 }, { trackIssues: 'true' }]) {
+        assert.throws(() => watchTargets({ ...watchSettings, ...invalid }, '/config/watch.json'), /Invalid/);
+    }
 });
