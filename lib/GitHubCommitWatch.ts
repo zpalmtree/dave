@@ -21,7 +21,7 @@ interface PullRequest {
     head: { ref: string };
     base: { ref: string };
 }
-interface WatchDestination { repository: string; threadId: string }
+interface WatchDestination { repository: string; threadId: string; mentionUserId?: string; trackIssues?: boolean }
 interface Settings extends WatchDestination {
     token: string;
     botUserId: string;
@@ -38,16 +38,18 @@ export function watchTargets(settings: Settings, configPath: string): WatchTarge
     const seen = new Set<string>();
     return destinations.map((destination, index) => {
         if (!destination || typeof destination.repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(destination.repository)
-            || typeof destination.threadId !== 'string' || !/^\d+$/.test(destination.threadId)) {
+            || typeof destination.threadId !== 'string' || !/^\d+$/.test(destination.threadId)
+            || (destination.mentionUserId !== undefined && (typeof destination.mentionUserId !== 'string' || !/^\d+$/.test(destination.mentionUserId)))
+            || (destination.trackIssues !== undefined && typeof destination.trackIssues !== 'boolean')) {
             throw new Error('Invalid GitHub watch configuration.');
         }
-        const { repository, threadId } = destination;
+        const { repository, threadId, mentionUserId, trackIssues } = destination;
         const key = `${encodeURIComponent(repository.toLowerCase())}.${threadId}`;
         if (seen.has(key)) throw new Error('Duplicate GitHub watch repository and thread.');
         seen.add(key);
         // Keep the original cursor/outbox intact; additional watches have stable,
         // destination-specific files even when their configuration order changes.
-        return { repository, threadId, statePath: index === 0 ? `${configPath}.state.json` : `${configPath}.${key}.state.json` };
+        return { repository, threadId, ...(mentionUserId ? { mentionUserId } : {}), ...(trackIssues !== undefined ? { trackIssues } : {}), statePath: index === 0 ? `${configPath}.state.json` : `${configPath}.${key}.state.json` };
     });
 }
 export interface WatchState {
@@ -55,12 +57,20 @@ export interface WatchState {
     threadId: string;
     heads: Record<string, string>;
     lastPullRequestNumber?: number;
+    lastIssueNumber?: number;
     pending: WatchNotification[];
 }
-export type WatchNotification = string | { embeds: APIEmbed[] };
+export type WatchNotification = string | { embeds: APIEmbed[]; event?: 'pull-request-opened' | 'issue-opened' };
 
-export function notificationOptions(notification: WatchNotification): MessageCreateOptions {
-    return { ...(typeof notification === 'string' ? { content: notification } : notification), allowedMentions: { parse: [] } };
+export function notificationOptions(notification: WatchNotification, mentionUserId?: string): MessageCreateOptions {
+    const ping = typeof notification !== 'string'
+        && (notification.event === 'pull-request-opened' || notification.event === 'issue-opened')
+        && mentionUserId && /^\d+$/.test(mentionUserId) ? mentionUserId : undefined;
+    return {
+        ...(typeof notification === 'string' ? { content: notification } : { embeds: notification.embeds }),
+        ...(ping ? { content: `<@${ping}>` } : {}),
+        allowedMentions: { parse: [], ...(ping ? { users: [ping] } : {}) },
+    };
 }
 
 type Request = (path: string) => Promise<any>;
@@ -274,7 +284,7 @@ export async function planPullRequests(state: WatchState, request: Request): Pro
     const pending = [...state.pending];
     for (const pull of discovered.sort((a, b) => a.number - b.number)) {
         const avatar = pull.user?.avatar_url;
-        pending.push({ embeds: [{
+        pending.push({ event: 'pull-request-opened', embeds: [{
             title: `${pull.draft ? 'Draft PR opened' : 'PR opened'} #${pull.number}: ${pull.title}`.slice(0, 256),
             url: `https://github.com/${state.repository}/pull/${pull.number}`,
             color: 0x238636,
@@ -283,6 +293,47 @@ export async function planPullRequests(state: WatchState, request: Request): Pro
         }] });
     }
     return { ...state, lastPullRequestNumber: latest, pending };
+}
+
+interface OpenedIssue {
+    number: number;
+    title: string;
+    state: string;
+    user: { login: string; avatar_url: string } | null;
+    pull_request?: unknown;
+}
+
+export async function planIssues(state: WatchState, request: Request): Promise<WatchState> {
+    const previous = state.lastIssueNumber;
+    let latest = previous || 0;
+    const discovered: OpenedIssue[] = [];
+    try {
+        for (let page = 1; ; page++) {
+            // GitHub's issues endpoint includes PRs; count them for pagination only.
+            const batch: OpenedIssue[] = await request(`/issues?state=all&sort=created&direction=desc&per_page=100&page=${page}`);
+            for (const issue of batch) {
+                latest = Math.max(latest, issue.number);
+                if (previous !== undefined && issue.number > previous && !issue.pull_request) discovered.push(issue);
+            }
+            if (previous === undefined || batch.length < 100 || batch.some(issue => issue.number <= previous)) break;
+        }
+    } catch (error) {
+        if (![403, 404, 410].includes((error as { status?: number }).status || 0)) throw error;
+        console.warn('[GitHub watch] Issue notifications unavailable; check Issues: read access and repository issue settings.');
+        return state;
+    }
+    const pending = [...state.pending];
+    for (const issue of discovered.sort((a, b) => a.number - b.number)) {
+        const avatar = issue.user?.avatar_url;
+        pending.push({ event: 'issue-opened', embeds: [{
+            title: `Issue opened #${issue.number}: ${issue.title}`.slice(0, 256),
+            url: `https://github.com/${state.repository}/issues/${issue.number}`,
+            color: 0x238636,
+            description: `**${plain(issue.user?.login || 'Unknown author', 100)}** opened an issue${issue.state === 'closed' ? '\nAlready closed' : ''}`,
+            ...(avatar && /^https:\/\/avatars\.githubusercontent\.com\//.test(avatar) ? { thumbnail: { url: avatar } } : {}),
+        }] });
+    }
+    return { ...state, lastIssueNumber: latest, pending };
 }
 
 export function pullRequestLinks(content: string, repository: string): number[] {
@@ -352,7 +403,7 @@ export function startGitHubCommitWatch(client: Client): void {
         if (settings.botUserId !== client.user?.id) return;
         for (const target of watchTargets(settings, configPath)) startWatch(settings.token, target);
     }
-    function startWatch(token: string, { repository, threadId, statePath }: WatchTarget) {
+    function startWatch(token: string, { repository, threadId, statePath, mentionUserId, trackIssues }: WatchTarget) {
         const request: Request = async path => {
             const response = await fetch(`https://api.github.com/repos/${repository}${path}`, {
                 headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
@@ -371,19 +422,20 @@ export function startGitHubCommitWatch(client: Client): void {
         const poll = async () => {
             try {
                 const channel = await client.channels.fetch(threadId);
-                if (!channel?.isThread()) throw new Error('Configured destination is not an accessible thread.');
+                if (!channel?.isTextBased() || channel.isDMBased() || !('send' in channel)) throw new Error('Configured destination is not an accessible guild text channel or thread.');
                 let state: WatchState | undefined;
                 try { state = JSON.parse(await fs.readFile(statePath, 'utf8')); }
                 catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
                 if (state && (state.repository !== repository || state.threadId !== threadId)) throw new Error('Watch state destination differs from configuration.');
                 const send = async (content: WatchNotification) => {
-                    if (channel.archived) await channel.setArchived(false);
-                    return channel.send(notificationOptions(content));
+                    if (channel.isThread() && channel.archived) await channel.setArchived(false);
+                    return channel.send(notificationOptions(content, mentionUserId));
                 };
                 if (state) await deliverPending(state, send, () => saveState(statePath, state!));
                 const initialized = Boolean(state);
                 state = await planUpdates(state, repository, threadId, request);
                 state = await planPullRequests(state, request);
+                if (trackIssues) state = await planIssues(state, request);
                 await saveState(statePath, state);
                 await deliverPending(state, send, () => saveState(statePath, state!));
                 if (!initialized) console.log(`[GitHub watch] Baseline saved for ${repository}: ${Object.keys(state.heads).length} branches; thread ${threadId}.`);

@@ -12,7 +12,7 @@ updates use blue. Repository headings and footers are omitted and commits use si
 breaks for compact spacing. A single blank line separates the merge heading from
 the commits. When all commits share a GitHub author, their avatar appears as a
 thumbnail; mixed or unknown authors omit the thumbnail. Merge metadata still
-uses bounded pages if necessary. Mentions are disabled. The bot needs Embed Links permission.
+uses bounded pages if necessary. Mentions are disabled by default. A configured `mentionUserId` is pinged only for newly opened PRs and issues. The bot needs Embed Links permission.
 
 Merged PRs receive a prominent line such as **xaz merged branch
 codex/title-harpoon-transition into main**, followed by a PR link. The actor is
@@ -50,15 +50,15 @@ Configuration is read from `~/.config/dave-github-watch.json`, or the path in
 ```
 
 `additionalRepositories` is optional. Every repository receives the same commit,
-branch, merge, PR-opening, and link-preview behavior. Destinations can share a
-thread or use separate threads. Each watcher polls and retries independently;
+branch, merge, PR-opening, and link-preview behavior. Set `trackIssues: true` on a destination to also track new issues. Destinations can share a
+thread or use separate guild text channels or threads (`threadId` accepts either). Each watcher polls and retries independently;
 a failed check for one repository does not stop another. Duplicate repository and
 thread pairs are rejected to prevent duplicate notifications.
 
 Keep this file outside Git with mode 0600. Only the matching bot user starts the
 watcher, so both deployment tracks can share this file without duplicate posts.
 A fine-grained GitHub token needs access to every configured repository with Contents: read
-and Pull requests: read for merge details. Without PR access, commit tracking
+and Pull requests: read for merge details, plus Issues: read when `trackIssues` is enabled. Without PR access, commit tracking
 continues with merge-commit labels and a warning in the logs.
 If the account is an outside collaborator and cannot select this repository for
 a fine-grained token, use an appropriate classic token or a GitHub App installed
@@ -83,7 +83,7 @@ Branch and comparison API results are paginated. API failures preserve progress.
 A branch created and deleted entirely between polls cannot be observed; polling
 also cannot recover commits force-pushed away before they were observed.
 
-The bot must have access to the thread and permission to send messages in it.
+The bot must have access to the destination channel/thread and permission to send messages and embed links in it.
 Archived threads are reopened when there is an update; locked threads may require
 additional Discord permissions. Configuration and API failures appear in PM2 logs
 with the `[GitHub watch]` prefix. No webhook or public inbound endpoint is needed.
@@ -113,3 +113,35 @@ committer name rather than presenting GitHub's web-flow account as the merger.
 Tracked source tips reachable through another source candidate are suppressed as
 inherited changes, avoiding separate settings-branch announcements when merging
 main after main already incorporated settings.
+
+## Blocknet Privacy
+
+The shared production configuration additionally watches `blocknetprivacy/core`,
+`blocknetprivacy/blocknet-gui`, and `blocknetprivacy/blocknet`. Each uses:
+
+```json
+{
+  "repository": "blocknetprivacy/core",
+  "threadId": "746507379310461010",
+  "trackIssues": true,
+  "mentionUserId": "1213306439175766031"
+}
+```
+
+Add one entry per repository to `additionalRepositories`. These watches post to
+`#clonehigh` and ping `justthedeveloper` only for new PRs (including drafts) and
+new issues. Commits, merges, branches and PR previews never ping. Discord allowed
+mentions explicitly permits only this user on opening notifications. Pooners and
+round-and-round retain their existing configuration and silent notifications.
+
+Issue tracking has its own persistent watermark and first-run baseline. It skips
+PR entries returned by GitHub's issues endpoint, includes issues closed between
+polls, and does not repeat edited or reopened issues. An opening followed by a
+quick merge/close still receives its opening notification. Disabled or inaccessible
+issues do not stop commit/PR delivery. New issues are opt-in per destination.
+
+Fixture showcase: http://localhost:8768 — run
+`node scripts/serve-github-watch-showcase.mjs` after building. It displays actual
+notification payloads produced by the watcher with public fixture data; no
+Discord messages or pings are sent. Desktop and mobile captures are stored in
+`docs/showcases/github-watch/`.
