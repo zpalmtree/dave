@@ -129,6 +129,9 @@ export class VideoStallMonitor {
 
         for (const [jobId, tracked] of [...this.tracked]) {
             const job = byId.get(jobId) || null;
+            // A worker disconnect gives no evidence that GPU admission resumed.
+            // Preserve this stall and its reminder timer through reconciliation.
+            if (job?.status === 'running_disconnected') continue;
             if (job && videoGpuWaitIsStalled(job, nowSeconds, thresholds.alertAfterSeconds)) continue;
             this.tracked.delete(jobId);
             const waited = job && job.gpu_queue_wait_seconds !== null && job.gpu_queue_wait_seconds !== undefined

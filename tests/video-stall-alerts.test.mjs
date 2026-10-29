@@ -136,3 +136,32 @@ test('a stalled job that disappears from the poll still closes the alert', () =>
     const ended = failed.observe([job({ status: 'failed', gpu_queue_state: null })], submitted + 1500, thresholds);
     assert.match(ended[0].text, /is now failed after waiting/);
 });
+
+test('worker reconnection preserves a stall without false recovery or a new alert', () => {
+    const monitor = new VideoStallMonitor();
+    const submitted = 1_000_012;
+    assert.equal(monitor.observe([job()], submitted + 1000, thresholds).length, 1);
+    const disconnected = job({ status: 'running_disconnected', worker_online: false });
+    assert.deepEqual(monitor.observe([disconnected], submitted + 1100, thresholds), []);
+    assert.deepEqual(monitor.observe([disconnected], submitted + 1200, thresholds), []);
+    assert.deepEqual(monitor.observe([job()], submitted + 1300, thresholds), []);
+    const reminder = monitor.observe([job()], submitted + 4600, thresholds);
+    assert.equal(reminder.length, 1);
+    assert.match(reminder[0].text, /still stalled/);
+    const recovered = monitor.observe([job({ gpu_queue_state: 'admitted',
+        gpu_queue_wait_seconds: 4700 })], submitted + 4700, thresholds);
+    assert.equal(recovered.length, 1);
+    assert.match(recovered[0].text, /Video queue resumed/);
+});
+
+test('a disconnected stalled job still closes its alert on confirmed failure', () => {
+    const monitor = new VideoStallMonitor();
+    const submitted = 1_000_012;
+    monitor.observe([job()], submitted + 1000, thresholds);
+    assert.deepEqual(monitor.observe([job({ status: 'running_disconnected', worker_online: false,
+        gpu_queue_state: null })], submitted + 1100, thresholds), []);
+    const ended = monitor.observe([job({ status: 'failed', gpu_queue_state: null })],
+        submitted + 1200, thresholds);
+    assert.equal(ended.length, 1);
+    assert.match(ended[0].text, /is now failed/);
+});

@@ -1,0 +1,97 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -540,15 +540,25 @@
+     return graph
+ 
+ 
+-def api(server: str, route: str, payload: dict | None = None) -> dict:
++class ComfyUnavailableError(RuntimeError):
++    """A read failed because the admitted backend stopped responding."""
++
++
++def api(server: str, route: str, payload: dict | None = None, *, timeout: float = 30) -> dict:
+     data = json.dumps(payload).encode() if payload is not None else None
+     request = urllib.request.Request(server + route, data=data,
+                                      headers={"Content-Type": "application/json"} if data else {})
+     try:
+-        with urllib.request.urlopen(request, timeout=30) as response:
++        with urllib.request.urlopen(request, timeout=timeout) as response:
+             return json.load(response)
+     except urllib.error.HTTPError as error:
+         raise RuntimeError(f"ComfyUI rejected {route}: {error.read(2000).decode(errors='replace')}") from error
++    except (TimeoutError, ConnectionError, urllib.error.URLError) as error:
++        if payload is not None:
++            # A timed-out POST may already have queued the graph. Do not submit
++            # it again automatically without an acknowledged prompt identity.
++            raise RuntimeError(f"ComfyUI submission status unknown for {route}: {error}") from error
++        raise ComfyUnavailableError(f"ComfyUI unavailable: status request failed: {error}") from error
+ 
+ 
+ def run_graph(server: str, graph: dict, output_node: str, timeout: float) -> Path:
+@@ -561,8 +571,21 @@
+     if not prompt_id:
+         raise RuntimeError(f"ComfyUI returned no prompt ID: {response}")
+     deadline = time.monotonic() + timeout
++    consecutive_failures = 0
+     while time.monotonic() < deadline:
+-        history = api(server, f"/history/{prompt_id}").get(prompt_id)
++        remaining = deadline - time.monotonic()
++        if remaining <= 0:
++            break
++        try:
++            history = api(server, f"/history/{prompt_id}", timeout=min(30, remaining)).get(prompt_id)
++            consecutive_failures = 0
++        except ComfyUnavailableError:
++            consecutive_failures += 1
++            if consecutive_failures >= 3:
++                raise
++            print("ComfyUI status temporarily unavailable; checking the same render again", flush=True)
++            time.sleep(min(5, max(0, deadline - time.monotonic())))
++            continue
+         if history:
+             for message in history.get("status", {}).get("messages", []):
+                 if message[0] == "execution_error":
+@@ -578,7 +601,7 @@
+                         raise RuntimeError("ComfyUI completed without saving the edited video")
+                     paths.append(path)
+                 return paths
+-        time.sleep(5)
++        time.sleep(min(5, max(0, deadline - time.monotonic())))
+     raise TimeoutError("ComfyUI video replacement timed out")
+ 
+ 
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -202,6 +202,12 @@
+         "pipe has been ended",
+         "no process is on the other end",
+     ))
++
++
++def retryable_video_edit_error(detail: str) -> bool:
++    """Retry backend availability failures, never content/tracking/review errors."""
++    return detail.startswith("ComfyUI unavailable:") or bool(re.search(
++        r"Timed out waiting for http://127\.0\.0\.1:\d+/system_stats", detail))
+ 
+ 
+ def gpuq_reservation_main(directory_value: str) -> int:
+@@ -1171,6 +1177,10 @@
+             "--idempotency-key",
+             idempotency_key,
+         ]
++        if job.get("has_source_video"):
++            # Cached SAM3 weights can abort DynamicVRAM during a later edit.
++            # Let gpuq evict and restart its managed backend after admission.
++            command.append("--evict-cache-before-run")
+         try:
+             estimate_low = int(job.get("estimate_low_seconds") or 0)
+             estimate_high = int(job.get("estimate_high_seconds") or 0)
+@@ -2321,7 +2331,7 @@
+         except WorkerLeaseLost:
+             await self.discard_current()
+         except Exception as exc:
+-            await self.fail_current(str(exc), False)
++            await self.fail_current(str(exc), retryable_video_edit_error(str(exc)))
+ 
+     async def run_viggle_edit(self, job: dict[str, Any], source_video: Path, output: Path,
+                               error_file: Path, output_dir: Path, replacement: Path | None = None,
