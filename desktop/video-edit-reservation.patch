@@ -1,0 +1,38 @@
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -47,7 +47,7 @@
+ DELIVERY_SIZE_SAFETY = 0.90
+ MAX_PLANNED_DURATION_SECONDS = 2.0 * 60.0
+ KEYFRAME_LIMIT = 25 * 1024 * 1024
+-# The GPU reservation idles while the broker repaints a clip's shots, so a few run at once.
++# Bound concurrent broker repaints; GPU admission is released during this network work.
+ VIDEO_EDIT_REPAINTS_AT_ONCE = 4
+ PROTOCOL_VERSION = 1
+ HEARTBEAT_SECONDS = 15
+@@ -2370,8 +2370,24 @@
+                 except Exception as exc:
+                     return exc
+ 
+-        results = [replacement] * len(frames) if backend == "wan" else \
+-            await asyncio.gather(*(repaint(shot, frame) for shot, frame in enumerate(frames, start=1)))
++        if backend == "wan":
++            results = [replacement] * len(frames)
++        else:
++            # Repainting can take minutes, longer than the reservation child's
++            # completed-result timeout. Yield admission while waiting, then use
++            # a new identity so gpuq cannot return the completed tracking lease.
++            from video_recovery import release_recovery_reservation
++            tracking_reservation = self.gpuq_job_id
++            await release_recovery_reservation(self)
++            results = await asyncio.gather(
++                *(repaint(shot, frame) for shot, frame in enumerate(frames, start=1)))
++            if self.cancel_reason:
++                return 1
++            scope = str(job.get("gpuq_reservation_scope") or "")
++            if not await self.ensure_gpu_reservation({
++                **job, "gpuq_reservation_scope": f"{scope}-edit-after-{tracking_reservation}",
++            }):
++                return 1
+         if self.cancel_reason:
+             return 1
+         failed = [index for index, result in enumerate(results) if isinstance(result, Exception)]
