@@ -1,0 +1,54 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -998,7 +998,7 @@
+                 process.kill()
+         reader.join(timeout=10)
+     for line in lines:
+-        if line.startswith(("Lip sync:", "Effects:")):
++        if line.startswith(("Lip sync:", "Effects:", "Mouth motion:")):
+             print(line.strip(), flush=True)
+     return json.loads(result.read_text(encoding="utf-8")) if result.is_file() else {}
+ 
+@@ -1021,6 +1021,24 @@
+             output.replace(edited)
+     except Exception as error:
+         print(f"Lip sync skipped: {error}"[:500], flush=True)
++
++
++def refine_mouth_motion(edited: Path, source: Path, mask: Path, work: Path) -> None:
++    """Refine silent speech openings while preserving the source frame timeline."""
++    if os.environ.get("VIDEO_EDIT_MOUTH_MOTION", "1") == "0":
++        return
++    output = work / "mouth-motion.mp4"
++    output.unlink(missing_ok=True)
++    try:
++        print("Matching the replacement's mouth openings to the silent source", flush=True)
++        outcome = run_wsl_pass("video_mouth_motion.py", [
++            "--source", wsl_path(source), "--video", wsl_path(edited), "--mask", wsl_path(mask),
++            "--state", wsl_path(work / "viggle.json"), "--output", wsl_path(output),
++        ], work / "mouth-motion.json", 90)
++        if outcome.get("action") == "mouth_motion" and output.is_file() and output.stat().st_size:
++            output.replace(edited)
++    except Exception as error:
++        print(f"Mouth motion refinement skipped: {error}"[:500], flush=True)
+ 
+ 
+ def still_effects(still: Path) -> str:
+@@ -1180,7 +1198,7 @@
+         effects = still_effects(args.still[0])
+         mask = work / "subject-mask.mp4"
+         try:
+-            if (has_audio and not isolated) or effects:
++            if (has_audio and not isolated) or effects or (isolated and not has_audio):
+                 subject_mask(work, segments, mask)
+         except Exception as error:
+             print(f"Lip sync and effects skipped: {error}"[:500], flush=True)
+@@ -1188,6 +1206,8 @@
+             # Lip sync first, on the plain face, so SyncNet does not score beams crossing it.
+             if has_audio and not isolated:
+                 resync_lips(args.server, args.output, mask, work, duration)
++            if isolated and not has_audio:
++                refine_mouth_motion(args.output, normalized, mask, work)
+             if effects:
+                 transfer_effects(args.output, normalized, mask, effects, work, duration)
+         if isolated:
