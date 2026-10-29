@@ -1,0 +1,14 @@
+{
+  "video_gen.py": {
+    "before_sha256": "6fa530223f2322dd2695952883f3c53d296c8c0ec30f0f1105f288653a18d4fe",
+    "after_sha256": "f1dda441a4388454f104e3f726a6fdf38b3f2d95d12de8f0c283d79bcdaead90"
+  },
+  "test_video_output_quality.py": {
+    "before_sha256": "49b57c289954b925b8c941c218b72778ca9aff98dfaddb480b7920a56c8e178a",
+    "after_sha256": "2bce4ab5d7fe06ade28ce0bfd890833c690ba0010fbff39c2a078c2982f29b89"
+  },
+  "test_video_canvas.py": {
+    "before_sha256": "7736971fc4e928f9dac47820fd91f94a84a24aec52f1404c8de19d9b70cd9072",
+    "after_sha256": "00249e8ef8b2261bd75442b906947e3c0a371c8edcbcd18c40da38d4cfd5e072"
+  }
+}

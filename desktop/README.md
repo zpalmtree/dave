@@ -1,5 +1,36 @@
 # Desktop video optimization changes
 
+## Short blends between generated shots
+
+`video-shot-blend.patch` makes ordinary `cut` boundaries between independently
+generated clips use a 0.25-second picture/audio crossfade (six frames at 24 fps).
+Planned `dissolve` transitions still use up to 0.5 seconds. Each overlap is
+bounded by a quarter of both adjacent clips and rounded down to whole frames.
+Continuations, single clips, exact external-song timelines, and source-video
+edits retain their existing assembly. Cuts generated *inside* one model clip
+are not postprocessed by this change.
+
+The overlap shortens the final video by 0.25 seconds per ordinary boundary and
+briefly overlaps its audio. Explicit `audio_transition=cut` or `fade` retains
+the existing midpoint audio edit. Set `VIDEO_SHOT_BLEND_SECONDS=0` in the worker
+environment to restore hard cuts; finite values are bounded to 0–0.5 seconds,
+and invalid values fall back to 0.25 seconds.
+
+Apply `python3 scripts/apply-video-shot-blend-desktop.py --check`, then without
+`--check`. The installer verifies the audited live revision before changing it.
+Reload the supervised worker while idle, sync both branches, then deploy with
+`scripts/deploy-bots.sh --with-broker`. CPU tests in the Windows embedded Python:
+`python -m unittest test_video_shot_blend.ShotBlendTests test_video_output_quality
+test_video_canvas test_video_recovery`.
+
+Showcase: <http://localhost:4348>, started with
+`node scripts/serve-shot-blend-showcase.mjs`. Generate fixtures first with the
+desktop Python and `scripts/generate-shot-blend-showcase.py --desktop-directory
+<installed-video_gen> --output <repo>/artifacts/shot-blend/showcase`. It uses the
+real assembler, includes the hard-cut comparison and timing exceptions, and
+records the installed source hash. The player starts muted. No GPU render or
+private video is used.
+
 ## Source caption protection
 
 `video-edit-captions.patch` adds foreground caption layers to the shared subject

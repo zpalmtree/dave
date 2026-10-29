@@ -1,0 +1,79 @@
+--- a/video_gen.py
++++ b/video_gen.py
+@@ -8103,6 +8103,25 @@
+     return name, destination
+ 
+ 
++def shot_blend_seconds(transition: str, previous: float, following: float) -> float:
++    """Default to a six-frame blend at independent shot boundaries (24 fps)."""
++    if transition == "dissolve":
++        requested = 0.5
++    elif transition == "cut":
++        try:
++            requested = float(os.environ.get("VIDEO_SHOT_BLEND_SECONDS", "0.25"))
++        except ValueError:
++            requested = 0.25
++        if not math.isfinite(requested):
++            requested = 0.25
++        requested = min(0.5, max(0.0, requested))
++    else:
++        return 0.0
++    # Bound against both adjacent clips, not the whole assembled timeline.
++    # Whole frames keep successive picture/audio overlaps on the same clock.
++    return math.floor(min(requested, previous / 4, following / 4) * FPS) / FPS
++
++
+ def assemble_segments(
+     paths: list[Path],
+     validations: list[dict[str, Any]],
+@@ -8137,8 +8156,10 @@
+     for index in range(1, len(paths)):
+         next_video = f"vx{index}"
+         next_audio = f"ax{index}"
+-        if transitions[index] == "dissolve":
+-            fade = min(0.5, cumulative / 4, float(validations[index]["duration_seconds"]) / 4)
++        fade = shot_blend_seconds(transitions[index],
++                                  float(validations[index - 1]["duration_seconds"]),
++                                  float(validations[index]["duration_seconds"]))
++        if fade:
+             offset = max(0.0, cumulative - fade)
+             filters.append(
+                 f"[{current_video}][v{index}]xfade=transition=fade:duration={fade:.3f}:"
+--- a/test_video_output_quality.py
++++ b/test_video_output_quality.py
+@@ -2,6 +2,7 @@
+ import array
+ import copy
+ import json
++import os
+ from pathlib import Path
+ import shutil
+ import subprocess
+@@ -148,6 +149,7 @@
+         self.assertGreater(frame[0], 30)
+         self.assertGreater(frame[2], 30, 'The boundary must blend red and blue, not hard-cut.')
+ 
++    @mock.patch.dict(os.environ, {'VIDEO_SHOT_BLEND_SECONDS': '0'})
+     def test_recovery_auto_audio_edit_softens_seam_without_changing_runtime(self):
+         levels = {}
+         for mode in ['cut', 'auto', 'fade']:
+--- a/test_video_canvas.py
++++ b/test_video_canvas.py
+@@ -81,7 +81,7 @@
+         portrait = self.inspect(clips[0], canvas, frames=24)
+         self.assert_bands(portrait, 4)
+         self.assert_bands(portrait, 251)
+-        for transition, frames in [('cut', 48), ('dissolve', 42)]:
++        for transition, frames in [('cut', 42), ('continue', 48), ('dissolve', 42)]:
+             output = recovery.join_clips(clips, self.root / f'{transition}.mp4',
+                 [{'transition': 'start'}, {'transition': transition, 'audio_transition': 'auto'}])
+             self.inspect(output, canvas, frames=frames)
+@@ -182,7 +182,7 @@
+                 asyncio.run(recovery.run_recovery_job(worker, job))
+                 self.assertEqual(worker.upload.await_count, attempt + 1)
+                 delivered = worker.upload.await_args.args[1]
+-                self.inspect(delivered, (144, 256), frames=48)
++                self.inspect(delivered, (144, 256), frames=48 if song else 42)
+         worker.fail_current.assert_awaited_once_with('temporary upload outage', True)
+         worker.wait_and_send_terminal.assert_awaited_once()
+         for index, original in enumerate(originals):
