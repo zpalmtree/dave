@@ -1,0 +1,27 @@
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -884,6 +884,11 @@
+             print(f"Tracking replacement target with SAM3 ({index}/{len(segments)})", flush=True)
+             mask_file = track_subject(args.server, clip.name, args.target, f"video/edits/{run_id}-{index}-mask",
+                                       args.subjects, source_frames)
++            if getattr(args, "isolated", False):
++                from video_edit_source_recovery import recover_source_track
++                mask_file = recover_source_track(args.server, clip, mask_file, args.target,
++                                                 args.subjects, source_frames, model_frames,
++                                                 work, index)
+             failure = tracked_or_skipped(mask_file, args.target, source_frames, shots, index)
+             edited.append(failure is None)
+             if failure:
+--- a/video_edit_composite.py
++++ b/video_edit_composite.py
+@@ -98,6 +98,10 @@
+     support[y:bottom, x:right] = True
+     if np.any(source & ~support):
+         raise RuntimeError('Source subject extends outside the generated crop.')
++    # Source visibility is authoritative: a generated performer must not appear
++    # while the tracked target is offscreen.
++    if not source.any():
++        return np.zeros((height, width), np.uint8)
+     core = (source | replacement) & support
+     if not core.any():
+         return np.zeros((height, width), np.uint8)

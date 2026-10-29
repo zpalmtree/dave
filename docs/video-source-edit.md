@@ -628,3 +628,37 @@ Upstream implementations: [MatAnyone 2](https://github.com/pq-yang/MatAnyone2),
 [ProPainter](https://github.com/sczhou/ProPainter). Only RVM and ProPainter are
 needed for the reusable experimental tool; model hashes and the ProPainter source
 revision are pinned in `desktop/video-edge-repair-models.json`.
+
+## Recovering source tracks after a camera swing
+
+For isolated edits, a failed source track now gets one reverse tracking pass with
+exactly the same target description and primary/group selection. When a primary
+track is still fragmented, the worker takes a mask from the middle of its longest
+sustained detection (at least 12 frames for normal-length segments), then tracks
+that one mask outward in both directions. These seeded passes disable text
+redetection and allow only one object, so they cannot add another detected person.
+The source segment is trimmed before reversal; model padding is added only after
+restoring chronological order, with the shared seed frame included once.
+
+Recovered masks must pass the existing source coverage and duration checks. No
+stable seed, unreadable evidence, or a failed recovery stops preparation. Group
+requests never enter single-object seed recovery. Compositing now produces zero
+alpha when the source target mask is empty, preserving offscreen footage even if
+the motion model invents a person there. Still identity and finished-motion review
+remain required. The recovery is bounded to one reversed pass and, for primary
+subjects only, two passes from one seed; it does not loop or call hosted models.
+
+Validation on October 29, 2026: 74 focused desktop tests passed in the Windows
+runtime, the TypeScript build passed, and 53 editor/reviewer/broker tests passed.
+A fresh GPU-admitted preparation of the original 17-second `8c6f8f57` source passed
+both shots. The failed second shot improved from 4% usable frames to 94/182 (52%);
+the remaining frames include the camera swing away from the subject. Sampled mask
+inspection confirmed the returning man was selected while shelves and the other
+man stayed outside the mask. This establishes source preparation, not a finished
+replacement render or Discord delivery. Private source images remain untracked.
+
+Install with `python3 scripts/apply-video-edit-source-recovery-desktop.py --check`,
+then without `--check`. New edit subprocesses load it automatically. The updated
+fixture showcase is <http://localhost:4348>, started with
+`node scripts/serve-edit-fallback-showcase.mjs`; desktop/mobile captures are in
+`docs/showcases/edit-fallback/`.

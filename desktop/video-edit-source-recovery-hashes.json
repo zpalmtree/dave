@@ -1,0 +1,10 @@
+{
+  "video_edit.py": {
+    "before_sha256": "3e10fa821a265b6b494cd689b6a96c9a92e9100c363f5cd4e496cf1975de0670",
+    "after_sha256": "096f345b5659a11f25bc72d0b430d88f44c2a691b9ee16444ec6a85ff0f453af"
+  },
+  "video_edit_composite.py": {
+    "before_sha256": "fc3c3657b13842f44d1ce68e0305c7580104f4ea83a8ff95e0c68afee78512d4",
+    "after_sha256": "54a58d1ec24fab7ce58029bc0edec23c5e206b79d530be386117fde51d2fdc39"
+  }
+}

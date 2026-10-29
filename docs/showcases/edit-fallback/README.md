@@ -15,14 +15,16 @@ is covered by the HTTP integration tests.
 Reviewed Playwright MCP captures: [desktop](desktop.png) at 1280px and
 [mobile](mobile.png) at 390px. Both include loading, primary success, fallback
 success, outage, empty output, both editors declining, unconfigured fallback,
-cancellation, usable imperfect stills, motion recovery, failed animation tracking
+cancellation, usable imperfect stills, source recovery, failed source recovery,
+motion recovery, failed animation tracking
 and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `d1f7b72` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `0f8b18c0e48b` over `VideoKeyframeProvider.ts` and
-`VideoBroker.ts`, then `VideoEditReview.ts` and `desktop/video-edit-recovery.patch`
+Captured from base revision `2487b60` plus this change. The feature fingerprint in
+the screenshots is SHA-256 `02dc849d9c37` over `VideoKeyframeProvider.ts` and
+`VideoBroker.ts`, then `VideoEditReview.ts`, `desktop/video-edit-recovery.patch`,
+`desktop/video_edit_source_recovery.py` and `desktop/video-edit-source-recovery.patch`
 in that order.
 
 Validation:
@@ -55,3 +57,11 @@ compositing and evidence extraction. The finished clip passed a live motion revi
 and exported as a looping GIF. Visible clothing/leg/boundary distortion remains.
 The earlier 8% failure above is retained as the original test record, not the
 follow-up outcome. Public cards use fixtures; private test images remain untracked.
+
+The October 29 source-tracking follow-up passed 74 focused Windows desktop tests,
+the TypeScript build and 53 editor/reviewer/broker tests. Fresh preparation of the
+original 17-second source passed both shots, including automatic backward and
+seeded tracking recovery. The source recovery cards describe this bounded path
+and use the shared failure formatter. These fixtures do not claim a finished
+replacement render. Both updated captures were reviewed with no overflow; all
+task-owned browser tabs were closed.
