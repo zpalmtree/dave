@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { VideoGenerationService } from '../dist/VideoGeneration.js';
+import { VideoGenerationService, completedVideoPost } from '../dist/VideoGeneration.js';
 
 test('a regenerated video is posted as a new reply, leaving the earlier delivery alone, without duplicates', async () => {
     const service = new VideoGenerationService({ user: { id: 'bot' } });
@@ -13,7 +13,7 @@ test('a regenerated video is posted as a new reply, leaving the earlier delivery
     const earlier = { id: '123', content: 'Minimax video **d8572423** is ready.', author: { id: 'bot' },
         edit: () => assert.fail('The earlier delivery must keep its video') };
     let reply = null;
-    const command = { reply: async payload => {
+    const command = { content: '$minimax A duck waves.', reply: async payload => {
         reply = { id: '200', content: payload.content, author: { id: 'bot' }, payload };
         return reply;
     } };
@@ -50,7 +50,7 @@ test('a ready video with a deleted progress message replies to the command and r
         isTextBased: () => true,
         messages: { fetch: async input => {
             if (input === 'deleted') throw Object.assign(new Error('Unknown Message'), { code: 10008 });
-            if (input === 'command') return { reply: async payload => {
+            if (input === 'command') return { content: '$minimax A duck waves.', reply: async payload => {
                 commandReplies++;
                 return channel.send(payload);
             } };
@@ -116,8 +116,31 @@ test('delivery falls back to the channel if the original command was deleted', a
         if (input === 'deleted') throw Object.assign(new Error('Unknown Message'), { code: 10008 });
         return { find: () => undefined };
     } }, send: async payload => {
-        assert.equal(payload.content, 'Video **d8572423** complete.');
+        assert.equal(payload.content, 'Video **d8572423** complete.\n> A duck waves.');
         return sent;
     } };
     assert.equal(await service.postDelivery(job, { channel }), sent);
+});
+
+for (const commandContent of ['$oalgo', '  $oalgo  ', '$oalgo\n', '$oalgo --image-provider grok', '$oalgo 0:05-0:10']) {
+    test(`bare or options-only command includes inherited context: ${commandContent.trim()}`, async () => {
+        const job = { id: 'ed7f8dac-test', model: 'minimax', command_variant: 'oalgo',
+            prompt: 'A robot interviews two people.', result_path: '/tmp/result.mp4', command_message_id: '50' };
+        let posted;
+        const command = { content: commandContent, reply: async payload => { posted = payload; return { id: '200' }; } };
+        const channel = { messages: { fetch: async input => input === '50' ? command : { find: () => undefined } } };
+        const service = new VideoGenerationService({ user: { id: 'bot' } });
+        await service.postDelivery(job, { channel });
+        assert.equal(posted.content, 'Video **ed7f8dac** complete.\n> A robot interviews two people.');
+    });
+}
+
+test('inherited completion context is bounded, quoted, and suppresses link previews', () => {
+    const job = { id: 'ed7f8dac-test', model: 'minimax',
+        prompt: 'A robot interviews two people.\n\nReference: https://example.com/robot\n' + 'Detail. '.repeat(500) };
+    const content = completedVideoPost(job, '$oalgo');
+    assert.ok(content.length <= 1999);
+    assert.match(content, /\n>>> A robot interviews two people\./);
+    assert.ok(content.includes('<https://example.com/robot>'));
+    assert.ok(content.endsWith('…'));
 });
