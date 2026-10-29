@@ -272,12 +272,21 @@ function completedVideoTiming(job: Pick<VideoJobView,
     return `took **${wall}**${rendering ? ` (${rendering} rendering)` : ''}`;
 }
 
-export function completedVideoPost(job: VideoJobView): string {
+// Omit commandContent for a concise standalone formatter preview. At delivery,
+// null means the command is unavailable, so the post must carry its own context.
+export function completedVideoPost(job: VideoJobView, commandContent?: string | null): string {
     const timing = completedVideoTiming(job);
     const notice = sanitizeVideoWorkerText(job.generation_notice, '', 1000).trim();
-    return `Video **${shortJobId(job.id)}** complete${
+    const result = `Video **${shortJobId(job.id)}** complete${
         timing ? ` — ${timing}` : ''
     }.${notice ? `\n${notice}` : ''}`;
+    // A bare command inherits its idea from the replied message or an image.
+    // Provider/range options alone don't give readers that idea either.
+    const commandBody = commandContent?.trim().replace(/^\S+\s*/, '')
+        .replace(/^--image-provider(?:=|\s+)(?:grok|sunburst)(?:\s+|$)/i, '') || '';
+    const needsContext = commandContent === null
+        || (commandContent !== undefined && !extractVideoSourceRange(commandBody).prompt.trim());
+    return needsContext ? formatVideoReplyWithFullPrompt(result, job) : result;
 }
 
 function isCompletedVideoPost(content: string | undefined, job: VideoJobView): boolean {
@@ -981,18 +990,21 @@ export class VideoGenerationService {
                 console.warn(`[Video] Could not archive workflows for ${job.id}: ${String(error)}`);
             }
         }
+        const deliveryJob = media.notice ? { ...job,
+            generation_notice: [job.generation_notice, media.notice].filter(Boolean).join('\n') } : job;
         const payload = {
-            content: completedVideoPost(media.notice ? { ...job,
-                generation_notice: [job.generation_notice, media.notice].filter(Boolean).join('\n') } : job),
+            content: completedVideoPost(deliveryJob, null),
             files: [{ attachment: media.path, name }],
             components: workflows ? [await saveWorkflowDownload(workflows, this.workflowDirectory)] : [],
             allowedMentions: { repliedUser: true },
         };
         try {
             const commandMessage = await channel.messages.fetch(job.command_message_id);
+            payload.content = completedVideoPost(deliveryJob, commandMessage.content ?? null);
             return await commandMessage.reply(payload);
         } catch (error) {
             console.warn(`[Video] Could not reply to original command for ${job.id}; posting in channel: ${String(error)}`);
+            payload.content = completedVideoPost(deliveryJob, null);
             return channel.send(payload);
         }
     }
