@@ -1,5 +1,45 @@
 # Desktop video optimization changes
 
+## Silent mouth-motion refinement
+
+`video-mouth-motion.patch` adds a CPU post-pass to short, silent, isolated source
+edits. `video_mouth_motion.py` tracks the selected source and replacement faces
+with the existing local InsightFace landmarks, measures lip aperture relative
+to mouth width, and makes a small warp of the replacement's existing mouth
+pixels. It adds no speech and never shifts video frames. The source subject mask
+and recognized caption boxes constrain which pixels may change before encoding;
+the mouth displacement is capped at six pixels. Smoothing resets at each cut.
+
+The helper requires an unambiguous, fully tracked mouth in every frame and a
+normalized 24 fps timeline. It skips clips shorter than one second, longer than
+ten seconds, larger than 896×512 pixels, tiny/steep faces, nearly static mouths,
+and already-close aperture motion. A fresh landmark pass must reduce mean
+aperture error by at least 20%, or the original render is retained. Missing
+models, analysis failures and the 90-second wrapper deadline also retain the
+original. Set `VIDEO_EDIT_MOUTH_MOTION=0` to disable it. The score measures mouth
+opening geometry; it does not establish that every word can be lip-read.
+
+The actual three-second silent example improved from 0.0939 to 0.0263 mean
+normalized aperture error (72% lower), retained 72 frames, and took about
+22 seconds through the Windows→WSL wrapper. The model runs with the CPU provider
+in the existing LatentSync venv; no new model download or GPU job is needed.
+Eleven geometry/isolation/fallback tests pass in that Linux venv, and the 40
+existing edit/isolated tests pass in Windows. The helper tests require the Linux
+venv's OpenCV, which the embedded Windows Python does not provide.
+
+Apply `python3 scripts/apply-video-mouth-motion-desktop.py --check`, then omit
+`--check`. New edit subprocesses load the helper automatically. Sync both branches
+and deploy with `scripts/deploy-bots.sh --with-broker` while the edit queue is idle.
+Test the helper with `/home/zp/.venvs/latentsync/bin/python -m unittest discover
+-s desktop -p test_video_mouth_motion.py`.
+
+Showcase: <http://localhost:4364>, started with
+`node scripts/serve-lipsync-showcase.mjs`. It displays the actual source, original
+delivery and corrected post-pass output from `artifacts/isolated-lipsync/showcase`,
+with a shared frame scrubber and muted playback. The report labels the helper
+revision. `?case=loading`, `?case=empty`, and `?case=error` exercise the same media
+cards and disabled controls without invoking inference.
+
 ## Repaint requests survive short broker restarts
 
 `video-edit-repaint-retry.patch` retries the same shot after HTTP 502/503/504
