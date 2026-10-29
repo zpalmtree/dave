@@ -134,6 +134,19 @@ new issues. Commits, merges, branches and PR previews never ping. Discord allowe
 mentions explicitly permits only this user on opening notifications. Pooners and
 round-and-round retain their existing configuration and silent notifications.
 
+`blocknetprivacy/awesome-blocknet` is also watched in `#clonehigh`, including new
+PRs and issues, with no configured ping target:
+
+```json
+{
+  "repository": "blocknetprivacy/awesome-blocknet",
+  "threadId": "746507379310461010",
+  "trackIssues": true
+}
+```
+
+Omit `mentionUserId` for this repository so all its notifications remain silent.
+
 Issue tracking has its own persistent watermark and first-run baseline. It skips
 PR entries returned by GitHub's issues endpoint, includes issues closed between
 polls, and does not repeat edited or reopened issues. An opening followed by a
