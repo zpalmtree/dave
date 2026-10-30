@@ -21,8 +21,8 @@ tracking and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `31d2ec8` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `0567fdfecaf1` over `VideoKeyframeProvider.ts` and
+Captured from base revision `f37504a` plus this change. The feature fingerprint in
+the screenshots is SHA-256 `680905616436` over `VideoKeyframeProvider.ts` and
 `VideoBroker.ts`, then `VideoEditReview.ts`, `desktop/video-edit-recovery.patch`,
 `desktop/video_edit_source_recovery.py`, `desktop/video-edit-source-recovery.patch`
 and `desktop/video_edit_alignment.py` in that order.
@@ -73,3 +73,7 @@ Both segments passed the live motion reviewer. The original blanket masks failed
 alignment validation; corrected masks selected the replacement. Private evidence
 and the repaired video remain under `artifacts/edit-composite-f8551b5a/`. Public
 captures contain only fixtures. No Discord delivery was performed by this replay.
+
+The bounded-batch follow-up adds one Windows regression test (92 focused tests
+total): 1, 23, 124 and 360 frames retain source order with logarithmic batch depth.
+The ten alignment tests passed after the change. No pixel processing changed.

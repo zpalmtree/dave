@@ -49,7 +49,7 @@ def source_point_graph(clip, source_mask, box, width, height, frames, prefix):
         'frames': node('GetVideoComponents', video=['source', 0]),
         'sam': node('CheckpointLoaderSimple', ckpt_name=SAM_MODEL),
     }
-    previous = None
+    images = []
     count = 0
     for index, data in enumerate(decoded_frames(source_mask, 'gray', width * height, frames)):
         selected = np.frombuffer(data, np.uint8).reshape(height, width) > 127
@@ -70,16 +70,25 @@ def source_point_graph(clip, source_mask, box, width, height, frames, prefix):
             graph[image] = node('MaskToImage', mask=[detect, 0])
         else:
             graph[image] = node('EmptyImage', width=width, height=height, batch_size=1, color=0)
-        if previous is not None:
-            batch = f'batch_{index}'
-            graph[batch] = node('ImageBatch', image1=[previous, 0], image2=[image, 0])
-            previous = batch
-        else:
-            previous = image
+        images.append(image)
         count += 1
     if count != frames:
         raise ReplacementAlignmentError('Source point masks are shorter than the segment.')
-    graph['mask_video'] = node('CreateVideo', images=[previous, 0], fps=24.0, bit_depth=8)
+    # A linear chain caches batches of 2, 3, ... N images (quadratic memory).
+    # Pair adjacent batches so each level retains only N images, in source order.
+    batch_index = 1
+    while len(images) > 1:
+        pairs = []
+        for index in range(0, len(images), 2):
+            if index + 1 == len(images):
+                pairs.append(images[index])
+                continue
+            batch = f'batch_{batch_index}'
+            graph[batch] = node('ImageBatch', image1=[images[index], 0], image2=[images[index + 1], 0])
+            pairs.append(batch)
+            batch_index += 1
+        images = pairs
+    graph['mask_video'] = node('CreateVideo', images=[images[0], 0], fps=24.0, bit_depth=8)
     graph['save_mask'] = node('SaveVideo', video=['mask_video', 0], filename_prefix=prefix,
                               format='auto', codec='auto')
     return graph
