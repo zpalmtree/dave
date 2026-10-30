@@ -775,3 +775,25 @@ Run `python -m unittest test_video_edit_source_recovery test_video_edit
 Windows desktop runtime. All 74 tests passed. Fresh preparation of the full
 17-second regression clip passed both shots; final replacement generation and
 delivery were not replayed. See `docs/video-source-edit.md` for the evidence.
+
+## Reject background masks and protect subject colour
+
+Apply `python3 scripts/apply-video-edit-alignment-desktop.py --check`, then run it
+without `--check`. The installer checks the exact compositor and recovery-test
+revisions and existing helper contents before writing. New edit subprocesses load
+the change automatically; no ComfyUI or worker restart is needed.
+
+Replacement masks must overlap at least 25% of each visible source subject mask.
+A failed alignment receives one segmentation retry per real frame, using the
+source mask's deepest interior point. This retry reuses the raw generated pixels;
+it does not invert the background mask or generate another animation. Empty source
+frames receive empty masks. Failed recovery retains the existing bounded renderer
+fallback; service failures stop the job. The retry graph and alignment JSON are
+saved next to the replacement mask, with the rejected mask retained for diagnosis.
+
+Background colour matching protects the union of source and replacement silhouettes,
+including interior holes. Invalid alignment disables that correction and clears its
+history. Whole-frame exposure matching, captions, source timing and final motion
+review remain in place. Run the Windows `test_video_edit_alignment`, `test_video_edit`,
+`test_video_edit_composite`, `test_video_edit_isolated`, `test_video_edit_recovery`,
+`test_video_edit_source_recovery` and `test_video_edit_captions` suites (91 tests).

@@ -1,0 +1,78 @@
+diff --git a/video_edit_composite.py b/video_edit_composite.py
+--- a/video_edit_composite.py
++++ b/video_edit_composite.py
+@@ -41,6 +41,7 @@
+ def track_replacement(server, rendered, source_mask, box, width, height, frames, destination, *, redetect=False):
+     import video_edit as edit
+     from video_edit_isolated import bounds, union_box
++    from video_edit_alignment import validate_alignment, source_point_graph, ReplacementAlignmentError
+     # A spatial prompt works for humans, animals and objects. Do not ask a second
+     # text detector to choose the most prominent performer in the original scene.
+     first = next(edit.decoded_frames(source_mask, 'gray', width * height, 1), None)
+@@ -74,6 +75,32 @@
+                 edit.validate_tracking_mask(result, 'the rendered replacement', frames, generated=True)
+             except RuntimeError as final_error:
+                 raise ReplacementTrackingError(str(final_error)) from final_error
++        try:
++            validate_alignment(source_mask, destination, width, height, frames)
++        except ReplacementAlignmentError as error:
++            # The model output may be clean even when SAM chooses its background.
++            # Retry segmentation once before spending another animation render.
++            destination.with_name(destination.stem + '-unanchored.mp4').write_bytes(destination.read_bytes())
++            record = {'status': 'running', 'reason': str(error), 'method': 'source_interior_points'}
++            audit = destination.with_name(destination.stem + '-alignment.json')
++            try:
++                graph = source_point_graph(clip.name, source_mask, box, width, height, frames,
++                                           'video/edits/' + name + '-points')
++                destination.with_name(destination.stem + '-points.json').write_text(
++                    json.dumps(graph, indent=2), encoding='utf-8')
++                result = edit.run_graph(server, graph, 'save_mask', 1800)
++                try:
++                    edit.validate_tracking_mask(result, 'the rendered replacement', frames, generated=True)
++                    validate_alignment(source_mask, result, width, height, frames)
++                except RuntimeError as final_error:
++                    raise ReplacementTrackingError(str(final_error)) from final_error
++                destination.write_bytes(result.read_bytes())
++                record['status'] = 'tracked'
++            except Exception as final_error:
++                record.update(status='failed', error=str(final_error))
++                raise
++            finally:
++                audit.write_text(json.dumps(record, indent=2), encoding='utf-8')
+     finally:
+         clip.unlink(missing_ok=True)
+ 
+@@ -163,6 +190,11 @@
+     replacement = replacement_mask > 127
+     if not (original | replacement).any():
+         return rendered, None
++    from video_edit_alignment import source_overlap
++    overlap = source_overlap(source_mask, replacement_mask)
++    if overlap is not None and overlap < 0.25:
++        # A bad background track must never turn the subject into colour-fit data.
++        return rendered, None
+     covered = binary_dilation(original, iterations=source_blur_padding([0, 0, width, height])) | replacement
+     distance = distance_transform_edt(~covered)
+     samples = (distance >= 3) & (distance <= 16)
+@@ -181,7 +213,7 @@
+         field = 0.75 * previous + 0.25 * field
+     # Fade the correction through the antialiased boundary, never through facial
+     # detail in the interior. The alpha compositor still controls the final scope.
+-    protected = binary_erosion(replacement, iterations=2, border_value=1)
++    protected = binary_fill_holes(original | replacement)
+     edge = np.clip(distance_transform_edt(~protected) / 6, 0, 1)
+     edge = edge * edge * (3 - 2 * edge)
+     return np.clip(rendered + field * edge[:, :, None], 0, 255), field
+diff --git a/test_video_edit_recovery.py b/test_video_edit_recovery.py
+--- a/test_video_edit_recovery.py
++++ b/test_video_edit_recovery.py
+@@ -44,7 +44,8 @@
+                 with patch.object(edit, 'INPUT', root), \
+                      patch.object(edit, 'decoded_frames', return_value=iter([source.tobytes()])), \
+                      patch.object(edit, 'run_graph', return_value=mask) as run, \
+-                     patch.object(edit, 'validate_tracking_mask', side_effect=decisions):
++                     patch.object(edit, 'validate_tracking_mask', side_effect=decisions), \
++                     patch('video_edit_alignment.validate_alignment'):
+                     call = lambda: composite.track_replacement('server', rendered, mask, [0, 0, 80, 64],
+                         96, 64, 24, root / 'replacement.mp4', redetect=retry)
+                     if not retry or final_error:

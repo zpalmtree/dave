@@ -680,3 +680,33 @@ fade-out fixture. It separately rejected the second segment for blending and
 transparency artifacts. Fixing the black-frame false rejection therefore does not
 establish that the complete old render is suitable for delivery; it was not sent
 to Discord. Private evidence remains under `artifacts/edit-review-f8551b5a/`.
+
+## Replacement mask alignment and colour protection
+
+The saved `f8551b5a` raw animation was clean. Its spatial SAM mask selected the
+blanket around the generated person; the edge-colour pass consequently modified
+the body and created the apparent transparency. A CPU replay isolated that change
+between the raw placed render and the colour-matched intermediate.
+
+The compositor now validates source/replacement overlap on every visible source
+frame. If a mask misses the subject, one point-guided segmentation retry uses the
+deepest interior of the source mask for each frame, without a box prompt that could
+union the background back in. It retains the raw animation, uses blank masks for
+blank source frames, and validates the recovered timeline, coverage and overlap.
+Failures continue through the existing bounded animation fallback; backend/service
+errors are not reclassified as permission to render again.
+
+Local background colour correction protects both source and replacement silhouettes
+and their interior holes. It skips misaligned evidence and clears history rather
+than projecting a correction over the body. The repaired real clip retains 36 frames,
+480×480, 1.5 seconds and its original silent soundtrack. Both segments passed the
+unchanged live motion review. Generation was reused; only segmentation used GPUq.
+The original failed job and its files were left intact; no Discord message was sent.
+
+Validation: 91 Windows tests passed, including background-mask rejection, late-frame
+misalignment, blank transitions, bounded retries, backend errors and interior colour
+protection. Installer check-only, repeat install and concurrent-edit refusal passed.
+Private replay evidence is at `artifacts/edit-composite-f8551b5a/`; the repaired clip
+is `repaired/edited.mp4`. Updated desktop/mobile fixture captures are in
+`docs/showcases/edit-fallback/`. Showcase: <http://localhost:4348>, started with
+`node scripts/serve-edit-fallback-showcase.mjs` after the TypeScript build.
