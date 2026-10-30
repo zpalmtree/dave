@@ -23,6 +23,7 @@ import { VIDEO_MAX_GLOBAL_JOBS, VIDEO_MAX_USER_JOBS } from '../dist/VideoProtoco
 import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
 import { VideoStallMonitor } from '../dist/VideoStallAlerts.js';
 import { VIDEO_EDIT_REFERENCE_VERSION } from '../dist/VideoEditReference.js';
+import { VIDEO_EDIT_REVIEW_VERSION } from '../dist/VideoEditReview.js';
 
 test('authenticated owner submissions bypass the personal limit but retain the global cap', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dave-video-owner-limit-'));
@@ -1251,6 +1252,17 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 const accepted = await review({ segment: 2, samples: [sample] });
                 assert.equal((await accepted.json()).accepted, true);
                 assert.equal(reviewCalls, count + 1, 'a later segment needs its own check');
+                const cachePath = join(directory, 'results', job.id, 'video-edit-review-1.json');
+                const cached = JSON.parse(readFileSync(cachePath, 'utf8'));
+                assert.equal(cached.version, VIDEO_EDIT_REVIEW_VERSION);
+                writeFileSync(cachePath, JSON.stringify({ ...cached, version: VIDEO_EDIT_REVIEW_VERSION - 1,
+                    reason: 'Matching black source and edited opening frames are unverifiable.' }));
+                const refreshed = await review({ segment: 1, samples: [sample] });
+                assert.equal((await refreshed.json()).accepted, true, 'Old fade rejections must be reviewed again.');
+                assert.equal(reviewCalls, count + 2);
+                assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).version, VIDEO_EDIT_REVIEW_VERSION);
+                await review({ segment: 1, samples: [sample] });
+                assert.equal(reviewCalls, count + 2, 'The updated review remains cached.');
             }
         } finally {
             socket.close();
