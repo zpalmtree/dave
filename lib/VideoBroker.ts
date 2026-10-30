@@ -5510,7 +5510,7 @@ export class VideoBroker {
         try {
             body = await readJson(req, 16 * 1024 * 1024);
             if (!Number.isInteger(body.segment) || body.segment < 1 || body.segment > 128
-                || !Array.isArray(body.samples) || !body.samples.length || body.samples.length > 4) throw new Error('Invalid edit samples.');
+                || !Array.isArray(body.samples) || !body.samples.length || body.samples.length > 16) throw new Error('Invalid edit samples.');
             const image = (data: unknown) => {
                 if (typeof data !== 'string' || !data.length || data.length > 2 * 1024 * 1024
                     || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) throw new Error('Invalid review image.');
@@ -5520,7 +5520,16 @@ export class VideoBroker {
                 if (!mimeType) throw new Error('Review images must be PNG or JPEG.');
                 return { bytes, mimeType };
             };
-            samples = body.samples.map((sample: any) => ({ source: image(sample.source), edited: image(sample.edited), mask: image(sample.mask) }));
+            let previousFrame = -1;
+            samples = body.samples.map((sample: any) => {
+                if (sample.frame !== undefined) {
+                    if (!Number.isInteger(sample.frame) || sample.frame < 0 || sample.frame >= 2880
+                        || sample.frame <= previousFrame) throw new Error('Invalid review frame order.');
+                    previousFrame = sample.frame;
+                }
+                return { source: image(sample.source), edited: image(sample.edited), mask: image(sample.mask),
+                    ...(sample.frame === undefined ? {} : { frame: sample.frame }) };
+            });
         } catch (error) { writeJson(res, 400, { error: String(error) }); return; }
         try {
             const reference = this.editReference(job);

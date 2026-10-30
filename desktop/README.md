@@ -803,3 +803,31 @@ order without quadratic cached batch storage on long shots. The installer accept
 the exact audited initial helper revision as an upgrade; unrelated edits still
 stop installation. The added batch-order/storage regression brings the focused
 suite to 92 tests.
+
+## Preserve source fades and review temporal continuity
+
+Deploy both bot tracks with `scripts/deploy-bots.sh --with-broker` first: motion
+review now accepts up to 16 chronologically numbered frame pairs. Then run
+`python3 scripts/apply-video-edit-continuity-desktop.py --check` and the same
+command without `--check`. It requires the alignment update, verifies all four
+patched desktop files and both new helper files, and refuses unrelated revisions.
+New renderer subprocesses load the change automatically.
+
+Histogram scene cuts are vetoed only with matching local scene structure or a
+gradual uniform exposure ramp. Missing dark source masks get one enhanced reverse
+tracking pass and one point-guided retry. Recovery requires matching subject
+texture and mask overlap within 12 frames. One adjacent frame may use a confirmed
+neighbor mask only when independently detected partial foreground corroborates
+it; these bridges never chain. Black frames and actual occlusions are excluded.
+Ambiguous candidates fail closed, with `dark-recovery-NN.json` evidence.
+
+Exposure matching follows dark frames and sustained source fades without the
+normal minimum gain, smoothing or bright-highlight bypass. Review evidence adds
+neighbors around every segment join, source visibility transition and unexpected
+output jump. More than 16 required samples stops the edit rather than dropping
+evidence. Motion review version 4 checks pop-in, identity/pose/placement changes
+and exposure against the source; existing still admission remains unchanged.
+
+The focused Windows suites above plus `test_video_edit_continuity` cover the new
+behavior, including actual FFmpeg encoding of fading highlights. See
+`docs/video-source-edit.md` for real-clip validation and its remaining limitation.

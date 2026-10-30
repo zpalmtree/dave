@@ -710,3 +710,45 @@ Private replay evidence is at `artifacts/edit-composite-f8551b5a/`; the repaired
 is `repaired/edited.mp4`. Updated desktop/mobile fixture captures are in
 `docs/showcases/edit-fallback/`. Showcase: <http://localhost:4348>, started with
 `node scripts/serve-edit-fallback-showcase.mjs` after the TypeScript build.
+
+## Fade and temporal continuity safeguards
+
+The manually posted `f8551b5a` repair still had an abrupt opening and an appearance
+change. Source tracking missed a dim visible frame; a histogram-based false cut
+at frame 13 split a continuous fade into two independently repainted shots using
+different animation backends. A per-segment review without neighboring frames
+accepted both pieces despite the discontinuity.
+
+Scene detection now checks exposure-invariant scene structure before splitting a
+histogram change. Dark source-mask gaps can be recovered from brighter analysis
+copies, subject to nearby texture, overlap and independent detection evidence.
+Compositing follows the source fade without its previous brightness floor,
+smoothing or highlight exemption. Matching black frames remain preserved.
+
+Motion review version 4 receives up to 16 ordered source frame numbers, including
+neighboring pairs around joins, mask visibility changes and output-only jumps.
+It rejects unexplained identity, pose, scale, position and exposure changes. Real
+source cuts, occlusions and exposure changes remain valid. Excess discontinuity
+evidence fails closed rather than silently discarding frames. The version bump
+invalidates previously cached review decisions.
+
+Validation on October 30, 2026 (EDT): the TypeScript build and all 54 broker/reviewer
+tests passed. The installer passed baseline, check-only, repeat-install and
+foreign-edit refusal checks. All 106 focused Windows tests passed, including cases
+for fades, real cuts, occlusions, black frames, bounded dark-mask recovery,
+cross-segment evidence and real FFmpeg fade encoding.
+
+Live reviewer validation rejected both segments of the previously posted repair,
+specifically identifying its over-bright pop-in and the clothing/pose switch at
+frames 12–13. Fresh GPUq-admitted source preparation produced one 36-frame shot
+and recovered frames 1–11, leaving frame 0 black. The subsequent animation test
+did **not** produce a finished replacement: Viggle lost its generated track, and
+the bounded Wan fallback's background mask failed source alignment, including its
+point retry. Existing rejection thresholds were retained. These results establish
+the source preparation and continuity gates, not a successful new render or a
+guarantee of model quality. No new Discord post was made.
+
+Private evidence is under `artifacts/edit-continuity-f8551b5a/` and the desktop
+`backups/edit-continuity-f8551b5a/` directory. The public fixture showcase remains
+<http://localhost:4348>, started with `node scripts/serve-edit-fallback-showcase.mjs`.
+Install instructions and the bounded recovery rules are in `desktop/README.md`.
