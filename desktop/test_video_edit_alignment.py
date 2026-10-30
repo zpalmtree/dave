@@ -68,6 +68,23 @@ class AlignmentTests(unittest.TestCase):
             with self.assertRaisesRegex(alignment.ReplacementAlignmentError, 'shorter'):
                 alignment.source_point_graph('raw.mp4', Path('mask'), [0, 0, 96, 64], 96, 64, 1, 'test')
 
+    def test_long_retry_preserves_frame_order_without_quadratic_batch_storage(self):
+        source, _, _ = self.masks()
+        for count in (1, 23, 124, 360):
+            with patch('video_edit.decoded_frames', return_value=iter([source.tobytes()] * count)):
+                graph = alignment.source_point_graph('raw.mp4', Path('mask'), [0, 0, 96, 64],
+                                                     96, 64, count, 'test')
+            stored = []
+            def frames(name):
+                item = graph[name]
+                if item['class_type'] != 'ImageBatch':
+                    return [int(name.removeprefix('mask_image_'))]
+                result = frames(item['inputs']['image1'][0]) + frames(item['inputs']['image2'][0])
+                stored.append(len(result))
+                return result
+            self.assertEqual(frames(graph['mask_video']['inputs']['images'][0]), list(range(count)))
+            self.assertLessEqual(sum(stored), count * max(1, (count - 1).bit_length()))
+
     def test_background_track_cannot_paint_correction_over_body(self):
         source_mask, _, background = self.masks()
         source = np.full((64, 96, 3), 150, np.float32)

@@ -797,3 +797,9 @@ history. Whole-frame exposure matching, captions, source timing and final motion
 review remain in place. Run the Windows `test_video_edit_alignment`, `test_video_edit`,
 `test_video_edit_composite`, `test_video_edit_isolated`, `test_video_edit_recovery`,
 `test_video_edit_source_recovery` and `test_video_edit_captions` suites (91 tests).
+
+Point-recovery graphs join adjacent masks in a balanced tree, retaining source
+order without quadratic cached batch storage on long shots. The installer accepts
+the exact audited initial helper revision as an upgrade; unrelated edits still
+stop installation. The added batch-order/storage regression brings the focused
+suite to 92 tests.
