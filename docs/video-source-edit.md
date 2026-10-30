@@ -662,3 +662,21 @@ then without `--check`. New edit subprocesses load it automatically. The updated
 fixture showcase is <http://localhost:4348>, started with
 `node scripts/serve-edit-fallback-showcase.mjs`; desktop/mobile captures are in
 `docs/showcases/edit-fallback/`.
+
+## Preserved black frames in motion review
+
+The `f8551b5a` replacement was rejected because its first review sample contained
+black source, edited and mask images. Inspection of the saved evidence confirmed
+that the source fades in from black; the output correctly preserved that frame.
+Motion review version 3 explicitly treats matching blank source/output frames
+with an empty mask as preserved transitions and evaluates the visible samples.
+Black output over a visible subject, an empty track over a visible subject, and
+evidence containing only blank frames remain grounds for rejection. Still review
+is unchanged. The version bump invalidates cached decisions under the older rule.
+
+The saved 1.5-second, 36-frame render was reviewed without regenerating video.
+The corrected live reviewer accepted the original opening segment and its reversed
+fade-out fixture. It separately rejected the second segment for blending and
+transparency artifacts. Fixing the black-frame false rejection therefore does not
+establish that the complete old render is suitable for delivery; it was not sent
+to Discord. Private evidence remains under `artifacts/edit-review-f8551b5a/`.
