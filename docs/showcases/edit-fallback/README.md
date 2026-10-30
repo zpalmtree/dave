@@ -12,20 +12,20 @@ uses the shared bot message formatters. It does not call providers or render vid
 Its quality-error card uses the shared failure formatter; broker review behavior
 is covered by the HTTP integration tests.
 
-Reviewed Playwright MCP captures: [desktop](desktop.png) at 1280px and
+Reviewed Playwright MCP captures: [desktop](desktop.png) at 1440px and
 [mobile](mobile.png) at 390px. Both include loading, primary success, fallback
 success, outage, empty output, both editors declining, unconfigured fallback,
 cancellation, usable imperfect stills, source recovery, failed source recovery,
-motion recovery, failed animation tracking
-and wrong-identity rejection states. Neither has horizontal overflow.
+motion recovery, background-mask recovery, subject colour protection, failed animation
+tracking and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `2487b60` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `02dc849d9c37` over `VideoKeyframeProvider.ts` and
+Captured from base revision `31d2ec8` plus this change. The feature fingerprint in
+the screenshots is SHA-256 `0567fdfecaf1` over `VideoKeyframeProvider.ts` and
 `VideoBroker.ts`, then `VideoEditReview.ts`, `desktop/video-edit-recovery.patch`,
-`desktop/video_edit_source_recovery.py` and `desktop/video-edit-source-recovery.patch`
-in that order.
+`desktop/video_edit_source_recovery.py`, `desktop/video-edit-source-recovery.patch`
+and `desktop/video_edit_alignment.py` in that order.
 
 Validation:
 
@@ -65,3 +65,11 @@ seeded tracking recovery. The source recovery cards describe this bounded path
 and use the shared failure formatter. These fixtures do not claim a finished
 replacement render. Both updated captures were reviewed with no overflow; all
 task-owned browser tabs were closed.
+
+The replacement-alignment follow-up passed 91 focused tests in the Windows runtime.
+A real 36-frame replay reused the two saved animation outputs, retried segmentation
+through GPUq with source-interior points, and rebuilt colour matching and compositing.
+Both segments passed the live motion reviewer. The original blanket masks failed
+alignment validation; corrected masks selected the replacement. Private evidence
+and the repaired video remain under `artifacts/edit-composite-f8551b5a/`. Public
+captures contain only fixtures. No Discord delivery was performed by this replay.
