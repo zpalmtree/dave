@@ -690,10 +690,11 @@ const sharedCommands: Command[] = [
     },
     {
         aliases: ['purge'],
+        discordOnly: true,
         primaryCommand: {
             argsFormat: Args.DontNeed,
             implementation: handlePurge,
-            description: 'Delete all your messages in a channel',
+            description: 'Delete all your messages across accessible channels and threads in this server',
         },
     },
     {

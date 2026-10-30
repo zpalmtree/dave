@@ -657,74 +657,7 @@ export async function handleCountdown(
     }
 }
 
-let inProgress = false;
-
-export async function handlePurge(msg: Message) {
-    await tryDeleteMessage(msg);
-
-    const allowed = [
-        '354701063955152898',
-        '901540415176597534',
-        '1231731968064880692',
-    ];
-
-    if (inProgress) {
-        console.log('Purge already in progress');
-        return;
-    }
-
-    if (!allowed.includes(msg.author.id)) {
-        console.log(`User ${msg.author.id} cannot access purge bot`);
-        return;
-    }
-
-    inProgress = true;
-
-    const target = msg.author.id;
-
-    console.log(`Deletion started by ${msg.author.id}`);
-
-    let messages: Message[] = [];
-
-    let i = 0;
-
-    try {
-        do {
-            try {
-                const firstMessage = messages.length === 0 ? undefined : messages[0].id;
-
-                console.log(`Fetching messages...`);
-
-                /* Fetch messages, convert to array and sort by timestamp, oldest first */
-                messages = [...(await msg.channel.messages.fetch({ before: firstMessage })).values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-                await sleep(2000);
-
-                for (const message of messages) {
-                    if (message.author.id === target) {
-                        try {
-                            await tryDeleteMessage(message);
-                            await sleep(2000);
-                            console.log(`Deleted message ${i} for ${msg.author.id}`);
-                        } catch (err) {
-                            console.log(err);
-                        }
-
-                        i++;
-                    }
-                }
-            } catch (err) {
-                console.log('err: ' + (err as any).toString());
-            }
-        } while (messages.length > 0);
-
-        console.log('Message deletion complete.');
-    } catch (err) {
-        console.log('err: ' + (err as any).toString());
-    }
-
-    inProgress = false;
-}
+export { handlePurge } from './Purge.js';
 
 export async function handleQuery(msg: Message, args: string): Promise<void> {
     if (args.trim() === '') {
