@@ -1263,6 +1263,12 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).version, VIDEO_EDIT_REVIEW_VERSION);
                 await review({ segment: 1, samples: [sample] });
                 assert.equal(reviewCalls, count + 2, 'The updated review remains cached.');
+                const ordered = Array.from({length:16}, (_,frame)=>({...sample,frame}));
+                assert.equal((await review({segment:3,samples:ordered})).status,200);
+                assert.equal((await review({segment:3,samples:[...ordered, {...sample,frame:16}]})).status,400);
+                for (const frames of [[2,1], [1,1], [-1], [1.5], [2880]]) {
+                    assert.equal((await review({segment:3,samples:frames.map(frame=>({...sample,frame}))})).status,400);
+                }
             }
         } finally {
             socket.close();

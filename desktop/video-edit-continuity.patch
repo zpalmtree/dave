@@ -1,0 +1,175 @@
+diff --git a/video_edit.py b/video_edit.py
+--- a/video_edit.py
++++ b/video_edit.py
+@@ -200,8 +200,10 @@
+ 
+ def shot_cuts(clip: Path, frames: int) -> list[int]:
+     """Frames where a new shot starts (see CUT_THRESHOLD)."""
+-    histograms = []
++    from video_edit_continuity import continuous_exposure
++    histograms, samples = [], []
+     for data in decoded_frames(clip, "rgb24", 64 * 36 * 3, frames, "scale=64:36:flags=area"):
++        samples.append(np.frombuffer(data, dtype=np.uint8).reshape(36, 64, 3))
+         levels = np.frombuffer(data, dtype=np.uint8) // 64
+         bins = levels[0::3].astype(np.int32) * 16 + levels[1::3] * 4 + levels[2::3]
+         histograms.append(np.bincount(bins, minlength=64) / (64 * 36))
+@@ -214,7 +216,8 @@
+         after = (totals[frame + window] - totals[frame]) / window
+         change[frame] = 0.5 * float(np.abs(before - after).sum())
+     return [frame for frame in range(1, count) if change[frame] >= CUT_THRESHOLD
+-            and change[frame] >= change[max(0, frame - CUT_WINDOW_FRAMES):frame + CUT_WINDOW_FRAMES + 1].max()]
++            and change[frame] >= change[max(0, frame - CUT_WINDOW_FRAMES):frame + CUT_WINDOW_FRAMES + 1].max()
++            and not continuous_exposure(samples, frame)]
+ 
+ 
+ def edit_plan(normalized: Path, duration: float, min_shot_frames: int = MIN_SHOT_FRAMES) -> tuple[list[tuple[int, int]], list[tuple[int, int, int]]]:
+@@ -306,7 +309,7 @@
+             raise RuntimeError(f"Could not decode {path.name}: {errors.read()[-1000:].decode(errors='replace')}")
+ 
+ 
+-def fit_levels(source: np.ndarray, rendered: np.ndarray) -> tuple[float, float]:
++def fit_levels(source: np.ndarray, rendered: np.ndarray, prior: float = LEVELS_GAIN_PRIOR) -> tuple[float, float]:
+     """Gain and offset mapping rendered luma onto source luma over the best-matching pixels.
+ 
+     Trimming drops light only one of them has, such as a beam the render left out.
+@@ -315,8 +318,10 @@
+     gain, offset = 1.0, 0.0
+     for _ in range(3):
+         x, y = rendered[inliers], source[inliers]
+-        gain = ((float(np.mean((x - x.mean()) * (y - y.mean()))) + LEVELS_GAIN_PRIOR) /
+-                (float(x.var()) + LEVELS_GAIN_PRIOR))
++        gain = ((float(np.mean((x - x.mean()) * (y - y.mean()))) + prior) /
++                max(1e-8, float(x.var()) + prior))
++        if prior == 0 and float(x.var()) < 1e-8:
++            gain = float(y.mean()) / max(1e-8, float(x.mean()))
+         offset = float(y.mean()) - gain * float(x.mean())
+         residual = np.abs(gain * rendered + offset - source)
+         inliers = residual <= np.quantile(residual, LEVELS_INLIERS)
+@@ -351,22 +356,36 @@
+         valid[:] = False
+         valid[y:bottom, x:right] = True
+     valid = valid.ravel()[::4]
+-    fits = []
++    fits, dark, exposure_samples, exposure_fits = [], [], [], []
+     for source_data, rendered_data, mask_data in zip(
+             decoded_frames(source, "rgb24", rgb_bytes, frames),
+             decoded_frames(rendered, "rgb24", rgb_bytes, frames),
+             decoded_frames(tracked, "gray", gray_bytes, frames, away)):
++        rgb = np.frombuffer(source_data, np.uint8).reshape(height, width, 3)
++        exposure_samples.append(rgb[::max(1,height//36), ::max(1,width//64)].copy())
++        dark.append(region is not None and np.quantile(np.frombuffer(source_data, np.uint8), .95) < 64)
+         background = (np.frombuffer(mask_data, dtype=np.uint8)[::4] <= 127) & valid
+         if np.count_nonzero(background) < max(16, 0.02 * np.count_nonzero(valid)):
+             fits.append((1.0, 0.0))
++            exposure_fits.append((1.0, 0.0))
+             continue
+         luma = [np.frombuffer(data, dtype=np.uint8).reshape(-1, 3)[::4][background] @ LUMA / 255
+                 for data in (source_data, rendered_data)]
+         fits.append(fit_levels(*luma))
++        exposure_fits.append(fit_levels(*luma, prior=0) if region is not None else fits[-1])
+     if not fits:
+         raise RuntimeError("Could not compare the replacement with the source clip")
+     gains = smoothed(np.clip([gain for gain, _ in fits], 0.7, 1.5), LEVELS_SMOOTH_FRAMES)
+     offsets = smoothed(np.clip([offset for _, offset in fits], -0.15, 0.15), LEVELS_SMOOTH_FRAMES)
++    # Dark source frames need their actual exposure, without a 0.7 gain floor or
++    # temporal smoothing that makes the replacement appear ahead of a fade.
++    if region is not None:
++        from video_edit_continuity import exposure_frames
++        dark = np.asarray(dark) | exposure_frames(exposure_samples)
++    for index, sensitive in enumerate(dark):
++        if sensitive:
++            gains[index] = np.clip(exposure_fits[index][0], 0, 1.5)
++            offsets[index] = np.clip(exposure_fits[index][1], -0.15, 0.15)
+     with tempfile.TemporaryFile() as errors:
+         with subprocess.Popen(
+             ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+@@ -387,6 +406,8 @@
+                     pixels = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 3) / np.float32(255)
+                     at = min(index, len(fits) - 1)
+                     keep = np.clip((pixels.max(axis=2, keepdims=True) - 0.8) / 0.2, 0, 1)
++                    if dark[at]:
++                        keep[:] = 0
+                     matched = np.clip((pixels * gains[at] + offsets[at]) * (1 - keep) + pixels * keep, 0, 1) * 255
+                     if edge_streams:
+                         from video_edit_composite import match_edge_background
+@@ -912,6 +933,9 @@
+                 mask_file = recover_source_track(args.server, clip, mask_file, args.target,
+                                                  args.subjects, source_frames, model_frames,
+                                                  work, index)
++                from video_edit_continuity import recover_dark_source_track
++                mask_file = recover_dark_source_track(args.server, clip, mask_file, args.target,
++                                                      args.subjects, source_frames, model_frames, work, index)
+             failure = tracked_or_skipped(mask_file, args.target, source_frames, shots, index)
+             edited.append(failure is None)
+             if failure:
+diff --git a/video_edit_isolated.py b/video_edit_isolated.py
+--- a/video_edit_isolated.py
++++ b/video_edit_isolated.py
+@@ -137,14 +137,22 @@
+     duration, w, h = clip_details(output)
+     if abs(duration - state['duration']) > 2 / 24 or (w, h) != (state['width'], state['height']):
+         raise RuntimeError('The replacement changed the source duration or canvas.')
++    from video_edit_continuity import continuity_indices
++    critical = continuity_indices(work, output, state)
+     paths = []
+     for index, (start, count, _) in enumerate(state['segments']):
++        indices = {start + frame for frame in (0, (count - 1) // 3, 2 * (count - 1) // 3, count - 1)}
++        indices.update(frame for frame in critical if start - 2 <= frame < start + count + 2)
++        if len(indices) > 16:
++            raise RuntimeError('Replacement has too many discontinuities for a bounded motion review.')
+         samples = []
+-        for frame in sorted({0, (count - 1) // 3, 2 * (count - 1) // 3, count - 1}):
+-            t = (start + frame) / 24
+-            samples.append({'source': jpeg(rgb_frame(work / 'normalized.mp4', t, w, h)),
++        for frame in sorted(indices):
++            mask_index, mask_start = next((other, offset) for other, (offset, length, _) in enumerate(state['segments'])
++                                          if offset <= frame < offset + length)
++            t = frame / 24
++            samples.append({'frame': frame, 'source': jpeg(rgb_frame(work / 'normalized.mp4', t, w, h)),
+                             'edited': jpeg(rgb_frame(output, t, w, h)),
+-                            'mask': jpeg(rgb_frame(work / f'mask-{index+1:02d}.mp4', frame / 24, w, h))})
++                            'mask': jpeg(rgb_frame(work / f'mask-{mask_index+1:02d}.mp4', (frame-mask_start) / 24, w, h))})
+         path = work / f'review-{index+1:02d}.json'
+         path.write_text(json.dumps({'segment': index+1, 'samples': samples}), encoding='utf-8')
+         paths.append(path.name)
+diff --git a/test_video_edit_isolated.py b/test_video_edit_isolated.py
+--- a/test_video_edit_isolated.py
++++ b/test_video_edit_isolated.py
+@@ -80,10 +80,15 @@
+             def frame(path,t,w,h):
+                 calls.append((path.name,t))
+                 return np.zeros((h,w,3),dtype=np.uint8)
+-            with patch('video_edit.clip_details',return_value=(2,160,96)),patch('video_edit.rgb_frame',side_effect=frame):
++            with patch('video_edit.clip_details',return_value=(2,160,96)),patch('video_edit.rgb_frame',side_effect=frame), \
++                 patch('video_edit_continuity.continuity_indices',return_value={22,23,24,25}):
+                 isolated.review_samples(work,work/'edited.mp4')
+             self.assertEqual(json.loads((work/'reviews.json').read_text()),['review-01.json','review-02.json'])
+             times=[t for name,t in calls if name=='edited.mp4']
+             for t in [0,23/24,1,47/24]: self.assertIn(t,times)
++            first=json.loads((work/'review-01.json').read_text())
++            second=json.loads((work/'review-02.json').read_text())
++            for review in [first,second]:
++                self.assertTrue({23,24}.issubset({sample['frame'] for sample in review['samples']}))
+ 
+ if __name__=='__main__': unittest.main()
+diff --git a/test_video_edit_composite.py b/test_video_edit_composite.py
+--- a/test_video_edit_composite.py
++++ b/test_video_edit_composite.py
+@@ -91,14 +91,14 @@
+             return iter([value.tobytes()] * count)
+         fits = []
+         actual_fit = video_edit.fit_levels
+-        def fit(a, b):
++        def fit(a, b, **kwargs):
+             fits.append((a, b))
+-            return actual_fit(a, b)
++            return actual_fit(a, b, **kwargs)
+         with tempfile.TemporaryDirectory() as d, patch('video_edit.decoded_frames', side_effect=frames), \
+              patch('video_edit.fit_levels', side_effect=fit):
+             video_edit.match_render_levels(Path('source'), Path('rendered'), Path('mask'), Path(d)/'out.mp4',
+                                            2, w, h, region=[0, 0, 48, 64])
+-        self.assertEqual(len(fits), 2)
++        self.assertEqual(len(fits), 4)
+         for source_samples, rendered_samples in fits:
+             self.assertLess(source_samples.max(), 0.8)
+             self.assertGreater(rendered_samples.min(), 0.15)

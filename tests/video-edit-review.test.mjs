@@ -36,3 +36,22 @@ test('still usability and finished motion receive distinct review contracts with
         .map(part=>Buffer.from(part.inlineData.data,'base64').toString()), ['identity','source','edited','mask']);
     assert.deepEqual(usage.map(event=>event.stage), ['video_edit_still_review','video_edit_motion_review']);
 });
+
+test('motion review transmits ordered neighboring evidence beyond the old four-frame limit', async t => {
+    const { reviewVideoEdit } = await import('../dist/VideoEditReview.js');
+    const requests = [];
+    t.mock.method(globalThis, 'fetch', async (_input, init) => {
+        requests.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify({
+            accepted:false,reason:'The replacement changes shape across consecutive source frames.'})}]}}]}),
+            {status:200,headers:{'content-type':'application/json'}});
+    });
+    const image = {bytes:Buffer.from('image'),mimeType:'image/png'};
+    const samples = [0,1,2,11,12,13,14,35].map(frame=>({source:image,edited:image,mask:image,frame}));
+    assert.equal((await reviewVideoEdit('the cat',image,samples,'motion')).accepted,false);
+    const labels=requests[0].contents[0].parts.filter(part=>part.text?.startsWith('Sample')).map(part=>part.text);
+    assert.deepEqual(labels,samples.map((sample,index)=>`Sample ${index+1} (source frame ${sample.frame}): SOURCE`));
+    await assert.rejects(reviewVideoEdit('the cat',image,samples,'still'),/number/);
+    await assert.rejects(reviewVideoEdit('the cat',image,Array(17).fill(samples[0]),'motion'),/number/);
+    assert.equal(requests.length,1);
+});

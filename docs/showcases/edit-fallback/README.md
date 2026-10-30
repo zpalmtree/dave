@@ -16,16 +16,18 @@ Reviewed Playwright MCP captures: [desktop](desktop.png) at 1440px and
 [mobile](mobile.png) at 390px. Both include loading, primary success, fallback
 success, outage, empty output, both editors declining, unconfigured fallback,
 cancellation, usable imperfect stills, source recovery, failed source recovery,
-motion recovery, background-mask recovery, subject colour protection, failed animation
-tracking and wrong-identity rejection states. Neither has horizontal overflow.
+motion recovery, background-mask recovery, subject colour protection, continuous
+fades, dark tracking recovery, neighboring-frame review, continuity rejection,
+failed animation tracking and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `f37504a` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `680905616436` over `VideoKeyframeProvider.ts` and
+Captured from base revision `bf1f236` plus this change. The feature fingerprint in
+the screenshots is SHA-256 `3ab0aa6b9867` over `VideoKeyframeProvider.ts` and
 `VideoBroker.ts`, then `VideoEditReview.ts`, `desktop/video-edit-recovery.patch`,
 `desktop/video_edit_source_recovery.py`, `desktop/video-edit-source-recovery.patch`
-and `desktop/video_edit_alignment.py` in that order.
+and `desktop/video_edit_alignment.py`, then `desktop/video_edit_continuity.py`
+and `desktop/video-edit-continuity.patch` in that order.
 
 Validation:
 
@@ -77,3 +79,12 @@ captures contain only fixtures. No Discord delivery was performed by this replay
 The bounded-batch follow-up adds one Windows regression test (92 focused tests
 total): 1, 23, 124 and 360 frames retain source order with logarithmic batch depth.
 The ten alignment tests passed after the change. No pixel processing changed.
+
+The October 30 continuity follow-up passed 106 focused Windows tests and 54
+broker/reviewer tests, plus the TypeScript build and installer checks. Real source
+preparation now retains one continuous shot and tracks the dim opening. The live
+reviewer rejects the previously posted repair for its bright pop-in and appearance
+switch. The fresh animation test stopped on replacement-mask alignment failure;
+no successful new render or delivery is claimed. Both updated captures were
+reviewed at desktop/mobile widths with all 20 fixtures and no horizontal overflow.
+All task-owned browser tabs were closed.
