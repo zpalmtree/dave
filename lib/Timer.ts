@@ -114,7 +114,7 @@ export async function handleTimer(msg: Message, args: string[], db: Database) {
         description
     );
 
-    const message = `Success. Timer #${timerID} will go off ${formatDiscordTimestamp(time)}.`;
+    const message = `Success. Timer #${timerID} set for ${formatDiscordTimestamp(time)}.`;
 
     await msg.reply(message);
 }
