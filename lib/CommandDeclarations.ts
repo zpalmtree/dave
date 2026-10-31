@@ -691,9 +691,10 @@ const sharedCommands: Command[] = [
         aliases: ['purge'],
         discordOnly: true,
         primaryCommand: {
-            argsFormat: Args.DontNeed,
+            argsFormat: Args.Combined,
             implementation: handlePurge,
-            description: 'Delete all your messages across accessible channels and threads in this server',
+            description: 'Delete all your messages across accessible channels and threads in this server. Use purge status to check progress.',
+            examples: [{ value: 'purge' }, { value: 'purge status' }],
         },
     },
     {
