@@ -1,3 +1,4 @@
+import { installPurgeOperator } from './PurgeOperator.js';
 import { canProcessMessage, fetchProcessableMessage, initPrivacy, onPrivacyChange, runWithPrivacyContext } from './Privacy.js';
 import { handlePrivacyInteraction, handlePrivacyMessage } from './PrivacyCommand.js';
 import { initPrivacyRequests } from './PrivacyRequests.js';
@@ -144,7 +145,10 @@ function createDiscordClient(db: sqlite3.Database, messageContent = true): { cli
             if ('messages' in channel) channel.messages.cache.clear();
         }
     });
+    let removePurgeOperator: (() => void) | undefined;
     client.on('clientReady', async () => {
+        removePurgeOperator?.();
+        removePurgeOperator = installPurgeOperator(client);
         console.log('Logged in');
 
         restoreTimers(db, client);
@@ -182,6 +186,7 @@ function createDiscordClient(db: sqlite3.Database, messageContent = true): { cli
         client,
         dispose: async () => {
             removePrivacyListener();
+            removePurgeOperator?.();
             await client.destroy();
         },
     };

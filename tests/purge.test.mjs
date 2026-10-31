@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChannelType, Collection, PermissionFlagsBits } from 'discord.js';
 import { createPurgeHandler } from '../dist/Purge.js';
+import { createPurgeOperator } from '../dist/PurgeOperator.js';
 
 const target = '882322615346270268';
 const collection = values => new Collection(values.map(value => [value.id, value]));
@@ -236,4 +237,97 @@ test('failed acknowledgments and progress edits do not stop deletion or strand t
     const check = invocation([channel('room')]);
     await purge(check, 'status');
     assert.equal(check.replies[0], 'No purge is running in this server.');
+});
+
+test('operator logs show channel lifecycle, permission skips, errors and final counts without message content', async () => {
+    const events = [];
+    const deleted = [];
+    const entry = { ...message('100', target, deleted), content: 'private fixture content' };
+    const msg = invocation([
+        channel('room', [[entry, message('90', target, deleted, true)]]),
+        channel('hidden', [], false),
+    ]);
+    const purge = createPurgeHandler(async () => {}, Date.now, (event, details) => events.push({ event, ...details }));
+    await purge(msg);
+    assert.deepEqual(events.map(e => e.event), ['started', 'channel_started', 'delete_error', 'channel_finished', 'channel_skipped', 'finished']);
+    assert.equal(new Set(events.map(e => e.runId)).size, 1);
+    assert.equal(events.at(-1).deleted, 1);
+    assert.equal(events.at(-1).failures, 1);
+    assert.equal(events.at(-1).skipped, 1);
+    assert.equal(JSON.stringify(events).includes(entry.content), false);
+    assert.deepEqual(purge.status(), []);
+});
+
+test('operator heartbeat works when Discord feedback fails and status snapshots cannot mutate the run', async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let heartbeat;
+    const observed = new Promise(resolve => { heartbeat = resolve; });
+    const events = [];
+    const purge = createPurgeHandler(() => gate, Date.now, (event, details) => {
+        events.push(event);
+        if (event === 'progress') heartbeat(details);
+    }, 5);
+    const msg = invocation([channel('room', [[message('100', target, [])]])]);
+    msg.reply = async () => { throw new Error('Cannot send'); };
+    const run = purge(msg);
+    let timeout;
+    try {
+        const state = await Promise.race([observed, new Promise((_, reject) => {
+            timeout = setTimeout(() => reject(new Error('No heartbeat')), 1000);
+        })]);
+        assert.equal(state.userId, target);
+        assert.equal(state.channelId, 'room');
+        assert.equal(state.before, '100');
+        const snapshot = purge.status()[0];
+        snapshot.deleted = 9000;
+        assert.equal(purge.status()[0].deleted, 0);
+    } finally {
+        clearTimeout(timeout);
+        release();
+        await run;
+    }
+    const count = events.length;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(events.length, count, 'heartbeat is cleared after completion');
+});
+
+test('operator status is read-only and start shares the Discord allowlist and concurrency guard', async () => {
+    const guildId = '891069801173237800';
+    const channelId = '952698229663866960';
+    const room = Object.assign(channel(channelId, [[message('100', target, [])]]), {
+        guildId, send: async () => ({ edit: async () => {} }),
+    });
+    const msg = invocation([room], { guildId });
+    msg.guild.members.fetch = async id => ({ user: { id } });
+    msg.guild.channels.fetch = async id => id ? room : collection([room]);
+    let lookups = 0;
+    const client = { guilds: { fetch: async () => { lookups++; return msg.guild; } } };
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const purge = createPurgeHandler(() => gate);
+    const operator = createPurgeOperator(client, purge);
+    const packet = { topic: 'purge-operator', data: { action: 'start', guildId, userId: target, channelId } };
+    assert.equal(await operator({ topic: 'other' }), undefined);
+    assert.deepEqual(await operator({ topic: 'purge-operator', data: { action: 'status' } }), { ok: true, runs: [] });
+    assert.equal(lookups, 0);
+    assert.equal((await operator({ ...packet, data: { ...packet.data, userId: '111111111111111111' } })).reason, 'user_not_allowed');
+    assert.equal((await operator({ ...packet, data: { ...packet.data, guildId: 'invalid' } })).reason, 'invalid_request');
+    assert.equal(lookups, 0);
+    try {
+        const result = await operator(packet);
+        assert.equal(result.ok, true);
+        assert.equal(result.run.userId, target);
+        await purge(msg);
+        assert.match(msg.replies[0], /already running/);
+        assert.equal((await operator(packet)).reason, 'already_running');
+        const status = await operator({ topic: 'purge-operator', data: { action: 'status' } });
+        assert.equal(status.runs[0].runId, result.run.runId);
+    } finally {
+        release();
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.deepEqual(purge.status(), []);
+    room.guildId = '111111111111111111';
+    assert.equal((await operator(packet)).reason, 'invalid_channel');
 });
