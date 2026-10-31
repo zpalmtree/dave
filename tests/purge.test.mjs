@@ -33,6 +33,11 @@ function message(id, author, deleted, fails = false) {
 function invocation(channels, { user = target, active = [], guildId = 'guild' } = {}) {
     return {
         author: { id: user }, channel: channels[0],
+        replies: [], edits: [],
+        async reply(payload) {
+            this.replies.push(payload.content);
+            return { edit: async payload => { this.edits.push(payload.content); } };
+        },
         guild: {
             id: guildId, members: { me: {} },
             channels: {
@@ -137,6 +142,7 @@ test('blocks overlapping guild purges and releases the guard after a listing fai
         return new Promise((_, reject) => { release = () => reject(new Error('Guild unavailable')); });
     };
     const running = purge(msg);
+    await new Promise(resolve => setImmediate(resolve));
     await purge(msg);
     assert.equal(calls, 1);
     release();
@@ -156,4 +162,78 @@ test('continues regular channels when thread discovery fails and stops nonadvanc
     await handler()(msg);
     assert.deepEqual(deleted, ['10']);
     assert.equal(room.requests.length, 2);
+});
+
+test('acknowledges first, starts in the invoking channel, updates progress, and reports completion', async () => {
+    const deleted = [];
+    const other = channel('other', [[message('300', target, deleted)]]);
+    const current = channel('current', [[message('200', target, deleted)]]);
+    const msg = invocation([other, current]);
+    msg.channel = current;
+    const fetch = current.messages.fetch;
+    current.messages.fetch = options => {
+        assert.match(msg.replies[0], /Purge started/);
+        assert.equal(other.requests.length, 0);
+        return fetch(options);
+    };
+    let time = 0;
+    await createPurgeHandler(async () => { time += 16000; }, () => time)(msg);
+    assert.deepEqual(deleted, ['200', '300']);
+    assert.equal(current.requests.length, 2);
+    assert.ok(msg.edits.some(text => text.startsWith('Purge is running.')));
+    assert.match(msg.edits.at(-1), /Purge finished\. 2 messages deleted; 2 channels\/threads checked/);
+});
+
+test('status and invalid arguments never start a purge', async () => {
+    const room = channel('room');
+    const msg = invocation([room]);
+    const purge = handler();
+    await purge(msg, ' STATUS ');
+    await purge(msg, 'anything-else');
+    assert.equal(room.requests.length, 0);
+    assert.equal(msg.replies[0], 'No purge is running in this server.');
+    assert.match(msg.replies[1], /no arguments/);
+});
+
+test('status and repeat invocations report an active purge without starting another', async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const purge = createPurgeHandler(() => gate);
+    const deleted = [];
+    const msg = invocation([channel('room', [[message('100', target, deleted)]])]);
+    const running = purge(msg);
+    await new Promise(resolve => setImmediate(resolve));
+    await purge(msg, 'status');
+    await purge(msg);
+    assert.match(msg.replies[1], /Purge is running\. 0 messages deleted/);
+    assert.match(msg.replies[2], /already running/);
+    assert.equal(msg.channel.requests.length, 1);
+    release();
+    await running;
+    assert.deepEqual(deleted, ['100']);
+});
+
+test('reports permission skips and individual deletion errors accurately', async () => {
+    const deleted = [];
+    const msg = invocation([
+        channel('hidden', [], false),
+        channel('room', [[message('200', target, deleted, true), message('100', target, deleted)]]),
+    ]);
+    await handler()(msg);
+    assert.match(msg.edits.at(-1), /1 messages deleted; 1 channels\/threads checked; 1 skipped for missing permissions; 1 errors/);
+});
+
+test('failed acknowledgments and progress edits do not stop deletion or strand the lock', async () => {
+    const deleted = [];
+    const msg = invocation([channel('room', [[message('100', target, deleted)]])]);
+    msg.reply = async () => { throw new Error('Cannot send'); };
+    const purge = handler();
+    await purge(msg);
+    msg.channel.messages.fetch = async () => collection([]);
+    msg.reply = async () => ({ edit: async () => { throw new Error('Cannot edit'); } });
+    await purge(msg);
+    assert.deepEqual(deleted, ['100']);
+    const check = invocation([channel('room')]);
+    await purge(check, 'status');
+    assert.equal(check.replies[0], 'No purge is running in this server.');
 });
