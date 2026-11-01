@@ -23,7 +23,6 @@ export function logPurgeEvent(event: string, details: Record<string, unknown> = 
 // A factory keeps the concurrency guard scoped to the handler and permits fast fixture tests.
 export function createPurgeHandler(
     pause = () => new Promise<void>(resolve => setTimeout(resolve, 2000)),
-    now = Date.now,
     log = logPurgeEvent,
     heartbeatMs = 30000,
     store?: PurgeCheckpointStore,
@@ -85,6 +84,7 @@ export function createPurgeHandler(
         const state: PurgeState = saved?.state ?? { runId: randomUUID(), guildId: guild.id, userId: msg.author.id,
             deleted: 0, failures: 0, scanned: 0, skipped: 0, pages: 0, phase: 'starting' };
         const checkpoint: PurgeCheckpoint = saved ?? { version: 1, state, invokingChannelId: msg.channel.id, channels: {} };
+        delete checkpoint.progressMessageId; // Retire notices created by older versions.
         const persist = () => {
             try { store?.save(checkpoint); }
             catch { throw new PurgeCheckpointError('Could not persist purge progress.'); }
@@ -92,37 +92,13 @@ export function createPurgeHandler(
         let complete = true;
         runningGuilds.set(guild.id, state);
         log(saved ? 'resumed' : 'started', { ...state, invokingChannelId: msg.channel.id });
-        // Operator progress must continue even if Discord status messages cannot be sent.
+        // Progress is operator-only; never post automatic Discord messages.
         const heartbeat = setInterval(() => log('progress', { ...state }), heartbeatMs);
         heartbeat.unref();
-        let progress: Message | undefined;
-        let lastUpdate = now();
-        const update = async (finished = false) => {
-            if (!progress || (!finished && now() - lastUpdate < 15000)) return;
-            lastUpdate = now();
-            try {
-                await progress.edit({
-                    content: `${finished ? 'Purge finished.' : 'Purge is running.'} ${summary(state)}${finished ? '' : ' Scanning server history can take a while.'}`,
-                    allowedMentions: { parse: [], repliedUser: false },
-                });
-            } catch (error) {
-                log('notification_error', { ...state });
-            }
-        };
         const visited = new Set(Object.keys(checkpoint.channels).filter(id => checkpoint.channels[id].done));
 
         try {
             persist();
-            if (saved?.progressMessageId && msg.channel.id === checkpoint.invokingChannelId) {
-                try {
-                    const previous = await msg.channel.messages.fetch(saved.progressMessageId);
-                    if (previous.author.id === msg.client?.user?.id) progress = previous;
-                } catch { /* The progress message may have been deleted. Replace it below. */ }
-            }
-            if (!progress) progress = await reply(msg, saved
-                ? `Purge resumed from its saved position. ${summary(state)} I will update this message with progress.`
-                : 'Purge started. Deleting only your messages across this server, starting in this channel. I will update this message with progress.');
-            if (progress?.id) { checkpoint.progressMessageId = progress.id; persist(); }
             state.phase = 'fetching_member';
             const member = guild.members.me ?? await guild.members.fetchMe();
             const scan = async (channel: GuildBasedChannel) => {
@@ -183,12 +159,10 @@ export function createPurgeHandler(
                                 log('delete_error', { ...state, messageId: message.id, code: (error as { code?: unknown })?.code });
                             }
                             await pause();
-                            await update();
                         }
                         before = oldest;
                         cursor.before = before;
                         persist();
-                        await update();
                     }
                 } catch (error) {
                     if (error instanceof PurgeCheckpointError) throw error;
@@ -277,7 +251,6 @@ export function createPurgeHandler(
             runningGuilds.delete(guild.id);
             state.phase = complete ? 'finished' : 'waiting_to_resume';
             log(complete ? 'finished' : 'waiting_to_resume', { ...state });
-            if (complete) await update(true);
         }
     };
     return Object.assign(handle, {
@@ -305,14 +278,10 @@ export function createPurgeHandler(
                 try {
                     const guild = await client.guilds.fetch(guildId);
                     let channel: GuildBasedChannel | null | undefined;
-                    try { channel = await guild.channels.fetch(saved.invokingChannelId); } catch { /* Can scan without notifications. */ }
+                    try { channel = await guild.channels.fetch(saved.invokingChannelId); } catch { /* The original command channel may no longer exist. */ }
                     const context = {
                         guild, client, author: { id: userId },
                         channel: channel ?? { id: saved.invokingChannelId, isThread: () => false },
-                        reply: (payload: Parameters<Message['reply']>[0]) => {
-                            if (channel?.isTextBased() && 'send' in channel) return channel.send(payload);
-                            return Promise.reject(new Error('Progress channel unavailable'));
-                        },
                     } as unknown as Message;
                     // Do not await the multi-day job; restore other guilds and return promptly.
                     void run(context, saved).catch(() => log('resume_run_error', { guildId, userId }));
@@ -324,5 +293,5 @@ export function createPurgeHandler(
     });
 }
 
-export const handlePurge = createPurgeHandler(undefined, undefined, undefined, undefined,
+export const handlePurge = createPurgeHandler(undefined, undefined, undefined,
     createFilePurgeCheckpointStore('.purge-state'));

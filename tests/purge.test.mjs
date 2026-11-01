@@ -165,7 +165,7 @@ test('continues regular channels when thread discovery fails and stops nonadvanc
     assert.equal(room.requests.length, 2);
 });
 
-test('acknowledges first, starts in the invoking channel, updates progress, and reports completion', async () => {
+test('starts in the invoking channel and stays silent through deletion and completion', async () => {
     const deleted = [];
     const other = channel('other', [[message('300', target, deleted)]]);
     const current = channel('current', [[message('200', target, deleted)]]);
@@ -173,16 +173,15 @@ test('acknowledges first, starts in the invoking channel, updates progress, and 
     msg.channel = current;
     const fetch = current.messages.fetch;
     current.messages.fetch = options => {
-        assert.match(msg.replies[0], /Purge started/);
+        assert.deepEqual(msg.replies, []);
         assert.equal(other.requests.length, 0);
         return fetch(options);
     };
-    let time = 0;
-    await createPurgeHandler(async () => { time += 16000; }, () => time)(msg);
+    await handler()(msg);
     assert.deepEqual(deleted, ['200', '300']);
     assert.equal(current.requests.length, 2);
-    assert.ok(msg.edits.some(text => text.startsWith('Purge is running.')));
-    assert.match(msg.edits.at(-1), /Purge finished\. 2 messages deleted; 2 channels\/threads checked/);
+    assert.deepEqual(msg.replies, []);
+    assert.deepEqual(msg.edits, []);
 });
 
 test('status and invalid arguments never start a purge', async () => {
@@ -206,37 +205,22 @@ test('status and repeat invocations report an active purge without starting anot
     await new Promise(resolve => setImmediate(resolve));
     await purge(msg, 'status');
     await purge(msg);
-    assert.match(msg.replies[1], /Purge is running\. 0 messages deleted/);
-    assert.match(msg.replies[2], /already running/);
+    assert.match(msg.replies[0], /Purge is running\. 0 messages deleted/);
+    assert.match(msg.replies[1], /already running/);
     assert.equal(msg.channel.requests.length, 1);
     release();
     await running;
     assert.deepEqual(deleted, ['100']);
 });
 
-test('reports permission skips and individual deletion errors accurately', async () => {
-    const deleted = [];
-    const msg = invocation([
-        channel('hidden', [], false),
-        channel('room', [[message('200', target, deleted, true), message('100', target, deleted)]]),
-    ]);
-    await handler()(msg);
-    assert.match(msg.edits.at(-1), /1 messages deleted; 1 channels\/threads checked; 1 skipped for missing permissions; 1 errors/);
-});
-
-test('failed acknowledgments and progress edits do not stop deletion or strand the lock', async () => {
+test('successful runs never attempt Discord sends, replies, or edits', async () => {
     const deleted = [];
     const msg = invocation([channel('room', [[message('100', target, deleted)]])]);
-    msg.reply = async () => { throw new Error('Cannot send'); };
-    const purge = handler();
-    await purge(msg);
-    msg.channel.messages.fetch = async () => collection([]);
-    msg.reply = async () => ({ edit: async () => { throw new Error('Cannot edit'); } });
-    await purge(msg);
+    let attempts = 0;
+    msg.reply = msg.channel.send = async () => { attempts++; throw new Error('Unexpected notification'); };
+    await handler()(msg);
     assert.deepEqual(deleted, ['100']);
-    const check = invocation([channel('room')]);
-    await purge(check, 'status');
-    assert.equal(check.replies[0], 'No purge is running in this server.');
+    assert.equal(attempts, 0);
 });
 
 test('operator logs show channel lifecycle, permission skips, errors and final counts without message content', async () => {
@@ -247,7 +231,7 @@ test('operator logs show channel lifecycle, permission skips, errors and final c
         channel('room', [[entry, message('90', target, deleted, true)]]),
         channel('hidden', [], false),
     ]);
-    const purge = createPurgeHandler(async () => {}, Date.now, (event, details) => events.push({ event, ...details }));
+    const purge = createPurgeHandler(async () => {}, (event, details) => events.push({ event, ...details }));
     await purge(msg);
     assert.deepEqual(events.map(e => e.event), ['started', 'channel_started', 'delete_error', 'channel_finished', 'channel_skipped', 'finished']);
     assert.equal(new Set(events.map(e => e.runId)).size, 1);
@@ -258,18 +242,19 @@ test('operator logs show channel lifecycle, permission skips, errors and final c
     assert.deepEqual(purge.status(), []);
 });
 
-test('operator heartbeat works when Discord feedback fails and status snapshots cannot mutate the run', async () => {
+test('operator heartbeat works silently and status snapshots cannot mutate the run', async () => {
     let release;
     const gate = new Promise(resolve => { release = resolve; });
     let heartbeat;
     const observed = new Promise(resolve => { heartbeat = resolve; });
     const events = [];
-    const purge = createPurgeHandler(() => gate, Date.now, (event, details) => {
+    const purge = createPurgeHandler(() => gate, (event, details) => {
         events.push(event);
         if (event === 'progress') heartbeat(details);
     }, 5);
     const msg = invocation([channel('room', [[message('100', target, [])]])]);
-    msg.reply = async () => { throw new Error('Cannot send'); };
+    let notifications = 0;
+    msg.reply = async () => { notifications++; throw new Error('Cannot send'); };
     const run = purge(msg);
     let timeout;
     try {
@@ -290,13 +275,15 @@ test('operator heartbeat works when Discord feedback fails and status snapshots 
     const count = events.length;
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(events.length, count, 'heartbeat is cleared after completion');
+    assert.equal(notifications, 0);
 });
 
 test('operator status is read-only and start shares the Discord allowlist and concurrency guard', async () => {
     const guildId = '891069801173237800';
     const channelId = '952698229663866960';
+    let sends = 0;
     const room = Object.assign(channel(channelId, [[message('100', target, [])]]), {
-        guildId, send: async () => ({ edit: async () => {} }),
+        guildId, send: async () => { sends++; return { edit: async () => {} }; },
     });
     const msg = invocation([room], { guildId });
     msg.guild.members.fetch = async id => ({ user: { id } });
@@ -328,6 +315,7 @@ test('operator status is read-only and start shares the Discord allowlist and co
         await new Promise(resolve => setImmediate(resolve));
     }
     assert.deepEqual(purge.status(), []);
+    assert.equal(sends, 0);
     room.guildId = '111111111111111111';
     assert.equal((await operator(packet)).reason, 'invalid_channel');
 });
