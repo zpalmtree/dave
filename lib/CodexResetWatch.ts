@@ -1,4 +1,4 @@
-import { Client, escapeMarkdown, MessageCreateOptions } from 'discord.js';
+import { Client, MessageCreateOptions } from 'discord.js';
 import { promises as fs } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
@@ -89,17 +89,13 @@ export function resetNotification(item: ResetWatchState['pending'][number]): Mes
     const { phase, reset } = item;
     if (phase !== 'dropped' || !isObservation(reset)) throw new Error('Only confirmed Codex account observations can be sent.');
     const banked = reset.reset_type === 'banked';
-    const description = escapeMarkdown(reset.text.trim()).slice(0, 1800);
     return {
         content: `<@&${codexRoleId}>`,
         allowedMentions: { parse: [], roles: [codexRoleId] },
         embeds: [{
-            title: banked ? '✅ Codex reset credit observed on monitored account' : '✅ Codex usage reset observed on monitored account',
-            color: 0x23a55a,
+            title: banked ? '🎟️ Codex banked reset awarded' : '✅ Codex usage reset',
+            color: banked ? 0x5865f2 : 0x23a55a,
             url: 'https://chatgpt.com/codex/settings/usage',
-            ...(description ? { description } : {}),
-            footer: { text: 'Direct Codex account check · confirmed twice' },
-            timestamp: new Date(reset.announced_at).toISOString(),
         }],
     };
 }
