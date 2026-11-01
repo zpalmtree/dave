@@ -81,6 +81,7 @@ test('resume uses completed-page cursors, skips finished channels, and preserves
     const { store } = storage(t);
     const saved = base();
     saved.channels = { '1': { done: true }, '2': { done: false, before: '400' } };
+    saved.progressMessageId = '9999';
     Object.assign(saved.state, { before: '100', channelId: '2', deleted: 7, scanned: 2 });
     store.save(saved);
     const f = fixture([{ id: '500', author: target }, { id: '390', author: 'other' },
@@ -88,14 +89,15 @@ test('resume uses completed-page cursors, skips finished channels, and preserves
     const events = [];
     const snapshots = [];
     const recording = { ...store, save: value => { snapshots.push(JSON.parse(JSON.stringify(value))); store.save(value); } };
-    await createPurgeHandler(async () => {}, Date.now, (event, state) => events.push({ event, ...state }), 30000, recording)(f.msg);
+    await createPurgeHandler(async () => {}, (event, state) => events.push({ event, ...state }), 30000, recording)(f.msg);
     assert.deepEqual(f.fetched, ['400', '380', '370']);
     assert.deepEqual(f.inventory.map(item => item.id), ['500', '390']);
     assert.equal(events.at(-1).deleted, 9);
     assert.equal(events.at(-1).scanned, 2);
     assert.equal(events.at(-1).runId, 'saved-run');
     assert.equal(events[0].event, 'resumed');
-    assert.match(f.replies[0], /resumed from its saved position/);
+    assert.deepEqual(f.replies, []);
+    assert.ok(snapshots.every(saved => saved.progressMessageId === undefined));
     assert.equal(snapshots.find(value => value.state.deleted === 8).channels['2'].before, '400');
     assert.deepEqual(store.list(), []);
 });
@@ -107,7 +109,7 @@ test('startup recovery retries unavailable Discord, prevents duplicates, and doe
     let finish;
     const finished = new Promise(resolve => { finish = resolve; });
     const events = [];
-    const purge = createPurgeHandler(async () => {}, Date.now, (event, state) => {
+    const purge = createPurgeHandler(async () => {}, (event, state) => {
         events.push(event); if (event === 'finished') finish(state);
     }, 30000, store);
     await purge.resumePending({ guilds: { fetch: async () => { throw new Error('Offline'); } } });
@@ -116,6 +118,7 @@ test('startup recovery retries unavailable Discord, prevents duplicates, and doe
     await Promise.all([purge.resumePending(f.client), purge.resumePending(f.client)]);
     const final = await finished;
     assert.equal(final.deleted, 2);
+    assert.deepEqual(f.replies, []);
     assert.equal(events.filter(event => event === 'resumed').length, 1);
     await purge.resumePending(f.client);
     assert.equal(events.filter(event => event === 'resumed').length, 1);
@@ -125,7 +128,7 @@ test('a saved purge cannot be overwritten by another allowed user or resumed for
     const { store } = storage(t);
     store.save(base());
     const f = fixture();
-    const purge = createPurgeHandler(async () => {}, Date.now, () => {}, 30000, store);
+    const purge = createPurgeHandler(async () => {}, () => {}, 30000, store);
     await purge({ ...f.msg, author: { id: '354701063955152898' } });
     assert.match(f.replies[0], /Another user has a saved purge/);
     assert.equal(f.fetched.length, 0);
@@ -144,11 +147,11 @@ test('checkpoint failures stop further deletion and leave the previous cursor sa
         store.save(value);
     } };
     const events = [];
-    await createPurgeHandler(async () => {}, Date.now, event => events.push(event), 30000, broken)(f.msg);
+    await createPurgeHandler(async () => {}, event => events.push(event), 30000, broken)(f.msg);
     assert.deepEqual(f.inventory.map(item => item.id), ['200']);
     assert.equal(store.load(guildId).channels['2'].before, undefined);
     assert.ok(events.includes('checkpoint_error'));
-    await createPurgeHandler(async () => {}, Date.now, () => {}, 30000, store)(f.msg);
+    await createPurgeHandler(async () => {}, () => {}, 30000, store)(f.msg);
     assert.deepEqual(f.inventory, []);
     assert.deepEqual(store.list(), []);
 });
@@ -156,7 +159,7 @@ test('checkpoint failures stop further deletion and leave the previous cursor sa
 test('an initial checkpoint failure prevents all history reads and deletes', async () => {
     const f = fixture();
     const broken = { load: () => undefined, list: () => [], save: () => { throw new Error('Disk full'); } };
-    await createPurgeHandler(async () => {}, Date.now, () => {}, 30000, broken)(f.msg);
+    await createPurgeHandler(async () => {}, () => {}, 30000, broken)(f.msg);
     assert.equal(f.fetched.length, 0);
     assert.equal(f.inventory.length, 2);
 });
@@ -168,7 +171,7 @@ test('recovery does not resurrect a job completed while another guild lookup was
     let release;
     const gate = new Promise(resolve => { release = resolve; });
     const fetched = [];
-    const purge = createPurgeHandler(async () => {}, Date.now, () => {}, 30000, store);
+    const purge = createPurgeHandler(async () => {}, () => {}, 30000, store);
     const recovery = purge.resumePending({ guilds: { fetch: async id => {
         fetched.push(id); await gate; throw new Error('Offline');
     } } });

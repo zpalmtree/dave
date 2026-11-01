@@ -28,7 +28,7 @@ const purge = createPurgeHandler(async () => {
         process.send({ deleted: 1 });
         await new Promise(() => {});
     }
-}, Date.now, (event, state) => {
+}, (event, state) => {
     if (mode === 'resume' && event === 'finished') {
         process.send({ event, ...state }, () => process.disconnect());
     }

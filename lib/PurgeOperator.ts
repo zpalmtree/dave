@@ -25,7 +25,6 @@ export function createPurgeOperator(client: Client, purge = handlePurge) {
         // Reuse the exact handler and concurrency guard used by Discord commands.
         const context = {
             guild, channel, author: member.user,
-            reply: (payload: Parameters<Message['reply']>[0]) => channel.send(payload),
         } as unknown as Message;
         void purge(context).catch(() => logPurgeEvent('operator_run_error', { guildId, userId }));
         return { ok: true, run: purge.status().find(run => run.guildId === guildId) };

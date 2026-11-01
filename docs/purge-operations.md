@@ -11,7 +11,7 @@ bot's encrypted working directory. Pending runs resume automatically when the
 Discord client is ready; failed startup lookups and unfinished scans retry
 once a minute. No new Discord command is required after a restart.
 
-Checkpoints retain the run/user/guild IDs, counters, progress-message ID, completed
+Checkpoints retain the run/user/guild IDs, counters, completed
 channels, and each unfinished channel's last fully processed page cursor. They
 contain no message content. Writes use a private temporary file, fsync, atomic
 rename, and a directory fsync. A failed checkpoint write stops further deletion.
@@ -28,8 +28,10 @@ cannot participate in the local file transaction.
 `$purge status` and operator status also show jobs waiting to resume. A saved job
 reserves its guild until it finishes; another user cannot replace it. Recovery
 rechecks the user allowlist and channel permissions. There is no need to keep
-Discord notifications working for recovery: an unavailable progress channel does
-not prevent the rest of the server being scanned.
+Discord notifications: startup, progress, completion, and restart recovery are
+silent. An unavailable original command channel does not prevent other channels
+being scanned. Only explicit `$purge status` requests and command validation
+responses produce Discord replies; automatic progress is confined to operator logs.
 
 The initial migration from the old in-memory implementation uses the preceding
 logged page boundary, not the in-flight oldest-message cursor, so it safely
@@ -53,8 +55,7 @@ Each JSON event includes an America/New_York timestamp labeled EST or EDT and
 the process ID. Runs include a run ID, guild/user/channel IDs, counts, phase,
 and history cursor. The log cursor is diagnostic; the per-channel cursor in
 the checkpoint is the safe completed-page position for recovery. Events cover start, channel start/finish, permission skips,
-errors, completion, and a heartbeat every 30 seconds, including when Discord
-notifications fail or an API request is awaiting a response. Message bodies,
+errors, completion, and a heartbeat every 30 seconds, including while an API request is awaiting a response. Message bodies,
 attachments, tokens, and full API error objects are not logged.
 
 ## Local operator access
@@ -70,8 +71,8 @@ The CLI uses the existing local PM2 IPC channel. It opens no network listener,
 does not create another bot session, and acknowledges requests from the actual
 running process. Operator start requires an allowlisted user who is a member
 of the guild and a text channel in that guild. It uses the same handler and
-guild concurrency guard as `$purge`; duplicate starts are rejected. Progress
-is posted by the bot in the specified channel and recorded in operator logs.
+guild concurrency guard as `$purge`; duplicate starts are rejected. The specified channel is scanned first. Progress is recorded only in operator logs;
+operator starts and recovery never post Discord messages.
 Use `dave` as the app name for the master track.
 
 A successful start acknowledgment means the run was accepted, not completed.
