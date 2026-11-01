@@ -53,6 +53,18 @@ await waiting(fixture('Busy response'));
 await waiting(fixture('Running status'), 'status');
 release();
 await run;
+const resumedMessage = fixture('Resumed after restart', { count: 1 });
+let saved = { version: 1, invokingChannelId: resumedMessage.channel.id, channels: {}, state: {
+    runId: 'fixture-resume', guildId: resumedMessage.guild.id, userId: target,
+    deleted: 12, failures: 0, scanned: 0, skipped: 0, pages: 42, phase: 'scanning_messages',
+} };
+const memoryStore = {
+    load: () => saved && structuredClone(saved), list: () => saved ? [structuredClone(saved)] : [],
+    save: value => { saved = structuredClone(value); }, remove: () => { saved = undefined; },
+};
+const recovery = createPurgeHandler(async () => {}, Date.now, () => {}, 30000, memoryStore);
+await recovery(fixture('Waiting to resume'), 'status');
+await recovery(resumedMessage);
 const sourceHash = createHash('sha256').update(await readFile('lib/Purge.ts')).digest('hex').slice(0,12);
 const escape = value => value.replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 const body = records.map(record => `<section><h2>${escape(record.label)}</h2>${record.replies.map(text => `<p><b>Reply</b> ${escape(text)}</p>`).join('')}${record.edits.map(text => `<p><b>Status edit</b> ${escape(text)}</p>`).join('')}</section>`).join('');
