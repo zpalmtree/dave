@@ -47,6 +47,10 @@ export function installPurgeOperator(client: Client): () => void {
             });
     };
     process.on('message', listener);
+    const resume = () => { void handlePurge.resumePending(client); };
+    resume();
+    const recoveryTimer = setInterval(resume, 60000);
+    recoveryTimer.unref();
     logPurgeEvent('operator_ready', { ipcAvailable: !!process.send });
-    return () => process.off('message', listener);
+    return () => { clearInterval(recoveryTimer); process.off('message', listener); };
 }

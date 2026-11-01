@@ -6,10 +6,35 @@
 alone does not grant either command. Purge deletes only the caller's messages
 in the current server, wherever the bot has the required permissions.
 
-Purge execution is in memory. A restart stops it; there is no automatic resume.
-A later invocation scans the remaining history. Logs survive restarts but
-are not recovery checkpoints. A `started` event without `finished` followed
-by a new process's `operator_ready` event indicates an interrupted run.
+Purge progress is persisted in `.purge-state/<guild-id>.json` inside each
+bot's encrypted working directory. Pending runs resume automatically when the
+Discord client is ready; failed startup lookups and unfinished scans retry
+once a minute. No new Discord command is required after a restart.
+
+Checkpoints retain the run/user/guild IDs, counters, progress-message ID, completed
+channels, and each unfinished channel's last fully processed page cursor. They
+contain no message content. Writes use a private temporary file, fsync, atomic
+rename, and a directory fsync. A failed checkpoint write stops further deletion.
+Unreadable checkpoints are retained and block replacement rather than silently
+starting over. Completed jobs remove their checkpoint and will not run again.
+
+On restart, an interrupted page is fetched again; completed channels and history
+pages are skipped. Archived-thread lists are rediscovered, with saved message
+cursors applied to each thread. Already-deleted messages stay deleted. A crash
+between Discord accepting a deletion and the local checkpoint commit can leave
+the displayed count lower by one, but will not skip remaining messages. Discord
+cannot participate in the local file transaction.
+
+`$purge status` and operator status also show jobs waiting to resume. A saved job
+reserves its guild until it finishes; another user cannot replace it. Recovery
+rechecks the user allowlist and channel permissions. There is no need to keep
+Discord notifications working for recovery: an unavailable progress channel does
+not prevent the rest of the server being scanned.
+
+The initial migration from the old in-memory implementation uses the preceding
+logged page boundary, not the in-flight oldest-message cursor, so it safely
+replays a few pages. Counters taken immediately before the old process stops
+may conservatively miss deletions made during that brief handoff.
 
 ## Logs
 
@@ -26,7 +51,8 @@ tail -F ~/.local/share/discord-data/logs/slug-bot-out.log | grep --line-buffered
 Use `dave-out.log` for the master track. Existing encrypted log rotation applies.
 Each JSON event includes an America/New_York timestamp labeled EST or EDT and
 the process ID. Runs include a run ID, guild/user/channel IDs, counts, phase,
-and history cursor. Events cover start, channel start/finish, permission skips,
+and history cursor. The log cursor is diagnostic; the per-channel cursor in
+the checkpoint is the safe completed-page position for recovery. Events cover start, channel start/finish, permission skips,
 errors, completion, and a heartbeat every 30 seconds, including when Discord
 notifications fail or an API request is awaiting a response. Message bodies,
 attachments, tokens, and full API error objects are not logged.

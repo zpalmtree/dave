@@ -33,3 +33,5 @@ resize.sh
 /artifacts/video-opus-ab/
 /artifacts/video-omni/
 /artifacts/video-shot-split/
+
+/.purge-state/
