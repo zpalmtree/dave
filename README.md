@@ -116,8 +116,9 @@ checks (rounded up to a whole second); backward or larger jumps are rejected.
 Normal rollovers, account/plan/window changes, polling gaps over five minutes,
 unknown credit inventories, and observed personal credit redemptions do not trigger
 usage-reset alerts. Complete, unchanged credit IDs also allow detection on accounts
-with banked credits. Grants can be account-specific; all direct alerts explicitly
-say they were observed on the monitored account, not verified globally. Very small
+with banked credits. Alerts use concise titles: “Codex banked reset awarded” for
+credit increases and “Codex usage reset” for usage drops, without descriptions or
+footers. Both reflect the monitored account; grants are not verified globally. Very small
 usage drops, resets while the desktop is offline, or resets without comparable
 account data may be missed. The desktop monitor must be running to detect new resets.
 

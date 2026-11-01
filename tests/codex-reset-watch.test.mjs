@@ -36,7 +36,7 @@ test('migration discards queued tracker announcements and drops before delivery'
         send: async message => { sent.push(message); },
     });
     assert.equal(sent.length, 1);
-    assert.match(sent[0].embeds[0].title, /monitored account/);
+    assert.equal(sent[0].embeds[0].title, '✅ Codex usage reset');
     assert.deepEqual(saved[0].pending, [{ phase: 'dropped', reset: direct }]);
     assert.deepEqual(result.seen, ['dropped:usage-pending']);
     assert.deepEqual(result.pending, []);
@@ -99,16 +99,16 @@ test('account feed rejects malformed and public tracker events', () => {
     assert.throws(() => planResetAlerts(baseline(), settings, [tracker('external')]), /Invalid/);
 });
 
-test('notifications ping only the codex role and keep account-specific evidence', () => {
+test('notifications ping only the codex role and distinguish banked awards from usage resets with minimal copy', () => {
     for (const reset_type of ['regular', 'banked']) {
         const message = resetNotification({ phase: 'dropped', reset: observation('a', { reset_type, text: '@everyone ' + '*'.repeat(5000) }) });
         assert.equal(message.content, '<@&1560349689025532064>');
         assert.deepEqual(message.allowedMentions, { parse: [], roles: ['1560349689025532064'] });
-        assert.match(message.embeds[0].title, /monitored account/);
-        assert.match(message.embeds[0].title, reset_type === 'banked' ? /reset credit/ : /usage reset/);
-        assert.match(message.embeds[0].footer.text, /confirmed twice/);
+        assert.equal(message.embeds[0].title, reset_type === 'banked' ? '🎟️ Codex banked reset awarded' : '✅ Codex usage reset');
+        assert.equal(message.embeds[0].footer, undefined);
+        assert.equal(message.embeds[0].timestamp, undefined);
         assert.equal(message.embeds[0].url, 'https://chatgpt.com/codex/settings/usage');
-        assert.ok(message.embeds[0].description.length <= 1800);
+        assert.equal(message.embeds[0].description, undefined);
         assert.equal(message.embeds[0].fields, undefined);
     }
     assert.throws(() => resetNotification({ phase: 'dropped', reset: tracker('external') }), /Only confirmed/);
