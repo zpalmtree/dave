@@ -121,3 +121,21 @@ test('scene openings are restricted to text-only OALGO and preserve legacy reque
     assert.equal((await submit({ source_image_scene: undefined })).status, 201);
     assert.equal(calls, 0);
 });
+
+test('a Sol Slug opening stages his own pixel sprite, and slugs cannot borrow each other\'s portrait', async t => {
+    const plans = [];
+    const { broker, submit } = await fixture(t, async (plan, references) => {
+        plans.push({ plan, references });
+        return { bytes: scene, mimeType: 'image/png', provider: 'test', model: 'test', reviewStatus: 'accepted' };
+    });
+    const accepted = await submit({ command_variant: 'slug01863', source_image: { preset: 'slug01863' } });
+    assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
+    const job = await broker.get('SELECT * FROM video_jobs WHERE public_id=?', [accepted.body.job.id]);
+    assert.equal(job.source_image_composition, 'generated');
+    assert.equal(plans.length, 1);
+    assert.match(plans[0].plan.keyframe.prompt, /Slug's identity: preserve his exact pixel-art sprite/);
+    assert.match(plans[0].plan.keyframe.prompt, /photographic live-action scene, and Slug as the same crisp pixel-art sprite/);
+    assert.doesNotMatch(plans[0].plan.keyframe.prompt, /Meximutt|jowls/);
+    assert.equal(plans[0].references[0].sourceUrl, 'built-in:slug01863');
+    assert.equal((await submit({ command_variant: 'slug01863', source_image: { preset: 'slug08917' } })).status, 400);
+});

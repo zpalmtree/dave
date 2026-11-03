@@ -8,6 +8,8 @@ import {
     MEXIMUTT,
     VideoCharacter,
     videoCharacterCommandLabel,
+    videoCharacterCast,
+    videoCharacterEditLook,
     videoCharacterForCommand,
     videoCharacterPlannerGuidance,
 } from './VideoCharacters.js';
@@ -477,7 +479,9 @@ export async function videoSourcesFromMessages(
 }
 
 export function videoReplacementUsesPreset(prompt: string, character: VideoCharacter): boolean {
-    const names = [character.id, ...(character.presetAliases || [])];
+    const names = [character.id, ...(character.presetAliases || []), ...(character.replacementNames || [])]
+        .sort((a, b) => b.length - a.length)
+        .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+'));
     return !prompt.trim() || new RegExp(`^(?:${names.join('|')})\\b`, 'i').test(prompt.trim());
 }
 
@@ -1397,6 +1401,8 @@ export async function handleVideoRequest(
     }
     prompt = videoPromptFromMessages(replacement ? replacement.prompt : prompt, referencedMessage, msg.channel, postText, sourceVideo || audioVideo || (isVideoClipSourceImage(attachedSourceImage) ? attachedSourceImage : null));
     if (replacement && !prompt) prompt = "Use the replacement image as the new subject while preserving the source clip's action, background, camera movement, and timing.";
+    const editLook = replacement && character && sourceImage && 'preset' in sourceImage ? videoCharacterEditLook(character) : '';
+    if (editLook) prompt = `${prompt.trim().replace(/([^.!?])$/, '$1.')} ${editLook}`;
     if (!prompt && sourceAudio) prompt = 'Perform and lip-sync to the uploaded song.';
     if (!prompt && sourceImage) {
         prompt = VIDEO_IMAGE_ONLY_AUTO_PROMPT;
@@ -1406,7 +1412,7 @@ export async function handleVideoRequest(
         return;
     }
     if (!msg.client.user) throw new Error('Discord client is not ready.');
-    const sceneOpening = character?.id === MEXIMUTT.id && !replacement && !compositeSourceImage
+    const sceneOpening = Boolean(character?.sceneOpening) && !replacement && !compositeSourceImage
         && !sourceAudio && !audioVideo && prompt !== VIDEO_IMAGE_ONLY_AUTO_PROMPT;
     startVideoGenerationService(msg.client);
     const promptTease = classifyPromptTease(prompt);
@@ -1520,6 +1526,29 @@ export function characterVideoHandler(character: VideoCharacter, model: VideoMod
             compositeAttachedImage: true,
             compositeProvider: parsed.provider,
         });
+    };
+}
+
+/**
+ * The handler for a cast command such as `$slug`: it stars one member at random, or the one a
+ * leading `#1863` names.
+ */
+export function castVideoHandler(cast: string, model: VideoModelId = 'minimax', random = Math.random) {
+    return async (msg: Message, prompt: string): Promise<void> => {
+        const members = videoCharacterCast(cast);
+        const pinned = /^#(\d{1,6})(?=\s|$)\s*/.exec(prompt.trim());
+        let member = members[Math.floor(random() * members.length)];
+        if (pinned) {
+            const found = members.find(candidate => Number(candidate.id.replace(/\D/g, '')) === Number(pinned[1]));
+            if (!found) {
+                const numbers = members.map(candidate => `#${Number(candidate.id.replace(/\D/g, ''))}`).join(', ');
+                await msg.reply(`There is no ${cast} #${Number(pinned[1])} in the cast. Pick one of ${numbers}, or leave the number out for a random one.`);
+                return;
+            }
+            member = found;
+            prompt = prompt.trim().slice(pinned[0].length);
+        }
+        await characterVideoHandler(member, model)(msg, prompt);
     };
 }
 
