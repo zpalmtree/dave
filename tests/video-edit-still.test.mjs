@@ -98,6 +98,36 @@ for (const isolated of [false, true]) test(`Gemini gets the original frame, iden
     assert.deepEqual(reservations.map(event => event.stage), Array(3).fill('video_edit_still'));
 });
 
+test('a second draw can go straight to Gemini with a 4:5 crop kept at 4:5', async () => {
+    // f2968aee: a 148x176 crop went out as 3:4 and came back with the replacement at half height.
+    const crop = { bytes: createCanvas(148, 176).toBuffer('image/png'), mimeType: 'image/png' };
+    const attempts = [];
+    const { result, error, requests } = await withImageEdits((_count, url, init) => {
+        assert.match(url, /generativelanguage.googleapis.com/, 'The preferred editor already refused this frame.');
+        assert.equal(JSON.parse(init.body).generationConfig.imageConfig.aspectRatio, '4:5');
+        return geminiImage();
+    }, () => createVideoEditStill(crop, replacement, 'Mario', 'meximutt', {
+        isolated: true, alternateOnly: true, attemptOffset: 3, deadline: Date.now() + 200_000,
+        onAttempt: event => attempts.push([event.provider, event.attempt, event.outcome]),
+    }));
+    assert.equal(error, undefined);
+    assert.equal(result.provider, 'gemini');
+    assert.equal(requests, 1);
+    assert.deepEqual(attempts, [['google', 6, 'success']]);
+    const wide = await withImageEdits((_count, url, init) => url.includes('api.openai.com') ? refused
+        : (assert.equal(JSON.parse(init.body).generationConfig.imageConfig.aspectRatio, '5:4'), geminiImage()),
+    () => createVideoEditStill({ bytes: createCanvas(176, 144).toBuffer('image/png'), mimeType: 'image/png' },
+        replacement, 'Mario', 'meximutt'));
+    assert.equal(wide.error, undefined);
+});
+
+test('a second draw sends nothing once its deadline has passed', async () => {
+    const { error, requests } = await withImageEdits(() => geminiImage(),
+        () => createVideoEditStill(frame, replacement, 'Peach', 'meximutt', { alternateOnly: true, deadline: Date.now() - 1 }));
+    assert.match(error.message, /ran out of time/);
+    assert.equal(requests, 0);
+});
+
 test('an outage goes directly to Gemini and JPEG output remains usable for effect metadata', async () => {
     const { result, error, requests } = await withImageEdits((_count, url) => url.includes('api.openai.com')
         ? [503, { error: { message: 'Service unavailable' } }]

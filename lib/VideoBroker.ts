@@ -2,7 +2,7 @@ import { recoveryMusic } from './VideoMusic.js';
 import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
-import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReviewSample } from './VideoEditReview.js';
+import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReview, EditReviewSample } from './VideoEditReview.js';
 import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
@@ -123,6 +123,7 @@ import {
     createVideoEditStill,
     createVideoIdentityRestoreStill,
     VIDEO_EDIT_STILL_ATTEMPTS,
+    VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
     videoEditStillWithEffects,
     isModerationFailure,
     generateFrontierVideoKeyframeCandidate,
@@ -5590,31 +5591,58 @@ export class VideoBroker {
         try {
             const isolated = req.headers['x-video-edit-isolated'] === '1';
             const reference = this.editReference(job);
-            const still = videoEditStillWithEffects(await (this.options.videoEditStillGenerator || createVideoEditStill)(
-                { bytes: frame, mimeType },
-                reference,
-                job.video_edit_target || 'the subject',
-                job.video_replacement_prompt || job.prompt,
-                // Usage events are keyed by attempt, so each shot reserves all editor attempts.
-                { serviceTier: configuredVideoOpenAIServiceTier(), ...this.providerHooks(job),
-                    attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS, isolated },
-            ), job.video_edit_effects || '');
-            const extension = still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
-            const path = join(directory, `video-edit-still${suffix}.${extension}`);
-            writeFileSync(path, still.bytes);
-            if (isolated || still.provider !== 'openai') {
-                const review = validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
-                    job.video_edit_target || 'the subject', reference, [{ source: { bytes: frame, mimeType }, edited: still }],
-                    'still', this.providerHooks(job), shot));
-                writeFileSync(join(directory, `video-edit-still-review${suffix}.json`), JSON.stringify(review, null, 2));
-                if (!review.accepted) {
-                    await this.recordMetricSpan(job.public_id, {
-                        source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
-                        metadata: { status: 'error' },
-                    });
-                    writeJson(res, 422, { error: `Replacement pose/identity check failed: ${review.reason}`, reason_code: 'edit_quality' }); return;
+            const target = job.video_edit_target || 'the subject';
+            const hooks = this.providerHooks(job);
+            const extension = (still: VideoKeyframeResult) => still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
+            // The isolated worker waits eight minutes for this response.
+            const budgetEnd = started + 420_000;
+            const draw = async (round: number, alternateOnly = false): Promise<{ still: VideoKeyframeResult; review?: EditReview }> => {
+                const still = videoEditStillWithEffects(await (this.options.videoEditStillGenerator || createVideoEditStill)(
+                    { bytes: frame, mimeType },
+                    reference,
+                    target,
+                    job.video_replacement_prompt || job.prompt,
+                    // Usage events are keyed by attempt, so each shot and round reserves all editor attempts.
+                    { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated,
+                        attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
+                        ...(round ? { alternateOnly, deadline: budgetEnd - 60_000 } : {}) },
+                ), job.video_edit_effects || '');
+                let review: EditReview | undefined;
+                if (isolated || still.provider !== 'openai') {
+                    review = validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
+                        target, reference, [{ source: { bytes: frame, mimeType }, edited: still }],
+                        'still', hooks, shot + round * 64));
+                    writeFileSync(join(directory, `video-edit-still-review${suffix}${round ? `-${round + 1}` : ''}.json`),
+                        JSON.stringify(review, null, 2));
+                }
+                writeFileSync(join(directory, `video-edit-still${suffix}.${extension(still)}`), still.bytes);
+                return { still, review };
+            };
+            let drawn = await draw(0);
+            // A rejected still is usually one bad draw: in f2968aee Gemini drew the replacement at half the
+            // source subject's height, while four test redraws of that frame kept the source scale. Isolated
+            // edits draw once more when time allows, going straight to Gemini when it drew the rejected still.
+            if (drawn.review && !drawn.review.accepted && isolated && budgetEnd - Date.now() >= 150_000) {
+                writeFileSync(join(directory, `video-edit-still-rejected${suffix}.${extension(drawn.still)}`), drawn.still.bytes);
+                console.log(`[Video] Drawing the replacement still again for ${job.public_id} shot ${shot}: ${drawn.review.reason}`);
+                try {
+                    drawn = await draw(1, drawn.still.provider !== 'openai');
+                } catch (error) {
+                    // A failed second draw leaves the first rejection as the answer, not a retryable outage.
+                    if (error instanceof VideoUsagePersistenceError) throw error;
+                    console.warn(`[Video] The second replacement still for ${job.public_id} failed.`, error);
                 }
             }
+            const { still, review } = drawn;
+            if (review && !review.accepted) {
+                await this.recordMetricSpan(job.public_id, {
+                    source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
+                    metadata: { status: 'error' },
+                });
+                writeJson(res, 422, { error: `Replacement pose/identity check failed: ${review.reason}`, reason_code: 'edit_quality' });
+                return;
+            }
+            const path = join(directory, `video-edit-still${suffix}.${extension(still)}`);
             await this.recordMetricSpan(job.public_id, {
                 source: 'broker', name: 'video_edit_still', duration_seconds: (Date.now() - started) / 1000,
                 metadata: { status: 'ok' },

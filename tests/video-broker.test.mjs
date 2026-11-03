@@ -1070,6 +1070,10 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
     let repaintProvider = 'openai';
     let rejectEdit = false;
     let reviewCalls = 0;
+    const stillVerdicts = [];
+    const reviewAttempts = [];
+    const repaintOptions = [];
+    let refuseRedraw = false;
     const broker = new VideoBroker({
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
@@ -1088,9 +1092,11 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             writeFileSync(path, 'replacement');
             return { path, bytes: 11, mimeType: 'image/png' };
         },
-        videoEditReviewer: async () => {
+        videoEditReviewer: async (_target, _reference, _samples, phase, _hooks, attempt) => {
             reviewCalls++;
-            return { accepted: !rejectEdit, reason: rejectEdit ? 'The wrong subject was replaced.' : 'Target and source performance preserved.' };
+            if (phase === 'still') reviewAttempts.push(attempt);
+            const accepted = phase === 'still' && stillVerdicts.length ? stillVerdicts.shift() : !rejectEdit;
+            return { accepted, reason: accepted ? 'Target and source performance preserved.' : 'The replacement is drawn at half the source height.' };
         },
         videoEditReferenceDescriber: async (reference, hooks) => {
             descriptions.push(reference.bytes.toString());
@@ -1100,9 +1106,11 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
         },
         videoEditStillGenerator: async (frame, replacement, target, request, options) => {
             repaints.push({ frame: frame.bytes.toString(), replacement: replacement.bytes.toString(), target, request });
-            await options.onUsage({ stage: 'video_edit_still', attempt: 1 + (options.attemptOffset || 0), outcome: refuse ? 'error' : 'success',
-                provider: 'openai', model: 'gpt-image-test', inputTokens: 10, outputTokens: 20, images: refuse ? 0 : 1 });
-            if (refuse) {
+            repaintOptions.push(options);
+            const refused = refuse || (refuseRedraw && options.attemptOffset % 6 >= 3);
+            await options.onUsage({ stage: 'video_edit_still', attempt: 1 + (options.attemptOffset || 0), outcome: refused ? 'error' : 'success',
+                provider: 'openai', model: 'gpt-image-test', inputTokens: 10, outputTokens: 20, images: refused ? 0 : 1 });
+            if (refused) {
                 const error = new Error('Your request was rejected by the safety system.');
                 error.code = 'moderation';
                 throw error;
@@ -1216,7 +1224,7 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             assert.equal(readFileSync(join(directory, 'results', job.id, 'video-edit-frame.png'), 'utf8'), 'frame');
             const attempts = await broker.all(
                 "SELECT attempt FROM video_usage_events WHERE job_public_id=? AND stage='video_edit_still' ORDER BY attempt", [job.id]);
-            assert.deepEqual(attempts.map(row => row.attempt), [1, 4]);
+            assert.deepEqual(attempts.map(row => row.attempt), [1, 7], 'Each shot reserves two rounds of three attempts.');
             // An alternate editor needs the pose/identity gate even without the isolated header.
             repaintProvider = 'gemini';
             const beforeAlternate = reviewCalls;
@@ -1229,10 +1237,42 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             repaintProvider = 'openai';
             rejectEdit = false;
             if (version === 8) {
+                // A rejected isolated still is drawn once more, from Gemini alone when Gemini drew it.
+                repaintProvider = 'gemini';
+                stillVerdicts.push(false, true);
+                let drawn = repaints.length;
+                reviewAttempts.length = 0;
+                const redrawn = await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '2' });
+                assert.equal(redrawn.status, 200);
+                assert.equal(repaints.length, drawn + 2);
+                assert.deepEqual(repaintOptions.slice(-2).map(options => [options.attemptOffset, options.alternateOnly]),
+                    [[6, undefined], [9, true]]);
+                assert.ok(repaintOptions.at(-1).deadline > Date.now() + 200_000);
+                assert.deepEqual(reviewAttempts, [2, 66], 'Each still review is billed under its own attempt.');
+                const results = join(directory, 'results', job.id);
+                assert.equal(readFileSync(join(results, 'video-edit-still-rejected-2.png'), 'utf8'), 'repainted');
+                assert.equal(JSON.parse(readFileSync(join(results, 'video-edit-still-review-2.json'))).accepted, false);
+                assert.equal(JSON.parse(readFileSync(join(results, 'video-edit-still-review-2-2.json'))).accepted, true);
+                repaintProvider = 'openai';
                 rejectEdit = true;
+                drawn = repaints.length;
                 const badStill = await still('frame', { 'x-video-edit-isolated': '1' });
                 assert.equal(badStill.status, 422);
                 assert.equal((await badStill.json()).reason_code, 'edit_quality');
+                assert.equal(repaints.length, drawn + 2, 'Only one extra draw is made.');
+                assert.equal(repaintOptions.at(-1).alternateOnly, false, 'A rejected gpt-image still may use gpt-image again.');
+                // A failed second draw reports the first rejection, so the worker does not retry an outage.
+                rejectEdit = false;
+                stillVerdicts.push(false);
+                refuseRedraw = true;
+                const generatorCalls = repaints.length;
+                const failedRedraw = await still('frame', { 'x-video-edit-isolated': '1' });
+                refuseRedraw = false;
+                assert.equal(failedRedraw.status, 422);
+                assert.deepEqual(await failedRedraw.json(), { reason_code: 'edit_quality',
+                    error: 'Replacement pose/identity check failed: The replacement is drawn at half the source height.' });
+                assert.equal(repaints.length, generatorCalls + 2);
+                rejectEdit = true;
                 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
                 const sample = { source: png, edited: png, mask: png };
                 const review = (body, headers = {}) => fetch(
