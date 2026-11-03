@@ -6,19 +6,22 @@ import { join } from 'node:path';
 import { Commands } from '../dist/CommandDeclarations.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
 import {
-    MEXIMUTT, VIDEO_CHARACTERS, bindLocalPresetIdentity, videoCharacterCommandLabel, videoCharacterForCommand,
-    videoCharacterForPreset, videoCharacterPhotorealKeyframe, videoCharacterPlannerGuidance,
+    MEXIMUTT, SOL_SLUGS, VIDEO_CHARACTERS, bindLocalPresetIdentity, isPixelSprite, videoCharacterCast,
+    videoCharacterCommandLabel, videoCharacterEditLook, videoCharacterForCommand, videoCharacterForPreset,
+    videoCharacterPhotorealKeyframe, videoCharacterPlannerGuidance,
 } from '../dist/VideoCharacters.js';
 import { videoEditIntentInstructions } from '../dist/VideoEditIntent.js';
 import {
-    VIDEO_CLIP_FRAME_PLANNER_GUIDANCE, completedVideoPost, formatVideoJob, initialVideoRequestStatus,
-    singleVideoResponderGate, videoReplyChainGuidance,
+    VIDEO_CLIP_FRAME_PLANNER_GUIDANCE, castVideoHandler, completedVideoPost, formatVideoJob, initialVideoRequestStatus,
+    singleVideoResponderGate, videoReplacementUsesPreset, videoReplyChainGuidance,
 } from '../dist/VideoGeneration.js';
 import { oalgoSourceImageCompositePlan } from '../dist/VideoOalgoComposite.js';
 import { VIDEO_MODELS, VIDEO_PLANNER_GUIDANCE_MAX_CHARS } from '../dist/VideoProtocol.js';
 import { storeVideoSourceImage } from '../dist/VideoSourceImage.js';
 
 const others = character => VIDEO_CHARACTERS.filter(other => other !== character);
+// Cast members share a name and voice; only their looks set them apart.
+const sameCast = (character, other) => Boolean(character.cast) && character.cast === other.cast;
 // Every prompt a character contributes, for checks that hold across all of them.
 const prompts = character => [
     videoCharacterPlannerGuidance(character),
@@ -36,7 +39,8 @@ test('the character registry has unambiguous ids, presets, commands, and portrai
     const modelCommands = Object.values(VIDEO_MODELS).map(model => model.command);
     for (const command of commands) assert.equal(modelCommands.includes(command), false, `${command} is a renderer command`);
     for (const character of VIDEO_CHARACTERS) {
-        assert.equal(character.id, character.name.toLowerCase());
+        if (character.cast) assert.equal(character.id, character.commands.minimax.variant);
+        else assert.equal(character.id, character.name.toLowerCase());
         assert.equal(videoCharacterForPreset(character.id), character);
         assert.ok(character.commands.minimax, `${character.name} needs a MiniMax command`);
         const portrait = readFileSync(new URL(`../images/${character.image}`, import.meta.url));
@@ -55,7 +59,20 @@ test('the character registry has unambiguous ids, presets, commands, and portrai
 for (const character of VIDEO_CHARACTERS) {
     const { name } = character;
 
-    test(`${name} has his own commands`, () => {
+    test(`${character.id} has his own commands`, () => {
+        if (character.cast) {
+            const declared = Commands.filter(candidate => candidate.aliases.includes(character.cast));
+            assert.equal(declared.length, 1, `${character.cast} is declared once`);
+            assert.equal(Commands.some(candidate => candidate.aliases.includes(character.id)), false);
+            assert.equal(declared[0].discordOnly, true);
+            assert.ok(declared[0].commandGates.includes(singleVideoResponderGate));
+            assert.match(declared[0].primaryCommand.description, new RegExp(name));
+            for (const related of declared[0].relatedCommands) {
+                assert.ok(Commands.some(candidate => candidate.aliases.includes(related)), `${related} exists`);
+            }
+            assert.match(initialVideoRequestStatus('minimax', character.id), new RegExp(`your ${character.commands.minimax.label} video`));
+            return;
+        }
         for (const [model, command] of Object.entries(character.commands)) {
             const declared = Commands.filter(candidate => candidate.aliases.includes(command.variant));
             assert.equal(declared.length, 1, `${command.variant} is declared once`);
@@ -73,11 +90,13 @@ for (const character of VIDEO_CHARACTERS) {
         }
     });
 
-    test(`${name}'s prompts describe only him`, () => {
+    test(`${character.id}'s prompts describe only him`, () => {
         const text = prompts(character);
         assert.match(text, new RegExp(name));
         for (const other of others(character)) {
-            for (const foreign of [other.name, other.clothing, other.clothingAndEmblem, other.accent, other.dialogueStyle]) {
+            const foreigns = sameCast(character, other) ? [other.clothing, other.clothingAndEmblem]
+                : [other.name, other.clothing, other.clothingAndEmblem, other.accent, other.dialogueStyle];
+            for (const foreign of foreigns) {
                 assert.equal(text.includes(foreign), false, `${name} prompts mention ${foreign}`);
             }
         }
@@ -86,7 +105,8 @@ for (const character of VIDEO_CHARACTERS) {
         assert.ok(guidance.includes(`dialogue.delivery: "${character.delivery}".`));
         assert.equal(character.delivery.includes('"'), false, 'The delivery is quoted inside the guidance.');
         assert.ok(character.delivery.includes(`strong ${character.accent} accent`));
-        assert.ok(guidance.includes(`his own ${character.eyes} and facial proportions`));
+        assert.ok(guidance.includes(isPixelSprite(character) ? `his own ${character.eyes}, unless`
+            : `his own ${character.eyes} and facial proportions`));
         assert.ok(guidance.includes(`Preserve his ${character.clothing} while`));
         assert.match(guidance, new RegExp(`Season nearly every new ${name} line with slang`));
         for (const phrase of character.slang) assert.ok(guidance.includes(`“${phrase}`), `${phrase} is offered as slang`);
@@ -95,34 +115,48 @@ for (const character of VIDEO_CHARACTERS) {
         assert.doesNotMatch(guidance, /undefined|\n/);
     });
 
-    test(`${name}'s guidance fits the broker's limit with the longest request context`, () => {
+    test(`${character.id}'s guidance fits the broker's limit with the longest request context`, () => {
         const combined = [videoCharacterPlannerGuidance(character), VIDEO_CLIP_FRAME_PLANNER_GUIDANCE,
             videoReplyChainGuidance(Array.from({ length: 3 }, () => ({ content: 'y'.repeat(1000) })))].join(' ');
         assert.ok(combined.length <= VIDEO_PLANNER_GUIDANCE_MAX_CHARS, `combined guidance is ${combined.length} characters`);
     });
 
-    test(`${name}'s scene openings and image compositions keep his portrait`, () => {
+    test(`${character.id}'s scene openings and image compositions keep his portrait`, () => {
         const photoreal = videoCharacterPhotorealKeyframe(character);
+        const sprite = isPixelSprite(character);
         assert.ok(photoreal.includes(`the original ${name} portrait`));
-        assert.ok(photoreal.includes(`his own ${character.eyes} at their true size`));
+        assert.ok(photoreal.includes(sprite ? `his own ${character.eyes}, standing in the real scene`
+            : `his own ${character.eyes} at their true size`));
         assert.doesNotMatch(photoreal, /cartoon|anim|3D|CG|Pixar|not |never/i, 'The image models draw styles they are told to avoid.');
         const plan = oalgoSourceImageCompositePlan('He waves at the camera.', character);
-        assert.ok(plan.keyframe.prompt.includes(`adding ${name} from Reference 1 as one additional, separate person`));
-        assert.ok(plan.keyframe.prompt.includes(`heavy torso, and ${character.clothing}.`));
+        assert.ok(plan.keyframe.prompt.includes(`adding ${name} from Reference 1 as one additional, separate ${sprite ? 'character' : 'person'}`));
+        assert.ok(plan.keyframe.prompt.includes(sprite ? `his ${character.physique}, his own ${character.eyes}, and ${character.clothingAndEmblem}.`
+            : `heavy torso, and ${character.clothing}.`));
         assert.ok(plan.keyframe.motion_contract.camera_relation.includes(`recognizable ${name}`));
         // Local Qwen Image has never heard of him, so it meets him as a picture.
+        const noun = character.noun || 'man';
         const local = bindLocalPresetIdentity(`${photoreal} ${name}'s shirt stays on ${name}.`, character);
-        assert.equal(local.includes(name), false);
-        assert.match(local, /camera realism of Picture 1:.* the Picture 1 man's shirt stays on the man in Picture 1\./);
+        assert.equal(new RegExp(`\\b${name}\\b`).test(local), false);
+        assert.match(local, new RegExp(`Picture 1:.* the Picture 1 ${noun}'s shirt stays on the ${noun} in Picture 1\\.`));
     });
 
-    test(`${name}'s video edits offer him as the default replacement`, () => {
+    test(`${character.id}'s video edits offer him as the default replacement`, () => {
+        assert.equal(videoReplacementUsesPreset(`${name} doing the same dance`, character), true);
+        assert.equal(videoReplacementUsesPreset('', character), true);
+        assert.equal(videoReplacementUsesPreset('a giant snail', character), false);
+        if (character.cast) {
+            for (const phrase of ['the slug', 'The Sol Slug, keeping the moves', 'slug']) {
+                assert.equal(videoReplacementUsesPreset(phrase, character), true, phrase);
+            }
+            assert.equal(videoReplacementUsesPreset('slugger from the bench', character), false);
+        }
+        assert.equal(Boolean(videoCharacterEditLook(character)), isPixelSprite(character));
         const instructions = videoEditIntentInstructions(name);
         assert.ok(instructions.includes(`If hasPreset is true, ${name} is the command's default replacement.`));
         assert.ok(instructions.includes(`start replacement with "${name}" followed by any requested directions`));
     });
 
-    test(`${name}'s status posts name him`, () => {
+    test(`${character.id}'s status posts name him`, () => {
         const { variant, label } = character.commands.minimax;
         const base = { id: '096444e4-test', model: 'minimax', command_variant: variant, prompt: 'test',
             status: 'running', has_source_image: true, progress: null };
@@ -138,7 +172,7 @@ for (const character of VIDEO_CHARACTERS) {
         }
     });
 
-    test(`the broker stars ${name} for his commands only`, async () => {
+    test(`the broker stars ${character.id} for his commands only`, async () => {
         const directory = mkdtempSync(join(tmpdir(), 'dave-video-character-'));
         const composed = [];
         const broker = new VideoBroker({
@@ -204,3 +238,23 @@ for (const character of VIDEO_CHARACTERS) {
         }
     });
 }
+
+test('$slug stars a random Sol Slug, or the one a #number pins', async () => {
+    const cast = videoCharacterCast('slug');
+    assert.deepEqual(cast, [...SOL_SLUGS]);
+    assert.ok(cast.length >= 2);
+    for (const slug of cast) {
+        assert.equal(slug.rendering, 'pixel-sprite');
+        assert.equal(slug.sceneOpening, true);
+        assert.match(slug.commands.minimax.label, /^Slug #\d+$/);
+        assert.equal(slug.commands.minimaxfast, undefined);
+    }
+    const replies = [];
+    const msg = { reply: async text => { replies.push(text); return { edit: async () => {} }; } };
+    await castVideoHandler('slug')(msg, '#99999 waves');
+    assert.match(replies.at(-1), /There is no slug #99999 in the cast\. Pick one of #1863, /);
+    assert.equal(MEXIMUTT.sceneOpening, true);
+    for (const character of VIDEO_CHARACTERS.filter(character => !character.cast && character !== MEXIMUTT)) {
+        assert.equal(Boolean(character.sceneOpening), false, `${character.name} keeps his portrait opening`);
+    }
+});

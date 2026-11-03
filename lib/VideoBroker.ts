@@ -1969,10 +1969,10 @@ export class VideoBroker {
         }
         const sceneOpening = body.source_image_scene === true;
         if ((body.source_image_scene !== undefined && typeof body.source_image_scene !== 'boolean')
-            || (sceneOpening && (presetCharacter !== MEXIMUTT || commandCharacter !== MEXIMUTT
+            || (sceneOpening && (!presetCharacter?.sceneOpening || commandCharacter !== presetCharacter
                 || compositeDescriptor || audioDescriptor || audioVideoDescriptor || videoDescriptor
                 || prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT))) {
-            return { status: 400, body: { error: 'A scene opening requires a text-only OALGO request and its character preset.' } };
+            return { status: 400, body: { error: 'A scene opening requires a text-only character request and its character preset.' } };
         }
         const sourceMode = videoDescriptor ? 'video_edit' : compositeDescriptor ? 'preset_composite'
             : sourceDescriptor ? (isPresetSourceImage(sourceDescriptor) ? 'preset' : 'attachment') : 'generated';
@@ -2155,7 +2155,7 @@ export class VideoBroker {
                                 onUsage: usage => submissionHooks.onUsage?.({
                                     ...usage, stage: `scene_opening_${usage.stage}`,
                                 }),
-                            }, this.options.keyframeGenerator);
+                            }, this.options.keyframeGenerator, presetCharacter || undefined);
                             sourceImage = storeCompositedSourceImage(opening, join(directory, 'scene-opening'));
                             sourceImageComposition = 'generated';
                         } catch (error) {
@@ -2167,7 +2167,7 @@ export class VideoBroker {
                                 detail: sanitizeVideoWorkerText(error instanceof Error ? error.message : String(error),
                                     'Scene opening unavailable; using original portrait.', 1000),
                             });
-                            console.warn('[Video] Scene opening unavailable; using the original Meximutt portrait.', error);
+                            console.warn(`[Video] Scene opening unavailable; using the original ${presetCharacter?.name} portrait.`, error);
                             sourceImage = base;
                         } finally {
                             sourceImageCompositionSeconds = (Date.now() - openingStarted) / 1000;

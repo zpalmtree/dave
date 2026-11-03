@@ -37,6 +37,26 @@ export interface VideoCharacter {
     pronunciation?: string;
     /** Sentences on his national pride, running jokes, and memes, added to the shared comedic persona. */
     persona?: string;
+    /**
+     * How he is drawn. A photoreal man (the default) is a real person in live-action footage; a
+     * pixel sprite keeps his flat pixel-art look while the world around him is live action.
+     */
+    rendering?: 'photoreal' | 'pixel-sprite';
+    /** What he is, where prompts place him among people. Defaults to "man". */
+    noun?: string;
+    /** The body features the image models must keep. Defaults to a man's face, hair, cheeks, and torso. */
+    physique?: string;
+    /** The voice kept through every emotion. Defaults to a low, chest-resonant adult male voice. */
+    voice?: string;
+    /** Stage text-only requests in a generated opening frame instead of his portrait. */
+    sceneOpening?: boolean;
+    /**
+     * A cast shares one command that stars a member picked at random. Members get no command of
+     * their own; each keeps his own command_variant so the broker knows whose portrait a job uses.
+     */
+    cast?: string;
+    /** Other words a replacement request may use for him, such as "the slug". */
+    replacementNames?: string[];
 }
 
 export const MEXIMUTT: VideoCharacter = {
@@ -60,6 +80,7 @@ export const MEXIMUTT: VideoCharacter = {
     dialogueStyle: 'playful Mexican-American slang and code-switching',
     slang: ['o algo', 'mayne', 'wey', 'puta pinche', 'no mames wey'],
     pronunciation: 'The separate slang phrase "o algo" is pronounced as Spanish words, never as individual letters.',
+    sceneOpening: true,
 };
 
 export const ARGENMUTT: VideoCharacter = {
@@ -96,7 +117,65 @@ export const COLOMBIANMUTT: VideoCharacter = {
     persona: 'His Colombian pride drives the comedy: Colombia has the best coffee, the best dancers, and the only real arepa on Earth, and he argues all three with anyone, above all a Venezuelan. He corrects every “Columbia” to “Colombia, with an O,” brags about Shakira, James, and the five-nil win over Argentina, is always “ya casi llegando” while an hour late, and wraps every insult in politeness such as “qué pena con usted” and “a la orden.” He takes huge offense at any Narcos or Escobar joke and steers it back to coffee, and he blames setbacks on whoever “dio papaya,” the traffic, or the runaway hippos. Use memes such as “no dar papaya,” “Colombia, not Columbia,” and “we don’t talk about Bruno” when they fit the beat.',
 };
 
-export const VIDEO_CHARACTERS: readonly VideoCharacter[] = [MEXIMUTT, ARGENMUTT, COLOMBIANMUTT];
+/** The shared Sol Slugs voice and persona; each member adds his own portrait and look. */
+const SOL_SLUG = {
+    name: 'Slug',
+    rendering: 'pixel-sprite',
+    noun: 'slug',
+    cast: 'slug',
+    replacementNames: ['slug', 'sol slug', 'the slug', 'a slug', 'the sol slug'],
+    sceneOpening: true,
+    example: 'apes into a memecoin at a real casino',
+    voice: 'cocky, slightly nasal and gravelly adult male voice',
+    delivery: 'cocky and conversational adult male, with a slightly nasal, gravelly voice and a strong online crypto-degen American accent on every phrase, using a fast, smug drawl, drawn-out vowels on his catchphrases, and animated rise-and-fall intonation',
+    accent: 'online crypto-degen American',
+    accentLabel: 'degen',
+    dialogueStyle: 'Solana degen slang and crypto-Twitter memes',
+    slang: ['gm', 'ser', 'wagmi', 'ngmi', 'lfg', 'probably nothing', 'few understand'],
+    pronunciation: 'Say "gm" as the letters G M, "ser" as "sir", "wagmi" as "wag-mee", "ngmi" as the letters N G M I, and "lfg" as the letters L F G.',
+    persona: 'He is a Sol Slug, a pixel-art slug NFT loose in the real world, and a die-hard Solana degen: every chart is bullish, every dip is a buying opportunity, he prices everything in SOL, calls everyone ser, and treats burning slugs as the ultimate flex. He leaves a slime trail, treats salt as a mortal enemy, and takes huge offense at being called a snail. Use memes such as “have fun staying poor,” “it’s so over, we’re so back,” “diamond tentacles,” and “this is the bottom” when they fit the beat.',
+} satisfies Partial<VideoCharacter>;
+
+function solSlug(number: string, look: Pick<VideoCharacter, 'eyes' | 'clothing' | 'clothingAndEmblem' | 'physique'>): VideoCharacter {
+    const variant = `slug${number}`;
+    return { ...SOL_SLUG, ...look, id: variant, image: `slugs/${number}.png`,
+        commands: { minimax: { variant, label: `Slug #${Number(number)}` } } };
+}
+
+// Chosen from a six-slug trial (2026-11-03); `$slug #1863` pins one.
+export const SOL_SLUGS: readonly VideoCharacter[] = [
+    solSlug('01863', {
+        eyes: 'squinting dwarven eyes on short eye stalks',
+        physique: 'beige pixel slug body with a pointed tail, carved abs, and small white-gloved arms',
+        clothing: 'gold crown, red royal cape, and bushy ginger dwarf beard',
+        clothingAndEmblem: 'the gold crown, red royal cape, bushy ginger dwarf beard, flaming torch, and gold pickaxe',
+    }),
+    solSlug('08917', {
+        eyes: 'two half-lidded eyes on tall eye stalks',
+        physique: 'beige pixel slug body with a long pointed tail, a stubbly grey five-o\'clock shadow, and small white-gloved arms',
+        clothing: 'olive-green army backpack',
+        clothingAndEmblem: 'the olive-green army backpack and a pistol in each white-gloved hand',
+    }),
+    solSlug('30506', {
+        eyes: 'one giant blue eyeball on a single stalk',
+        physique: 'cyan pixel slug body with fins on his head and a wide open shouting mouth',
+        clothing: 'ornate gold chest plate',
+        clothingAndEmblem: 'the ornate gold chest plate and the big green fish he holds',
+    }),
+    solSlug('00507', {
+        eyes: 'two round eyes on short eye stalks',
+        physique: 'pixel slug body covered in sandy golden capybara fur, with a long pointed tail',
+        clothing: 'grey capybara mask and red scarf',
+        clothingAndEmblem: 'the grey capybara mask, red scarf, and golden capybara-fur body',
+    }),
+];
+
+export const VIDEO_CHARACTERS: readonly VideoCharacter[] = [MEXIMUTT, ARGENMUTT, COLOMBIANMUTT, ...SOL_SLUGS];
+
+/** The members of a cast command, such as the Sol Slugs of `$slug`. */
+export function videoCharacterCast(cast: string): VideoCharacter[] {
+    return VIDEO_CHARACTERS.filter(character => character.cast === cast);
+}
 
 export function videoCharacterForPreset(preset: unknown): VideoCharacter | null {
     return VIDEO_CHARACTERS.find(character => character.id === preset
@@ -114,6 +193,14 @@ export function videoCharacterCommandLabel(variant: string | null | undefined): 
         .find(command => command.variant === variant)?.label || null;
 }
 
+export function isPixelSprite(character: VideoCharacter): boolean {
+    return character.rendering === 'pixel-sprite';
+}
+
+function characterVoice(character: VideoCharacter): string {
+    return character.voice || 'low, chest-resonant adult male voice';
+}
+
 function quotedList(phrases: string[]): string {
     return [...phrases.slice(0, -1).map(phrase => `“${phrase},”`), `and “${phrases.at(-1)}”`].join(' ');
 }
@@ -123,7 +210,9 @@ export function videoCharacterPlannerGuidance(character: VideoCharacter): string
     return [
         `${name} is the recurring character in an enacted visual story. Treat the supplied portrait as his identity and opening frame, not as a requirement to hold its crop, background, or pose for the entire video.`,
         'Resolve spoken wording and visual subject matter independently. When the prompt is a boast, rant, or other utterance about concrete projects, places, objects, transformations, or game mechanics, preserve the appropriate spoken wording while visibly staging its distinctive ideas as actions with consequences. Put those visible beats in the analysis actions and inferred_staging, then realize them in shot.visual; mentioning them only in dialogue, intent, or eyebrow gestures does not cover them.',
-        `${name} is a real man in photorealistic live-action footage. Keep fantastical or mythic scenes in that photographic realism, with real, physically present places, creatures, and props, and his own ${character.eyes} and facial proportions, unless the user asks for another rendering style.`,
+        isPixelSprite(character)
+            ? `${name} is a pixel-art ${character.noun} sprite loose in photorealistic live-action footage. Stage real, physically present places, people, creatures, and props around him in photographic realism, and keep ${name} himself the same crisp pixel-art sprite as his portrait in every shot: flat blocky pixels, hard dark outlines, his ${character.physique}, and his own ${character.eyes}, unless the user asks for another rendering style. He glides on his tail and gestures with his small arms; his sprite may turn, squash, and stretch while staying pixel art.`
+            : `${name} is a real man in photorealistic live-action footage. Keep fantastical or mythic scenes in that photographic realism, with real, physically present places, creatures, and props, and his own ${character.eyes} and facial proportions, unless the user asks for another rendering style.`,
         `After honoring frame zero, use motivated camera reveals, interactions, transformations, or later cuts to develop the premise around the recognizable ${name} character. Keep his face and mouth readable while he speaks, but allow a wider composition and changing surroundings. Preserve his ${character.clothing} while showing any separately requested national symbols in the scene.`,
         `For a reaction to an attached image, identify the main depicted subject and the props or relationships that explain the situation. Keep that subject recognizable and visibly connect ${name} to it. In shot.visual, name the target of each purposeful glance or head turn and when it happens relative to his speech and reaction; choose the subject and any story-defining prop that he would naturally notice, rather than merely listing them as background scenery. Make the look legible through a clear directional head turn and a useful camera view of both observer and target; a tiny eye shift or downward nod in a distant composition is insufficient.`,
         'Make expressions develop in response to what he notices, using readable changes in eyes, brows, mouth, or posture appropriate to the requested emotion. Preserve facial identity without freezing his face or body. A request to look into the camera describes that action beat, not a permanent gaze lock; leave room for a motivated look toward the scene while preserving the user\'s action order and exact words. If the user explicitly requires continuous eye contact, stillness, or a specific expression sequence, honor that restriction and use only compatible reactions.',
@@ -131,7 +220,7 @@ export function videoCharacterPlannerGuidance(character: VideoCharacter): string
         'Develop the visual beats alongside the corresponding spoken phrases instead of reciting the whole monologue first and adding a long silent reenactment afterward. A short utterance with linked ideas normally needs its natural speaking time plus a brief setup and payoff, not a separate segment for each noun. Split long supplied speech at natural clause boundaries across shots or segments while preserving every word and its order. Add runtime only when a required action needs it to remain legible or the user requests it.',
         'Use a static talking head only when the user requests that presentation or the brief is a simple greeting or performance with no visual story to enact. Do not invent a ban on new props, graphics, scene changes, or camera movement merely because dialogue is supplied verbatim. Respect actual user restrictions on text, motion, camera, or presentation.',
         `Use this default ${name} voice description in dialogue.delivery: "${character.delivery}". Copy it in full for his ordinary boastful or conversational delivery, including English-only lines and dialogue supplied verbatim by the user.`,
-        `For a different requested emotion, adapt the performance while retaining the low, chest-resonant adult male voice and strong ${character.accent} accent through complaints, shouts, and emotional changes. Keep the voice description outside dialogue.text and language; never recite these instructions or phonetically respell the supplied words. Avoid a neutral American narrator or flat text-to-speech delivery.`,
+        `For a different requested emotion, adapt the performance while retaining the ${characterVoice(character)} and strong ${character.accent} accent through complaints, shouts, and emotional changes. Keep the voice description outside dialogue.text and language; never recite these instructions or phonetically respell the supplied words. Avoid a neutral American narrator or flat text-to-speech delivery.`,
         `When the requested action or source image supports dialogue, give the ${name} character ${character.dialogueStyle}.`,
         `${name} is the recurring character's cast name. ${character.pronunciation
             ? `${character.pronunciation} Keep speaker IDs and user-supplied dialogue.text unchanged; specify this pronunciation in dialogue.delivery when the name or phrase occurs in spoken wording.`
@@ -147,6 +236,9 @@ export function videoCharacterPlannerGuidance(character: VideoCharacter): string
 // and H3 then keeps that medium and gives the character cartoon eyes. State the
 // photographic medium positively; the image models draw negated styles too.
 export function videoCharacterPhotorealKeyframe(character: VideoCharacter): string {
+    if (isPixelSprite(character)) {
+        return `Render this as a photorealistic live-action photograph of real places, people, and props, with natural lens optics and lighting, and ${character.name}, wherever he appears, as the same crisp pixel-art sprite as in the original ${character.name} portrait: flat blocky pixels, hard dark outlines, his ${character.physique}, and his own ${character.eyes}, standing in the real scene large enough to read clearly, unless the request itself asks for a different art style.`;
+    }
     return `Render this as a photorealistic live-action photograph with the camera realism of the original ${character.name} portrait: real people with natural skin texture and pores, real fabric, natural lens optics and lighting, and ${character.name}, wherever he appears, with his own ${character.eyes} at their true size, even in a fantastical setting, unless the request itself asks for a different art style.`;
 }
 
@@ -155,7 +247,15 @@ export function videoCharacterPhotorealKeyframe(character: VideoCharacter): stri
 // cast member (61af9651). Name him only through his reference picture.
 export function bindLocalPresetIdentity(text: string, character: VideoCharacter): string {
     const { name } = character;
+    const noun = character.noun || 'man';
     return text.replace(new RegExp(`\\bthe original ${name} portrait\\b`, 'g'), 'Picture 1')
-        .replace(new RegExp(`\\b${name}'s\\b`, 'g'), "the Picture 1 man's")
-        .replace(new RegExp(`\\b${name}\\b`, 'g'), 'the man in Picture 1');
+        .replace(new RegExp(`\\b${name}'s\\b`, 'g'), `the Picture 1 ${noun}'s`)
+        .replace(new RegExp(`\\b${name}\\b`, 'g'), `the ${noun} in Picture 1`);
+}
+
+/** Added to a request that puts him into someone else's clip, where the frame stays photographic. */
+export function videoCharacterEditLook(character: VideoCharacter): string {
+    return isPixelSprite(character)
+        ? `Draw ${character.name} as the same crisp pixel-art sprite as his reference picture, with flat blocky pixels, hard dark outlines, his ${character.physique}, and ${character.clothingAndEmblem}, set into the photographic frame.`
+        : '';
 }

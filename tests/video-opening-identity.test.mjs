@@ -130,16 +130,17 @@ for (const generatedAnchor of [false, true]) test(`local opening guard caches de
 });
 
 for (const character of VIDEO_CHARACTERS)
-test(`a local ${character.name} opening names him only through Picture 1`, async () => {
+test(`a local ${character.id} opening names him only through Picture 1`, async () => {
     // 61af9651: Qwen read the unknown name as a creature and drew a mascot in his shirt.
+    const noun = character.noun || 'man';
     await fixture(async ({ request }) => {
         const directive = await request('image', { segment_index: 1 });
         const local = [directive.body.keyframe.prompt, ...Object.values(directive.body.keyframe.motion_contract)].join(' ');
-        assert.doesNotMatch(local, new RegExp(character.name));
-        assert.match(local, /the man in Picture 1 stands by the purple door in the Picture 1 man's flag shirt/);
-        assert.match(local, /camera realism of Picture 1:/);
+        assert.doesNotMatch(local, new RegExp(`\\b${character.name}\\b`));
+        assert.ok(local.includes(`the ${noun} in Picture 1 stands by the purple door in the Picture 1 ${noun}'s flag shirt`));
+        assert.match(local, character.rendering === 'pixel-sprite' ? /same crisp pixel-art sprite as in Picture 1:/ : /camera realism of Picture 1:/);
         const rejected = await request('review', { segment_index: 1, kind: 'image', artifact_sha256: 'a'.repeat(64), frame: image });
-        assert.deepEqual(rejected.body.issues, ['Show the man in Picture 1 as the human man standing by the purple door.']);
+        assert.deepEqual(rejected.body.issues, [`Show the ${noun} in Picture 1 as the human man standing by the purple door.`]);
     }, { character });
 });
 

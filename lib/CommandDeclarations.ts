@@ -113,6 +113,7 @@ import { slugCommands } from './SlugCommands.js';
 import { config } from './Config.js';
 
 import {
+    castVideoHandler,
     characterVideoHandler,
     discordOnlyGate,
     handleMinimaxFastVideo,
@@ -124,17 +125,25 @@ import {
     singleVideoResponderGate,
 } from './VideoGeneration.js';
 
-import { VIDEO_CHARACTERS, VideoCharacter } from './VideoCharacters.js';
+import { VIDEO_CHARACTERS, VideoCharacter, videoCharacterCast } from './VideoCharacters.js';
 
 import {
     handleQwenEdit,
     handleQwenImage,
 } from './QwenImage.js';
 
-/* Each built-in video character gets a command, plus a faster one where he offers it. */
+/* The commands that star each character: his own, or his cast's shared one. */
+const CHARACTER_COMMANDS = [...new Set(VIDEO_CHARACTERS.map(character => character.cast
+    || character.commands.minimax?.variant).filter((command): command is string => Boolean(command)))];
+
+/* Each built-in video character gets a command, plus a faster one where he offers it. A cast's
+ * members share one command instead. */
 function characterVideoCommands(character: VideoCharacter): Command[] {
+    if (character.cast) {
+        return videoCharacterCast(character.cast)[0] === character ? [castVideoCommand(character.cast, character)] : [];
+    }
     const { minimax, minimaxfast } = character.commands;
-    const costars = VIDEO_CHARACTERS.flatMap(other => other === character ? [] : other.commands.minimax?.variant || []);
+    const costars = CHARACTER_COMMANDS.filter(command => command !== minimax?.variant);
     const commands: Command[] = [];
     if (minimax) {
         commands.push({
@@ -170,6 +179,24 @@ function characterVideoCommands(character: VideoCharacter): Command[] {
     return commands;
 }
 
+function castVideoCommand(cast: string, first: VideoCharacter): Command {
+    const pinned = Number(first.id.replace(/\D/g, ''));
+    return {
+        aliases: [cast],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: castVideoHandler(cast),
+            description: `Make a video starring a random ${first.name} from the cast, or pick one with #number. Attach an image or clip for the scene, or use “replace” to edit someone in a video or GIF.`,
+            examples: [{ value: `${cast} ${first.example}` },
+                { value: `${cast} #${pinned} ${first.example}` },
+                { value: `${cast} replace the dancer with the ${first.noun || first.name}, keeping the same moves` }],
+        },
+        relatedCommands: [...CHARACTER_COMMANDS.filter(command => command !== cast), 'minimax', 'videoqueue'],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
+    };
+}
+
 /* Keep shared command order synchronized across deployment tracks. */
 const sharedCommands: Command[] = [
     {
@@ -192,7 +219,7 @@ const sharedCommands: Command[] = [
             examples: [{ value: 'minimax an arcade kart race between historical figures' },
                 { value: 'minimax replace the red car with the blue car in the attached image' }],
         },
-        relatedCommands: ['minimaxfast', 'oalgo', 'videoqueue'],
+        relatedCommands: ['minimaxfast', 'oalgo', 'slug', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     ...VIDEO_CHARACTERS.flatMap(characterVideoCommands),

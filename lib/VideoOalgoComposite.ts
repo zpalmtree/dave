@@ -5,22 +5,30 @@ import { VideoKeyframeError, VideoKeyframeResult, createFrontierVideoKeyframe } 
 import { VideoKeyframeReference } from './VideoKeyframeReferences.js';
 import { VideoProviderHooks, VideoUsagePersistenceError } from './VideoUsage.js';
 import { StoredVideoSourceImage } from './VideoSourceImage.js';
-import { MEXIMUTT, VideoCharacter } from './VideoCharacters.js';
+import { MEXIMUTT, VideoCharacter, isPixelSprite } from './VideoCharacters.js';
 
 /** Stage the opening before screenplay planning, which will treat the result as frame zero. */
-export function oalgoSceneOpeningPlan(prompt: string): Record<string, unknown> {
+export function oalgoSceneOpeningPlan(prompt: string, character: VideoCharacter = MEXIMUTT): Record<string, unknown> {
+    const { name } = character;
+    const sprite = isPixelSprite(character);
     return {
         intent: prompt,
         keyframe: {
             recommended: true,
-            reason: 'Put Meximutt directly into the requested scene before video planning.',
+            reason: `Put ${name} directly into the requested scene before video planning.`,
             prompt: [
                 `Create the opening instant of this video request: ${prompt}`,
-                'Use Reference 1 only as the authority for Meximutt\'s identity: preserve his exact face, hair shape, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing.',
+                sprite
+                    ? `Use Reference 1 only as the authority for ${name}'s identity: preserve his exact pixel-art sprite, his ${character.physique}, his own ${character.eyes}, and ${character.clothingAndEmblem}.`
+                    : character === MEXIMUTT
+                        ? 'Use Reference 1 only as the authority for Meximutt\'s identity: preserve his exact face, hair shape, huge full cheeks and jowls, heavy torso, and Mexican-flag clothing.'
+                        : `Use Reference 1 only as the authority for ${name}'s identity: preserve his exact face, hair shape, ${character.physique || 'huge full cheeks and jowls, heavy torso'}, and ${character.clothing}.`,
                 'Stage him already in the requested setting, with the other participants and story-defining props needed for the first action. Replace the reference background, crop, and pose as needed for this scene.',
                 'Choose the earliest useful moment before the first action or spoken exchange. Do not show later events, the outcome, or a montage of the whole story. Do not turn dialogue into captions or speech bubbles.',
                 'Keep his face recognizable and his mouth visible for speech. Match perspective and lighting across one coherent scene, with space and clear sightlines for the opening interaction.',
-                'Keep photographic live-action texture unless the request explicitly asks for another style.',
+                sprite
+                    ? `Render the setting, people, and props as a photographic live-action scene, and ${name} as the same crisp pixel-art sprite as Reference 1, with flat blocky pixels and hard dark outlines, standing in that real scene with matching perspective and a soft contact shadow, large enough to read clearly, unless the request explicitly asks for another style.`
+                    : 'Keep photographic live-action texture unless the request explicitly asks for another style.',
             ].join(' '),
             reference_requirements: [],
         },
@@ -28,20 +36,31 @@ export function oalgoSceneOpeningPlan(prompt: string): Record<string, unknown> {
     };
 }
 
+function sceneOpeningIdentityFacts(character: VideoCharacter): string {
+    if (isPixelSprite(character)) {
+        return `Preserve the exact pixel-art character: his sprite, ${character.physique}, his own ${character.eyes}, and ${character.clothingAndEmblem}, drawn in the same flat blocky pixels with hard dark outlines. The pixel-art background, pose, and camera framing may change to fit the requested opening.`;
+    }
+    if (character === MEXIMUTT) {
+        return 'Preserve the exact individual: face, hair silhouette, full cheeks and jowls, heavy body proportions, and Mexican-flag clothing. The background, pose, and camera framing may change to fit the requested opening.';
+    }
+    return `Preserve the exact individual: face, hair silhouette, ${character.physique || 'full cheeks and jowls, heavy body proportions'}, and ${character.clothing}. The background, pose, and camera framing may change to fit the requested opening.`;
+}
+
 export async function createOalgoSceneOpening(
     base: StoredVideoSourceImage,
     prompt: string,
     hooks: VideoProviderHooks,
     generator = createFrontierVideoKeyframe,
+    character: VideoCharacter = MEXIMUTT,
 ): Promise<VideoKeyframeResult> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS);
     try {
-        const result = await generator(oalgoSceneOpeningPlan(prompt), [{
-            label: 'Original Meximutt identity', kind: 'identity',
-            visualFactsToPreserve: 'Preserve the exact individual: face, hair silhouette, full cheeks and jowls, heavy body proportions, and Mexican-flag clothing. The background, pose, and camera framing may change to fit the requested opening.',
+        const result = await generator(oalgoSceneOpeningPlan(prompt, character), [{
+            label: `Original ${character.name} identity`, kind: 'identity',
+            visualFactsToPreserve: sceneOpeningIdentityFacts(character),
             bytes: readFileSync(base.path), mimeType: base.mimeType,
-            sourceUrl: 'built-in:meximutt', contextUrl: 'built-in:meximutt',
+            sourceUrl: `built-in:${character.id}`, contextUrl: `built-in:${character.id}`,
         }], {
             ...hooks, aspectRatio: '16:9', requireIdentityPreservation: true,
             reviewPurpose: 'character-opening', abortSignal: controller.signal,
@@ -63,6 +82,7 @@ export async function createOalgoSceneOpening(
 
 export function oalgoSourceImageCompositePlan(prompt: string, character: VideoCharacter = MEXIMUTT): Record<string, unknown> {
     const { name } = character;
+    const sprite = isPixelSprite(character);
     const requestedAction = prompt === VIDEO_IMAGE_ONLY_AUTO_PROMPT
         ? `Add ${name} to the attached situation. Preserve its existing subjects and action; a later screenplay will plan the motion.`
         : `Stage the combined image so it can naturally begin this requested video: ${prompt}`;
@@ -72,11 +92,15 @@ export function oalgoSourceImageCompositePlan(prompt: string, character: VideoCh
             recommended: true,
             reason: `Combine the built-in ${name} art with the user-supplied visual reference.`,
             prompt: [
-                `Edit the scene in Reference 2 by adding ${name} from Reference 1 as one additional, separate person.`,
+                `Edit the scene in Reference 2 by adding ${name} from Reference 1 as one additional, separate ${sprite ? 'character' : 'person'}.`,
                 `Keep every main subject from Reference 2 visible and recognizable, keeping their own clothing, equipment, and story-defining props with their original owners. ${name} joins them; he does not replace, merge with, or dress as any existing subject.`,
-                `Use the ${name} base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and ${character.clothing}. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.`,
+                sprite
+                    ? `Use the ${name} base image directly for his pixel-art sprite: his ${character.physique}, his own ${character.eyes}, and ${character.clothingAndEmblem}. Keep him the same crisp pixel-art sprite, with flat blocky pixels and hard dark outlines, set into the attached scene's own photographic texture, instead of redesigning him from a description.`
+                    : `Use the ${name} base image directly for his face, hair silhouette, huge full cheeks and jowls, heavy torso, and ${character.clothing}. Preserve his distinctive proportions and photographic texture instead of redesigning him from a description.`,
                 `Keep the attached setting and the relationships between its subjects. Make room beside them for ${name}, widening the view only as needed. Keep his face large enough to recognize and the attached subjects unobscured.`,
-                'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
+                sprite
+                    ? 'Render a unified scene with consistent perspective and lighting, never a split screen, side-by-side layout, pasted rectangle, or collage.'
+                    : 'Render a unified scene with consistent perspective, lighting, and texture, never a split screen, side-by-side layout, pasted rectangle, or collage.',
                 requestedAction,
             ].join(' '),
             reference_requirements: [],
@@ -109,7 +133,9 @@ export async function composeOalgoSourceImages(
             // authority for face and body. Declared as style, the composite kept the shirt
             // and palette and replaced the character with a generic man.
             kind: 'identity',
-            visualFactsToPreserve: `This image is the authority for who ${name} is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with ${character.clothingAndEmblem}, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so ${name} can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.`,
+            visualFactsToPreserve: isPixelSprite(character)
+                ? `This image is the authority for who ${name} is. Preserve his exact pixel-art sprite: his ${character.physique}, his own ${character.eyes}, and ${character.clothingAndEmblem}, in the same flat blocky pixels, hard dark outlines, and palette. Allow a wider or rebalanced composition and an attached-scene setting so ${name} can visibly interact with the attached subjects, but never substitute a different character or redraw him smoothly.`
+                : `This image is the authority for who ${name} is. Preserve his exact facial anatomy, head and body proportions, and hair shape, along with ${character.clothingAndEmblem}, rendering style, and palette. Allow a wider or rebalanced composition and an attached-scene setting so ${name} can visibly interact with the attached subjects, but never substitute a different man, slim his build, or restyle his hair.`,
             bytes: readFileSync(base.path),
             mimeType: base.mimeType,
             sourceUrl: `built-in:${character.id}`,
@@ -153,14 +179,14 @@ export async function composeOalgoSourceImages(
     }
 }
 
-export function oalgoCompositionFailureMessage(error: unknown): string {
-    const prefix = 'Could not combine Meximutt with your attached image. No video was queued.';
+export function oalgoCompositionFailureMessage(error: unknown, name = MEXIMUTT.name): string {
+    const prefix = `Could not combine ${name} with your attached image. No video was queued.`;
     if (error instanceof VideoKeyframeError) {
         switch (error.code) {
             case 'moderation':
                 return `${prefix} The image provider declined this combination under its safety rules. Repeating the same request is unlikely to help.`;
             case 'identity_review':
-                return `${prefix} The generated images changed Meximutt's likeness, even after a repair. You can retry the composition.`;
+                return `${prefix} The generated images changed ${name}'s likeness, even after a repair. You can retry the composition.`;
             case 'composition_review':
                 return `${prefix} The generated images did not preserve the attached scene, even after a repair. You can retry the composition.`;
             case 'review_unavailable':
