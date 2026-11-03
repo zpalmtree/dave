@@ -50,7 +50,7 @@ Configuration is read from `~/.config/dave-github-watch.json`, or the path in
 ```
 
 `additionalRepositories` is optional. Every repository receives the same commit,
-branch, merge, PR-opening, and link-preview behavior. Set `trackIssues: true` on a destination to also track new issues. Destinations can share a
+branch, merge, and PR-opening behavior. Set `trackIssues: true` on a destination to also track new issues. Destinations can share a
 thread or use separate guild text channels or threads (`threadId` accepts either). Each watcher polls and retries independently;
 a failed check for one repository does not stop another. Duplicate repository and
 thread pairs are rejected to prevent duplicate notifications.
@@ -98,13 +98,9 @@ include closed PRs so PRs opened and closed/merged between polls are still shown
 with their current status noted. Reopening or editing an existing PR does not
 produce another opening notification. This requires Pull requests: read access.
 
-Human-posted GitHub PR links in the configured thread receive a reply with a
-private-repository preview: title/link, current status, author avatar, branches,
-and a short description. Only repositories configured for that thread are expanded. Bot messages
-are ignored, repeated links in one message are deduplicated, and at most three
-PRs per repository are previewed per message. Angle-bracket links (`<https://...>`) suppress
-previews. Preview replies never ping the sender. No public OpenGraph service is
-used, and private PR details are not expanded in other channels.
+Human-posted GitHub links do not trigger automatic bot cards or replies, including
+links posted in replies. New PR, issue, commit, and merge announcements continue
+through the polling watcher. Discord may still show its own native link previews.
 
 PR merges use the same linked branch heading as other merges, followed by one
 compact merger/PR metadata line. Mixed-author PR merge batches may use the
@@ -130,7 +126,7 @@ The shared production configuration additionally watches `blocknetprivacy/core`,
 
 Add one entry per repository to `additionalRepositories`. These watches post to
 `#clonehigh` and ping `justthedeveloper` only for new PRs (including drafts) and
-new issues. Commits, merges, branches and PR previews never ping. Discord allowed
+new issues. Commits, merges, and branches never ping. Discord allowed
 mentions explicitly permits only this user on opening notifications. Pooners and
 round-and-round retain their existing configuration and silent notifications.
 
