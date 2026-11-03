@@ -302,7 +302,7 @@ async function generateGeminiKeyframe(
     references: VideoKeyframeReference[],
     attempt: number,
     options: VideoKeyframeOptions,
-    sourceFrameEdit?: { timeoutMs: number },
+    sourceFrameEdit?: { timeoutMs: number; aspectRatio: string },
 ): Promise<VideoKeyframeResult> {
     const geminiModel = options.geminiModel || VIDEO_KEYFRAME_MODEL;
     const imageSize = geminiModel === VIDEO_KEYFRAME_FAST_LITE_MODEL
@@ -354,7 +354,7 @@ async function generateGeminiKeyframe(
                 maxOutputTokens: 32768,
                 responseModalities: ['IMAGE'],
                 imageConfig: {
-                    aspectRatio: options.aspectRatio || '16:9',
+                    aspectRatio: sourceFrameEdit?.aspectRatio || options.aspectRatio || '16:9',
                     imageSize,
                 },
             },
@@ -709,8 +709,19 @@ export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: s
     return { ...still, bytes: Buffer.concat([still.bytes.subarray(0, end), length, chunk, checksum, still.bytes.subarray(end)]) };
 }
 
-/** Two preferred-editor attempts and one alternate-editor attempt per shot. */
-export const VIDEO_EDIT_STILL_ATTEMPTS = 3;
+/**
+ * Two preferred-editor attempts and one alternate-editor attempt per round, and up to two rounds per
+ * shot: the broker draws once more when the still review rejects the first still.
+ */
+export const VIDEO_EDIT_STILL_ROUND_ATTEMPTS = 3;
+export const VIDEO_EDIT_STILL_ATTEMPTS = 2 * VIDEO_EDIT_STILL_ROUND_ATTEMPTS;
+
+/**
+ * Gemini edit ratios. Nano Banana also takes 4:5 and 5:4, which the keyframe canvas list leaves out.
+ * The worker stretches the still onto its crop, so f2968aee's 148x176 crop, sent as 3:4, came back
+ * 12% wider; at 4:5 the stretch is 5%.
+ */
+const VIDEO_EDIT_STILL_GEMINI_ASPECT_RATIOS = [...VIDEO_KEYFRAME_ASPECT_RATIOS, '4:5', '5:4'];
 
 type VideoEditStillOptions = VideoFrontierCallOptions & {
     isolated?: boolean;
@@ -718,6 +729,10 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     /** Added to the attempt numbers, so repaints of several shots of one job record separately. */
     attemptOffset?: number;
     requestTimeoutMs?: number;
+    /** Skip the preferred editor, for a second draw after it already refused or failed this frame. */
+    alternateOnly?: boolean;
+    /** Epoch milliseconds by which every editor request must finish; capped at 270 seconds from the call. */
+    deadline?: number;
 };
 
 /**
@@ -746,9 +761,9 @@ export async function createVideoEditStill(
             + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Fill the same crop; do not turn a profile into a front-facing portrait.'
         : videoEditStillPrompt(target, request);
     const started = Date.now();
-    const deadline = started + 270_000;
-    let failure: unknown;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const deadline = Math.min(started + 270_000, options.deadline ?? Infinity);
+    let failure: unknown = new Error('The replacement editors ran out of time.');
+    for (let attempt = 1; attempt <= 2 && !options.alternateOnly; attempt++) {
         if (attempt > 1 && Date.now() - started > 90_000) break;
         options.abortSignal?.throwIfAborted();
         try {
@@ -765,7 +780,7 @@ export async function createVideoEditStill(
     if (!config.geminiApiKey || Date.now() >= deadline) throw failure;
     // Use a native edit request, not the new-scene/keyframe prompt that can pull the camera back.
     const source = await loadImage(frame.bytes);
-    const aspectRatio = VIDEO_KEYFRAME_ASPECT_RATIOS.reduce((best, ratio) => {
+    const aspectRatio = VIDEO_EDIT_STILL_GEMINI_ASPECT_RATIOS.reduce((best, ratio) => {
         const distance = (value: string) => {
             const [width, height] = value.split(':').map(Number);
             return Math.abs(Math.log(width / height / (source.width / source.height)));
@@ -779,11 +794,11 @@ export async function createVideoEditStill(
         kind: 'identity', visualFactsToPreserve: '', sourceUrl: 'worker-edit', contextUrl: 'worker-edit',
     }));
     const still = await generateGeminiKeyframe(prompt, references, 3 + (options.attemptOffset || 0), {
-        ...options, aspectRatio,
+        ...options,
         beforeRequest: event => options.beforeRequest?.({ ...event, stage: 'video_edit_still' }),
         onUsage: event => options.onUsage?.({ ...event, stage: 'video_edit_still' }),
         onAttempt: event => options.onAttempt?.({ ...event, stage: 'video_edit_still' }),
-    }, { timeoutMs: Math.max(1, Math.min(180_000, deadline - Date.now())) });
+    }, { timeoutMs: Math.max(1, Math.min(180_000, deadline - Date.now())), aspectRatio });
     // Validate the actual pixels and use PNG so downstream effect metadata survives JPEG replies.
     const decoded = await loadImage(still.bytes);
     const canvas = createCanvas(decoded.width, decoded.height);

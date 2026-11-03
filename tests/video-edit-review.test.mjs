@@ -32,6 +32,10 @@ test('still usability and finished motion receive distinct review contracts with
     assert.equal(requests[0].systemInstruction.parts[0].text, EDIT_STILL_REVIEW_INSTRUCTION);
     assert.equal(requests[1].systemInstruction.parts[0].text, EDIT_REVIEW_INSTRUCTION);
     assert.notEqual(EDIT_STILL_REVIEW_INSTRUCTION, EDIT_REVIEW_INSTRUCTION);
+    // The animation keeps the still's scale, so a zoomed-out still (f2968aee) must stop here.
+    assert.match(EDIT_STILL_REVIEW_INSTRUCTION, /reject a still that zooms out or rescales the subject/);
+    assert.match(EDIT_STILL_REVIEW_INSTRUCTION, /about two thirds of the source subject's span or less/);
+    assert.match(EDIT_STILL_REVIEW_INSTRUCTION, /build, silhouette or headwear size are acceptable/);
     for (const request of requests) assert.deepEqual(request.contents[0].parts.filter(part=>part.inlineData)
         .map(part=>Buffer.from(part.inlineData.data,'base64').toString()), ['identity','source','edited','mask']);
     assert.deepEqual(usage.map(event=>event.stage), ['video_edit_still_review','video_edit_motion_review']);

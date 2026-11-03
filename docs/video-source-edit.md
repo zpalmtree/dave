@@ -36,15 +36,38 @@ produces a usable image, the edit stops before animation.
 
 Alternate frames always pass a still-usability review, including for older workers
 that do not request isolated crops. A recognizable, coherent replacement can
-proceed with differences in expression, hand gesture, local pose, clothing or body
-shape: the source clip supplies motion in the following animation step. Unchanged
+proceed with differences in expression, hand gesture, local pose, clothing, build or
+body shape: the source clip supplies motion in the following animation step. Unchanged
 or wrong subjects, severe corruption, unrelated scenes and major viewpoint/crop
-changes still stop the edit. Finished isolated animations receive their separate
-source-performance review; still acceptance does not bypass it. Each shot reserves three
-separate provider-attempt numbers; cancellation and accounting failures stop
-further requests. Generation is bounded to 270 seconds, leaving time for review
-within the worker's existing request timeout. JPEG replies are converted to PNG so
+changes still stop the edit. So does a zoomed-out or rescaled still, because the
+animation keeps the still's scale: the review compares the subject's height in the
+frame and rejects a replacement at about two thirds of the source span or less, or
+about one and a half times it or more. Finished isolated animations receive their separate
+source-performance review; still acceptance does not bypass it.
+
+When an isolated still is rejected, the broker draws it once more if at least 150
+seconds remain of its 420-second budget (the worker waits eight minutes). The second
+draw goes straight to Gemini when Gemini drew the rejected still, because gpt-image
+already refused or failed that frame. If the second draw fails, the first rejection
+is the answer (HTTP 422), so the worker does not retry it as an outage. The rejected
+still is kept as `video-edit-still-rejected[-<shot>].png`, and the second review as
+`video-edit-still-review[-<shot>]-2.json`. Each shot reserves six provider-attempt
+numbers (two rounds of three), and a second still review is billed as attempt
+`64 + shot`. Cancellation and accounting failures stop further requests. Each round of
+generation is bounded to 270 seconds. JPEG replies are converted to PNG so
 subject-effect metadata is retained.
+
+Gemini edit requests use the nearest of the keyframe aspect ratios plus 4:5 and 5:4,
+which Nano Banana accepts. The worker stretches each still onto its crop, so a 148x176
+crop sent as 3:4 came back 12% wider; at 4:5 the stretch is 5%.
+
+Job `f2968aee` (Mario replaced by Meximutt) motivated these changes. gpt-image refused
+the frame twice. Gemini then drew Meximutt at half Mario's height, low in a zoomed-out
+frame. The still review accepted it, and the Wan animation failed its motion review on
+scale and movement. Four test redraws of the same frame (3:4, 4:5 and padded inputs)
+all kept the source scale, so the bad still was one unlucky draw. With the new wording,
+the review rejected that still in 2 of 2 runs and accepted all 14 good stills on file
+(10 earlier production stills and the 4 redraws) in both runs.
 
 If an isolated Viggle animation cannot be tracked for compositing, the worker
 retries that segment once with the installed Wan-Animate-2 renderer, retaining the
