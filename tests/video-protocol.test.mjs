@@ -2016,6 +2016,7 @@ test('screenplay schema and compiler keep a silent dialogue beat only before a l
     assert.ok(dialogueSchema.required.includes('beat_before'));
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /beat_before/);
     assert.match(VIDEO_PLANNER_INSTRUCTIONS, /use a sniff, sigh, or laugh only when the moment gives a reason/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /tie it in shot\.visual to the exact phrase it lands on/);
     const line = (text, beat_before) => ({ speaker_id: 'OALGO', language: 'English', delivery: 'boastful', text, beat_before });
     const dialogue = compileBestEffortFrontierVideoPlan(
         frontierPlan([
