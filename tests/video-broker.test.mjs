@@ -1079,7 +1079,8 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
         botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
         videoEditGrounder: async (_source, target) => ({ action: 'replace', target,
-            effects: 'two light beams from its eyes', clarification: '' }),
+            effects: 'two light beams from its eyes', clarification: '',
+            target_boxes: [{ seconds: 0, box_2d: [342, 281, 401, 463] }] }),
         sourceVideoDownloader: async (_source, target) => {
             mkdirSync(target, { recursive: true });
             const path = join(target, 'source-video.mp4');
@@ -1186,6 +1187,8 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             }
 
             assert.equal(lease.job.video_edit_subjects, 'primary');
+            // The grounded target boxes reach the worker, which picks the tracked person inside them.
+            assert.deepEqual(lease.job.video_edit_target_boxes, [{ seconds: 0, box_2d: [342, 281, 401, 463] }]);
             const still = (body, headers = {}) => fetch(
                 `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-still`, {
                     method: 'POST', body,
