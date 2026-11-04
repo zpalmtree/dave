@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createVideoEditStill, videoEditStillPrompt, videoEditStillWithEffects } from '../dist/VideoKeyframeProvider.js';
+import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditStillWithEffects } from '../dist/VideoKeyframeProvider.js';
+import { parseSubjectBox } from '../dist/VideoBroker.js';
 import { inflateSync } from 'node:zlib';
 import { createCanvas, loadImage } from 'canvas';
 import { config } from '../dist/Config.js';
@@ -47,6 +48,19 @@ test('each shot of a clip numbers its own repaint attempts', async () => {
         () => createVideoEditStill(frame, replacement, 'the woman', 'meximutt',
             { attemptOffset: 4, onAttempt: value => attempts.push(value.attempt) }));
     assert.deepEqual(attempts, [5, 6]);
+});
+
+test('an isolated repaint names the target and its place in a crop shared with other people', () => {
+    // 24206bd8: "the selected subject" let the editor replace a man holding the target aloft.
+    const subject = isolatedEditSubject('the person falling from the bridge', [0.1, 0.05, 0.62, 0.4]);
+    assert.match(subject, /^the person falling from the bridge: the one figure/);
+    assert.match(subject, /from 10% to 62% of Image 1's width and 5% to 40% of its height/);
+    assert.match(videoEditStillPrompt(subject, 'meximutt'), /Every other person in Image 1 stays exactly as they are/);
+    assert.equal(isolatedEditSubject('the man'), 'the selected subject in this tight source crop');
+    assert.deepEqual(parseSubjectBox('0.100,0.050,0.620,0.400'), [0.1, 0.05, 0.62, 0.4]);
+    for (const bad of [undefined, '', '0.1,0.2,0.3', '0.5,0.1,0.4,0.9', '0,0,1.2,1', 'a,b,c,d', ['0,0,1,1']]) {
+        assert.equal(parseSubjectBox(bad), undefined, String(bad));
+    }
 });
 
 test('the repaint keeps the subject\'s headwear without naming any garment', () => {

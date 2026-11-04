@@ -1242,9 +1242,13 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 stillVerdicts.push(false, true);
                 let drawn = repaints.length;
                 reviewAttempts.length = 0;
-                const redrawn = await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '2' });
+                const redrawn = await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '2',
+                    'x-video-edit-subject-box': '0.100,0.050,0.620,0.400' });
                 assert.equal(redrawn.status, 200);
                 assert.equal(repaints.length, drawn + 2);
+                // The worker's target box reaches both draws.
+                assert.deepEqual(repaintOptions.slice(-2).map(options => options.subjectBox),
+                    [[0.1, 0.05, 0.62, 0.4], [0.1, 0.05, 0.62, 0.4]]);
                 assert.deepEqual(repaintOptions.slice(-2).map(options => [options.attemptOffset, options.alternateOnly]),
                     [[6, undefined], [9, true]]);
                 assert.ok(repaintOptions.at(-1).deadline > Date.now() + 200_000);
