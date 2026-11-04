@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { OALGO_PHOTOREAL_KEYFRAME, VideoBroker } from '../dist/VideoBroker.js';
 import { VIDEO_CHARACTERS, videoCharacterPhotorealKeyframe } from '../dist/VideoCharacters.js';
 import { approvedLocalRecoveryContract, approvedRecoveryContract, continueUnbrokenLocalSegments, recoveryHash,
-    repairVideoTiming, recoveryLimitReached, videoDialogueFloorSeconds, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
+    repairVideoTiming, recoveryLimitReached, splitLongVideoSegments, videoDialogueFloorSeconds, VIDEO_RECOVERY_VERSION } from '../dist/VideoRecovery.js';
 import { requestPlannerResponse, stageFrontierDialogueVisually, VIDEO_PLAN_SCHEMA } from '../dist/VideoFrontierPlanner.js';
 import { createVideoPlanWithMuseFallback, prepareRecoveryPlan, prepareRecoveryPlanWithMuseFallback, RecoveryLocalPlanRequired, RecoveryStoppedError } from '../dist/VideoRecoveryService.js';
 import { VideoUsagePersistenceError } from '../dist/VideoUsage.js';
@@ -78,6 +78,41 @@ test('timing repair preserves long dialogue, beat order, keyframe indexes, and i
     const before = structuredClone(value);
     repairVideoTiming(value, 15, 5);
     assert.deepEqual(value, before);
+});
+
+function shotPlan(durations, transitions = []) {
+    const shots = durations.map((duration, index) => ({ visual: `Shot ${index + 1}`, duration_seconds: duration,
+        camera_transition: transitions[index] || 'cut', dialogue: [] }));
+    return { segments: [{ transition: 'start', target_seconds: durations.reduce((a, b) => a + b, 0), shots }] };
+}
+
+test('long H3 segments split at the most balanced shot boundary without changing footage', () => {
+    const value = shotPlan([4, 3, 6], [undefined, 'cut', 'continuous']);
+    value.segments.push({ transition: 'cut', target_seconds: 8, shots: [{ visual: 'Short', duration_seconds: 8, dialogue: [] }] });
+    value.segment_keyframes = [{ segment_index: 2, prompt: 'Second scene' }];
+    assert.equal(splitLongVideoSegments(value), 1);
+    assert.deepEqual(value.segments.map(s => [s.transition, s.target_seconds, s.shots.length]),
+        [['start', 7, 2], ['continue', 6, 1], ['cut', 8, 1]]);
+    assert.equal(value.segment_keyframes[0].segment_index, 3);
+    assert.equal(value.runtime_segment_split_count, 1);
+    const before = structuredClone(value);
+    assert.equal(splitLongVideoSegments(value), 0);
+    assert.deepEqual(value, before);
+});
+
+test('segment split keeps pieces at the H3 minimum and moves a delivery trim to the last piece', () => {
+    const unsplittable = shotPlan([2, 11]);
+    const before = structuredClone(unsplittable);
+    assert.equal(splitLongVideoSegments(unsplittable), 0);
+    assert.deepEqual(unsplittable, before);
+    const trimmed = shotPlan([6, 7]);
+    trimmed.segments[0].output_seconds = 12;
+    assert.equal(splitLongVideoSegments(trimmed), 1);
+    assert.deepEqual(trimmed.segments.map(s => [s.transition, s.target_seconds, s.output_seconds]),
+        [['start', 6, 6], ['cut', 7, 6]]);
+    const recursive = shotPlan([6, 6, 6, 6]);
+    assert.equal(splitLongVideoSegments(recursive), 3);
+    assert.deepEqual(recursive.segments.map(s => s.target_seconds), [6, 6, 6, 6]);
 });
 
 test('timing repair continues an unbroken camera beat when splitting a long take', () => {
