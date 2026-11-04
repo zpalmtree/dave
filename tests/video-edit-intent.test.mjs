@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateVideoEditDecision, sampleVideoEditFrames, videoEditSampleTimes } from '../dist/VideoEditIntent.js';
+import { parseVideoEditTargetBoxes, validateVideoEditDecision, sampleVideoEditFrames, videoEditSampleTimes } from '../dist/VideoEditIntent.js';
 import { resolveVideoEditRequest } from '../dist/VideoGeneration.js';
 import { ARGENMUTT, MEXIMUTT } from '../dist/VideoCharacters.js';
 
@@ -102,6 +102,22 @@ test('non-video requests never invoke the video edit interpreter', async () => {
     assert.equal(result.replacement, null);
 });
 
+test('grounding keeps valid target boxes and drops malformed ones', () => {
+    // 24206bd8: SAM tracked a man holding the target; the grounded boxes pick the thrown man.
+    const decision = validateVideoEditDecision({ action: 'replace', target: 'the person being thrown', effects: '',
+        subjects: 'primary', clarification: '', target_boxes: [
+            { seconds: 0, box_2d: [342, 281, 401, 463] },
+            { seconds: 0.31, box_2d: [401, 347, 343, 521] },
+            { seconds: 0.62, box_2d: [386, 370, 436, 1200] },
+            { seconds: 'soon', box_2d: [1, 2, 3, 4] },
+            { seconds: 1.24, box_2d: [587.4, 514, 663, 578] }] }, false);
+    assert.deepEqual(decision.targetBoxes, [{ seconds: 0, box_2d: [342, 281, 401, 463] },
+        { seconds: 1.24, box_2d: [587, 514, 663, 578] }]);
+    assert.deepEqual(parseVideoEditTargetBoxes('nope'), []);
+    assert.deepEqual(validateVideoEditDecision({ action: 'clarify', target: '', clarification: 'Which one?',
+        target_boxes: [{ seconds: 0, box_2d: [1, 2, 3, 4] }] }, false).targetBoxes, []);
+});
+
 test('structured decisions reject empty or invalid grounding instead of using the original name', () => {
     for (const value of [null, {}, { action: 'replace', target: '', clarification: '' },
         { action: 'replace', target: 'x'.repeat(121), clarification: '' },
@@ -110,16 +126,16 @@ test('structured decisions reject empty or invalid grounding instead of using th
         assert.throws(() => validateVideoEditDecision(value, false), /interpret/);
     }
     assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: ' red car ', clarification: '' }, false),
-        { action: 'replace', target: 'red car', effects: '', subjects: 'primary', clarification: '' });
+        { action: 'replace', target: 'red car', effects: '', subjects: 'primary', targetBoxes: [], clarification: '' });
     assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: 'bull-headed man',
         effects: ' two light beams from its eyes ', clarification: '' }, false),
         { action: 'replace', target: 'bull-headed man', effects: 'two light beams from its eyes', subjects: 'primary',
-            clarification: '' });
+            targetBoxes: [], clarification: '' });
     assert.deepEqual(validateVideoEditDecision({ action: 'replace', target: 'the dancers', effects: '', subjects: 'group',
-        clarification: '' }, false), { action: 'replace', target: 'the dancers', effects: '', subjects: 'group', clarification: '' });
+        clarification: '' }, false), { action: 'replace', target: 'the dancers', effects: '', subjects: 'group', targetBoxes: [], clarification: '' });
     assert.deepEqual(validateVideoEditDecision({ action: 'clarify', target: '', effects: 'beams', subjects: 'group',
         clarification: 'Which person?' }, false),
-        { action: 'clarify', target: '', effects: '', subjects: 'primary', clarification: 'Which person?' });
+        { action: 'clarify', target: '', effects: '', subjects: 'primary', targetBoxes: [], clarification: 'Which person?' });
     assert.throws(() => validateVideoEditDecision({ action: 'replace', target: 'man', effects: 'x'.repeat(161),
         clarification: '' }, false), /interpret/);
     assert.throws(() => validateVideoEditDecision({ action: 'replace', target: 'man', effects: '', subjects: 'everyone',

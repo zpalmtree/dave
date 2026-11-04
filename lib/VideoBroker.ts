@@ -1,7 +1,7 @@
 import { recoveryMusic } from './VideoMusic.js';
 import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
-import { groundVideoEditTarget, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects } from './VideoEditIntent.js';
+import { groundVideoEditTarget, parseVideoEditTargetBoxes, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects, VideoEditTargetBox } from './VideoEditIntent.js';
 import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReview, EditReviewSample } from './VideoEditReview.js';
 import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
@@ -374,6 +374,7 @@ interface JobRow {
     video_edit_target: string | null;
     video_edit_effects: string | null;
     video_edit_subjects: VideoEditSubjects | null;
+    video_edit_target_boxes: string | null;
     video_edit_mode: VideoEditMode | null;
     video_replacement_prompt: string | null;
     source_image_path: string | null;
@@ -551,6 +552,14 @@ export function parseSubjectBox(header: string | string[] | undefined): [number,
     if (values.length !== 4 || values.some(value => !Number.isFinite(value) || value < 0 || value > 1)) return undefined;
     const [left, top, right, bottom] = values;
     return right > left && bottom > top ? [left, top, right, bottom] : undefined;
+}
+
+function parseStoredTargetBoxes(value: string | null): VideoEditTargetBox[] | null {
+    if (!value) return null;
+    try {
+        const boxes = parseVideoEditTargetBoxes(JSON.parse(value));
+        return boxes.length ? boxes : null;
+    } catch { return null; }
 }
 
 function nowSeconds(): number {
@@ -791,6 +800,7 @@ export class VideoBroker {
             video_edit_target TEXT,
             video_edit_effects TEXT,
             video_edit_subjects TEXT,
+            video_edit_target_boxes TEXT,
             video_edit_mode TEXT,
             video_replacement_prompt TEXT,
             source_image_mime TEXT,
@@ -897,7 +907,7 @@ export class VideoBroker {
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_audio_origin', 'TEXT'], ['source_excerpt_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
-            ['video_edit_target', 'TEXT'], ['video_edit_effects', 'TEXT'], ['video_edit_subjects', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
+            ['video_edit_target', 'TEXT'], ['video_edit_effects', 'TEXT'], ['video_edit_subjects', 'TEXT'], ['video_edit_target_boxes', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
             ['source_image_path', 'TEXT'], ['render_seconds', 'REAL'],
             ['source_image_mime', 'TEXT'],
             ['source_image_bytes', 'INTEGER'],
@@ -1893,6 +1903,7 @@ export class VideoBroker {
         let videoEditTarget = String(body.video_edit_target || '').trim();
         let videoEditEffects = '';
         let videoEditSubjects: VideoEditSubjects = 'primary';
+        let videoEditTargetBoxes: VideoEditTargetBox[] = [];
         if (body.video_edit_mode !== undefined && body.video_edit_mode !== null
             && (!['replace', 'add'].includes(body.video_edit_mode) || !videoEditTarget)) {
             return { status: 400, body: { error: 'Video edit mode must be replace or add, with a subject.' } };
@@ -2018,6 +2029,7 @@ export class VideoBroker {
                 videoEditTarget = grounding.target;
                 videoEditEffects = grounding.effects;
                 videoEditSubjects = grounding.subjects;
+                videoEditTargetBoxes = grounding.targetBoxes || [];
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
                 await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
@@ -2235,12 +2247,12 @@ export class VideoBroker {
                         channel_id, guild_id, command_message_id, status_message_id, status,
                         estimate_low_seconds, estimate_high_seconds, created_at, updated_at,
                         source_audio_path, source_audio_seconds, source_audio_lyrics_json, source_excerpt_json,
-                        source_video_path, source_video_seconds, video_edit_target, video_edit_effects, video_edit_subjects, video_edit_mode, video_replacement_prompt,
+                        source_video_path, source_video_seconds, video_edit_target, video_edit_effects, video_edit_subjects, video_edit_target_boxes, video_edit_mode, video_replacement_prompt,
                         source_image_path, source_image_mime, source_image_bytes,
                         source_image_composite_path, source_image_composite_mime, source_image_composite_bytes,
                         source_image_composition,
                         experiment_id, variant_id, command_variant, source_mode, requested_at, optimization_json, source_kind
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [
                         publicId,
                         String(body.command_message_id),
@@ -2266,6 +2278,7 @@ export class VideoBroker {
                         sourceExcerpt ? JSON.stringify(sourceExcerpt) : null,
                         sourceVideo?.path || null, sourceVideo?.duration || null, videoEditTarget || null,
                         videoEditEffects || null, sourceVideo ? videoEditSubjects : null,
+                        videoEditTargetBoxes.length ? JSON.stringify(videoEditTargetBoxes) : null,
                         sourceVideo ? videoEditMode : null, replacementPrompt || null,
                         sourceImage?.path || null,
                         sourceImage?.mimeType || null,
@@ -4694,6 +4707,7 @@ export class VideoBroker {
                 video_edit_mode: row.video_edit_mode || 'replace',
                 // Jobs grounded before the field existed keep every tracked match.
                 video_edit_subjects: row.video_edit_subjects || null,
+                video_edit_target_boxes: parseStoredTargetBoxes(row.video_edit_target_boxes),
                 video_edit_isolated: this.worker.videoEditVersion >= 8
                     && Boolean(row.source_video_path) && (row.video_edit_mode || 'replace') === 'replace',
                 video_edit_describe_reference: this.worker.videoEditVersion >= 7
