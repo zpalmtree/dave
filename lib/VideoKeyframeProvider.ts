@@ -758,7 +758,7 @@ export async function createVideoEditStill(
         onUsage: guard(options.onUsage), onAttempt: guard(options.onAttempt) };
     const prompt = options.isolated
         ? videoEditStillPrompt('the selected subject in this tight source crop', request)
-            + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Fill the same crop; do not turn a profile into a front-facing portrait.'
+            + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Fill the same crop; do not turn a profile into a front-facing portrait. When Image 1 shows the subject from behind, draw the replacement from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
         : videoEditStillPrompt(target, request);
     const started = Date.now();
     const deadline = Math.min(started + 270_000, options.deadline ?? Infinity);
