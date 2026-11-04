@@ -96,7 +96,7 @@ for (const character of VIDEO_CHARACTERS) {
         for (const other of others(character)) {
             const foreigns = sameCast(character, other) ? [other.clothing, other.clothingAndEmblem]
                 : [other.name, other.clothing, other.clothingAndEmblem, other.accent, other.dialogueStyle];
-            for (const foreign of foreigns) {
+            for (const foreign of foreigns.filter(Boolean)) {
                 assert.equal(text.includes(foreign), false, `${name} prompts mention ${foreign}`);
             }
         }
@@ -104,11 +104,13 @@ for (const character of VIDEO_CHARACTERS) {
         assert.match(guidance, new RegExp(`^${name} is the recurring character`));
         assert.ok(guidance.includes(`dialogue.delivery: "${character.delivery}".`));
         assert.equal(character.delivery.includes('"'), false, 'The delivery is quoted inside the guidance.');
-        assert.ok(character.delivery.includes(`strong ${character.accent} accent`));
+        if (character.accent) assert.ok(character.delivery.includes(`strong ${character.accent} accent`));
+        else assert.doesNotMatch(guidance, /accent|slang/i, 'An accent-free voice gets no accent or slang guidance.');
         assert.ok(guidance.includes(isPixelSprite(character) ? `his own ${character.eyes}, unless`
             : `his own ${character.eyes} and facial proportions`));
         assert.ok(guidance.includes(`Preserve his ${character.clothing} while`));
-        assert.match(guidance, new RegExp(`Season nearly every new ${name} line with slang`));
+        if (character.slang.length) assert.match(guidance, new RegExp(`Season nearly every new ${name} line with slang`));
+        if (character.comedy) assert.ok(guidance.includes(character.comedy));
         for (const phrase of character.slang) assert.ok(guidance.includes(`“${phrase}`), `${phrase} is offered as slang`);
         if (character.persona) assert.ok(guidance.includes(character.persona));
         assert.match(guidance, /explicitly requested verbatim/);
