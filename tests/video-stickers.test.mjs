@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { StickerFormatType } from 'discord.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
-import { videoSourceImageFromMessage, videoSourceImageFromMessages, videoSourcesFromMessages } from '../dist/VideoGeneration.js';
+import { videoSourceImageFromMessage, videoSourceImageFromMessages, videoSourcesFromMessages, videoClipSourceImageFromMessage } from '../dist/VideoGeneration.js';
+import { sourceClipDescriptor } from '../dist/VideoSourceClip.js';
+import { videoOutputFormatForSources } from '../dist/VideoGifDelivery.js';
 import { videoStickerFrameUrl } from '../dist/VideoSticker.js';
 
 const sticker = { id: '1466329130122612786', name: 'cattongue', format: StickerFormatType.PNG };
@@ -35,9 +37,28 @@ test('command sources and attached images keep precedence over reply stickers', 
     assert.equal(videoSourceImageFromMessages(message([], [clip]), message([sticker])).clip_url, clip.url);
 });
 
-test('PNG, APNG and GIF stickers request a static PNG; ambiguous and unsupported stickers fail explicitly', () => {
+test('still PNG stickers are images; animated APNG and GIF stickers are GIF-delivered clips of their original frames', () => {
+    assert.deepEqual(videoSourceImageFromMessage(message([sticker])), expected);
+    assert.equal(videoClipSourceImageFromMessage(message([sticker])), null);
+    for (const [format, extension, url] of [
+        [StickerFormatType.APNG, 'apng', `https://media.discordapp.net/stickers/${sticker.id}.png?passthrough=true`],
+        [StickerFormatType.GIF, 'gif', `https://media.discordapp.net/stickers/${sticker.id}.gif`]]) {
+        const reply = message([{ ...sticker, format, name: 'cat tongue!' }]);
+        assert.equal(videoSourceImageFromMessage(reply), null);
+        const clip = videoClipSourceImageFromMessage(reply);
+        assert.deepEqual(clip, { clip_url: url, name: `cat-tongue.${extension}` });
+        assert.equal(sourceClipDescriptor(clip).name, `cat-tongue.${extension}`);
+        assert.equal(videoOutputFormatForSources(clip), 'gif');
+        assert.equal(videoSourceImageFromMessages(message(), reply).clip_url, url);
+    }
+    // An attached clip outranks a sticker in the same message.
+    const video = { url: 'https://cdn.discordapp.com/attachments/1/2/source.mp4', contentType: 'video/mp4', name: 'source.mp4', size: 10 };
+    assert.equal(videoClipSourceImageFromMessage(message([{ ...sticker, format: StickerFormatType.APNG }], [video])).clip_url, video.url);
+});
+
+test('sticker descriptors still request a static PNG frame; ambiguous and unsupported stickers fail explicitly', () => {
     for (const format of [StickerFormatType.PNG, StickerFormatType.APNG, StickerFormatType.GIF]) {
-        const source = videoSourceImageFromMessage(message([{ ...sticker, format }]));
+        const source = { ...expected, sticker_format: format };
         const url = new URL(videoStickerFrameUrl(source));
         assert.equal(url.hostname, 'media.discordapp.net');
         assert.equal(url.pathname, `/stickers/${sticker.id}.${format === StickerFormatType.GIF ? 'gif' : 'png'}`);
