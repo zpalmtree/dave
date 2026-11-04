@@ -544,6 +544,15 @@ export function videoFailureDisposition(
     return attempt < 2 ? 'retry' : 'fail';
 }
 
+/** The worker's "left,top,right,bottom" target box inside an isolated crop, as fractions. */
+export function parseSubjectBox(header: string | string[] | undefined): [number, number, number, number] | undefined {
+    if (typeof header !== 'string' || header.length > 64) return undefined;
+    const values = header.split(',').map(Number);
+    if (values.length !== 4 || values.some(value => !Number.isFinite(value) || value < 0 || value > 1)) return undefined;
+    const [left, top, right, bottom] = values;
+    return right > left && bottom > top ? [left, top, right, bottom] : undefined;
+}
+
 function nowSeconds(): number {
     return Math.floor(Date.now() / 1000);
 }
@@ -5590,6 +5599,7 @@ export class VideoBroker {
         const started = Date.now();
         try {
             const isolated = req.headers['x-video-edit-isolated'] === '1';
+            const subjectBox = parseSubjectBox(req.headers['x-video-edit-subject-box']);
             const reference = this.editReference(job);
             const target = job.video_edit_target || 'the subject';
             const hooks = this.providerHooks(job);
@@ -5604,6 +5614,7 @@ export class VideoBroker {
                     job.video_replacement_prompt || job.prompt,
                     // Usage events are keyed by attempt, so each shot and round reserves all editor attempts.
                     { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated,
+                        ...(isolated && subjectBox ? { subjectBox } : {}),
                         attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
                         ...(round ? { alternateOnly, deadline: budgetEnd - 60_000 } : {}) },
                 ), job.video_edit_effects || '');

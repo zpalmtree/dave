@@ -710,6 +710,20 @@ export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: s
 }
 
 /**
+ * Which subject of an isolated crop the repaint replaces. A crop can also show other people: in
+ * 24206bd8 the editor replaced one of the two men holding the target aloft, because the prompt
+ * said only "the selected subject". The worker's tracked box names the target's place in the crop.
+ */
+export function isolatedEditSubject(target: string, box?: [number, number, number, number]): string {
+    if (!box) return 'the selected subject in this tight source crop';
+    const percent = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 100);
+    const [left, top, right, bottom] = box.map(percent);
+    const named = target.trim().replace(/^(the|a|an) /i, '').slice(0, 160) || 'subject';
+    return `the ${named}: the one figure occupying the region from ${left}% to ${right}% of Image 1's width`
+        + ` and ${top}% to ${bottom}% of its height. Every other person in Image 1 stays exactly as they are`;
+}
+
+/**
  * Two preferred-editor attempts and one alternate-editor attempt per round, and up to two rounds per
  * shot: the broker draws once more when the still review rejects the first still.
  */
@@ -725,6 +739,8 @@ const VIDEO_EDIT_STILL_GEMINI_ASPECT_RATIOS = [...VIDEO_KEYFRAME_ASPECT_RATIOS, 
 
 type VideoEditStillOptions = VideoFrontierCallOptions & {
     isolated?: boolean;
+    /** The target's box inside an isolated crop as [left, top, right, bottom] fractions, when known. */
+    subjectBox?: [number, number, number, number];
     abortSignal?: AbortSignal;
     /** Added to the attempt numbers, so repaints of several shots of one job record separately. */
     attemptOffset?: number;
@@ -757,7 +773,7 @@ export async function createVideoEditStill(
     options = { ...options, beforeRequest: guard(options.beforeRequest),
         onUsage: guard(options.onUsage), onAttempt: guard(options.onAttempt) };
     const prompt = options.isolated
-        ? videoEditStillPrompt('the selected subject in this tight source crop', request)
+        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox), request)
             + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give the replacement Image 1\'s facial expression exactly: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. The animation keeps this expression, so Image 2\'s own expression gives way to Image 1\'s. Dress the replacement in Image 2\'s own clothing, not the clothing worn in Image 1, so the replacement looks the same in every shot of the clip. Fill the same crop; do not turn a profile into a front-facing portrait. When Image 1 shows the subject from behind, draw the replacement from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
         : videoEditStillPrompt(target, request);
     const started = Date.now();
