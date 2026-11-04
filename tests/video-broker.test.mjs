@@ -1072,6 +1072,8 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
     let reviewCalls = 0;
     const stillVerdicts = [];
     const reviewAttempts = [];
+    const headCalls = [];
+    const reviewTargets = [];
     const repaintOptions = [];
     let refuseRedraw = false;
     const broker = new VideoBroker({
@@ -1093,7 +1095,9 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             writeFileSync(path, 'replacement');
             return { path, bytes: 11, mimeType: 'image/png' };
         },
+        videoEditHeadLocator: async (_frame, _target, box) => (headCalls.push(box), { box: [0.6, 0.29, 0.68, 0.37], side: 'right' }),
         videoEditReviewer: async (_target, _reference, _samples, phase, _hooks, attempt) => {
+            if (phase === 'still') reviewTargets.push(_target);
             reviewCalls++;
             if (phase === 'still') reviewAttempts.push(attempt);
             const accepted = phase === 'still' && stillVerdicts.length ? stillVerdicts.shift() : !rejectEdit;
@@ -1252,6 +1256,10 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 // The worker's target box reaches both draws.
                 assert.deepEqual(repaintOptions.slice(-2).map(options => options.subjectBox),
                     [[0.1, 0.05, 0.62, 0.4], [0.1, 0.05, 0.62, 0.4]]);
+                // Its head position is located once and anchors both draws and both still reviews.
+                assert.deepEqual(headCalls, [[0.1, 0.05, 0.62, 0.4]]);
+                assert.ok(repaintOptions.slice(-2).every(options => /head is at the right end of its body, at 60% to 68%/.test(options.headWording)));
+                assert.ok(reviewTargets.slice(-2).every(target => /\(in Image 1, its head is at the right end/.test(target)));
                 assert.deepEqual(repaintOptions.slice(-2).map(options => [options.attemptOffset, options.alternateOnly]),
                     [[6, undefined], [9, true]]);
                 assert.ok(repaintOptions.at(-1).deadline > Date.now() + 200_000);
