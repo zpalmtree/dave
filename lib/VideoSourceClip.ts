@@ -70,7 +70,11 @@ export function webpFfmpegPath(environment: NodeJS.ProcessEnv = process.env): st
 async function convertAnimatedImage(input: string, output: string, format: 'webp_anim' | 'apng'): Promise<void> {
     await new Promise<void>((resolve, reject) => execFile(webpFfmpegPath(), ['-nostdin', '-v', 'error', '-y',
         '-protocol_whitelist', 'file', '-format_whitelist', format, '-f', format, '-i', input,
-        '-map', '0:v:0', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+        // Transparent frames (stickers, cut-outs) sit on white, as transparent source images do;
+        // dropping alpha would otherwise leave whatever colour the transparent pixels hold.
+        '-filter_complex', '[0:v]format=rgba,pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white@0[fg];'
+            + 'color=white:size=2x2[bg];[bg][fg]scale2ref[base][top];[base][top]overlay=shortest=1:format=auto,format=yuv420p[v]',
+        '-map', '[v]',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output,
     ], { timeout: 600_000, maxBuffer: 1024 * 1024 }, error => error
         ? reject(new Error(format === 'apng' ? 'Could not decode the animated PNG.' : 'Could not decode the animated WebP.'))

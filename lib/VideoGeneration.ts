@@ -2,7 +2,7 @@ import { detectAnimatedPngs, isAnimatedPngAttachment } from './AnimatedPng.js';
 import { publicVideoFromMessage, stripResolvedVideoLinks } from './PublicVideo.js';
 import { fetchProcessableMessage } from './Privacy.js';
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
-import { VideoStickerSourceImage, videoStickerSourceImage } from './VideoSticker.js';
+import { VideoStickerSourceImage, videoStickerSourceImage, videoStickerClip } from './VideoSticker.js';
 import { describeVideoSourceExcerpt, extractVideoSourceRange, videoSourceRange, VideoSourceRange } from './VideoSourceExcerpt.js';
 import { classifyVideoEditIntent, VideoEditMode } from './VideoEditIntent.js';
 import {
@@ -381,7 +381,9 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachm
         if (stickers.length > 1) throw new Error('Please send just one sticker for the starting image.');
         if (!stickers.length) return null;
         const sticker = stickers[0];
-        return videoStickerSourceImage({ sticker_id: sticker.id, sticker_format: sticker.format, name: sticker.name });
+        const descriptor = videoStickerSourceImage({ sticker_id: sticker.id, sticker_format: sticker.format, name: sticker.name });
+        // Animated stickers are clips (videoClipSourceImageFromMessage), like GIF attachments.
+        return videoStickerClip(descriptor) ? null : descriptor;
     }
     const attachment = candidates[0];
     const mime = attachment.contentType?.split(';')[0].toLowerCase()
@@ -413,7 +415,12 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
     if (clips.length > 1) {
         throw new Error('Please attach just one video clip.');
     }
-    if (!clips.length) return null;
+    if (!clips.length) {
+        const stickers = [...(msg.stickers?.values() || [])];
+        if (msg.attachments.size || stickers.length !== 1) return null;
+        const sticker = stickers[0];
+        return videoStickerClip(videoStickerSourceImage({ sticker_id: sticker.id, sticker_format: sticker.format, name: sticker.name }));
+    }
     const attachment = clips[0];
     const mime = attachment.contentType?.split(';')[0].toLowerCase();
     // An animated PNG is named .apng so the broker decodes every frame, not just the first.

@@ -26,3 +26,20 @@ export function videoStickerFrameUrl(value: VideoStickerSourceImage): string {
     const extension = sticker.sticker_format === StickerFormatType.GIF ? 'gif' : 'png';
     return `https://media.discordapp.net/stickers/${sticker.sticker_id}.${extension}?format=png&passthrough=false`;
 }
+
+/**
+ * Animated stickers are edited as clips, like a GIF attachment. Discord serves an APNG
+ * sticker's original frames with passthrough=true; without it the media proxy flattens
+ * the sticker to one still frame.
+ */
+export function videoStickerClip(value: VideoStickerSourceImage): { clip_url: string; name: string } | null {
+    const sticker = videoStickerSourceImage(value);
+    const base = sticker.name.replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'sticker';
+    if (sticker.sticker_format === StickerFormatType.APNG) {
+        return { clip_url: `https://media.discordapp.net/stickers/${sticker.sticker_id}.png?passthrough=true`, name: `${base}.apng` };
+    }
+    if (sticker.sticker_format === StickerFormatType.GIF) {
+        return { clip_url: `https://media.discordapp.net/stickers/${sticker.sticker_id}.gif`, name: `${base}.gif` };
+    }
+    return null;
+}
