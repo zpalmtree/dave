@@ -3,7 +3,7 @@ import { configuredVideoPlannerVariant, createFrontierVideoPlan, FrontierPlanner
 import { VideoFrontierCallOptions, VideoPlannerRequestLimitError, VideoUsagePersistenceError, withVideoPlannerRequestLimit } from './VideoUsage.js';
 import { videoTextModelCapabilities } from './VideoModelCapabilities.js';
 import { VIDEO_MUSE_PLANNER_MODEL, VIDEO_MODELS, VideoModelId } from './VideoProtocol.js';
-import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy } from './VideoRecovery.js';
+import { approvedRecoveryContract, recoveryHash, repairVideoTiming, requireRecoveryPlanningPolicy, splitLongVideoSegments } from './VideoRecovery.js';
 import { classificationReviewHash, reviewVideoMinorClassification, VideoClassificationReview } from './VideoClassificationReview.js';
 
 export class RecoveryStoppedError extends Error {}
@@ -94,6 +94,8 @@ export async function prepareRecoveryPlan(input: {
             }
             const isH3 = VIDEO_MODELS[input.model].generatorModel === 'h3';
             repairVideoTiming(plan, isH3 ? 15 : 20, isH3 ? 5 : 3);
+            // Song and source-audio jobs pin segments to the audio; the split A/B covered neither.
+            if (isH3 && !input.sourceAudioSeconds && process.env.VIDEO_SEGMENT_SPLIT !== '0') splitLongVideoSegments(plan);
             if (input.sourceAudioSeconds) pinVideoPlanToAudio(plan, input.sourceAudioSeconds, input.sourceAudioLyrics);
             requireRecoveryPlanningPolicy(plan, input.sourceAudioSeconds ?? input.options.requestedDurationSeconds);
             const notice = String(plan.generation_notice || '').trim();

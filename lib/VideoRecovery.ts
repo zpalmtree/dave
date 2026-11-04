@@ -234,6 +234,76 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
     }
 }
 
+export const H3_SEGMENT_SPLIT_THRESHOLD_SECONDS = 11;
+
+/**
+ * Split H3 segments longer than the threshold at their most balanced shot boundary, recursively,
+ * keeping every piece at or above the minimum. H3 sampling cost per frame grows with segment
+ * length, so this cut render GPU 15% on the plans it changed, with the same footage, dialogue
+ * and story (segment-split A/B, 2026-11-04). An authored camera cut opens a new scene with its
+ * own opening image; a continuous camera move continues from the previous final frame.
+ */
+export function splitLongVideoSegments(plan: any, threshold = H3_SEGMENT_SPLIT_THRESHOLD_SECONDS, minimum = 5): number {
+    if (!Array.isArray(plan?.segments)) return 0;
+    const tolerance = 1e-6;
+    const shotSeconds = (shots: any[]) => shots.reduce((sum, shot) => sum + Number(shot.duration_seconds), 0);
+    const splitOnce = (segment: any): any[] | null => {
+        const shots: any[] = Array.isArray(segment.shots) ? segment.shots : [];
+        const target = Number(segment.target_seconds);
+        let best: { index: number; left: number; right: number; worst: number } | null = null;
+        for (let index = 1; index < shots.length; index++) {
+            const left = shotSeconds(shots.slice(0, index));
+            const right = target - left;
+            if (left + tolerance < minimum || right + tolerance < minimum) continue;
+            const worst = Math.max(left, right);
+            if (!best || worst < best.worst - tolerance) best = { index, left, right, worst };
+        }
+        if (!best) return null;
+        const hasOutput = segment.output_seconds !== undefined && segment.output_seconds !== null;
+        const trimmed = hasOutput ? target - Number(segment.output_seconds) : 0;
+        // Any trim belongs to the end of the original segment, so it moves to the last piece.
+        if (trimmed > tolerance && best.right - trimmed < 0.5) return null;
+        const first = { ...segment, shots: shots.slice(0, best.index), target_seconds: best.left };
+        const second = { ...segment, shots: shots.slice(best.index), target_seconds: best.right,
+            transition: shots[best.index].camera_transition === 'continuous' ? 'continue' : 'cut' };
+        if (hasOutput) {
+            first.output_seconds = best.left;
+            second.output_seconds = best.right - trimmed;
+        } else {
+            delete first.output_seconds;
+            delete second.output_seconds;
+        }
+        if (second.overlay_label !== undefined) second.overlay_label = 'N/A';
+        return [first, second];
+    };
+    const segments: any[] = [];
+    const oldIndexes: number[] = [];
+    let splits = 0;
+    const visit = (segment: any) => {
+        const pieces = Number(segment.target_seconds) > threshold + tolerance ? splitOnce(segment) : null;
+        if (!pieces) {
+            segments.push(segment);
+            return;
+        }
+        splits++;
+        pieces.forEach(visit);
+    };
+    for (const [originalIndex, segment] of plan.segments.entries()) {
+        oldIndexes[originalIndex] = segments.length + 1;
+        visit(segment);
+    }
+    if (!splits) return 0;
+    segments[0].transition = 'start';
+    plan.segments = segments;
+    if (Array.isArray(plan.segment_keyframes)) {
+        plan.segment_keyframes = plan.segment_keyframes.map((frame: any) => ({
+            ...frame, segment_index: oldIndexes[Number(frame.segment_index) - 1],
+        })).filter((frame: any) => frame.segment_index > 1);
+    }
+    plan.runtime_segment_split_count = splits;
+    return splits;
+}
+
 export const VIDEO_AUTOMATIC_LIMIT_SECONDS = 120;
 
 /** Keep complete opening segments; preserve the omitted tail for fidelity checks and diagnostics. */
