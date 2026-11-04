@@ -2011,6 +2011,26 @@ test('screenplay schema and compiler carry the planner spoken form of a line', (
     }
 });
 
+test('planner voices plain typos corrected but keeps intentional spelling and grammar', () => {
+    const dialogueSchema = VIDEO_PLAN_SCHEMA.properties.segments.items.properties.shots.items.properties.dialogue.items;
+    assert.match(dialogueSchema.properties.spoken_text.description, /accidental English typo is corrected/);
+    assert.match(dialogueSchema.properties.spoken_text.description, /Slang, dialect, deliberate or joke spellings/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /correct an English word the user plainly mistyped/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /deliberate misspellings and joke spellings \(stronk, yurope, iloominarty\)/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Never correct grammar or word choice and never add, drop, or reorder a word/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /Never put an expansion or correction into dialogue\.text itself/);
+    const line = compileBestEffortFrontierVideoPlan(
+        frontierPlan([{
+            speaker_id: 'OALGO', language: 'English', delivery: 'smug',
+            text: "dont tell my aunt, she'll get jelous o algo",
+            spoken_text: "don't tell my aunt, she'll get jealous o algo",
+        }]),
+        frontierAnalysis('generated'), 'OALGO brags.', 'minimax',
+    ).segments[0].shots[0].dialogue[0];
+    assert.equal(line.text, "dont tell my aunt, she'll get jelous o algo");
+    assert.equal(line.spoken_text, "don't tell my aunt, she'll get jealous o algo");
+});
+
 test('screenplay schema and compiler keep a silent dialogue beat only before a later line in its shot', () => {
     const dialogueSchema = VIDEO_PLAN_SCHEMA.properties.segments.items.properties.shots.items.properties.dialogue.items;
     assert.ok(dialogueSchema.required.includes('beat_before'));
