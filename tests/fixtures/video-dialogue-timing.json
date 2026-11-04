@@ -15,6 +15,11 @@
     "seconds": 4.085714285714286
   },
   {
+    "name": "a beat between split lines adds its pause; one before a shot's first line does not",
+    "lines": [{"text": "I made it.", "beat_before": "ignored before the first line"}, {"text": "Barely.", "beat_before": "He glances back at the finish line"}],
+    "seconds": 4.864285714285714
+  },
+  {
     "name": "silent scene",
     "lines": [],
     "seconds": 0

@@ -2011,6 +2011,28 @@ test('screenplay schema and compiler carry the planner spoken form of a line', (
     }
 });
 
+test('screenplay schema and compiler keep a silent dialogue beat only before a later line in its shot', () => {
+    const dialogueSchema = VIDEO_PLAN_SCHEMA.properties.segments.items.properties.shots.items.properties.dialogue.items;
+    assert.ok(dialogueSchema.required.includes('beat_before'));
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /beat_before/);
+    assert.match(VIDEO_PLANNER_INSTRUCTIONS, /use a sniff, sigh, or laugh only when the moment gives a reason/);
+    const line = (text, beat_before) => ({ speaker_id: 'OALGO', language: 'English', delivery: 'boastful', text, beat_before });
+    const dialogue = compileBestEffortFrontierVideoPlan(
+        frontierPlan([
+            line('No refunds?', 'He takes a breath.'),
+            line('Then I keep the receipt.', 'He folds the receipt into his shirt pocket.'),
+            line('Forever.', 'He mouths "wow".'),
+            line('Mayne.', ''),
+        ]),
+        frontierAnalysis('generated'),
+        'OALGO complains about refunds.',
+        'minimax',
+    ).segments[0].shots[0].dialogue;
+    assert.deepEqual(dialogue.map(entry => entry.beat_before),
+        [undefined, 'He folds the receipt into his shirt pocket', undefined, undefined]);
+    assert.equal('beat_before' in dialogue[0], false);
+});
+
 test('best-effort compiler preserves all beats and extends generation beyond the render budget', () => {
     const plan = frontierPlan();
     plan.segments = Array.from({ length: 8 }, (_, index) => ({

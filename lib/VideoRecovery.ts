@@ -81,12 +81,33 @@ function requireProtectedRecoveryDialogue(plan: any, analyses: any[], prompt: st
     }
 }
 
-function speechSeconds(lines: any[]): number {
+/** A silent physical beat between two lines of one shot (dialogue.beat_before). */
+export const VIDEO_DIALOGUE_BEAT_SECONDS = 0.6;
+const DIALOGUE_BEAT_MAX_CHARACTERS = 200;
+
+/**
+ * The beat performed before a later line in its shot, or ''. Matches
+ * video_gen.dialogue_beat: a beat before a shot's first line belongs in shot.visual,
+ * and one that quotes wording would be voiced, so both are ignored.
+ */
+export function dialogueBeat(line: any, indexInShot: number): string {
+    if (indexInShot <= 0) return '';
+    const beat = String(line?.beat_before || '').replace(/\s+/g, ' ').trim().replace(/[.;,:]+$/, '');
+    if (!beat || /["\u201c\u201d<>]/.test(beat)) return '';
+    return beat.slice(0, DIALOGUE_BEAT_MAX_CHARACTERS).trimEnd();
+}
+
+function shotBeats(lines: any[]): number {
+    return lines.filter((line, index) => String(line?.text || '').trim() && dialogueBeat(line, index)).length;
+}
+
+function speechSeconds(lines: any[], beats = shotBeats(lines)): number {
     // Keep this estimate in sync with video_gen.dialogue_floor_seconds. The
     // renderer validates approved plans too, including their final cut points.
+    // `lines` is one shot's dialogue unless the caller counts beats per shot.
     const spoken = lines.filter(line => String(line.text || '').trim());
     if (!spoken.length) return 0;
-    return spoken.reduce((total, line) => {
+    return beats * VIDEO_DIALOGUE_BEAT_SECONDS + spoken.reduce((total, line) => {
         const text = String(line.text);
         const fast = /\b(?:fast|rapid|double[- ]?time|rap|rapping)\b/i.test(String(line.delivery || ''));
         return total + (text.match(/[\p{L}\p{N}_][\p{L}\p{N}_'-]*/gu) || []).length / ((fast ? 220 : 140) / 60)
@@ -96,8 +117,13 @@ function speechSeconds(lines: any[]): number {
     }, 1.25 + Math.max(0, spoken.length - 1) * 0.4);
 }
 
+function segmentSpeechSeconds(shots: any[]): number {
+    return speechSeconds(shots.flatMap((shot: any) => shot.dialogue || []),
+        shots.reduce((total: number, shot: any) => total + shotBeats(shot.dialogue || []), 0));
+}
+
 export function videoDialogueFloorSeconds(segment: any): number {
-    return speechSeconds((segment?.shots || []).flatMap((shot: any) => shot.dialogue || []));
+    return segmentSpeechSeconds(segment?.shots || []);
 }
 
 /** A shot's physical place, or '' when the planner gave none (older and fallback plans). */
@@ -122,11 +148,11 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
     for (const [originalIndex, original] of plan.segments.entries()) {
         if (!Array.isArray(original?.shots) || !original.shots.length) continue;
         oldIndexes[originalIndex] = repaired.length + 1;
-        const lines = original.shots.flatMap((shot: any) => shot.dialogue || []);
+        const segmentSpeech = segmentSpeechSeconds(original.shots);
         const relocated = locationChanges(original.shots);
         if (!relocated && original.shots.length <= 4 && Number(original.target_seconds) >= minimum
-            && Number(original.target_seconds) <= maximum && speechSeconds(lines) <= Number(original.target_seconds)
-            && speechSeconds(lines) <= Number(original.output_seconds ?? original.target_seconds)
+            && Number(original.target_seconds) <= maximum && segmentSpeech <= Number(original.target_seconds)
+            && segmentSpeech <= Number(original.output_seconds ?? original.target_seconds)
             && original.shots.every((shot: any) => speechSeconds(shot.dialogue || []) <= Number(shot.duration_seconds))) {
             repaired.push(original);
             continue;
@@ -152,6 +178,7 @@ export function repairVideoTiming(plan: any, maximum: number, minimum: number): 
                     }
                     const part = { ...line, text: words.slice(0, count).join(' ') };
                     if (part.text !== line.text) delete part.spoken_text;
+                    if (parts.length) delete part.beat_before;
                     parts.push(part);
                     words = words.slice(count);
                 }
