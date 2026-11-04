@@ -357,10 +357,19 @@ function inferredImageMime(name: string | null | undefined): string | null {
     return null;
 }
 
+// Discord's AttachmentFlags.IsAnimated; still WebPs remain starting images.
+function isAnimatedWebpAttachment(attachment: { contentType?: string | null; name?: string | null; flags?: unknown }): boolean {
+    const mime = attachment.contentType?.split(';')[0].toLowerCase();
+    const flags = attachment.flags as { bitfield?: number } | number | null | undefined;
+    const bits = Number(typeof flags === 'object' ? flags?.bitfield : flags) || 0;
+    return (mime === 'image/webp' || inferredImageMime(attachment.name) === 'image/webp') && (bits & 32) !== 0;
+}
+
 export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachmentSourceImage | VideoStickerSourceImage | null {
     const candidates = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         if (mime === 'image/gif' || inferredImageMime(attachment.name) === 'image/gif') return false;
+        if (isAnimatedWebpAttachment(attachment)) return false;
         return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
     });
     if (candidates.length > 1) {
@@ -395,6 +404,7 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
     const clips = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         const extension = attachment.name?.split('.').pop()?.toLowerCase();
+        if (extension === 'webp' || mime === 'image/webp') return isAnimatedWebpAttachment(attachment);
         return Boolean(mime === 'image/gif' || mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.has(extension)));
     });
     if (clips.length > 1) {
@@ -402,8 +412,9 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
     }
     if (!clips.length) return null;
     const attachment = clips[0];
-    const name = attachment.contentType?.split(';')[0].toLowerCase() === 'image/gif'
-        && !/\.gif$/i.test(attachment.name || '') ? 'clip.gif' : attachment.name || 'clip';
+    const mime = attachment.contentType?.split(';')[0].toLowerCase();
+    const name = mime === 'image/gif' && !/\.gif$/i.test(attachment.name || '') ? 'clip.gif'
+        : isAnimatedWebpAttachment(attachment) && !/\.webp$/i.test(attachment.name || '') ? 'clip.webp' : attachment.name || 'clip';
     return { clip_url: attachment.url, name, bytes: attachment.size };
 }
 

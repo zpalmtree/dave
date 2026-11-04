@@ -15,7 +15,7 @@ export function videoOutputFormatForSources(...sources: unknown[]): VideoOutputF
     return sources.some(source => {
         if (!source || typeof source !== 'object' || !('clip_url' in source)) return false;
         const clip = source as { clip_url: string; name?: string; source_page_url?: string };
-        return /\.gif$/i.test(clip.name || '') || isGifVideoUrl(clip.clip_url) || isGifPageUrl(clip.source_page_url || '');
+        return /\.(?:gif|webp)$/i.test(clip.name || '') || isGifVideoUrl(clip.clip_url) || isGifPageUrl(clip.source_page_url || '');
     }) ? 'gif' : 'mp4';
 }
 

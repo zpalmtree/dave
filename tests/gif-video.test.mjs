@@ -9,7 +9,8 @@ import { Response } from 'node-fetch';
 import { gifVideoFromMessage, isGifVideoUrl, stripGifVideoLinks } from '../dist/GifVideo.js';
 import { videoSourcesFromMessages, videoSourceImageFromMessage, videoClipSourceImageFromMessage,
     resolveVideoEditRequest, videoReplacementUsesPreset, videoPromptFromMessages } from '../dist/VideoGeneration.js';
-import { sourceClipDescriptor, storeVideoSourceClip } from '../dist/VideoSourceClip.js';
+import { sourceClipDescriptor, storeVideoSourceClip, webpFfmpegPath } from '../dist/VideoSourceClip.js';
+import { publicVideoFromMessage } from '../dist/PublicVideo.js';
 import { MEXIMUTT } from '../dist/VideoCharacters.js';
 import { videoOutputFormatForSources } from '../dist/VideoGifDelivery.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
@@ -91,6 +92,25 @@ test('Klipy replies use the playable video rather than the WebP thumbnail and re
         assert.equal(await gifVideoFromMessage(message(url), noFetch), null);
     }
     await assert.rejects(gifVideoFromMessage(message(`${klipy} ${tenor}`), noFetch), /exactly one/);
+});
+
+test('fxtwitter GIF links use the tweet GIF MP4 rather than the animated WebP and retain GIF delivery', async () => {
+    const webp = 'https://gif.fxtwitter.com/tweet_video/HMcDY8zWgAAZJw4.webp';
+    const mp4 = 'https://video.twimg.com/tweet_video/HMcDY8zWgAAZJw4.mp4';
+    const embed = { type: 'image', url: webp, thumbnail: { url: webp } };
+    const prompt = 'replace the man being thrown with meximutt';
+    for (const reply of [message(webp, [], [embed]), message('', [], [embed]),
+        message(webp.replace('fxtwitter.com', 'fixupx.com').replace('.webp', '.gif'))]) {
+        const result = await resolveVideoEditRequest(prompt, message(prompt), reply, '', MEXIMUTT, noFetch);
+        assert.equal(result.replacement.target, 'the man being thrown');
+        assert.equal(sourceClipDescriptor(result.sources.clip).clip_url, mp4);
+        assert.equal(videoOutputFormatForSources(result.sources.clip), 'gif');
+        assert.equal(videoPromptFromMessages(prompt, reply, undefined, '', result.sources.clip), prompt);
+    }
+    for (const url of ['https://gif.fxtwitter.com.evil.test/tweet_video/a.webp',
+        'https://gif.fxtwitter.com/ext_tw_video/a.webp', 'https://fxtwitter.com/tweet_video/a.webp']) {
+        assert.equal(await gifVideoFromMessage(message(url), noFetch), null);
+    }
 });
 
 test('missing embeds resolve bounded share-page metadata and prefer animation over thumbnails', async () => {
@@ -177,6 +197,68 @@ test('GIF resolution rejects ambiguous, unavailable, redirected and untrusted so
         await assert.rejects(gifVideoFromMessage(message(tenor), resolve), /upload the GIF directly/);
     }
     assert.throws(() => sourceClipDescriptor({ clip_url: gif.url, name: gif.name, bytes: 101 * 1024 * 1024 }), /100 MiB/);
+});
+
+test('animated WebP attachments and flagged embeds are GIF-style clips; still WebPs stay images', async () => {
+    const animated = { url: 'https://cdn.discordapp.com/attachments/1/2/dance.webp', name: 'dance.webp', contentType: 'image/webp', size: 456 };
+    for (const flags of [32, { bitfield: 32 }]) {
+        const reply = message('', [{ ...animated, flags }]);
+        assert.equal(videoSourceImageFromMessage(reply), null);
+        const clip = videoClipSourceImageFromMessage(reply);
+        assert.equal(clip.clip_url, animated.url);
+        assert.equal(videoOutputFormatForSources(clip), 'gif');
+        assert.equal((await videoSourcesFromMessages(message(), reply, true, noTwitter)).clip.clip_url, animated.url);
+    }
+    assert.equal(videoClipSourceImageFromMessage(message('', [{ ...animated, name: 'download', flags: 32 }])).name, 'clip.webp');
+    const still = message('', [{ ...animated, flags: 0 }]);
+    assert.equal(videoClipSourceImageFromMessage(still), null);
+    assert.equal(videoSourceImageFromMessage(still).url, animated.url);
+
+    const link = 'https://example.com/media/dance.webp';
+    const thumbnail = { url: link, content_type: 'image/webp', flags: 32 };
+    for (const reply of [message(link, [], [{ type: 'image', url: link, thumbnail }]),
+        message('', [], [{ url: link, thumbnail: { url: link }, data: { type: 'image', url: link, thumbnail } }])]) {
+        assert.deepEqual(await publicVideoFromMessage(reply, noFetch), { clip_url: link, name: 'source.webp', source_page_url: link });
+    }
+    const webpResponse = async url => new Response(Readable.from([Buffer.from('RIFF')]), { url, headers: { 'content-type': 'image/webp' } });
+    assert.equal(await publicVideoFromMessage(message(link, [], [{ type: 'image', url: link, thumbnail: { ...thumbnail, flags: 0 } }]), webpResponse), null);
+});
+
+const webpCapable = (() => {
+    try { return execFileSync(webpFfmpegPath(), ['-hide_banner', '-h', 'demuxer=webp_anim']).includes('Animated WebP demuxer'); }
+    catch { return false; }
+})();
+
+test('broker converts animated WebP to playable MP4 with motion, duration, odd dimensions and excerpt support',
+    { skip: webpCapable ? false : 'needs FFmpeg 9.0+ (scripts/install-webp-ffmpeg.sh or VIDEO_WEBP_FFMPEG)' }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'webp-source-test-'));
+    try {
+        const fixture = join(directory, 'fixture.webp');
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=65x49:rate=10:duration=2',
+            '-c:v', 'libwebp_anim', '-loop', '0', fixture]);
+        const bytes = readFileSync(fixture);
+        const source = { clip_url: 'https://example.com/media/fixture.webp', name: 'source.webp', bytes: bytes.length };
+        const fetcher = async url => new Response(Readable.from([bytes]), { url, headers: { 'content-type': 'image/webp' } });
+        const full = await storeVideoSourceClip(source, join(directory, 'full'), null, undefined, { fetcher });
+        assert.match(full.path, /source-video\.mp4$/);
+        assert.ok(Math.abs(full.duration - 2) < 0.11, full.duration);
+        assert.equal(full.bytes, readFileSync(full.path).length);
+        const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', full.path]));
+        assert.equal(probe.streams.length, 1);
+        assert.equal(probe.streams[0].codec_name, 'h264');
+        assert.equal(probe.streams[0].width, 66);
+        assert.equal(probe.streams[0].height, 50);
+        const frame = seconds => execFileSync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', full.path,
+            '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+        assert.notDeepEqual(frame(0), frame(1.5), 'animation survives conversion');
+        for (const leftover of ['source-video.part', 'source-webp.mp4']) assert.equal(existsSync(join(directory, 'full', leftover)), false);
+        const cut = await storeVideoSourceClip(source, join(directory, 'cut'), { start_seconds: 0.5, end_seconds: 1.5 }, undefined, { fetcher });
+        assert.ok(Math.abs(cut.duration - 1) < 0.11, cut.duration);
+        assert.equal(existsSync(join(directory, 'cut', 'source-webp.mp4')), false);
+        await assert.rejects(storeVideoSourceClip(source, join(directory, 'bad'), null, undefined, {
+            fetcher: async url => new Response(Readable.from([readFileSync(fixture).subarray(0, 40)]), { url }),
+        }), /WebP|decode/);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('broker normalizes one GIF loop into playable MP4 with motion, duration, odd dimensions and excerpt support', async () => {

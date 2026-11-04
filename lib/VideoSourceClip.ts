@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
-import { createWriteStream, mkdirSync, renameSync, rmSync, statSync } from 'fs';
+import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -14,7 +15,7 @@ export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
 export const VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS = 15;
 export const VIDEO_EDIT_MAX_SECONDS = VIDEO_MAX_TOTAL_DURATION_SECONDS;
 export const VIDEO_EDIT_MAX_BYTES = 100 * 1024 * 1024;
-export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'gif']);
+export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'gif', 'webp']);
 
 export interface SubmittedVideoSourceClip {
     clip_url: string;
@@ -46,7 +47,7 @@ export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | nul
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();
     if (!extension || !VIDEO_CLIP_EXTENSIONS.has(extension)) {
-        throw new Error('The source video must be MP4, MOV, M4V, WebM, MKV, or GIF.');
+        throw new Error('The source video must be MP4, MOV, M4V, WebM, MKV, GIF, or animated WebP.');
     }
     const bytes = Number(value.bytes || 0);
     if (bytes && (!Number.isInteger(bytes) || bytes < 0 || bytes > VIDEO_EDIT_MAX_BYTES)) {
@@ -57,6 +58,23 @@ export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | nul
 
 export const LOCAL_VIDEO_INPUT_ARGS = ['-protocol_whitelist', 'file,pipe',
     '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif'];
+
+/** FFmpeg decodes animated WebP from 9.0; scripts/install-webp-ffmpeg.sh installs it beside the distro ffmpeg. */
+export function webpFfmpegPath(environment: NodeJS.ProcessEnv = process.env): string {
+    if (environment.VIDEO_WEBP_FFMPEG) return environment.VIDEO_WEBP_FFMPEG;
+    const installed = join(homedir(), '.local', 'opt', 'ffmpeg-9.0', 'ffmpeg');
+    return existsSync(installed) ? installed : 'ffmpeg';
+}
+
+/** Animated WebP has no container duration, so it becomes an MP4 before probing. */
+async function convertAnimatedWebp(input: string, output: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => execFile(webpFfmpegPath(), ['-nostdin', '-v', 'error', '-y',
+        '-protocol_whitelist', 'file', '-format_whitelist', 'webp_anim', '-f', 'webp_anim', '-i', input,
+        '-map', '0:v:0', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output,
+    ], { timeout: 600_000, maxBuffer: 1024 * 1024 }, error => error
+        ? reject(new Error('Could not decode the animated WebP.')) : resolve()));
+}
 
 async function probeDuration(path: string): Promise<number> {
     const output = await new Promise<string>((resolve, reject) => execFile('ffprobe', [
@@ -109,10 +127,12 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
     const extension = source.name.split('.').pop()!.toLowerCase();
     mkdirSync(directory, { recursive: true });
     const temporary = join(directory, 'source-video.part');
-    const destination = join(directory, `source-video.${extension}`);
+    const destination = join(directory, `source-video.${extension === 'webp' ? 'mp4' : extension}`);
+    const webpVideo = join(directory, 'source-webp.mp4');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     rmSync(temporary, { force: true });
+    rmSync(webpVideo, { force: true });
     try {
         let bytes = 0;
         if (isYoutubeVideoUrl(source.clip_url)) {
@@ -138,20 +158,26 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
             await pipeline(response.body, meter, createWriteStream(temporary, { flags: 'wx' }));
         }
         if (!bytes) throw new Error('The source video is empty.');
-        const duration = await probeDuration(temporary);
+        let input = temporary;
+        if (extension === 'webp') {
+            await convertAnimatedWebp(temporary, webpVideo);
+            input = webpVideo;
+        }
+        const duration = await probeDuration(input);
         // Soundtrack extraction selects its own excerpt after transcribing the whole song.
         const excerpt = options.fullSource ? null : videoSourceClipExcerpt(duration, range);
         if (excerpt || extension === 'gif') {
             const cut = join(directory, 'source-video.mp4');
-            const cutDuration = await cutVideoSourceClip(temporary, cut, excerpt || {
+            const cutDuration = await cutVideoSourceClip(input, cut, excerpt || {
                 start_seconds: 0, end_seconds: duration, source_seconds: duration, label: '', chosen: 'start',
             }, extension === 'gif');
             return { path: cut, bytes: statSync(cut).size, duration: cutDuration, excerpt };
         }
-        renameSync(temporary, destination);
-        return { path: destination, bytes, duration };
+        renameSync(input, destination);
+        return { path: destination, bytes: input === temporary ? bytes : statSync(destination).size, duration };
     } finally {
         clearTimeout(timeout);
         rmSync(temporary, { force: true });
+        rmSync(webpVideo, { force: true });
     }
 }
