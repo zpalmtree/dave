@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditStillWithEffects } from '../dist/VideoKeyframeProvider.js';
 import { parseSubjectBox } from '../dist/VideoBroker.js';
+import { parseVideoEditHead, videoEditHeadWording } from '../dist/VideoEditIntent.js';
 import { inflateSync } from 'node:zlib';
 import { createCanvas, loadImage } from 'canvas';
 import { config } from '../dist/Config.js';
@@ -57,6 +58,15 @@ test('an isolated repaint names the target and its place in a crop shared with o
     assert.match(subject, /from 10% to 62% of Image 1's width and 5% to 40% of its height/);
     assert.match(videoEditStillPrompt(subject, 'meximutt'), /Every other person in Image 1 stays exactly as they are/);
     assert.equal(isolatedEditSubject('the man'), 'the selected subject in this tight source crop');
+    // 24206bd8: at 15 px the editor drew the thrown man's head where his feet were.
+    const head = videoEditHeadWording(parseVideoEditHead({ found: true, head_box_2d: [294, 606, 373, 674], head_side: 'right' }));
+    assert.equal(head, "its head is at the right end of its body, at 61% to 67% of Image 1's width and 29% to 37% of its height");
+    assert.match(isolatedEditSubject('the person falling', [0.1, 0.05, 0.62, 0.4], head),
+        /of its height; its head is at the right end of its body, .* so the replacement's head and face go exactly there/);
+    for (const bad of [{ found: false, head_box_2d: [1, 2, 3, 4], head_side: 'left' },
+        { found: true, head_box_2d: [5, 2, 3, 4], head_side: 'left' }, { found: true, head_box_2d: [1, 2, 3, 4], head_side: 'up' }]) {
+        assert.equal(parseVideoEditHead(bad), null);
+    }
     assert.deepEqual(parseSubjectBox('0.100,0.050,0.620,0.400'), [0.1, 0.05, 0.62, 0.4]);
     for (const bad of [undefined, '', '0.1,0.2,0.3', '0.5,0.1,0.4,0.9', '0,0,1.2,1', 'a,b,c,d', ['0,0,1,1']]) {
         assert.equal(parseSubjectBox(bad), undefined, String(bad));

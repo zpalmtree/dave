@@ -1,7 +1,7 @@
 import { recoveryMusic } from './VideoMusic.js';
 import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
-import { groundVideoEditTarget, parseVideoEditTargetBoxes, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects, VideoEditTargetBox } from './VideoEditIntent.js';
+import { groundVideoEditTarget, locateVideoEditHead, parseVideoEditTargetBoxes, videoEditHeadWording, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects, VideoEditTargetBox } from './VideoEditIntent.js';
 import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReview, EditReviewSample } from './VideoEditReview.js';
 import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
@@ -182,6 +182,7 @@ interface BrokerOptions {
     ) => Promise<VideoKeyframeResult>;
     keyframeCandidateGenerator?: typeof generateFrontierVideoKeyframeCandidate;
     videoEditStillGenerator?: typeof createVideoEditStill;
+    videoEditHeadLocator?: typeof locateVideoEditHead;
     keyframeReferenceResolver?: (
         plan: Record<string, any>,
         jobDirectory: string,
@@ -5617,6 +5618,11 @@ export class VideoBroker {
             const reference = this.editReference(job);
             const target = job.video_edit_target || 'the subject';
             const hooks = this.providerHooks(job);
+            // Which end is the head: at 15 px the editor flipped a thrown man and the review missed it.
+            const head = isolated && subjectBox ? await (this.options.videoEditHeadLocator || locateVideoEditHead)(
+                { bytes: frame, mimeType }, target, subjectBox, hooks) : null;
+            const headWording = head ? videoEditHeadWording(head) : undefined;
+            const reviewTarget = headWording ? `${target} (in Image 1, ${headWording})` : target;
             const extension = (still: VideoKeyframeResult) => still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
             // The isolated worker waits eight minutes for this response.
             const budgetEnd = started + 420_000;
@@ -5628,14 +5634,14 @@ export class VideoBroker {
                     job.video_replacement_prompt || job.prompt,
                     // Usage events are keyed by attempt, so each shot and round reserves all editor attempts.
                     { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated,
-                        ...(isolated && subjectBox ? { subjectBox } : {}),
+                        ...(isolated && subjectBox ? { subjectBox, ...(headWording ? { headWording } : {}) } : {}),
                         attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
                         ...(round ? { alternateOnly, deadline: budgetEnd - 60_000 } : {}) },
                 ), job.video_edit_effects || '');
                 let review: EditReview | undefined;
                 if (isolated || still.provider !== 'openai') {
                     review = validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
-                        target, reference, [{ source: { bytes: frame, mimeType }, edited: still }],
+                        reviewTarget, reference, [{ source: { bytes: frame, mimeType }, edited: still }],
                         'still', hooks, shot + round * 64));
                     writeFileSync(join(directory, `video-edit-still-review${suffix}${round ? `-${round + 1}` : ''}.json`),
                         JSON.stringify(review, null, 2));
