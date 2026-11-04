@@ -10,12 +10,13 @@ import { VIDEO_DISCORD_BASELINE_UPLOAD_BYTES, VideoJobView } from './VideoProtoc
 const run = promisify(execFile);
 export type VideoOutputFormat = 'gif' | 'mp4';
 
-/** GIF sites often supply an MP4 rendition; retain the original media's intent. */
+/** GIF sites often supply an MP4 rendition; retain the original media's intent. Discord shows
+ * animated WebP and APNG like GIFs, so those clips also come back as GIFs. */
 export function videoOutputFormatForSources(...sources: unknown[]): VideoOutputFormat {
     return sources.some(source => {
         if (!source || typeof source !== 'object' || !('clip_url' in source)) return false;
         const clip = source as { clip_url: string; name?: string; source_page_url?: string };
-        return /\.(?:gif|webp)$/i.test(clip.name || '') || isGifVideoUrl(clip.clip_url) || isGifPageUrl(clip.source_page_url || '');
+        return /\.(?:gif|webp|apng)$/i.test(clip.name || '') || isGifVideoUrl(clip.clip_url) || isGifPageUrl(clip.source_page_url || '');
     }) ? 'gif' : 'mp4';
 }
 

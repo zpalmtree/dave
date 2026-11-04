@@ -15,7 +15,7 @@ export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
 export const VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS = 15;
 export const VIDEO_EDIT_MAX_SECONDS = VIDEO_MAX_TOTAL_DURATION_SECONDS;
 export const VIDEO_EDIT_MAX_BYTES = 100 * 1024 * 1024;
-export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'gif', 'webp']);
+export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'gif', 'webp', 'apng']);
 
 export interface SubmittedVideoSourceClip {
     clip_url: string;
@@ -47,7 +47,7 @@ export function sourceClipDescriptor(value: any): SubmittedVideoSourceClip | nul
     const name = String(value.name || 'clip.mp4').slice(0, 255);
     const extension = name.split('.').pop()?.toLowerCase();
     if (!extension || !VIDEO_CLIP_EXTENSIONS.has(extension)) {
-        throw new Error('The source video must be MP4, MOV, M4V, WebM, MKV, GIF, or animated WebP.');
+        throw new Error('The source video must be MP4, MOV, M4V, WebM, MKV, GIF, animated WebP, or animated PNG.');
     }
     const bytes = Number(value.bytes || 0);
     if (bytes && (!Number.isInteger(bytes) || bytes < 0 || bytes > VIDEO_EDIT_MAX_BYTES)) {
@@ -66,14 +66,15 @@ export function webpFfmpegPath(environment: NodeJS.ProcessEnv = process.env): st
     return existsSync(installed) ? installed : 'ffmpeg';
 }
 
-/** Animated WebP has no container duration, so it becomes an MP4 before probing. */
-async function convertAnimatedWebp(input: string, output: string): Promise<void> {
+/** Animated WebP and APNG have no container duration, so they become an MP4 before probing. */
+async function convertAnimatedImage(input: string, output: string, format: 'webp_anim' | 'apng'): Promise<void> {
     await new Promise<void>((resolve, reject) => execFile(webpFfmpegPath(), ['-nostdin', '-v', 'error', '-y',
-        '-protocol_whitelist', 'file', '-format_whitelist', 'webp_anim', '-f', 'webp_anim', '-i', input,
+        '-protocol_whitelist', 'file', '-format_whitelist', format, '-f', format, '-i', input,
         '-map', '0:v:0', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output,
     ], { timeout: 600_000, maxBuffer: 1024 * 1024 }, error => error
-        ? reject(new Error('Could not decode the animated WebP.')) : resolve()));
+        ? reject(new Error(format === 'apng' ? 'Could not decode the animated PNG.' : 'Could not decode the animated WebP.'))
+        : resolve()));
 }
 
 async function probeDuration(path: string): Promise<number> {
@@ -127,7 +128,7 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
     const extension = source.name.split('.').pop()!.toLowerCase();
     mkdirSync(directory, { recursive: true });
     const temporary = join(directory, 'source-video.part');
-    const destination = join(directory, `source-video.${extension === 'webp' ? 'mp4' : extension}`);
+    const destination = join(directory, `source-video.${extension === 'webp' || extension === 'apng' ? 'mp4' : extension}`);
     const webpVideo = join(directory, 'source-webp.mp4');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -159,8 +160,8 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
         }
         if (!bytes) throw new Error('The source video is empty.');
         let input = temporary;
-        if (extension === 'webp') {
-            await convertAnimatedWebp(temporary, webpVideo);
+        if (extension === 'webp' || extension === 'apng') {
+            await convertAnimatedImage(temporary, webpVideo, extension === 'webp' ? 'webp_anim' : 'apng');
             input = webpVideo;
         }
         const duration = await probeDuration(input);

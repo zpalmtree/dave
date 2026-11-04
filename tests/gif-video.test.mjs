@@ -14,6 +14,7 @@ import { publicVideoFromMessage } from '../dist/PublicVideo.js';
 import { MEXIMUTT } from '../dist/VideoCharacters.js';
 import { videoOutputFormatForSources } from '../dist/VideoGifDelivery.js';
 import { VideoBroker } from '../dist/VideoBroker.js';
+import { detectAnimatedPngs, isAnimatedPngData } from '../dist/AnimatedPng.js';
 
 const tenor = 'https://tenor.com/view/referee-gif-123456';
 const giphy = 'https://giphy.com/gifs/referee-abc123';
@@ -222,6 +223,68 @@ test('animated WebP attachments and flagged embeds are GIF-style clips; still We
     }
     const webpResponse = async url => new Response(Readable.from([Buffer.from('RIFF')]), { url, headers: { 'content-type': 'image/webp' } });
     assert.equal(await publicVideoFromMessage(message(link, [], [{ type: 'image', url: link, thumbnail: { ...thumbnail, flags: 0 } }]), webpResponse), null);
+});
+
+test('animated PNGs are GIF-style clips like animated WebP; still PNGs stay starting images', async () => {
+    const apng = { url: 'https://cdn.discordapp.com/attachments/1/2/dance.png', name: 'dance.png', contentType: 'image/png', size: 789 };
+    for (const flags of [32, { bitfield: 32 }]) {
+        const reply = message('', [{ ...apng, flags }]);
+        assert.equal(videoSourceImageFromMessage(reply), null);
+        const clip = videoClipSourceImageFromMessage(reply);
+        assert.equal(clip.clip_url, apng.url);
+        assert.equal(clip.name, 'dance.apng');
+        assert.equal(sourceClipDescriptor(clip).name, 'dance.apng');
+        assert.equal(videoOutputFormatForSources(clip), 'gif');
+    }
+    const still = message('', [{ ...apng, flags: 0 }]);
+    assert.equal(videoClipSourceImageFromMessage(still), null);
+    assert.equal(videoSourceImageFromMessage(still).url, apng.url);
+
+    // Without Discord's flag, the file's acTL chunk (before IDAT) decides.
+    const chunk = (type, data = Buffer.alloc(0)) => Buffer.concat([Buffer.from([0, 0, 0, data.length]), Buffer.from(type, 'latin1'), data, Buffer.alloc(4)]);
+    const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const animatedBytes = Buffer.concat([signature, chunk('IHDR', Buffer.alloc(13)), chunk('acTL', Buffer.alloc(8)), chunk('IDAT', Buffer.alloc(4))]);
+    const stillBytes = Buffer.concat([signature, chunk('IHDR', Buffer.alloc(13)), chunk('IDAT', Buffer.alloc(4)), chunk('acTL', Buffer.alloc(8))]);
+    assert.equal(isAnimatedPngData(animatedBytes), true);
+    assert.equal(isAnimatedPngData(stillBytes), false);
+    assert.equal(isAnimatedPngData(Buffer.from('not a png at all')), false);
+    const unflagged = { ...apng, url: 'https://cdn.discordapp.com/attachments/1/2/sniffed.png', name: 'sniffed.png' };
+    const plain = { ...portrait, url: 'https://cdn.discordapp.com/attachments/1/2/plain.png' };
+    const bodies = { [unflagged.url]: animatedBytes, [plain.url]: stillBytes };
+    await detectAnimatedPngs([message('', [unflagged]), message('', [plain])],
+        async url => new Response(Readable.from([bodies[url]]), { url }));
+    assert.equal(videoClipSourceImageFromMessage(message('', [unflagged])).name, 'sniffed.apng');
+    assert.equal(videoClipSourceImageFromMessage(message('', [plain])), null);
+    await detectAnimatedPngs([message('', [{ ...apng, url: 'https://cdn.discordapp.com/attachments/1/2/broken.png' }])],
+        async () => { throw new Error('offline'); });
+
+    const link = 'https://example.com/media/dance.png';
+    const thumbnail = { url: link, content_type: 'image/png', flags: 32 };
+    assert.deepEqual(await publicVideoFromMessage(message(link, [], [{ type: 'image', url: link, thumbnail }]), noFetch),
+        { clip_url: link, name: 'source.apng', source_page_url: link });
+});
+
+test('broker converts an animated PNG to playable MP4 with motion and its full duration', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'apng-source-test-'));
+    try {
+        const fixture = join(directory, 'fixture.png');
+        execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=65x49:rate=10:duration=2',
+            '-c:v', 'apng', '-plays', '0', '-f', 'apng', fixture]);
+        const bytes = readFileSync(fixture);
+        assert.equal(isAnimatedPngData(bytes), true);
+        const source = { clip_url: 'https://example.com/media/fixture.png', name: 'fixture.apng', bytes: bytes.length };
+        const fetcher = async url => new Response(Readable.from([bytes]), { url, headers: { 'content-type': 'image/png' } });
+        const full = await storeVideoSourceClip(source, join(directory, 'full'), null, undefined, { fetcher });
+        assert.match(full.path, /source-video\.mp4$/);
+        assert.ok(Math.abs(full.duration - 2) < 0.11, full.duration);
+        const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', full.path]));
+        assert.equal(probe.streams[0].codec_name, 'h264');
+        assert.equal(probe.streams[0].width, 66);
+        const frame = seconds => execFileSync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', full.path,
+            '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+        assert.notDeepEqual(frame(0), frame(1.5), 'animation survives conversion');
+        assert.equal(existsSync(join(directory, 'full', 'source-webp.mp4')), false);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 const webpCapable = (() => {

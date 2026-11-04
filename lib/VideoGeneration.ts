@@ -1,3 +1,4 @@
+import { detectAnimatedPngs, isAnimatedPngAttachment } from './AnimatedPng.js';
 import { publicVideoFromMessage, stripResolvedVideoLinks } from './PublicVideo.js';
 import { fetchProcessableMessage } from './Privacy.js';
 import { videoSourceAudioFromMessages, VIDEO_SOURCE_AUDIO_GUIDANCE, SubmittedVideoSourceAudio } from './VideoSourceAudio.js';
@@ -369,7 +370,7 @@ export function videoSourceImageFromMessage(msg: Message): SubmittedVideoAttachm
     const candidates = [...msg.attachments.values()].filter(attachment => {
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         if (mime === 'image/gif' || inferredImageMime(attachment.name) === 'image/gif') return false;
-        if (isAnimatedWebpAttachment(attachment)) return false;
+        if (isAnimatedWebpAttachment(attachment) || isAnimatedPngAttachment(attachment)) return false;
         return Boolean(mime?.startsWith('image/') || inferredImageMime(attachment.name));
     });
     if (candidates.length > 1) {
@@ -405,6 +406,8 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
         const mime = attachment.contentType?.split(';')[0].toLowerCase();
         const extension = attachment.name?.split('.').pop()?.toLowerCase();
         if (extension === 'webp' || mime === 'image/webp') return isAnimatedWebpAttachment(attachment);
+        if (isAnimatedPngAttachment(attachment)) return true;
+        if (extension === 'png' || extension === 'apng') return false;
         return Boolean(mime === 'image/gif' || mime?.startsWith('video/') || (extension && VIDEO_CLIP_EXTENSIONS.has(extension)));
     });
     if (clips.length > 1) {
@@ -413,8 +416,11 @@ export function videoClipSourceImageFromMessage(msg: Message): SubmittedVideoCli
     if (!clips.length) return null;
     const attachment = clips[0];
     const mime = attachment.contentType?.split(';')[0].toLowerCase();
+    // An animated PNG is named .apng so the broker decodes every frame, not just the first.
     const name = mime === 'image/gif' && !/\.gif$/i.test(attachment.name || '') ? 'clip.gif'
-        : isAnimatedWebpAttachment(attachment) && !/\.webp$/i.test(attachment.name || '') ? 'clip.webp' : attachment.name || 'clip';
+        : isAnimatedWebpAttachment(attachment) && !/\.webp$/i.test(attachment.name || '') ? 'clip.webp'
+        : isAnimatedPngAttachment(attachment) ? `${(attachment.name || 'clip').replace(/\.a?png$/i, '') || 'clip'}.apng`
+        : attachment.name || 'clip';
     return { clip_url: attachment.url, name, bytes: attachment.size };
 }
 
@@ -1369,6 +1375,8 @@ export async function handleVideoRequest(
     const editContext = JSON.stringify({ request: videoPromptPlainText(prompt, msg.channel),
         reply: referencedMessage ? videoPromptPlainText(referencedMessage.content, referencedMessage.channel).slice(0, 1500) : '',
         earlier: videoReplyChainGuidance(await earlierReplyChain) }).slice(0, 6000);
+    // Animated PNGs without Discord's IsAnimated flag are recognised from their header bytes.
+    await detectAnimatedPngs([msg, referencedMessage]);
     try {
         const resolved = model === 'minimax'
             ? await withTyping(msg.channel, () => resolveVideoEditRequest(prompt, msg, referencedMessage, editContext, character))

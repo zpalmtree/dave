@@ -19,17 +19,19 @@ type Message = { content?: string; embeds?: ReadonlyArray<Embed> };
 type Fetcher = (url: string, options?: RequestInit) => Promise<Response>;
 const specializedLink = (value: string) => Boolean(youtubeVideoFromMessage({ content: value }))
     || !stripTwitterPostLinks(value).trim();
-// Discord's EmbedMediaFlags.IsAnimated distinguishes an animated WebP from a still.
-function animatedWebp(embed: Embed): string | null {
+// Discord's EmbedMediaFlags.IsAnimated distinguishes an animated WebP or PNG from a still.
+function animatedImage(embed: Embed): { url: string; name: string } | null {
     const raw = embed.data || embed as { image?: EmbedMedia; thumbnail?: EmbedMedia; video?: EmbedMedia };
     for (const media of [raw.image, raw.thumbnail, raw.video]) {
         const url = publicMediaUrl(media?.url || '');
-        if (url && (Number(media!.flags) & 32) && (media!.content_type?.toLowerCase() === 'image/webp' || /\.webp$/i.test(url.pathname))) {
-            return url.toString();
-        }
+        if (!url || !(Number(media!.flags) & 32)) continue;
+        const type = media!.content_type?.toLowerCase();
+        if (type === 'image/webp' || /\.webp$/i.test(url.pathname)) return { url: url.toString(), name: 'source.webp' };
+        if (type === 'image/png' || type === 'image/apng' || /\.a?png$/i.test(url.pathname)) return { url: url.toString(), name: 'source.apng' };
     }
     return null;
 }
+const animatedWebp = (embed: Embed) => animatedImage(embed)?.url || null;
 const clean = (value: string) => value.replace(/[)\],.!?;:'\u2019]+$/, '');
 
 function clip(value: string, page?: string, mime?: string, videoEmbed = false): SubmittedVideoSourceClip | null {
@@ -62,8 +64,8 @@ export async function publicVideoFromMessage(message: Message, fetcher: Fetcher 
         const playable = clip(embed.video?.url || '', page.toString(), undefined, true)
             || clip(embed.image?.url || '', page.toString());
         if (playable) return playable;
-        const webp = animatedWebp(embed);
-        if (webp) return { clip_url: webp, name: 'source.webp', source_page_url: page.toString() };
+        const animated = animatedImage(embed);
+        if (animated) return { clip_url: animated.url, name: animated.name, source_page_url: page.toString() };
     }
     const direct = clip(page.toString());
     if (direct) return direct;
