@@ -37,6 +37,8 @@ export interface VideoCharacter {
     pronunciation?: string;
     /** Sentences on his national pride, running jokes, and memes, added to the shared comedic persona. */
     persona?: string;
+    /** Replaces the shared boastful comedic persona, for a character with another temperament. */
+    comedy?: string;
     /**
      * How he is drawn. A photoreal man (the default) is a real person in live-action footage; a
      * pixel sprite keeps his flat pixel-art look while the world around him is live action.
@@ -117,7 +119,7 @@ export const COLOMBIANMUTT: VideoCharacter = {
     persona: 'His Colombian pride drives the comedy: Colombia has the best coffee, the best dancers, and the only real arepa on Earth, and he argues all three with anyone, above all a Venezuelan. He corrects every “Columbia” to “Colombia, with an O,” brags about Shakira, James, and the five-nil win over Argentina, is always “ya casi llegando” while an hour late, and wraps every insult in politeness such as “qué pena con usted” and “a la orden.” He takes huge offense at any Narcos or Escobar joke and steers it back to coffee, and he blames setbacks on whoever “dio papaya,” the traffic, or the runaway hippos. Use memes such as “no dar papaya,” “Colombia, not Columbia,” and “we don’t talk about Bruno” when they fit the beat.',
 };
 
-/** The shared Sol Slugs voice and persona; each member adds his own portrait and look. */
+/** The shared Sol Slugs voice: plain and scene-driven, no accent or slang (picked from a four-voice trial, 2026-11-03). Each member adds his own portrait and look. */
 const SOL_SLUG = {
     name: 'Slug',
     rendering: 'pixel-sprite',
@@ -126,14 +128,13 @@ const SOL_SLUG = {
     replacementNames: ['slug', 'sol slug', 'the slug', 'a slug', 'the sol slug'],
     sceneOpening: true,
     example: 'apes into a memecoin at a real casino',
-    voice: 'cocky, slightly nasal and gravelly adult male voice',
-    delivery: 'cocky and conversational adult male, with a slightly nasal, gravelly voice and a strong online crypto-degen American accent on every phrase, using a fast, smug drawl, drawn-out vowels on his catchphrases, and animated rise-and-fall intonation',
-    accent: 'online crypto-degen American',
-    accentLabel: 'degen',
-    dialogueStyle: 'Solana degen slang and crypto-Twitter memes',
-    slang: ['gm', 'ser', 'wagmi', 'ngmi', 'lfg', 'probably nothing', 'few understand'],
-    pronunciation: 'Say "gm" as the letters G M, "ser" as "sir", "wagmi" as "wag-mee", "ngmi" as the letters N G M I, and "lfg" as the letters L F G.',
-    persona: 'He is a Sol Slug, a pixel-art slug NFT loose in the real world, and a die-hard Solana degen: every chart is bullish, every dip is a buying opportunity, he prices everything in SOL, calls everyone ser, and treats burning slugs as the ultimate flex. He leaves a slime trail, treats salt as a mortal enemy, and takes huge offense at being called a snail. Use memes such as “have fun staying poor,” “it’s so over, we’re so back,” “diamond tentacles,” and “this is the bottom” when they fit the beat.',
+    voice: 'warm, relaxed mid-range adult male voice',
+    delivery: 'natural and conversational adult male, with a warm, relaxed mid-range voice, clear everyday American speech, and lively natural intonation',
+    accent: '',
+    accentLabel: '',
+    dialogueStyle: '',
+    slang: [],
+    comedy: 'Play Slug as a likeable comedic character, not a narrator. Build each sketch from its own premise, let his lines react to what is happening in the shot instead of describing it, and give the final line to whichever character and wording the scene has earned.',
 } satisfies Partial<VideoCharacter>;
 
 function solSlug(number: string, look: Pick<VideoCharacter, 'eyes' | 'clothing' | 'clothingAndEmblem' | 'physique'>): VideoCharacter {
@@ -145,25 +146,25 @@ function solSlug(number: string, look: Pick<VideoCharacter, 'eyes' | 'clothing' 
 // Chosen from a six-slug trial (2026-11-03); `$slug #1863` pins one.
 export const SOL_SLUGS: readonly VideoCharacter[] = [
     solSlug('01863', {
-        eyes: 'squinting dwarven eyes on short eye stalks',
+        eyes: 'two narrow squinting white eyes with small black pupils under bushy ginger brows',
         physique: 'beige pixel slug body with a pointed tail, carved abs, and small white-gloved arms',
         clothing: 'gold crown, red royal cape, and bushy ginger dwarf beard',
         clothingAndEmblem: 'the gold crown, red royal cape, bushy ginger dwarf beard, flaming torch, and gold pickaxe',
     }),
     solSlug('08917', {
-        eyes: 'two half-lidded eyes on tall eye stalks',
+        eyes: 'two tall beige eye stalks with half-closed lids, each with a small white eye and one black pupil',
         physique: 'beige pixel slug body with a long pointed tail, a stubbly grey five-o\'clock shadow, and small white-gloved arms',
         clothing: 'olive-green army backpack',
         clothingAndEmblem: 'the olive-green army backpack and a pistol in each white-gloved hand',
     }),
     solSlug('30506', {
-        eyes: 'one giant blue eyeball on a single stalk',
+        eyes: 'one giant round eyeball on a single stalk, with a pale blue iris and a dark teal slit pupil',
         physique: 'cyan pixel slug body with fins on his head and a wide open shouting mouth',
         clothing: 'ornate gold chest plate',
         clothingAndEmblem: 'the ornate gold chest plate and the big green fish he holds',
     }),
     solSlug('00507', {
-        eyes: 'two round eyes on short eye stalks',
+        eyes: 'two tall white eye stalks with square black pupils',
         physique: 'pixel slug body covered in sandy golden capybara fur, with a long pointed tail',
         clothing: 'grey capybara mask and red scarf',
         clothingAndEmblem: 'the grey capybara mask, red scarf, and golden capybara-fur body',
@@ -211,7 +212,7 @@ export function videoCharacterPlannerGuidance(character: VideoCharacter): string
         `${name} is the recurring character in an enacted visual story. Treat the supplied portrait as his identity and opening frame, not as a requirement to hold its crop, background, or pose for the entire video.`,
         'Resolve spoken wording and visual subject matter independently. When the prompt is a boast, rant, or other utterance about concrete projects, places, objects, transformations, or game mechanics, preserve the appropriate spoken wording while visibly staging its distinctive ideas as actions with consequences. Put those visible beats in the analysis actions and inferred_staging, then realize them in shot.visual; mentioning them only in dialogue, intent, or eyebrow gestures does not cover them.',
         isPixelSprite(character)
-            ? `${name} is a pixel-art ${character.noun} sprite loose in photorealistic live-action footage. Stage real, physically present places, people, creatures, and props around him in photographic realism, and keep ${name} himself the same crisp pixel-art sprite as his portrait in every shot: flat blocky pixels, hard dark outlines, his ${character.physique}, and his own ${character.eyes}, unless the user asks for another rendering style. He glides on his tail and gestures with his small arms; his sprite may turn, squash, and stretch while staying pixel art.`
+            ? `${name} is a pixel-art ${character.noun} sprite loose in photorealistic live-action footage. Stage real, physically present places, people, creatures, and props around him in photographic realism, and keep ${name} himself the same crisp pixel-art sprite as his portrait in every shot: flat blocky pixels, hard dark outlines, his ${character.physique}, and his own ${character.eyes}, unless the user asks for another rendering style. He glides on his tail and gestures with his small arms; his sprite may turn, squash, and stretch while staying pixel art. In every shot and close-up his eyes stay the same flat pixel eyes as the portrait, with the same color, size, and pupils, changing only by blinking or narrowing for an expression.`
             : `${name} is a real man in photorealistic live-action footage. Keep fantastical or mythic scenes in that photographic realism, with real, physically present places, creatures, and props, and his own ${character.eyes} and facial proportions, unless the user asks for another rendering style.`,
         `After honoring frame zero, use motivated camera reveals, interactions, transformations, or later cuts to develop the premise around the recognizable ${name} character. Keep his face and mouth readable while he speaks, but allow a wider composition and changing surroundings. Preserve his ${character.clothing} while showing any separately requested national symbols in the scene.`,
         `For a reaction to an attached image, identify the main depicted subject and the props or relationships that explain the situation. Keep that subject recognizable and visibly connect ${name} to it. In shot.visual, name the target of each purposeful glance or head turn and when it happens relative to his speech and reaction; choose the subject and any story-defining prop that he would naturally notice, rather than merely listing them as background scenery. Make the look legible through a clear directional head turn and a useful camera view of both observer and target; a tiny eye shift or downward nod in a distant composition is insufficient.`,
@@ -220,15 +221,17 @@ export function videoCharacterPlannerGuidance(character: VideoCharacter): string
         'Develop the visual beats alongside the corresponding spoken phrases instead of reciting the whole monologue first and adding a long silent reenactment afterward. A short utterance with linked ideas normally needs its natural speaking time plus a brief setup and payoff, not a separate segment for each noun. Split long supplied speech at natural clause boundaries across shots or segments while preserving every word and its order. Add runtime only when a required action needs it to remain legible or the user requests it.',
         'Use a static talking head only when the user requests that presentation or the brief is a simple greeting or performance with no visual story to enact. Do not invent a ban on new props, graphics, scene changes, or camera movement merely because dialogue is supplied verbatim. Respect actual user restrictions on text, motion, camera, or presentation.',
         `Use this default ${name} voice description in dialogue.delivery: "${character.delivery}". Copy it in full for his ordinary boastful or conversational delivery, including English-only lines and dialogue supplied verbatim by the user.`,
-        `For a different requested emotion, adapt the performance while retaining the ${characterVoice(character)} and strong ${character.accent} accent through complaints, shouts, and emotional changes. Keep the voice description outside dialogue.text and language; never recite these instructions or phonetically respell the supplied words. Avoid a neutral American narrator or flat text-to-speech delivery.`,
-        `When the requested action or source image supports dialogue, give the ${name} character ${character.dialogueStyle}.`,
+        `For a different requested emotion, adapt the performance while retaining the ${characterVoice(character)}${character.accent ? ` and strong ${character.accent} accent` : ''} through complaints, shouts, and emotional changes. Keep the voice description outside dialogue.text and language; never recite these instructions or phonetically respell the supplied words. ${character.accent ? 'Avoid a neutral American narrator or flat text-to-speech delivery.' : 'Avoid a narrator or flat text-to-speech delivery.'}`,
+        ...(character.dialogueStyle ? [`When the requested action or source image supports dialogue, give the ${name} character ${character.dialogueStyle}.`] : []),
         `${name} is the recurring character's cast name. ${character.pronunciation
             ? `${character.pronunciation} Keep speaker IDs and user-supplied dialogue.text unchanged; specify this pronunciation in dialogue.delivery when the name or phrase occurs in spoken wording.`
             : 'Keep speaker IDs and user-supplied dialogue.text unchanged.'} A speaker name is a cast label, not extra dialogue: never announce it unless it belongs to the requested line.`,
-        `Season nearly every new ${name} line with slang such as ${quotedList(character.slang)}; vary which phrases appear across lines rather than repeating one, and place it where he would naturally say it, with the joke carried by what the line says.`,
-        `Play ${name} as a comedic character, not a narrator: he is supremely and boastfully confident, treats his own schemes and hot takes as genius, never admits he is wrong, and stays that certain whatever happens to him. Build each sketch from its own premise rather than a standing formula: the scheme may work absurdly well, he may be right for a ridiculous reason, he may win and immediately want something stupider, another character may get the last word, or it may fall apart. Indignantly blaming an object or a bystander for a failure is one ending among these; choose it only when this premise makes it the funniest, and give the final line to whichever character and wording the scene has earned. His generated lines react to what is happening in the shot—bragging, complaining, justifying, or escalating—instead of describing the premise the viewer can already see.`,
+        ...(character.slang.length ? [`Season nearly every new ${name} line with slang such as ${quotedList(character.slang)}; vary which phrases appear across lines rather than repeating one, and place it where he would naturally say it, with the joke carried by what the line says.`] : []),
+        character.comedy ?? `Play ${name} as a comedic character, not a narrator: he is supremely and boastfully confident, treats his own schemes and hot takes as genius, never admits he is wrong, and stays that certain whatever happens to him. Build each sketch from its own premise rather than a standing formula: the scheme may work absurdly well, he may be right for a ridiculous reason, he may win and immediately want something stupider, another character may get the last word, or it may fall apart. Indignantly blaming an object or a bystander for a failure is one ending among these; choose it only when this premise makes it the funniest, and give the final line to whichever character and wording the scene has earned. His generated lines react to what is happening in the shot—bragging, complaining, justifying, or escalating—instead of describing the premise the viewer can already see.`,
         ...(character.persona ? [character.persona] : []),
-        `Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable ${name} wording, but always retain the ${character.accentLabel} accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.`,
+        character.accent
+            ? `Preserve any dialogue the user explicitly requested verbatim in dialogue.text; apply slang and code-switching only to new or adaptable ${name} wording, but always retain the ${character.accentLabel} accent in dialogue.delivery without translating, rewriting, or adding words to supplied lines.`
+            : `Preserve any dialogue the user explicitly requested verbatim in dialogue.text, and keep his voice description in dialogue.delivery without translating, rewriting, or adding words to supplied lines.`,
     ].join(' ');
 }
 
