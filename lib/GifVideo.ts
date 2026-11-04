@@ -29,6 +29,14 @@ export function isGifVideoUrl(value: string): boolean {
         || (MEDIA_HOSTS.has(url.hostname) && /\.(?:gif|mp4|webm)$/i.test(url.pathname))));
 }
 
+/** Twitter serves a tweet's GIF, and only a GIF, as video.twimg.com/tweet_video/<id>.mp4; videos use
+ * ext_tw_video or amplify_video. A GIF tweet reached through its status link keeps GIF delivery. */
+export function isTwitterGifVideoUrl(value: string): boolean {
+    const url = safeUrl(value);
+    return Boolean(url && url.protocol === 'https:' && url.hostname === 'video.twimg.com'
+        && /^\/tweet_video\/[\w-]+\.mp4$/i.test(url.pathname));
+}
+
 /** Discord's original and signed/proxied embed URLs identify the same attachment. */
 function gifIdentity(value: string): string {
     const url = safeUrl(value)!;

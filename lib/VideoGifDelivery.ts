@@ -4,7 +4,7 @@ import { createReadStream } from 'fs';
 import { rename, rm, stat } from 'fs/promises';
 import { dirname, join } from 'path';
 import { promisify } from 'util';
-import { isGifVideoUrl, isGifPageUrl } from './GifVideo.js';
+import { isGifVideoUrl, isGifPageUrl, isTwitterGifVideoUrl } from './GifVideo.js';
 import { VIDEO_DISCORD_BASELINE_UPLOAD_BYTES, VideoJobView } from './VideoProtocol.js';
 
 const run = promisify(execFile);
@@ -16,7 +16,8 @@ export function videoOutputFormatForSources(...sources: unknown[]): VideoOutputF
     return sources.some(source => {
         if (!source || typeof source !== 'object' || !('clip_url' in source)) return false;
         const clip = source as { clip_url: string; name?: string; source_page_url?: string };
-        return /\.(?:gif|webp|apng)$/i.test(clip.name || '') || isGifVideoUrl(clip.clip_url) || isGifPageUrl(clip.source_page_url || '');
+        return /\.(?:gif|webp|apng)$/i.test(clip.name || '') || isGifVideoUrl(clip.clip_url)
+            || isTwitterGifVideoUrl(clip.clip_url) || isGifPageUrl(clip.source_page_url || '');
     }) ? 'gif' : 'mp4';
 }
 

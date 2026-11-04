@@ -95,6 +95,17 @@ test('Klipy replies use the playable video rather than the WebP thumbnail and re
     await assert.rejects(gifVideoFromMessage(message(`${klipy} ${tenor}`), noFetch), /exactly one/);
 });
 
+test('a GIF tweet reached through its status link is delivered as a GIF', () => {
+    // 24206bd8: the fxtwitter GIF came back through the post resolver as twitter-<id>.mp4 and went out as MP4.
+    assert.equal(videoOutputFormatForSources({ clip_url: 'https://video.twimg.com/tweet_video/HK3HVjCagAAGUIB.mp4',
+        name: 'twitter-2052.mp4' }), 'gif');
+    for (const url of ['https://video.twimg.com/ext_tw_video/1/pu/vid/720x1280/a.mp4',
+        'https://video.twimg.com/amplify_video/1/vid/720x1280/a.mp4', 'https://video.twimg.com.evil.test/tweet_video/a.mp4',
+        'http://video.twimg.com/tweet_video/a.mp4']) {
+        assert.equal(videoOutputFormatForSources({ clip_url: url, name: 'twitter-1.mp4' }), 'mp4', url);
+    }
+});
+
 test('fxtwitter GIF links use the tweet GIF MP4 rather than the animated WebP and retain GIF delivery', async () => {
     const webp = 'https://gif.fxtwitter.com/tweet_video/HMcDY8zWgAAZJw4.webp';
     const mp4 = 'https://video.twimg.com/tweet_video/HMcDY8zWgAAZJw4.mp4';
