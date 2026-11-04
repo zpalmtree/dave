@@ -10,13 +10,26 @@ const MIME_EXTENSIONS: Record<string, string> = {
     'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
     'video/x-matroska': 'mkv', 'image/gif': 'gif', 'video/x-m4v': 'm4v',
 };
-type Message = { content?: string; embeds?: ReadonlyArray<{
-    url?: string | null; video?: { url?: string | null } | null;
-    image?: { url?: string | null } | null;
-}> };
+type EmbedMedia = { url?: string | null; flags?: number | null; content_type?: string | null } | null | undefined;
+type Embed = { url?: string | null; video?: { url?: string | null } | null; image?: { url?: string | null } | null;
+    // discord.js's media getters drop the raw flags and content type.
+    data?: { image?: EmbedMedia; thumbnail?: EmbedMedia; video?: EmbedMedia };
+    thumbnail?: EmbedMedia };
+type Message = { content?: string; embeds?: ReadonlyArray<Embed> };
 type Fetcher = (url: string, options?: RequestInit) => Promise<Response>;
 const specializedLink = (value: string) => Boolean(youtubeVideoFromMessage({ content: value }))
     || !stripTwitterPostLinks(value).trim();
+// Discord's EmbedMediaFlags.IsAnimated distinguishes an animated WebP from a still.
+function animatedWebp(embed: Embed): string | null {
+    const raw = embed.data || embed as { image?: EmbedMedia; thumbnail?: EmbedMedia; video?: EmbedMedia };
+    for (const media of [raw.image, raw.thumbnail, raw.video]) {
+        const url = publicMediaUrl(media?.url || '');
+        if (url && (Number(media!.flags) & 32) && (media!.content_type?.toLowerCase() === 'image/webp' || /\.webp$/i.test(url.pathname))) {
+            return url.toString();
+        }
+    }
+    return null;
+}
 const clean = (value: string) => value.replace(/[)\],.!?;:'\u2019]+$/, '');
 
 function clip(value: string, page?: string, mime?: string, videoEmbed = false): SubmittedVideoSourceClip | null {
@@ -34,7 +47,8 @@ export async function publicVideoFromMessage(message: Message, fetcher: Fetcher 
     const embeds = message.embeds || [];
     if (!links.length) {
         for (const embed of embeds) {
-            const media = embed.video?.url || (embed.image?.url && EXTENSIONS.test(publicMediaUrl(embed.image.url)?.pathname || '') ? embed.image.url : null);
+            const media = embed.video?.url || (embed.image?.url && EXTENSIONS.test(publicMediaUrl(embed.image.url)?.pathname || '') ? embed.image.url : null)
+                || animatedWebp(embed);
             if (media && !specializedLink(embed.url || media)) links.push(embed.url || media);
         }
     }
@@ -48,6 +62,8 @@ export async function publicVideoFromMessage(message: Message, fetcher: Fetcher 
         const playable = clip(embed.video?.url || '', page.toString(), undefined, true)
             || clip(embed.image?.url || '', page.toString());
         if (playable) return playable;
+        const webp = animatedWebp(embed);
+        if (webp) return { clip_url: webp, name: 'source.webp', source_page_url: page.toString() };
     }
     const direct = clip(page.toString());
     if (direct) return direct;

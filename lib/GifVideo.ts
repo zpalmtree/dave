@@ -35,9 +35,21 @@ function gifIdentity(value: string): string {
     return isDiscordGif(url) ? `discord:${url.pathname}` : gifPage(value) || url.toString();
 }
 
+// fxtwitter's GIF links transcode a tweet's GIF to animated WebP, which is not a
+// playable clip. Twitter keeps the original MP4 under the same media id.
+const TWITTER_GIF_HOSTS = new Set(['gif.fxtwitter.com', 'gif.fixupx.com']);
+const TWITTER_GIF_PATH = /^\/tweet_video\/([\w-]+)\.(?:webp|gif|mp4)$/i;
+
+function twitterGifClip(value: string): SubmittedVideoSourceClip | null {
+    const url = safeUrl(value);
+    const id = url && TWITTER_GIF_HOSTS.has(url.hostname) ? TWITTER_GIF_PATH.exec(url.pathname)?.[1] : null;
+    return id ? { clip_url: `https://video.twimg.com/tweet_video/${id}.mp4`, name: `${id}.mp4` } : null;
+}
+
 function gifPage(value: string): string | null {
     const url = safeUrl(value);
     if (!url) return null;
+    if (twitterGifClip(value)) return `https://${url.hostname}${url.pathname}`;
     const host = url.hostname.replace(/^www\./, '');
     if (host === 'tenor.com' && /^\/view\/[\w-]+-\d+\/?$/.test(url.pathname)) {
         return `https://tenor.com${url.pathname.replace(/\/$/, '')}`;
@@ -98,6 +110,8 @@ export async function gifVideoFromMessage(message: GifMessage, fetcher: (url: st
         const signed = matching.find(value => ['ex', 'is', 'hm'].every(key => safeUrl(value)!.searchParams.has(key)));
         return clip(signed || link);
     }
+    const twitterGif = twitterGifClip(link);
+    if (twitterGif) return { ...twitterGif, source_page_url: link };
     const direct = clip(link);
     if (direct) return direct;
     for (const embed of embeds) {
