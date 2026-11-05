@@ -1080,9 +1080,10 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
         host: '127.0.0.1', port: 0,
         dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
         botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        // groundVideoEditTarget returns an already-validated decision (camelCase boxes).
         videoEditGrounder: async (_source, target) => ({ action: 'replace', target,
-            effects: 'two light beams from its eyes', clarification: '',
-            target_boxes: [{ seconds: 0, box_2d: [342, 281, 401, 463] }] }),
+            effects: 'two light beams from its eyes', subjects: 'primary', clarification: '',
+            targetBoxes: [{ seconds: 0, box_2d: [342, 281, 401, 463] }] }),
         sourceVideoDownloader: async (_source, target) => {
             mkdirSync(target, { recursive: true });
             const path = join(target, 'source-video.mp4');
