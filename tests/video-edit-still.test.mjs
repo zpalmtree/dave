@@ -63,6 +63,13 @@ test('an isolated repaint names the target and its place in a crop shared with o
     assert.equal(head, "its head is at the right end of its body, at 61% to 67% of Image 1's width and 29% to 37% of its height");
     assert.match(isolatedEditSubject('the person falling', [0.1, 0.05, 0.62, 0.4], head),
         /of its height; its head is at the right end of its body, .* so the replacement's head and face go exactly there/);
+    // 9d8798c9: from a blurred crop the editor drew the reference's own scowl over a worried emoji.
+    const worried = videoEditHeadWording(parseVideoEditHead({ found: true, head_box_2d: [240, 210, 760, 820], head_side: 'top',
+        expression: '  anxious, with furrowed inner brows,\n wide eyes and a closed mouth.  ' }));
+    assert.equal(worried, "its head is at the top end of its body, at 21% to 82% of Image 1's width and 24% to 76% of its height"
+        + ', and its face shows anxious, with furrowed inner brows, wide eyes and a closed mouth');
+    assert.equal(parseVideoEditHead({ found: true, head_box_2d: [1, 2, 3, 4], head_side: 'top', expression: ' ' })?.expression, undefined);
+    assert.equal(parseVideoEditHead({ found: true, head_box_2d: [1, 2, 3, 4], head_side: 'top', expression: 'x'.repeat(500) })?.expression?.length, 220);
     for (const bad of [{ found: false, head_box_2d: [1, 2, 3, 4], head_side: 'left' },
         { found: true, head_box_2d: [5, 2, 3, 4], head_side: 'left' }, { found: true, head_box_2d: [1, 2, 3, 4], head_side: 'up' }]) {
         assert.equal(parseVideoEditHead(bad), null);

@@ -188,14 +188,22 @@ export async function groundVideoEditTarget(source: StoredVideoSourceClip, targe
 
 export type VideoEditHeadSide = 'left' | 'right' | 'top' | 'bottom';
 /** box is [left, top, right, bottom] as fractions of the image. */
-export interface VideoEditHead { box: [number, number, number, number]; side: VideoEditHeadSide }
+export interface VideoEditHead { box: [number, number, number, number]; side: VideoEditHeadSide; expression?: string }
 
-const VIDEO_EDIT_HEAD_INSTRUCTIONS = 'Locate a body part of one subject in a video frame for an image editor. Return head_box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000 of the image: the head of the subject whose body lies in the given region, never anyone else\'s. Also return head_side: the end of that subject\'s body the head is at, one of left, right, top, bottom. Return found false when that subject\'s head cannot be seen.';
+const VIDEO_EDIT_HEAD_INSTRUCTIONS = 'Locate a body part of one subject in a video frame for an image editor. Return head_box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000 of the image: the head of the subject whose body lies in the given region, never anyone else\'s. Also return head_side: the end of that subject\'s body the head is at, one of left, right, top, bottom. Return found false when that subject\'s head cannot be seen. Also return expression, for an editor who must copy that face onto a different character: in at most 25 words, the emotion and the visible state of the brows, eyes and mouth (closed, open, teeth bared or clenched, corners up or down), in plain physical wording that applies to a human face. Return an empty expression when the face is turned away or too unclear to read.';
+
+/** The longest expression wording passed on to the editor and reviewer. */
+const VIDEO_EDIT_EXPRESSION_CHARS = 220;
 
 /**
  * Where the target's head is in an isolated crop. At 15 px the editor flipped 24206bd8's thrown man,
  * drawing his head where his feet were, and the still review accepted it; a named head position
  * anchors both. Gemini gave the same answer in three of three draws. Failures return null.
+ *
+ * It also describes the face in words. Viggle holds the still's expression, and from a 46x58 crop
+ * of 9d8798c9's emoji the editor drew the reference's own scowl for both a worried and an angry
+ * face; the motion review rejected every render as static. Named, the editor drew wide worried eyes
+ * and clenched angry teeth in two of two draws each, and it refused no real-person frame for it.
  */
 export async function locateVideoEditHead(frame: { bytes: Buffer; mimeType: string }, target: string,
     subjectBox: [number, number, number, number], hooks: VideoProviderHooks = {}): Promise<VideoEditHead | null> {
@@ -214,7 +222,7 @@ export async function locateVideoEditHead(frame: { bytes: Buffer; mimeType: stri
             systemInstruction: VIDEO_EDIT_HEAD_INSTRUCTIONS, responseMimeType: 'application/json',
             responseJsonSchema: { type: 'object', additionalProperties: false, required: ['found', 'head_box_2d', 'head_side'],
                 properties: { found: { type: 'boolean' }, head_box_2d: { type: 'array', items: { type: 'integer' } },
-                    head_side: { type: 'string', enum: ['left', 'right', 'top', 'bottom'] } } },
+                    head_side: { type: 'string', enum: ['left', 'right', 'top', 'bottom'] }, expression: { type: 'string' } } },
             mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH, maxOutputTokens: 512,
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
@@ -239,7 +247,9 @@ export function parseVideoEditHead(value: any): VideoEditHead | null {
         || box.some((coordinate: number) => !Number.isFinite(coordinate) || coordinate < 0 || coordinate > 1000)
         || box[2] <= box[0] || box[3] <= box[1]) return null;
     const [ymin, xmin, ymax, xmax] = box.map((coordinate: number) => coordinate / 1000);
-    return { box: [xmin, ymin, xmax, ymax], side: value.head_side };
+    const expression = typeof value.expression === 'string'
+        ? value.expression.replace(/\s+/g, ' ').trim().replace(/[.;,]+$/, '').slice(0, VIDEO_EDIT_EXPRESSION_CHARS).trim() : '';
+    return { box: [xmin, ymin, xmax, ymax], side: value.head_side, ...(expression ? { expression } : {}) };
 }
 
 /** The head position as editor and reviewer wording. */
@@ -247,5 +257,6 @@ export function videoEditHeadWording(head: VideoEditHead): string {
     const percent = (value: number) => Math.round(value * 100);
     const [left, top, right, bottom] = head.box;
     return `its head is at the ${head.side} end of its body, at ${percent(left)}% to ${percent(right)}% of Image 1's width`
-        + ` and ${percent(top)}% to ${percent(bottom)}% of its height`;
+        + ` and ${percent(top)}% to ${percent(bottom)}% of its height`
+        + (head.expression ? `, and its face shows ${head.expression}` : '');
 }
