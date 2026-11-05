@@ -399,3 +399,30 @@ test('broker normalizes one GIF loop into playable MP4 with motion, duration, od
         assert.equal(existsSync(join(directory, 'bad', 'source-video.part')), false);
     } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('broker loops an emote-length GIF up to a second and refuses one too small to edit', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'gif-short-test-'));
+    try {
+        const fixture = (name, size, duration) => {
+            const path = join(directory, name);
+            execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `testsrc=size=${size}:rate=25:duration=${duration}`, '-loop', '0', path]);
+            return readFileSync(path);
+        };
+        const store = (bytes, folder) => storeVideoSourceClip({ clip_url: gif.url, name: gif.name, bytes: bytes.length },
+            join(directory, folder), null, undefined, { fetcher: async url => new Response(Readable.from([bytes]), { url }) });
+        // 1716933983781198.gif: 56x56, 8 frames at 25 fps.
+        const short = await store(fixture('short.gif', '56x56', 0.32), 'short');
+        assert.match(short.path, /source-video\.mp4$/);
+        assert.ok(Math.abs(short.duration - 1.28) < 0.05, short.duration);
+        assert.equal(short.excerpt, undefined);
+        const frames = Number(execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=nb_read_frames',
+            '-of', 'default=nw=1:nk=1', short.path]).toString());
+        assert.equal(frames, 32, 'four whole plays of the 8-frame loop');
+        const frame = index => execFileSync('ffmpeg', ['-v', 'error', '-i', short.path, '-vf', `select=eq(n\\,${index})`,
+            '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+        assert.notDeepEqual(frame(0), frame(4), 'animation survives looping');
+        for (const leftover of ['source-video.part', 'source-loop.mp4']) assert.equal(existsSync(join(directory, 'short', leftover)), false);
+        await assert.rejects(store(fixture('tiny.gif', '24x40', 1), 'tiny'), /too small to edit \(24×40\)/);
+        assert.equal(existsSync(join(directory, 'tiny', 'source-loop.mp4')), false);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+});
