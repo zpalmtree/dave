@@ -106,7 +106,9 @@ export function validateVideoEditDecision(value: any, intent: boolean): VideoEdi
         ...(intent ? { replacement: edits.includes(value.action) ? value.replacement.trim() : '' }
             : { effects: edits.includes(value.action) ? String(value.effects || '').trim() : '',
                 subjects: edits.includes(value.action) && value.subjects === 'group' ? 'group' : 'primary',
-                targetBoxes: edits.includes(value.action) ? parseVideoEditTargetBoxes(value.target_boxes) : [] }),
+                // The broker re-validates a grounder's already-validated decision, whose boxes
+                // are camelCase: reading only target_boxes there dropped every box in production.
+                targetBoxes: edits.includes(value.action) ? parseVideoEditTargetBoxes(value.target_boxes ?? value.targetBoxes) : [] }),
         clarification: value.action === 'clarify' ? value.clarification.trim() : '' } as VideoEditIntent | VideoEditGrounding;
 }
 

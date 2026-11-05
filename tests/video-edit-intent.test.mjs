@@ -113,6 +113,8 @@ test('grounding keeps valid target boxes and drops malformed ones', () => {
             { seconds: 1.24, box_2d: [587.4, 514, 663, 578] }] }, false);
     assert.deepEqual(decision.targetBoxes, [{ seconds: 0, box_2d: [342, 281, 401, 463] },
         { seconds: 1.24, box_2d: [587, 514, 663, 578] }]);
+    // The broker validates the grounder's validated decision again; its boxes must survive.
+    assert.deepEqual(validateVideoEditDecision(decision, false).targetBoxes, decision.targetBoxes);
     assert.deepEqual(parseVideoEditTargetBoxes('nope'), []);
     assert.deepEqual(validateVideoEditDecision({ action: 'clarify', target: '', clarification: 'Which one?',
         target_boxes: [{ seconds: 0, box_2d: [1, 2, 3, 4] }] }, false).targetBoxes, []);
