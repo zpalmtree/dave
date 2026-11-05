@@ -12,10 +12,15 @@ import { rangeVideoSourceExcerpt, VIDEO_SOURCE_INPUT_MAX_SECONDS, VideoSourceExc
 
 export const VIDEO_EDIT_MIN_SECONDS = 0.5;
 export const VIDEO_EDIT_LEGACY_MIN_SECONDS = 5;
+/** A shorter animation is looped up to this length before the minimum-length check. */
+export const VIDEO_LOOP_MIN_SECONDS = 1;
+/** Emoji GIFs around 54x96 px edit well; below this there is nothing left to track. */
+export const VIDEO_EDIT_MIN_SIDE = 32;
 export const VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS = 15;
 export const VIDEO_EDIT_MAX_SECONDS = VIDEO_MAX_TOTAL_DURATION_SECONDS;
 export const VIDEO_EDIT_MAX_BYTES = 100 * 1024 * 1024;
 export const VIDEO_CLIP_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'gif', 'webp', 'apng']);
+const ANIMATED_EXTENSIONS = new Set(['gif', 'webp', 'apng']);
 
 export interface SubmittedVideoSourceClip {
     clip_url: string;
@@ -81,19 +86,48 @@ async function convertAnimatedImage(input: string, output: string, format: 'webp
         : resolve()));
 }
 
-async function probeDuration(path: string): Promise<number> {
+interface ProbedVideo {
+    duration: number;
+    width: number;
+    height: number;
+}
+
+async function probeVideo(path: string): Promise<ProbedVideo> {
     const output = await new Promise<string>((resolve, reject) => execFile('ffprobe', [
-        '-v', 'error', ...LOCAL_VIDEO_INPUT_ARGS, '-select_streams', 'v:0', '-show_entries', 'stream=codec_type:format=duration',
-        '-of', 'json', path,
+        '-v', 'error', ...LOCAL_VIDEO_INPUT_ARGS, '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', path,
     ], { timeout: 30_000, maxBuffer: 64 * 1024 }, (error, stdout) =>
         error ? reject(new Error('Could not decode the source video.')) : resolve(String(stdout))));
     const value = JSON.parse(output);
     if (!value.streams?.length) throw new Error('The source clip has no video stream.');
-    const duration = Number(value.format?.duration);
+    return { duration: Number(value.format?.duration), width: Number(value.streams[0].width), height: Number(value.streams[0].height) };
+}
+
+function checkSourceVideo({ duration, width, height }: ProbedVideo): number {
     if (!Number.isFinite(duration) || duration < VIDEO_EDIT_MIN_SECONDS || duration > VIDEO_SOURCE_INPUT_MAX_SECONDS) {
         throw new Error(`Video replacement supports clips from ${VIDEO_EDIT_MIN_SECONDS} seconds to 10 minutes.`);
     }
+    if (Math.min(width, height) < VIDEO_EDIT_MIN_SIDE) {
+        throw new Error(`The source video is too small to edit (${width}×${height}). Use one at least ${VIDEO_EDIT_MIN_SIDE} pixels on each side.`);
+    }
     return duration;
+}
+
+async function probeDuration(path: string): Promise<number> {
+    return checkSourceVideo(await probeVideo(path));
+}
+
+/**
+ * Plays a too-short animation (an emote-sized GIF, say) whole until it lasts at least
+ * VIDEO_LOOP_MIN_SECONDS. Discord shows it looping, so the longer clip looks the same.
+ */
+async function loopShortAnimation(input: string, output: string, duration: number, gif: boolean): Promise<void> {
+    const plays = Math.ceil(VIDEO_LOOP_MIN_SECONDS / duration);
+    await new Promise<void>((resolve, reject) => execFile('ffmpeg', ['-nostdin', '-v', 'error', '-y',
+        ...LOCAL_VIDEO_INPUT_ARGS, '-stream_loop', String(plays - 1), ...(gif ? ['-ignore_loop', '1'] : []), '-i', input,
+        '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', '-map', '0:v:0',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output,
+    ], { timeout: 600_000, maxBuffer: 1024 * 1024 }, error => error ? reject(new Error('Could not loop the source animation.')) : resolve()));
 }
 
 /**
@@ -134,10 +168,12 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
     const temporary = join(directory, 'source-video.part');
     const destination = join(directory, `source-video.${extension === 'webp' || extension === 'apng' ? 'mp4' : extension}`);
     const webpVideo = join(directory, 'source-webp.mp4');
+    const loopVideo = join(directory, 'source-loop.mp4');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     rmSync(temporary, { force: true });
     rmSync(webpVideo, { force: true });
+    rmSync(loopVideo, { force: true });
     try {
         let bytes = 0;
         if (isYoutubeVideoUrl(source.clip_url)) {
@@ -168,15 +204,29 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
             await convertAnimatedImage(temporary, webpVideo, extension === 'webp' ? 'webp_anim' : 'apng');
             input = webpVideo;
         }
-        const duration = await probeDuration(input);
+        let probed = await probeVideo(input);
+        let looped = false;
+        if (ANIMATED_EXTENSIONS.has(extension) && probed.duration > 0 && probed.duration < VIDEO_EDIT_MIN_SECONDS) {
+            await loopShortAnimation(input, loopVideo, probed.duration, extension === 'gif');
+            input = loopVideo;
+            looped = true;
+            probed = await probeVideo(input);
+        }
+        const duration = checkSourceVideo(probed);
         // Soundtrack extraction selects its own excerpt after transcribing the whole song.
         const excerpt = options.fullSource ? null : videoSourceClipExcerpt(duration, range);
-        if (excerpt || extension === 'gif') {
+        const gif = extension === 'gif' && !looped;
+        if (excerpt || gif) {
             const cut = join(directory, 'source-video.mp4');
             const cutDuration = await cutVideoSourceClip(input, cut, excerpt || {
                 start_seconds: 0, end_seconds: duration, source_seconds: duration, label: '', chosen: 'start',
-            }, extension === 'gif');
+            }, gif);
             return { path: cut, bytes: statSync(cut).size, duration: cutDuration, excerpt };
+        }
+        if (looped) {
+            const path = join(directory, 'source-video.mp4');
+            renameSync(input, path);
+            return { path, bytes: statSync(path).size, duration };
         }
         renameSync(input, destination);
         return { path: destination, bytes: input === temporary ? bytes : statSync(destination).size, duration };
@@ -184,5 +234,6 @@ export async function storeVideoSourceClip(source: SubmittedVideoSourceClip, dir
         clearTimeout(timeout);
         rmSync(temporary, { force: true });
         rmSync(webpVideo, { force: true });
+        rmSync(loopVideo, { force: true });
     }
 }
