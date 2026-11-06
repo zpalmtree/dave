@@ -59,6 +59,14 @@ test('the prompt writer sends the window clip and pinned still to Gemini and val
         target: 'Mario', request: 'meximutt', replacementDescription: 'a heavy-set man',
     });
     assert.ok(requests[1].contents[0].parts.some(part => /backwards and forwards/.test(part.text || '')));
+    assert.ok(!requests[1].contents[0].parts.some(part => /This target is a group/.test(part.text || '')));
+    // 3c8ba05b: every dancing bear becomes its own copy, so the prompt must not say only one figure changes.
+    await writeRemakePrompt({
+        clip: { bytes: Buffer.from('clip'), mimeType: 'video/mp4' }, frames: 90, sourceFrames: 72, group: true,
+        pictures: [{ image: { bytes: Buffer.from('still'), mimeType: 'image/png' }, frame: 44 }],
+        target: 'all dancing bears', request: 'meximutt', replacementDescription: 'a heavy-set man',
+    });
+    assert.ok(requests[2].contents[0].parts.some(part => /This target is a group: .*its own copy of <Subject 1>.*"Only these figures change"/.test(part.text || '')));
     await assert.rejects(writeRemakePrompt({
         clip: { bytes: Buffer.from('clip'), mimeType: 'video/mp4' }, frames: 91, sourceFrames: 72,
         pictures: [{ image: { bytes: Buffer.from('still'), mimeType: 'image/png' }, frame: 44 }],

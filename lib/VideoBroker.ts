@@ -5613,7 +5613,7 @@ export class VideoBroker {
             const referencePath = join(directory, 'video-edit-reference.json');
             const description = existsSync(referencePath) ? String(JSON.parse(readFileSync(referencePath, 'utf8')).description || '') : '';
             const sha256 = createHash('sha256').update(clip).update(still).update(JSON.stringify([body.frames, body.source_frames, body.pin, body.padding]))
-                .update(job.video_edit_target || '').update(description).digest('hex');
+                .update(job.video_edit_target || '').update(description).update(job.video_edit_subjects === 'group' ? 'group' : '').digest('hex');
             const path = join(directory, `video-edit-remake-prompt-${body.segment}.json`);
             if (existsSync(path)) {
                 const cached = JSON.parse(readFileSync(path, 'utf8'));
@@ -5625,6 +5625,7 @@ export class VideoBroker {
                 clip: { bytes: clip, mimeType: 'video/mp4' }, frames: body.frames, sourceFrames: body.source_frames,
                 padding: body.padding, pictures: [{ image: { bytes: still, mimeType: 'image/png' }, frame: body.pin }],
                 target: job.video_edit_target || 'the subject', request: job.prompt || '', replacementDescription: description,
+                ...(job.video_edit_subjects === 'group' ? { group: true } : {}),
             }, this.providerHooks(job), body.segment);
             mkdirSync(directory, { recursive: true });
             writeFileSync(path, JSON.stringify({ prompt, sha256, version: VIDEO_EDIT_REMAKE_PROMPT_VERSION }, null, 2));
@@ -5677,8 +5678,10 @@ export class VideoBroker {
             const reference = this.editReference(job);
             const target = job.video_edit_target || 'the subject';
             const hooks = this.providerHooks(job);
+            // Every member of a group target is replaced; one located head pinned 3c8ba05b's repaint to one bear.
+            const group = job.video_edit_subjects === 'group';
             // Which end is the head: at 15 px the editor flipped a thrown man and the review missed it.
-            const head = isolated && subjectBox ? await (this.options.videoEditHeadLocator || locateVideoEditHead)(
+            const head = isolated && subjectBox && !group ? await (this.options.videoEditHeadLocator || locateVideoEditHead)(
                 { bytes: frame, mimeType }, target, subjectBox, hooks) : null;
             const headWording = head ? videoEditHeadWording(head) : undefined;
             const reviewTarget = headWording ? `${target} (in Image 1, ${headWording})` : target;
@@ -5692,7 +5695,7 @@ export class VideoBroker {
                     target,
                     job.video_replacement_prompt || job.prompt,
                     // Usage events are keyed by attempt, so each shot and round reserves all editor attempts.
-                    { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated,
+                    { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated, ...(group ? { group } : {}),
                         ...(isolated && subjectBox ? { subjectBox, ...(headWording ? { headWording } : {}) } : {}),
                         attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
                         ...(round ? { alternateOnly, deadline: budgetEnd - 60_000 } : {}) },
