@@ -4362,3 +4362,81 @@ test('music recovery endpoints require worker authentication, active lease and a
         }
     } finally { if(socket)socket.close();await harness.stop(); }
 });
+
+test('a leased isolated replacement gets a cached, validated Viggle-Remake prompt per segment window', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-remake-prompt-'));
+    const prompts = [];
+    const broker = new VideoBroker({
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        videoEditGrounder: async (_source, target) => ({ action: 'replace', target, effects: '', subjects: 'primary',
+            clarification: '', targetBoxes: [] }),
+        sourceVideoDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: 3 };
+        },
+        sourceImageDownloader: async (_source, target) => {
+            mkdirSync(target, { recursive: true });
+            const path = join(target, 'replacement.png');
+            writeFileSync(path, 'replacement');
+            return { path, bytes: 11, mimeType: 'image/png' };
+        },
+        videoEditReferenceDescriber: async () => 'a heavy-set man with a dark mohawk and a flag t-shirt',
+        videoEditRemakePrompter: async (request, _hooks, attempt) => {
+            prompts.push({ ...request, attempt });
+            return `subject_definitions:\n<Video 1> ... ${request.target} ${request.replacementDescription}`;
+        },
+    });
+    await broker.start();
+    try {
+        const accepted = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'Meximutt',
+                source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4' },
+                source_image: { url: 'https://cdn.discordapp.com/attachments/1/2/replacement.png',
+                    mime_type: 'image/png', bytes: 11, name: 'replacement.png' },
+                video_edit_target: 'the cartoon duck', requester_id: 'user', origin_bot_id: 'bot', channel_id: 'channel',
+                command_message_id: 'remake', status_message_id: 'status' }),
+        });
+        assert.equal(accepted.status, 201);
+        const job = (await accepted.json()).job;
+        const socket = new WebSocket(`ws://127.0.0.1:${broker.listeningPort()}/v1/worker`, {
+            headers: { authorization: 'Bearer worker-secret' },
+        });
+        const take = socketInbox(socket);
+        await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+        try {
+            socket.send(JSON.stringify({ type: 'hello', protocol: 1, worker_id: 'edit-worker',
+                capabilities: ['minimax'], current_job: null, video_edit_version: 8 }));
+            const lease = await take(value => value.type === 'job');
+            const headers = { authorization: 'Bearer worker-secret', 'x-video-lease': lease.job.lease_id };
+            const post = (path, body, extra = {}) => fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/${path}`, {
+                method: 'POST', body, headers: { ...headers, ...extra } });
+            assert.equal((await post('video-edit-reference', 'reference', { 'content-type': 'image/png' })).status, 200);
+            const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(12)]);
+            const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('still')]);
+            const window = { segment: 1, frames: 90, source_frames: 72, pin: 44,
+                clip: mp4.toString('base64'), still: png.toString('base64') };
+            const remake = (body, extra) => post('video-edit-remake-prompt', JSON.stringify(body), { 'content-type': 'application/json', ...extra });
+            assert.equal((await remake(window, { 'x-video-lease': 'stale' })).status, 409);
+            assert.equal((await remake({ ...window, clip: png.toString('base64') })).status, 400, 'The window must be an MP4.');
+            assert.equal((await remake({ ...window, pin: 'late' })).status, 400);
+            assert.equal((await remake({ ...window, padding: 'loop' })).status, 400);
+            const written = await remake(window);
+            assert.equal(written.status, 200);
+            assert.match((await written.json()).prompt, /the cartoon duck a heavy-set man with a dark mohawk/);
+            assert.equal(prompts.length, 1);
+            assert.equal(prompts[0].frames, 90);
+            assert.equal(prompts[0].pictures[0].frame, 44);
+            assert.equal(prompts[0].request, 'Meximutt');
+            assert.equal((await remake(window)).status, 200);
+            assert.equal(prompts.length, 1, 'An identical window reuses its prompt.');
+            assert.equal((await remake({ ...window, pin: null })).status, 200);
+            assert.equal(prompts.length, 2);
+            assert.equal(prompts[1].pictures[0].frame, null);
+        } finally { socket.close(); }
+    } finally { await broker.stop(); }
+});
