@@ -33,7 +33,19 @@ export type RemakePromptRequest = {
     target: string;
     request: string;
     replacementDescription: string;
+    /** The target is a group whose every member becomes its own copy of the replacement. */
+    group?: boolean;
 };
+
+/**
+ * The instruction describes one replaced figure. A group target ("replace every bear", 3c8ba05b)
+ * replaces each member, and the painted frames show one copy per member, so the prompt must too.
+ */
+export const REMAKE_GROUP_NOTE = 'This target is a group: every one of its members is replaced. <Subject 1> is the replacement character, '
+    + 'and each member of the group becomes its own copy of <Subject 1>, as the painted frames show, so <Video 1> and the target video '
+    + 'show the same number of figures. Write every section for the group: say that each member becomes a copy of <Subject 1>, '
+    + 'describe each copy\'s performance by its place in the frame (the copy on the left, the one in the middle), and close with '
+    + '"Only these figures change" instead of "Only this one figure changes".';
 
 export const REMAKE_PROMPT_INSTRUCTION = `You write the prompt for Viggle-Remake, a video model that re-renders a source video with one character replaced. It reads MiniMax-H3's six-section prompt. You receive the source clip (<Video 1>), the painted frames (<Picture 1>, <Picture 2>, ...: frames of the source already repainted with the replacement, each pinned at a given frame of the output), the target that is replaced, the user's request and a description of the replacement's appearance.
 
@@ -110,6 +122,7 @@ export async function writeRemakePrompt(request: RemakePromptRequest, hooks: Vid
     const parts: any[] = [
         { text: JSON.stringify({ target: request.target, request: request.request.slice(0, 600),
             replacement_appearance: request.replacementDescription.slice(0, 1000) }) },
+        ...(request.group ? [{ text: REMAKE_GROUP_NOTE }] : []),
         { text: `<Video 1>, the source window: ${frames} frames at 24 fps, ${stamp(frames)} long.${held}` },
         { inlineData: { mimeType: request.clip.mimeType, data: request.clip.bytes.toString('base64') },
             videoMetadata: { fps: REMAKE_PROMPT_VIDEO_FPS } },

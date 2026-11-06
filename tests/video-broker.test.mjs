@@ -1288,6 +1288,17 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 assert.deepEqual(await failedRedraw.json(), { reason_code: 'edit_quality',
                     error: 'Replacement pose/identity check failed: The replacement is drawn at half the source height.' });
                 assert.equal(repaints.length, generatorCalls + 2);
+                // 3c8ba05b: a group target is repainted as a group, never pinned to one located head.
+                await broker.run("UPDATE video_jobs SET video_edit_subjects='group' WHERE public_id=?", [job.id]);
+                const heads = headCalls.length;
+                const grouped = await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '3',
+                    'x-video-edit-subject-box': '0.020,0.085,0.982,0.931' });
+                assert.equal(grouped.status, 200);
+                assert.equal(headCalls.length, heads);
+                assert.equal(repaintOptions.at(-1).group, true);
+                assert.equal(repaintOptions.at(-1).headWording, undefined);
+                assert.equal(reviewTargets.at(-1), 'the man');
+                await broker.run("UPDATE video_jobs SET video_edit_subjects='primary' WHERE public_id=?", [job.id]);
                 rejectEdit = true;
                 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
                 const sample = { source: png, edited: png, mask: png };

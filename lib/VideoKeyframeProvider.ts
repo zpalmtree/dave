@@ -660,17 +660,29 @@ export interface VideoEditStillImage {
  * subject in a hijab, and the replacement's own clothing otherwise took its place. The rule names no
  * garment: listing hijabs and veils got a bareheaded politician's frame refused 4 of 4 times, while
  * this wording passed 4 of 4 and still kept the hijab in 4 of 4.
+ *
+ * A group target ("replace every bear") replaces each of its members with its own copy. Worded for
+ * one replacement, 3c8ba05b's repaints changed one of four dancing bears, or drew one Meximutt and
+ * erased the rest, in five of six draws, and the still review rejected each.
  */
-export function videoEditStillPrompt(target: string, request: string): string {
-    const named = /^(the|a|an) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
+export function videoEditStillPrompt(target: string, request: string, group = false): string {
+    const named = /^(the|a|an|all|every|each|both|these|those) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
+    const place = group
+        ? [`Replace ${named} with copies of the subject shown in Image 2, one copy for each of them, so the frame shows`,
+            'exactly as many copies as Image 1 shows of them. Each copy takes exactly the place of the figure it replaces:',
+            'the same position in the frame, the same size,']
+        : [`Edit Image 1, a frame from a video. Replace ${named} with the subject shown in Image 2.`,
+            `The replacement takes exactly the place of ${named}: the same position in the frame, the same size,`];
     return [
-        `Edit Image 1, a frame from a video. Replace ${named} with the subject shown in Image 2.`,
-        `The replacement takes exactly the place of ${named}: the same position in the frame, the same size,`,
+        ...(group ? ['Edit Image 1, a frame from a video.'] : []),
+        ...place,
         'the same head angle, gaze, expression, eye openness and mouth shape where they apply, and the same pose',
         'and crop.',
-        'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
+        group ? 'Use Image 2 for every copy\'s identity, face, shape, proportions, clothing, colors and texture,'
+            : 'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
         'keeping its distinctive look instead of redesigning it.',
-        `If ${named} wears anything on its head in Image 1, the replacement wears the same thing in the same way,`,
+        group ? 'If one of them wears anything on its head in Image 1, its copy wears the same thing in the same way,'
+            : `If ${named} wears anything on its head in Image 1, the replacement wears the same thing in the same way,`,
         'over its own hair and clothing.',
         'Keep everything else in Image 1 exactly as it is: the background, other subjects, lighting, colors,',
         'camera angle and framing.',
@@ -714,10 +726,15 @@ export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: s
  * 24206bd8 the editor replaced one of the two men holding the target aloft, because the prompt
  * said only "the selected subject". The worker's tracked box names the target's place in the crop.
  */
-export function isolatedEditSubject(target: string, box?: [number, number, number, number], head?: string): string {
-    if (!box) return 'the selected subject in this tight source crop';
+export function isolatedEditSubject(target: string, box?: [number, number, number, number], head?: string,
+    group = false): string {
+    if (!box) return group ? 'the selected subjects in this tight source crop' : 'the selected subject in this tight source crop';
     const percent = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 100);
     const [left, top, right, bottom] = box.map(percent);
+    if (group) {
+        const named = target.trim().replace(/^(the|all( of)?( the)?|every|each|both( of)?( the)?) /i, '').slice(0, 160) || 'subjects';
+        return `the ${named} in the region from ${left}% to ${right}% of Image 1's width and ${top}% to ${bottom}% of its height`;
+    }
     const named = target.trim().replace(/^(the|a|an) /i, '').slice(0, 160) || 'subject';
     return `the ${named}: the one figure occupying the region from ${left}% to ${right}% of Image 1's width`
         + ` and ${top}% to ${bottom}% of its height${head ? `; ${head}, so the replacement's head and face go`
@@ -745,6 +762,8 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     subjectBox?: [number, number, number, number];
     /** Where the target's head is, worded for the editor; anchors which end of a tiny subject is which. */
     headWording?: string;
+    /** The target is a group: each of its members gets its own copy of the replacement. */
+    group?: boolean;
     abortSignal?: AbortSignal;
     /** Added to the attempt numbers, so repaints of several shots of one job record separately. */
     attemptOffset?: number;
@@ -776,10 +795,14 @@ export async function createVideoEditStill(
     };
     options = { ...options, beforeRequest: guard(options.beforeRequest),
         onUsage: guard(options.onUsage), onAttempt: guard(options.onAttempt) };
-    const prompt = options.isolated
+    const group = options.group === true;
+    const prompt = options.isolated && group
+        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, undefined, true), request, true)
+            + ' Image 1 is a tracked crop of the intended subjects, not the full scene. Replace every one of them; leave none of them unchanged and remove none of them. Preserve each figure\'s source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give each copy the facial expression of the figure it replaces: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. Dress every copy in Image 2\'s own clothing, not the clothing worn in Image 1. Fill the same crop. Where Image 1 shows a figure from behind, draw its copy from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
+        : options.isolated
         ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, options.headWording), request)
             + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give the replacement Image 1\'s facial expression exactly: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. The animation keeps this expression, so Image 2\'s own expression gives way to Image 1\'s. Dress the replacement in Image 2\'s own clothing, not the clothing worn in Image 1, so the replacement looks the same in every shot of the clip. Fill the same crop; do not turn a profile into a front-facing portrait. When Image 1 shows the subject from behind, draw the replacement from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
-        : videoEditStillPrompt(target, request);
+        : videoEditStillPrompt(target, request, group);
     const started = Date.now();
     const deadline = Math.min(started + 270_000, options.deadline ?? Infinity);
     let failure: unknown = new Error('The replacement editors ran out of time.');

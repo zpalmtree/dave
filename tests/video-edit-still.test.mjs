@@ -80,6 +80,19 @@ test('an isolated repaint names the target and its place in a crop shared with o
     }
 });
 
+test('a group target replaces each of its members with its own copy', () => {
+    // 3c8ba05b: worded for one figure, the editor replaced one of four dancing bears or drew a single Meximutt.
+    const subject = isolatedEditSubject('all dancing bears', [0.02, 0.085, 0.982, 0.931], undefined, true);
+    assert.equal(subject, "the dancing bears in the region from 2% to 98% of Image 1's width and 9% to 93% of its height");
+    const prompt = videoEditStillPrompt(subject, 'meximutt', true);
+    assert.match(prompt, /^Edit Image 1, a frame from a video\. Replace the dancing bears in the region .* with copies of the subject shown in Image 2, one copy for each of them/);
+    assert.match(prompt, /exactly as many copies as Image 1 shows of them/);
+    assert.doesNotMatch(prompt, /the one figure|The replacement takes/);
+    assert.equal(isolatedEditSubject('every bear', undefined, undefined, true), 'the selected subjects in this tight source crop');
+    assert.match(isolatedEditSubject('both of the men', [0, 0, 1, 1], undefined, true), /^the men in the region/);
+    assert.match(videoEditStillPrompt('all dancing bears', '', true), /Replace all dancing bears with copies/);
+});
+
 test('the repaint keeps the subject\'s headwear without naming any garment', () => {
     const prompt = videoEditStillPrompt('the woman in the foreground', 'Meximutt');
     assert.match(prompt, /wears anything on its head in Image 1, the replacement wears the same thing/);
@@ -150,6 +163,17 @@ test('a second draw can go straight to Gemini with a 4:5 crop kept at 4:5', asyn
     () => createVideoEditStill({ bytes: createCanvas(176, 144).toBuffer('image/png'), mimeType: 'image/png' },
         replacement, 'Mario', 'meximutt'));
     assert.equal(wide.error, undefined);
+});
+
+test('an isolated group repaint asks for one copy per member and no head position', async () => {
+    let prompt;
+    const { error } = await withImageEdits((_count, _url, init) => (prompt = init.body.get('prompt'), repainted),
+        () => createVideoEditStill(frame, replacement, 'all dancing bears', 'meximutt', {
+            isolated: true, group: true, subjectBox: [0.02, 0.085, 0.982, 0.931], headWording: 'its head is at the top end' }));
+    assert.equal(error, undefined);
+    assert.match(prompt, /copies of the subject shown in Image 2, one copy for each of them/);
+    assert.match(prompt, /tracked crop of the intended subjects.*Replace every one of them; leave none of them unchanged and remove none of them/);
+    assert.doesNotMatch(prompt, /its head is at|the one figure|crop of the intended subject,/);
 });
 
 test('a second draw sends nothing once its deadline has passed', async () => {
