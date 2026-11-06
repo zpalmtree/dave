@@ -3,6 +3,7 @@ import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
 import { groundVideoEditTarget, locateVideoEditHead, parseVideoEditTargetBoxes, videoEditHeadWording, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects, VideoEditTargetBox } from './VideoEditIntent.js';
 import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReview, EditReviewSample } from './VideoEditReview.js';
+import { writeRemakePrompt, VIDEO_EDIT_REMAKE_PROMPT_VERSION } from './VideoEditRemakePrompt.js';
 import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
 import { sourceAudioDescriptor, storeVideoSourceAudio, pinVideoPlanToAudio, StoredVideoSourceAudio, SubmittedVideoSourceAudio,
     transcribeVideoSourceAudio, videoSourceAudioPlannerGuidance, parseVideoSourceAudioLyrics, VideoSourceAudioLyrics,
@@ -157,6 +158,7 @@ export const OALGO_PHOTOREAL_KEYFRAME = videoCharacterPhotorealKeyframe(MEXIMUTT
 
 interface BrokerOptions {
     videoEditReviewer?: typeof reviewVideoEdit;
+    videoEditRemakePrompter?: typeof writeRemakePrompt;
     videoEditReferenceDescriber?: typeof describeVideoEditReference;
     videoEditGrounder?: typeof groundVideoEditTarget;
     sourceVideoDownloader?: typeof storeVideoSourceClip;
@@ -5573,6 +5575,63 @@ export class VideoBroker {
         } catch (error) { writeJson(res, 502, { error: sanitizeVideoWorkerText(String(error), 'Subject-edit review failed.', 500) }); }
     }
 
+    /**
+     * Write the timed six-section prompt for one Viggle-Remake window of an isolated replacement.
+     * The worker sends the window clip it will render and the still pinned in it; the prompt names
+     * every change of the source performance at its time, which Viggle-Animate could not follow.
+     */
+    private async handleVideoEditRemakePrompt(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
+        const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
+        if (!job || job.worker_id !== this.worker?.id || publicId !== this.worker.currentJob
+            || !this.workerLeaseMatches(req, job)) {
+            writeJson(res, 409, { error: 'Job is not leased to this worker.' }); return;
+        }
+        if (!job.source_video_path || (job.video_edit_mode || 'replace') !== 'replace') {
+            writeJson(res, 409, { error: 'This job is not a subject replacement.' }); return;
+        }
+        let body: any;
+        let clip: Buffer;
+        let still: Buffer;
+        try {
+            body = await readJson(req, 24 * 1024 * 1024);
+            const base64 = (data: unknown, limit: number) => {
+                if (typeof data !== 'string' || !data.length || data.length > limit || !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
+                    throw new Error('Invalid Remake window data.');
+                return Buffer.from(data, 'base64');
+            };
+            if (!Number.isInteger(body.segment) || body.segment < 1 || body.segment > 128
+                || !Number.isInteger(body.frames) || !Number.isInteger(body.source_frames)
+                || !(body.pin === null || Number.isInteger(body.pin))
+                || !(body.padding === undefined || body.padding === 'hold' || body.padding === 'boomerang')) throw new Error('Invalid Remake window.');
+            clip = base64(body.clip, 16 * 1024 * 1024);
+            still = base64(body.still, 8 * 1024 * 1024);
+            if (clip.toString('latin1', 4, 8) !== 'ftyp') throw new Error('The Remake window must be an MP4 clip.');
+            if (!still.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('The Remake still must be a PNG.');
+        } catch (error) { writeJson(res, 400, { error: String(error) }); return; }
+        try {
+            const directory = join(this.options.resultsDir, publicId);
+            const referencePath = join(directory, 'video-edit-reference.json');
+            const description = existsSync(referencePath) ? String(JSON.parse(readFileSync(referencePath, 'utf8')).description || '') : '';
+            const sha256 = createHash('sha256').update(clip).update(still).update(JSON.stringify([body.frames, body.source_frames, body.pin, body.padding]))
+                .update(job.video_edit_target || '').update(description).digest('hex');
+            const path = join(directory, `video-edit-remake-prompt-${body.segment}.json`);
+            if (existsSync(path)) {
+                const cached = JSON.parse(readFileSync(path, 'utf8'));
+                if (cached.sha256 === sha256 && cached.version === VIDEO_EDIT_REMAKE_PROMPT_VERSION && typeof cached.prompt === 'string') {
+                    writeJson(res, 200, { prompt: cached.prompt }); return;
+                }
+            }
+            const prompt = await (this.options.videoEditRemakePrompter || writeRemakePrompt)({
+                clip: { bytes: clip, mimeType: 'video/mp4' }, frames: body.frames, sourceFrames: body.source_frames,
+                padding: body.padding, pictures: [{ image: { bytes: still, mimeType: 'image/png' }, frame: body.pin }],
+                target: job.video_edit_target || 'the subject', request: job.prompt || '', replacementDescription: description,
+            }, this.providerHooks(job), body.segment);
+            mkdirSync(directory, { recursive: true });
+            writeFileSync(path, JSON.stringify({ prompt, sha256, version: VIDEO_EDIT_REMAKE_PROMPT_VERSION }, null, 2));
+            writeJson(res, 200, { prompt });
+        } catch (error) { writeJson(res, 502, { error: sanitizeVideoWorkerText(String(error), 'The Remake prompt could not be written.', 500) }); }
+    }
+
     /** Repaint the worker's chosen source-video frame with the replacement for Viggle-Animate. */
     private async handleVideoEditStill(req: IncomingMessage, res: ServerResponse, publicId: string): Promise<void> {
         const job = await this.get<JobRow>('SELECT * FROM video_jobs WHERE public_id = ?', [publicId]);
@@ -5857,6 +5916,10 @@ export class VideoBroker {
         const editReview = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-review$/.exec(url.pathname);
         if (editReview && req.method === 'POST') {
             await this.handleVideoEditReview(req, res, editReview[1]); return;
+        }
+        const editRemakePrompt = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-remake-prompt$/.exec(url.pathname);
+        if (editRemakePrompt && req.method === 'POST') {
+            await this.handleVideoEditRemakePrompt(req, res, editRemakePrompt[1]); return;
         }
         const editStill = /^\/v1\/worker\/jobs\/([0-9a-f-]+)\/video-edit-still$/.exec(url.pathname);
         if (editStill && req.method === 'POST') {
