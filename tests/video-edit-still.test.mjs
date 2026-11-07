@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditStillWithEffects } from '../dist/VideoKeyframeProvider.js';
+import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditStillWithEffects, withoutJpegApp11 } from '../dist/VideoKeyframeProvider.js';
 import { parseSubjectBox } from '../dist/VideoBroker.js';
 import { parseVideoEditHead, videoEditHeadWording } from '../dist/VideoEditIntent.js';
 import { inflateSync } from 'node:zlib';
@@ -317,4 +317,23 @@ test('a preset portrait reference brings its character sheet and an upload bring
     assert.ok(sheet.bytes.equals(readFileSync(new URL('../images/oalgo-sheet.png', import.meta.url))));
     assert.equal(videoCharacterBodySheet(Buffer.from('an uploaded reference')), null);
     assert.equal(videoCharacterBodySheet(readFileSync(new URL('../images/argenmutt.png', import.meta.url))), null);
+});
+
+test('a Gemini JPEG signed with a C2PA manifest that names an SVG type still decodes', async () => {
+    // node-canvas sniffs "<svg" ahead of the JPEG signature and parsed such a repaint as SVG.
+    const plain = sourceCanvas.toBuffer('image/jpeg');
+    const app0End = 4 + plain.readUInt16BE(4);
+    const manifest = Buffer.from(`JP\0\x01jumb c2pa.thumbnail.claim image/svg+xml <svg xmlns="http://www.w3.org/2000/svg"/>`, 'latin1');
+    const header = Buffer.from([0xff, 0xeb, 0, 0]);
+    header.writeUInt16BE(manifest.length + 2, 2);
+    const signed = Buffer.concat([plain.subarray(0, app0End), header, manifest, plain.subarray(app0End)]);
+    await assert.rejects(loadImage(signed), /SVG/, 'The fixture reproduces the misdetection.');
+    assert.ok(withoutJpegApp11(signed).equals(plain));
+    assert.equal(withoutJpegApp11(plain), plain);
+    assert.equal(withoutJpegApp11(frame.bytes), frame.bytes, 'PNGs pass through untouched.');
+    const { result, error } = await withImageEdits(() => geminiImage(signed, 'image/jpeg'),
+        () => createVideoEditStill(frame, replacement, 'Peach', 'meximutt', { alternateOnly: true }));
+    assert.equal(error, undefined);
+    assert.equal(result.mimeType, 'image/png');
+    assert.equal((await loadImage(result.bytes)).width, 160);
 });

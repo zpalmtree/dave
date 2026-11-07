@@ -776,6 +776,29 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     deadline?: number;
 };
 
+/**
+ * A JPEG without its APP11 segments. Gemini signs some replies with a C2PA manifest there, and one
+ * manifest named an "<svg" content type 276 bytes in: node-canvas sniffs for that text before the
+ * JPEG signature, so it parsed the repaint as SVG and rejected it ("Invalid SVG image").
+ */
+export function withoutJpegApp11(bytes: Buffer): Buffer {
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return bytes;
+    const kept: Buffer[] = [bytes.subarray(0, 2)];
+    let offset = 2;
+    let stripped = false;
+    while (offset + 4 <= bytes.length && bytes[offset] === 0xff) {
+        const marker = bytes[offset + 1];
+        // Start of scan: the entropy-coded data follows, so the rest is kept as it is.
+        if (marker === 0xda) break;
+        const end = offset + 2 + bytes.readUInt16BE(offset + 2);
+        if (end > bytes.length) return bytes;
+        if (marker === 0xeb) stripped = true;
+        else kept.push(bytes.subarray(offset, end));
+        offset = end;
+    }
+    return stripped ? Buffer.concat([...kept, bytes.subarray(offset)]) : bytes;
+}
+
 export interface VideoEditOutfit {
     /** A full-length front, side and back sheet of the replacement character. */
     sheet?: VideoEditStillImage;
@@ -884,7 +907,7 @@ export async function createVideoEditStill(
         onAttempt: event => options.onAttempt?.({ ...event, stage: 'video_edit_still' }),
     }, { timeoutMs: Math.max(1, Math.min(180_000, deadline - Date.now())), aspectRatio });
     // Validate the actual pixels and use PNG so downstream effect metadata survives JPEG replies.
-    const decoded = await loadImage(still.bytes);
+    const decoded = await loadImage(withoutJpegApp11(still.bytes));
     const canvas = createCanvas(decoded.width, decoded.height);
     canvas.getContext('2d').drawImage(decoded, 0, 0);
     return checkedImageResult(canvas.toBuffer('image/png'), 'image/png', still.provider, still.model);
