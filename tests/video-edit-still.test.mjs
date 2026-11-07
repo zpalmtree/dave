@@ -274,3 +274,47 @@ test('the still carries grounded effects to the worker as PNG text', () => {
     const jpeg = { ...still, mimeType: 'image/jpeg', bytes: Buffer.from('jpeg') };
     assert.equal(videoEditStillWithEffects(jpeg, 'beams'), jpeg);
 });
+
+test('outfit images follow the portrait and fix the clothing below it in every shot', async () => {
+    // 3c8ba05b: the portrait ends at the shirt, and two shots drew bare legs and red trousers.
+    const sheet = { bytes: Buffer.from('sheet'), mimeType: 'image/png' };
+    const shot = { bytes: Buffer.from('shot'), mimeType: 'image/png' };
+    let prompt, images;
+    const both = await withImageEdits((_count, _url, init) => (prompt = init.body.get('prompt'),
+        images = init.body.getAll('image[]').map(file => file.name), repainted),
+    () => createVideoEditStill(frame, replacement, 'all dancing bears', 'meximutt', {
+        isolated: true, group: true, outfit: { sheet, shot } }));
+    assert.equal(both.error, undefined);
+    assert.deepEqual(images, ['image_1.png', 'image_2.png', 'image_3.png', 'image_4.png']);
+    assert.match(prompt, /Image 3 is a full-length reference sheet of the subject in Image 2.*Dress every copy exactly as Image 3 shows, from the shirt down to the trousers and shoes/);
+    assert.match(prompt, /Image 4 is these same copies already drawn into another shot of this clip/);
+    assert.match(prompt, /Take only appearance from Images 3 and 4: the pose, size, position, framing and expression still come from Image 1\.$/);
+    const sheetOnly = await withImageEdits((_count, _url, init) => (prompt = init.body.get('prompt'),
+        images = init.body.getAll('image[]').length, repainted),
+    () => createVideoEditStill(frame, replacement, 'Peach', 'meximutt', { outfit: { sheet } }));
+    assert.equal(sheetOnly.error, undefined);
+    assert.equal(images, 3);
+    assert.match(prompt, /Dress the replacement exactly as Image 3 shows/);
+    assert.match(prompt, /Take only appearance from Image 3:/);
+    assert.doesNotMatch(prompt, /Image 4/);
+    const shotOnly = await withImageEdits((_count, _url, init) => (prompt = init.body.get('prompt'), repainted),
+        () => createVideoEditStill(frame, replacement, 'Peach', 'meximutt', { isolated: true, outfit: { shot } }));
+    assert.equal(shotOnly.error, undefined);
+    assert.match(prompt, /Image 3 is this same replacement already drawn into another shot of this clip/);
+    const plain = await withImageEdits((_count, _url, init) => (prompt = init.body.get('prompt'),
+        images = init.body.getAll('image[]').length, repainted),
+    () => createVideoEditStill(frame, replacement, 'Peach', 'meximutt'));
+    assert.equal(plain.error, undefined);
+    assert.equal(images, 2);
+    assert.doesNotMatch(prompt, /Image 3/);
+});
+
+test('a preset portrait reference brings its character sheet and an upload brings none', async () => {
+    const { videoCharacterBodySheet } = await import('../dist/VideoSourceImage.js');
+    const { readFileSync } = await import('node:fs');
+    const sheet = videoCharacterBodySheet(readFileSync(new URL('../images/oalgo.png', import.meta.url)));
+    assert.equal(sheet.mimeType, 'image/png');
+    assert.ok(sheet.bytes.equals(readFileSync(new URL('../images/oalgo-sheet.png', import.meta.url))));
+    assert.equal(videoCharacterBodySheet(Buffer.from('an uploaded reference')), null);
+    assert.equal(videoCharacterBodySheet(readFileSync(new URL('../images/argenmutt.png', import.meta.url))), null);
+});

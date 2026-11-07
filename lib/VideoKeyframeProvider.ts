@@ -764,6 +764,8 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     headWording?: string;
     /** The target is a group: each of its members gets its own copy of the replacement. */
     group?: boolean;
+    /** Images that fix the replacement's whole outfit, so every shot of a clip dresses it alike. */
+    outfit?: VideoEditOutfit;
     abortSignal?: AbortSignal;
     /** Added to the attempt numbers, so repaints of several shots of one job record separately. */
     attemptOffset?: number;
@@ -773,6 +775,43 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     /** Epoch milliseconds by which every editor request must finish; capped at 270 seconds from the call. */
     deadline?: number;
 };
+
+export interface VideoEditOutfit {
+    /** A full-length front, side and back sheet of the replacement character. */
+    sheet?: VideoEditStillImage;
+    /** The accepted repaint of another shot of the same clip. */
+    shot?: VideoEditStillImage;
+}
+
+/**
+ * The outfit images follow Images 1 and 2. Each shot of a clip is repainted on its own, and a
+ * reference that ends at the shirt left the rest to each draw: 3c8ba05b's first shot gave the
+ * Meximutts bare legs and its second red trousers, and every motion review rejected the jump.
+ */
+export function videoEditOutfitImages(outfit: VideoEditOutfit | undefined): VideoEditStillImage[] {
+    return [outfit?.sheet, outfit?.shot].filter((image): image is VideoEditStillImage => Boolean(image));
+}
+
+export function videoEditOutfitPrompt(outfit: VideoEditOutfit | undefined, group = false): string {
+    const who = group ? 'every copy' : 'the replacement';
+    const sentences: string[] = [];
+    let image = 3;
+    if (outfit?.sheet) {
+        sentences.push(`Image ${image} is a full-length reference sheet of the subject in Image 2, seen from the front,`
+            + ` side and back. Dress ${who} exactly as Image ${image} shows, from the shirt down to the trousers and`
+            + ` shoes, and draw its body from Image ${image} at whatever angle Image 1 shows. Image 2 stays the authority`
+            + ' for the face.');
+        image++;
+    }
+    if (outfit?.shot) {
+        sentences.push(`Image ${image} is ${group ? 'these same copies' : 'this same replacement'} already drawn into another`
+            + ` shot of this clip. Give ${who} the same clothing, colors and rendering style as Image ${image}, so`
+            + ` ${group ? 'the copies look' : 'the replacement looks'} the same in every shot.`);
+    }
+    if (!sentences.length) return '';
+    return ` ${sentences.join(' ')} Take only appearance from ${sentences.length > 1 ? 'Images 3 and 4' : 'Image 3'}:`
+        + ' the pose, size, position, framing and expression still come from Image 1.';
+}
 
 /**
  * Try the preferred editor, then Gemini with the original inputs and identical edit instructions.
@@ -796,13 +835,14 @@ export async function createVideoEditStill(
     options = { ...options, beforeRequest: guard(options.beforeRequest),
         onUsage: guard(options.onUsage), onAttempt: guard(options.onAttempt) };
     const group = options.group === true;
-    const prompt = options.isolated && group
+    const extras = videoEditOutfitImages(options.outfit);
+    const prompt = (options.isolated && group
         ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, undefined, true), request, true)
             + ' Image 1 is a tracked crop of the intended subjects, not the full scene. Replace every one of them; leave none of them unchanged and remove none of them. Preserve each figure\'s source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give each copy the facial expression of the figure it replaces: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. Dress every copy in Image 2\'s own clothing, not the clothing worn in Image 1. Fill the same crop. Where Image 1 shows a figure from behind, draw its copy from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
         : options.isolated
         ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, options.headWording), request)
             + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give the replacement Image 1\'s facial expression exactly: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. The animation keeps this expression, so Image 2\'s own expression gives way to Image 1\'s. Dress the replacement in Image 2\'s own clothing, not the clothing worn in Image 1, so the replacement looks the same in every shot of the clip. Fill the same crop; do not turn a profile into a front-facing portrait. When Image 1 shows the subject from behind, draw the replacement from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
-        : videoEditStillPrompt(target, request, group);
+        : videoEditStillPrompt(target, request, group)) + videoEditOutfitPrompt(options.outfit, group);
     const started = Date.now();
     const deadline = Math.min(started + 270_000, options.deadline ?? Infinity);
     let failure: unknown = new Error('The replacement editors ran out of time.');
@@ -812,7 +852,7 @@ export async function createVideoEditStill(
         try {
             return await requestVideoEditStill(frame, replacement, prompt, attempt + (options.attemptOffset || 0), {
                 ...options, requestTimeoutMs: Math.max(1, deadline - Date.now() - 60_000),
-            });
+            }, 'video_edit_still', extras);
         } catch (error) {
             if (error instanceof VideoUsagePersistenceError || options.abortSignal?.aborted) throw error;
             failure = error;
@@ -830,10 +870,11 @@ export async function createVideoEditStill(
         };
         return distance(ratio) < distance(best) ? ratio : best;
     });
-    const references: VideoKeyframeReference[] = [frame, replacement].map((image, index) => ({
+    const references: VideoKeyframeReference[] = [frame, replacement, ...extras].map((image, index) => ({
         ...checkedImageResult(image.bytes, image.mimeType, 'input', 'input'),
         label: index === 0 ? 'Source frame. Preserve pose, expression, framing and background.'
-            : 'Replacement identity. Take pose and framing from Image 1.',
+            : index === 1 ? 'Replacement identity. Take pose and framing from Image 1.'
+            : 'Replacement outfit. Take pose and framing from Image 1.',
         kind: 'identity', visualFactsToPreserve: '', sourceUrl: 'worker-edit', contextUrl: 'worker-edit',
     }));
     const still = await generateGeminiKeyframe(prompt, references, 3 + (options.attemptOffset || 0), {
@@ -887,7 +928,9 @@ async function requestVideoEditStill(
     attempt: number,
     options: VideoEditStillOptions,
     stage = 'video_edit_still',
+    extras: VideoEditStillImage[] = [],
 ): Promise<VideoKeyframeResult> {
+    const images = [frame, replacement, ...extras];
     const model = VIDEO_KEYFRAME_FALLBACK_MODEL;
     const started = Date.now();
     let outcome: 'success' | 'error' = 'error';
@@ -899,7 +942,7 @@ async function requestVideoEditStill(
     const timeout = setTimeout(() => controller.abort(), options.requestTimeoutMs ?? 4 * 60 * 1000);
     try {
         await options.beforeRequest?.({ stage, attempt, provider: 'openai', model,
-            maxInputTokens: videoRequestInputTokenBound({ prompt, references: [{ type: 'input_image' }, { type: 'input_image' }] }),
+            maxInputTokens: videoRequestInputTokenBound({ prompt, references: images.map(() => ({ type: 'input_image' })) }),
             maxOutputTokens: 32768, maxImages: 1 });
         const form = new FormData();
         form.append('model', model);
@@ -910,7 +953,7 @@ async function requestVideoEditStill(
         form.append('output_format', 'png');
         form.append('moderation', 'low');
         form.append('n', '1');
-        [frame, replacement].forEach((image, index) => {
+        images.forEach((image, index) => {
             const extension = image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.split('/')[1];
             form.append('image[]', new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }),
                 `image_${index + 1}.${extension}`);

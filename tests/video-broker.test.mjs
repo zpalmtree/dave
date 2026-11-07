@@ -1298,6 +1298,19 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 assert.equal(repaintOptions.at(-1).group, true);
                 assert.equal(repaintOptions.at(-1).headWording, undefined);
                 assert.equal(reviewTargets.at(-1), 'the man');
+                assert.equal(repaintOptions.at(-1).outfit, undefined, 'An uploaded reference has no character sheet.');
+                // The worker names the shot it repainted first; later shots are dressed like it.
+                const dressed = await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '3',
+                    'x-video-edit-outfit-shot': '2' });
+                assert.equal(dressed.status, 200);
+                assert.equal(String(repaintOptions.at(-1).outfit.shot.bytes), 'repainted');
+                assert.equal(repaintOptions.at(-1).outfit.shot.mimeType, 'image/png');
+                assert.equal(repaintOptions.at(-1).outfit.sheet, undefined);
+                for (const named of ['3', '9', 'x']) {
+                    assert.equal((await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '3',
+                        'x-video-edit-outfit-shot': named })).status, 200);
+                    assert.equal(repaintOptions.at(-1).outfit, undefined, `outfit shot ${named}`);
+                }
                 await broker.run("UPDATE video_jobs SET video_edit_subjects='primary' WHERE public_id=?", [job.id]);
                 rejectEdit = true;
                 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';

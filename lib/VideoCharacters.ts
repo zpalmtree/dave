@@ -12,6 +12,12 @@ export interface VideoCharacter {
     name: string;
     /** Portrait PNG in images/: his identity reference and default opening frame. */
     image: string;
+    /**
+     * Full-length front, side and back reference sheet in images/, sent beside the portrait when he
+     * replaces a subject. The portrait ends at his shirt, so each repaint invented his legs: 3c8ba05b's
+     * two shots drew bare legs and red trousers, and the motion review rejected the jump.
+     */
+    bodySheet?: string;
     /** Other preset names that older clients submit. */
     presetAliases?: string[];
     /** Per renderer: the command (also the command_variant recorded on jobs), extra Discord aliases, and the label in status posts. */
@@ -65,6 +71,7 @@ export const MEXIMUTT: VideoCharacter = {
     id: 'meximutt',
     name: 'Meximutt',
     image: 'oalgo.png',
+    bodySheet: 'oalgo-sheet.png',
     presetAliases: ['oalgo'],
     commands: {
         minimax: { variant: 'oalgo', aliases: ['meximutt', 'minimutt'], label: 'Oalgo' },
