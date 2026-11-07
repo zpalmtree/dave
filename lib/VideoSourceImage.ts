@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { join } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -12,7 +13,7 @@ import { isVideoSourceClipUrl, storeVideoSourceClip, LOCAL_VIDEO_INPUT_ARGS } fr
 import { isTwitterImageUrl } from './TwitterVideo.js';
 import { imageExtension } from './VideoImageMime.js';
 import type { VideoKeyframeResult } from './VideoKeyframeProvider.js';
-import { videoCharacterForPreset } from './VideoCharacters.js';
+import { VIDEO_CHARACTERS, videoCharacterForPreset } from './VideoCharacters.js';
 
 export interface VideoAttachmentSourceImageDescriptor {
     url: string;
@@ -297,4 +298,32 @@ export function storeCompositedSourceImage(
     writeFileSync(temporary, result.bytes, { flag: 'wx' });
     renameSync(temporary, destination);
     return { path: destination, mimeType: result.mimeType, bytes: result.bytes.length };
+}
+
+let bodySheets: Map<string, string> | undefined;
+
+/**
+ * The full-length sheet of the character whose bundled portrait these bytes are. Preset replacement
+ * jobs store a byte-for-byte copy of the portrait as their reference, so its hash names the character.
+ */
+export function videoCharacterBodySheet(portrait: Buffer): { bytes: Buffer; mimeType: string } | null {
+    if (!bodySheets) {
+        bodySheets = new Map();
+        for (const character of VIDEO_CHARACTERS) {
+            if (!character.bodySheet) continue;
+            try {
+                const image = readFileSync(fileURLToPath(new URL(`../images/${character.image}`, import.meta.url)));
+                bodySheets.set(createHash('sha256').update(image).digest('hex'), character.bodySheet);
+            } catch {
+                // A missing portrait leaves that character without a sheet.
+            }
+        }
+    }
+    const sheet = bodySheets.get(createHash('sha256').update(portrait).digest('hex'));
+    if (!sheet) return null;
+    try {
+        return { bytes: readFileSync(fileURLToPath(new URL(`../images/${sheet}`, import.meta.url))), mimeType: 'image/png' };
+    } catch {
+        return null;
+    }
 }

@@ -90,6 +90,7 @@ import {
     sourceImageDescriptor,
     storeCompositedSourceImage,
     storeVideoSourceImage,
+    videoCharacterBodySheet,
 } from './VideoSourceImage.js';
 import { composeOalgoSourceImages, createOalgoSceneOpening } from './VideoOalgoComposite.js';
 import {
@@ -555,6 +556,17 @@ export function parseSubjectBox(header: string | string[] | undefined): [number,
     if (values.length !== 4 || values.some(value => !Number.isFinite(value) || value < 0 || value > 1)) return undefined;
     const [left, top, right, bottom] = values;
     return right > left && bottom > top ? [left, top, right, bottom] : undefined;
+}
+
+/** The accepted repaint the broker last stored for a shot of an edit, in whichever format it came. */
+export function storedVideoEditStill(directory: string, shot: number): { bytes: Buffer; mimeType: string } | null {
+    const suffix = shot > 1 ? `-${shot}` : '';
+    const found = (['png', 'jpg', 'webp'] as const)
+        .map(extension => ({ extension, path: join(directory, `video-edit-still${suffix}.${extension}`) }))
+        .filter(candidate => existsSync(candidate.path))
+        .sort((a, b) => statSync(b.path).mtimeMs - statSync(a.path).mtimeMs)[0];
+    if (!found) return null;
+    return { bytes: readFileSync(found.path), mimeType: found.extension === 'jpg' ? 'image/jpeg' : `image/${found.extension}` };
 }
 
 function parseStoredTargetBoxes(value: string | null): VideoEditTargetBox[] | null {
@@ -5684,6 +5696,13 @@ export class VideoBroker {
             const head = isolated && subjectBox && !group ? await (this.options.videoEditHeadLocator || locateVideoEditHead)(
                 { bytes: frame, mimeType }, target, subjectBox, hooks) : null;
             const headWording = head ? videoEditHeadWording(head) : undefined;
+            // The worker repaints its clearest shot first and names it here, after that repaint passed,
+            // so every other shot dresses the replacement alike; a character's own sheet fixes the outfit.
+            const outfitShot = Number(req.headers['x-video-edit-outfit-shot'] || 0);
+            const sheet = videoCharacterBodySheet(reference.bytes);
+            const shotStill = Number.isInteger(outfitShot) && outfitShot >= 1 && outfitShot <= 64 && outfitShot !== shot
+                ? storedVideoEditStill(directory, outfitShot) : null;
+            const outfit = sheet || shotStill ? { ...(sheet ? { sheet } : {}), ...(shotStill ? { shot: shotStill } : {}) } : undefined;
             const reviewTarget = headWording ? `${target} (in Image 1, ${headWording})` : target;
             const extension = (still: VideoKeyframeResult) => still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
             // The isolated worker waits eight minutes for this response.
@@ -5696,6 +5715,7 @@ export class VideoBroker {
                     job.video_replacement_prompt || job.prompt,
                     // Usage events are keyed by attempt, so each shot and round reserves all editor attempts.
                     { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated, ...(group ? { group } : {}),
+                        ...(outfit ? { outfit } : {}),
                         ...(isolated && subjectBox ? { subjectBox, ...(headWording ? { headWording } : {}) } : {}),
                         attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
                         ...(round ? { alternateOnly, deadline: budgetEnd - 60_000 } : {}) },
