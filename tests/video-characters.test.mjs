@@ -243,8 +243,11 @@ for (const character of VIDEO_CHARACTERS) {
 
 test('$slug stars a random Sol Slug, or the one a #number pins', async () => {
     const cast = videoCharacterCast('slug');
-    assert.deepEqual(cast, [...SOL_SLUGS]);
+    assert.deepEqual(cast, SOL_SLUGS.filter(slug => !slug.retired));
     assert.ok(cast.length >= 2);
+    const retired = SOL_SLUGS.filter(slug => slug.retired);
+    assert.ok(retired.length, 'Retired slugs stay listed for their earlier jobs.');
+    for (const slug of retired) assert.equal(videoCharacterForCommand(slug.commands.minimax.variant), slug);
     for (const slug of cast) {
         assert.equal(slug.rendering, 'pixel-sprite');
         assert.equal(slug.sceneOpening, true);
@@ -254,7 +257,9 @@ test('$slug stars a random Sol Slug, or the one a #number pins', async () => {
     const replies = [];
     const msg = { reply: async text => { replies.push(text); return { edit: async () => {} }; } };
     await castVideoHandler('slug')(msg, '#99999 waves');
-    assert.match(replies.at(-1), /There is no slug #99999 in the cast\. Pick one of #1863, /);
+    assert.match(replies.at(-1), /There is no slug #99999 in the cast\. Pick one of #1496, /);
+    await castVideoHandler('slug')(msg, '#30506 waves');
+    assert.match(replies.at(-1), /There is no slug #30506 in the cast\./, 'A retired slug cannot be pinned.');
     assert.equal(MEXIMUTT.sceneOpening, true);
     for (const character of VIDEO_CHARACTERS.filter(character => !character.cast && character !== MEXIMUTT)) {
         assert.equal(Boolean(character.sceneOpening), false, `${character.name} keeps his portrait opening`);
