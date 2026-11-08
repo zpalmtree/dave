@@ -63,6 +63,8 @@ export interface VideoCharacter {
      * their own; each keeps his own command_variant so the broker knows whose portrait a job uses.
      */
     cast?: string;
+    /** A former cast member: his jobs still resolve, but the cast command no longer picks him. */
+    retired?: boolean;
     /** Other words a replacement request may use for him, such as "the slug". */
     replacementNames?: string[];
 }
@@ -144,31 +146,67 @@ const SOL_SLUG = {
     comedy: 'Play Slug as a likeable comedic character, not a narrator. Build each sketch from its own premise, let his lines react to what is happening in the shot instead of describing it, and give the final line to whichever character and wording the scene has earned.',
 } satisfies Partial<VideoCharacter>;
 
-function solSlug(number: string, look: Pick<VideoCharacter, 'eyes' | 'clothing' | 'clothingAndEmblem' | 'physique'>): VideoCharacter {
+function solSlug(number: string, look: Pick<VideoCharacter, 'eyes' | 'clothing' | 'clothingAndEmblem' | 'physique' | 'retired'>): VideoCharacter {
     const variant = `slug${number}`;
     return { ...SOL_SLUG, ...look, id: variant, image: `slugs/${number}.png`,
         commands: { minimax: { variant, label: `Slug #${Number(number)}` } } };
 }
 
-// Chosen from a six-slug trial (2026-11-03); `$slug #1863` pins one.
+/** The Wide Eyed trait: big, plain eyes that every image and video model keeps as eyes. */
+const WIDE_EYES = 'two tall white oval eyes side by side on top of his head, each outlined in black with a tall black pupil';
+
+// Re-cast from a thirteen-slug trial (2026-11-08) of openings, edit stills, and H3 close-ups:
+// slugs with the big two-eyed Wide Eyed look kept their eyes, while #1863's squint became
+// glasses, #8917's half-lidded eyes were drawn wide open, and #30506 has a single eye.
+// Retired members stay listed so their jobs still render and regenerate. `$slug #1496` pins one.
 export const SOL_SLUGS: readonly VideoCharacter[] = [
-    solSlug('01863', {
-        eyes: 'two narrow squinting white eyes with small black pupils under bushy ginger brows',
-        physique: 'beige pixel slug body with a pointed tail, carved abs, and small white-gloved arms',
-        clothing: 'gold crown, red royal cape, and bushy ginger dwarf beard',
-        clothingAndEmblem: 'the gold crown, red royal cape, bushy ginger dwarf beard, flaming torch, and gold pickaxe',
+    solSlug('01496', {
+        eyes: WIDE_EYES,
+        physique: 'red pixel slug body with darker red stripes down his back, a wide-open laughing mouth, and small white hands',
+        clothing: 'gold chain with a huge sparkling diamond ring hanging from it',
+        clothingAndEmblem: 'the gold chain and its huge sparkling diamond ring pendant',
     }),
-    solSlug('08917', {
-        eyes: 'two tall beige eye stalks with half-closed lids, each with a small white eye and one black pupil',
-        physique: 'beige pixel slug body with a long pointed tail, a stubbly grey five-o\'clock shadow, and small white-gloved arms',
-        clothing: 'olive-green army backpack',
-        clothingAndEmblem: 'the olive-green army backpack and a pistol in each white-gloved hand',
+    solSlug('09890', {
+        eyes: WIDE_EYES,
+        physique: 'orange pixel slug body with a small happy smile and a long pointed tail',
+        clothing: 'swooping blond combover hair and white polka-dot disco cape',
+        clothingAndEmblem: 'the swooping blond combover hair and white polka-dot disco cape',
     }),
-    solSlug('30506', {
-        eyes: 'one giant round eyeball on a single stalk, with a pale blue iris and a dark teal slit pupil',
-        physique: 'cyan pixel slug body with fins on his head and a wide open shouting mouth',
-        clothing: 'ornate gold chest plate',
-        clothingAndEmblem: 'the ornate gold chest plate and the big green fish he holds',
+    solSlug('06021', {
+        eyes: WIDE_EYES,
+        physique: 'hot-pink pixel slug body with darker pink stripes, carved abs, a grimacing mouth, and small white hands',
+        clothing: 'bare hot-pink body',
+        clothingAndEmblem: 'his bare hot-pink striped body and carved abs',
+    }),
+    solSlug('02243', {
+        eyes: WIDE_EYES,
+        physique: 'bright yellow pixel slug body with a wide-open chomping mouth and small white hands held up in OK signs',
+        clothing: 'huge round brown afro',
+        clothingAndEmblem: 'the huge round brown afro',
+    }),
+    solSlug('05832', {
+        eyes: WIDE_EYES,
+        physique: 'purple pixel slug body with a cute tongue-out smile and small white hands',
+        clothing: 'dark red track pants on his tail',
+        clothingAndEmblem: 'the dark red track pants, wooden wizard staff with a blue crystal, and glowing blue orb',
+    }),
+    solSlug('03971', {
+        eyes: 'two tall cyan eye stalks on top of his head, each tipped with a white eye and a black pupil',
+        physique: 'cyan pixel slug body with darker cyan stripes, carved abs, a thick brown moustache, and small white-gloved hands',
+        clothing: 'red flag on a pole strapped to his back',
+        clothingAndEmblem: 'the red flag on a pole strapped to his back and the thick brown moustache',
+    }),
+    solSlug('04997', {
+        eyes: WIDE_EYES,
+        physique: 'lime-green pixel slug body with a calm flat mouth and small white hands',
+        clothing: 'white astronaut suit and big white headphones with a lime earcup',
+        clothingAndEmblem: 'the white astronaut suit and big white headphones',
+    }),
+    solSlug('05781', {
+        eyes: WIDE_EYES,
+        physique: 'orange pixel slug body with a calm flat mouth and small white hands',
+        clothing: 'maroon tunic with a gold-and-purple crest',
+        clothingAndEmblem: 'the maroon tunic with its gold-and-purple crest and the golden sword',
     }),
     solSlug('00507', {
         eyes: 'two tall white eye stalks with square black pupils',
@@ -176,13 +214,34 @@ export const SOL_SLUGS: readonly VideoCharacter[] = [
         clothing: 'grey capybara mask and red scarf',
         clothingAndEmblem: 'the grey capybara mask, red scarf, and golden capybara-fur body',
     }),
+    solSlug('01863', {
+        eyes: 'two narrow squinting white eyes with small black pupils under bushy ginger brows',
+        physique: 'beige pixel slug body with a pointed tail, carved abs, and small white-gloved arms',
+        clothing: 'gold crown, red royal cape, and bushy ginger dwarf beard',
+        clothingAndEmblem: 'the gold crown, red royal cape, bushy ginger dwarf beard, flaming torch, and gold pickaxe',
+        retired: true,
+    }),
+    solSlug('08917', {
+        eyes: 'two tall beige eye stalks with half-closed lids, each with a small white eye and one black pupil',
+        physique: 'beige pixel slug body with a long pointed tail, a stubbly grey five-o\'clock shadow, and small white-gloved arms',
+        clothing: 'olive-green army backpack',
+        clothingAndEmblem: 'the olive-green army backpack and a pistol in each white-gloved hand',
+        retired: true,
+    }),
+    solSlug('30506', {
+        eyes: 'one giant round eyeball on a single stalk, with a pale blue iris and a dark teal slit pupil',
+        physique: 'cyan pixel slug body with fins on his head and a wide open shouting mouth',
+        clothing: 'ornate gold chest plate',
+        clothingAndEmblem: 'the ornate gold chest plate and the big green fish he holds',
+        retired: true,
+    }),
 ];
 
 export const VIDEO_CHARACTERS: readonly VideoCharacter[] = [MEXIMUTT, ARGENMUTT, COLOMBIANMUTT, ...SOL_SLUGS];
 
 /** The members of a cast command, such as the Sol Slugs of `$slug`. */
 export function videoCharacterCast(cast: string): VideoCharacter[] {
-    return VIDEO_CHARACTERS.filter(character => character.cast === cast);
+    return VIDEO_CHARACTERS.filter(character => character.cast === cast && !character.retired);
 }
 
 export function videoCharacterForPreset(preset: unknown): VideoCharacter | null {

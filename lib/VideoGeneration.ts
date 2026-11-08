@@ -1557,7 +1557,7 @@ export function characterVideoHandler(character: VideoCharacter, model: VideoMod
 
 /**
  * The handler for a cast command such as `$slug`: it stars one member at random, or the one a
- * leading `#1863` names.
+ * leading `#1496` names.
  */
 export function castVideoHandler(cast: string, model: VideoModelId = 'minimax', random = Math.random) {
     return async (msg: Message, prompt: string): Promise<void> => {
