@@ -155,6 +155,11 @@ import {
 const ACTIVE_SQL = ACTIVE_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LEASED_SQL = LEASED_VIDEO_STATUSES.map(status => `'${status}'`).join(',');
 const LOCAL_VIDEO_PLANNER_MODEL = 'hauhaucs-qwen3.8:27b-q4kp-mtp';
+// Used until the first replacement edit completes; production edits take
+// about 2.5-12 minutes, far less than a full generation.
+const VIDEO_EDIT_FALLBACK_LOW_SECONDS = 150;
+const VIDEO_EDIT_FALLBACK_HIGH_SECONDS = 720;
+type VideoRuntimeKind = 'generate' | 'edit';
 export const OALGO_PHOTOREAL_KEYFRAME = videoCharacterPhotorealKeyframe(MEXIMUTT);
 
 interface BrokerOptions {
@@ -986,8 +991,25 @@ export class VideoBroker {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             model TEXT NOT NULL,
             runtime_seconds REAL NOT NULL,
-            recorded_at INTEGER NOT NULL
+            recorded_at INTEGER NOT NULL,
+            kind TEXT
         )`);
+        const runtimeSampleColumns = new Set(
+            (await this.all<{ name: string }>('PRAGMA table_info(video_runtime_samples)'))
+                .map(column => column.name),
+        );
+        if (!runtimeSampleColumns.has('kind')) {
+            await this.run('ALTER TABLE video_runtime_samples ADD COLUMN kind TEXT');
+        }
+        // Samples recorded before the kind column mixed edits into the model
+        // history. A sample is written in the same moment its job completes,
+        // so the completion time identifies which samples were edits.
+        await this.run(`UPDATE video_runtime_samples SET kind = CASE WHEN EXISTS (
+                SELECT 1 FROM video_jobs j WHERE j.model = video_runtime_samples.model
+                AND j.source_video_seconds IS NOT NULL
+                AND j.completed_at BETWEEN video_runtime_samples.recorded_at - 5 AND video_runtime_samples.recorded_at + 5
+            ) THEN 'edit' ELSE 'generate' END
+            WHERE kind IS NULL`);
         await this.run(`CREATE TABLE IF NOT EXISTS video_job_metrics (
             job_public_id TEXT PRIMARY KEY,
             model TEXT NOT NULL,
@@ -2248,9 +2270,9 @@ export class VideoBroker {
                 if (sourceImage || sourceAudio || sourceVideo) rmSync(directory, { recursive: true, force: true });
                 return { status: 409, body: { error: `You already have ${VIDEO_MAX_USER_JOBS} unfinished video jobs.` } };
             }
-            const baseEstimate = await this.runtimeEstimate(body.model as VideoModelId);
-            const editSegments = sourceVideo ? Math.ceil(sourceVideo.duration / VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS) : 1;
-            const estimate = { low: baseEstimate.low * editSegments, high: baseEstimate.high * editSegments };
+            const estimate = sourceVideo
+                ? await this.editRuntimeEstimate(body.model as VideoModelId, sourceVideo.duration)
+                : await this.runtimeEstimate(body.model as VideoModelId);
             const now = nowSeconds();
             try {
                 await this.run(
@@ -2355,19 +2377,24 @@ export class VideoBroker {
         return result;
     }
 
-    private async runtimeEstimate(model: VideoModelId): Promise<{ low: number; high: number }> {
+    private async runtimeEstimate(
+        model: VideoModelId,
+        kind: VideoRuntimeKind = 'generate',
+    ): Promise<{ low: number; high: number }> {
         const definition = VIDEO_MODELS[model];
         const rows = await this.all<{ runtime_seconds: number }>(
             `SELECT runtime_seconds FROM video_runtime_samples
-             WHERE model = ? ORDER BY id DESC LIMIT 20`,
-            [model],
+             WHERE model = ? AND COALESCE(kind, 'generate') = ? ORDER BY id DESC LIMIT 20`,
+            [model, kind],
         );
         const samples = rows
             .map(row => Number(row.runtime_seconds))
             .filter(value => Number.isFinite(value) && value > 0)
             .sort((a, b) => a - b);
         if (samples.length === 0) {
-            return { low: definition.fallbackLowSeconds, high: definition.fallbackHighSeconds };
+            return kind === 'edit'
+                ? { low: VIDEO_EDIT_FALLBACK_LOW_SECONDS, high: VIDEO_EDIT_FALLBACK_HIGH_SECONDS }
+                : { low: definition.fallbackLowSeconds, high: definition.fallbackHighSeconds };
         }
         const percentile = (fraction: number) => samples[Math.min(
             samples.length - 1,
@@ -2379,10 +2406,23 @@ export class VideoBroker {
         return { low, high };
     }
 
+    // Replacement edits run a much shorter pipeline than full generation and
+    // their runtime barely tracks clip length, so they learn only from earlier
+    // edits. Each extra single-pass window is a separate render.
+    private async editRuntimeEstimate(
+        model: VideoModelId,
+        sourceSeconds: number,
+    ): Promise<{ low: number; high: number }> {
+        const base = await this.runtimeEstimate(model, 'edit');
+        const passes = Math.max(1, Math.ceil((Number(sourceSeconds) || 0) / VIDEO_EDIT_SINGLE_PASS_MAX_SECONDS));
+        return { low: base.low * passes, high: base.high * passes };
+    }
+
     private async plannedRuntimeEstimate(
         job: JobRow,
         plan: Record<string, any>,
     ): Promise<{ low: number; high: number }> {
+        if (job.source_video_seconds != null) return this.editRuntimeEstimate(job.model, job.source_video_seconds);
         const segments = Array.isArray(plan.segments) ? plan.segments : [];
         const plannedDuration = segments.reduce(
             (sum: number, segment: any) => sum + Math.max(0, Number(segment?.target_seconds) || 0),
@@ -2404,6 +2444,10 @@ export class VideoBroker {
              WHERE model = ?
              AND COALESCE(generated_duration_seconds, output_duration_seconds) > 0
              AND segment_count > 0
+             AND NOT EXISTS (
+                SELECT 1 FROM video_jobs j WHERE j.public_id = video_job_metrics.job_public_id
+                AND j.source_video_seconds IS NOT NULL
+             )
              ORDER BY recorded_at DESC LIMIT 50`,
             [job.model],
         );
@@ -2485,9 +2529,22 @@ export class VideoBroker {
         const estimate = await this.runtimeEstimate(model);
         await this.run(
             `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?, updated_at = ?
-             WHERE model = ? AND status = 'queued' AND estimate_ready = 0`,
+             WHERE model = ? AND status = 'queued' AND estimate_ready = 0 AND source_video_seconds IS NULL`,
             [estimate.low, estimate.high, nowSeconds(), model],
         );
+        const edits = await this.all<{ public_id: string; source_video_seconds: number }>(
+            `SELECT public_id, source_video_seconds FROM video_jobs
+             WHERE model = ? AND status = 'queued' AND estimate_ready = 0 AND source_video_seconds IS NOT NULL`,
+            [model],
+        );
+        for (const edit of edits) {
+            const editEstimate = await this.editRuntimeEstimate(model, edit.source_video_seconds);
+            await this.run(
+                `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?, updated_at = ?
+                 WHERE public_id = ? AND status = 'queued'`,
+                [editEstimate.low, editEstimate.high, nowSeconds(), edit.public_id],
+            );
+        }
     }
 
     private async singleLeaseRenderSeconds(jobId: string): Promise<number | null> {
@@ -4063,7 +4120,7 @@ export class VideoBroker {
                 if (!isVideoModel(model) || !estimate) continue;
                 await this.run(
                     `UPDATE video_jobs SET estimate_low_seconds = ?, estimate_high_seconds = ?, updated_at = ?
-                     WHERE status = 'queued' AND model = ? AND estimate_ready = 0`,
+                     WHERE status = 'queued' AND model = ? AND estimate_ready = 0 AND source_video_seconds IS NULL`,
                     [Math.max(1, estimate.low), Math.max(1, estimate.high), nowSeconds(), model],
                 );
             }
@@ -4598,8 +4655,8 @@ export class VideoBroker {
                         runtimeSeconds - Math.max(0, Number(row.gpu_queue_wait_seconds) || 0),
                     );
                     await this.run(
-                        'INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at) VALUES(?,?,?)',
-                        [row.model, processingRuntime, nowSeconds()],
+                        'INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at, kind) VALUES(?,?,?,?)',
+                        [row.model, processingRuntime, nowSeconds(), row.source_video_seconds != null ? 'edit' : 'generate'],
                     );
                     await this.refreshQueuedEstimates(row.model);
                 }
