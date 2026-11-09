@@ -131,6 +131,15 @@ letter counters and gaps remain editable. Detection uses source frames and the
 original subject track, excluding clothing text; no caption wording, colour,
 position or ending frame is supplied by the user. It applies to both commands'
 default isolated edits and the shared masked H3/add compositing paths.
+Isolated edits also erase those glyphs from each shot's still before the
+repaint, so the render carries no second, moving copy of the caption. Short
+words on a recognized caption line ("of"), which OCR skips, count as caption.
+
+The repaint keeps the target's headwear unless the target's own wording names
+it ("the person wearing a Guy Fawkes mask and black hat"), in which case it is
+replaced along with the target. Still and motion reviews receive the requested
+replacement prompt, so an expression or mouth it fixes (Sol Slug #2243's
+open mouth) outranks the source expression.
 
 This is conservative fixed-caption detection, not a guarantee for animated,
 changing, low-confidence or multicolour text. A disappearing caption releases

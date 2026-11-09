@@ -39,6 +39,12 @@ test('still usability and finished motion receive distinct review contracts with
     for (const request of requests) assert.deepEqual(request.contents[0].parts.filter(part=>part.inlineData)
         .map(part=>Buffer.from(part.inlineData.data,'base64').toString()), ['identity','source','edited','mask']);
     assert.deepEqual(usage.map(event=>event.stage), ['video_edit_still_review','video_edit_motion_review']);
+    // A look the request fixes, such as Sol Slug #2243's always-open mouth, outranks the source expression (19b37af1).
+    assert.equal(JSON.parse(requests[0].contents[0].parts[0].text).requested_look, undefined);
+    await reviewVideoEdit('the character', image('identity'), [sample], 'still', {}, 1, '  slug with a wide-open chomping mouth ');
+    assert.equal(JSON.parse(requests[2].contents[0].parts[0].text).requested_look, 'slug with a wide-open chomping mouth');
+    for (const instruction of [EDIT_STILL_REVIEW_INSTRUCTION, EDIT_REVIEW_INSTRUCTION])
+        assert.match(instruction, /requested state takes the place of the SOURCE expression or mouth state/);
 });
 
 test('motion review transmits ordered neighboring evidence beyond the old four-frame limit', async t => {

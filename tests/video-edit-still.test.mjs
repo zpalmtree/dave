@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditStillWithEffects, withoutJpegApp11 } from '../dist/VideoKeyframeProvider.js';
+import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditTargetNamesHeadwear, videoEditStillWithEffects, withoutJpegApp11 } from '../dist/VideoKeyframeProvider.js';
 import { parseSubjectBox } from '../dist/VideoBroker.js';
 import { parseVideoEditHead, videoEditHeadWording } from '../dist/VideoEditIntent.js';
 import { inflateSync } from 'node:zlib';
@@ -98,6 +98,24 @@ test('the repaint keeps the subject\'s headwear without naming any garment', () 
     assert.match(prompt, /wears anything on its head in Image 1, the replacement wears the same thing/);
     // Listing religious garments got frames of bareheaded real people refused.
     assert.doesNotMatch(prompt, /hijab|veil|turban|headscarf/i);
+});
+
+test('headwear named in the target is replaced with it', () => {
+    // 19b37af1: the kept hat sat over Sol Slug's afro and every render was rejected for it.
+    const target = 'the person wearing a Guy Fawkes mask and black hat';
+    assert.equal(videoEditTargetNamesHeadwear(target), true);
+    for (const prompt of [videoEditStillPrompt(target, 'slug'),
+        videoEditStillPrompt(isolatedEditSubject(target, [0.06, 0.01, 0.89, 0.99], 'its head is at the top'), 'slug')]) {
+        assert.match(prompt, /on its head too, is replaced along with it/);
+        assert.doesNotMatch(prompt, /wears the same thing/);
+        assert.doesNotMatch(prompt.replaceAll(target.replace(/^the /, ''), ''), /hijab|veil|turban|headscarf|\bhat\b/i);
+    }
+    assert.match(videoEditStillPrompt('the soldiers in helmets', 'slug', true), /each copy has only the head/);
+    for (const plain of ['the woman in the foreground', 'the man escaping the capsule', 'the headless horseman',
+        'the kid from the neighborhood', 'the chapter narrator']) {
+        assert.equal(videoEditTargetNamesHeadwear(plain), false, plain);
+        assert.match(videoEditStillPrompt(plain, 'slug'), /wears the same thing in the same way/);
+    }
 });
 
 const geminiImage = (bytes = frame.bytes, mimeType = 'image/png') => [200, {
