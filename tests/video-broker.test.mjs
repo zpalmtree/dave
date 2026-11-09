@@ -4467,3 +4467,94 @@ test('a leased isolated replacement gets a cached, validated Viggle-Remake promp
         } finally { socket.close(); }
     } finally { await broker.stop(); }
 });
+
+test('replacement edits estimate from earlier edits, not full generation history', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dave-video-edit-eta-'));
+    let clipSeconds = 7.5;
+    const options = {
+        host: '127.0.0.1', port: 0,
+        dbPath: join(directory, 'queue.sqlite3'), resultsDir: join(directory, 'results'),
+        botToken: 'bot-secret', workerToken: 'worker-secret', preplanQueuedJobs: false,
+        videoEditGrounder: async (_source, target) => ({ action: 'replace', target, clarification: '' }),
+        sourceVideoDownloader: async (_source, targetDirectory) => {
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'source-video.mp4');
+            writeFileSync(path, 'clip');
+            return { path, bytes: 4, duration: clipSeconds };
+        },
+        sourceImageDownloader: async (_source, targetDirectory) => {
+            mkdirSync(targetDirectory, { recursive: true });
+            const path = join(targetDirectory, 'replacement.png');
+            writeFileSync(path, 'image');
+            return { path, bytes: 5, mimeType: 'image/png' };
+        },
+    };
+    let broker = new VideoBroker(options);
+    await broker.start();
+    const submit = async (id, edit) => {
+        const response = await fetch(`http://127.0.0.1:${broker.listeningPort()}/v1/jobs`, {
+            method: 'POST', headers: { authorization: 'Bearer bot-secret', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'minimax', prompt: 'Estimate test.',
+                requester_id: `user-${id}`, origin_bot_id: 'bot', channel_id: 'channel',
+                command_message_id: id, status_message_id: `status-${id}`,
+                ...(edit ? {
+                    source_video: { clip_url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4', name: 'clip.mp4', bytes: 1234 },
+                    source_image: { url: 'https://cdn.discordapp.com/attachments/1/2/replacement.png',
+                        mime_type: 'image/png', bytes: 1234, name: 'replacement.png' },
+                    video_edit_target: 'the red car',
+                } : {}) }),
+        });
+        assert.equal(response.status, 201);
+        return (await response.json()).job;
+    };
+    try {
+        const firstEdit = await submit('edit-no-history', true);
+        assert.deepEqual([firstEdit.estimate_low_seconds, firstEdit.estimate_high_seconds], [150, 720]);
+
+        const now = Math.floor(Date.now() / 1000);
+        for (let index = 0; index < 5; index += 1) {
+            await broker.run('INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at, kind) VALUES(?,?,?,?)',
+                ['minimax', 1500, now, 'generate']);
+            await broker.run('INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at, kind) VALUES(?,?,?,?)',
+                ['minimax', 300, now, 'edit']);
+        }
+        const regular = await submit('regular', false);
+        assert.deepEqual([regular.estimate_low_seconds, regular.estimate_high_seconds], [1350, 1725]);
+        const edit = await submit('edit', true);
+        assert.deepEqual([edit.estimate_low_seconds, edit.estimate_high_seconds], [270, 345]);
+        clipSeconds = 20;
+        const longEdit = await submit('long-edit', true);
+        assert.deepEqual([longEdit.estimate_low_seconds, longEdit.estimate_high_seconds], [540, 690],
+            'Each single-pass window is a separate edit render.');
+
+        // A finished edit refreshes waiting edits from edit history only.
+        for (let index = 0; index < 5; index += 1) {
+            await broker.run('INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at, kind) VALUES(?,?,?,?)',
+                ['minimax', 600, now, 'edit']);
+        }
+        await broker.refreshQueuedEstimates('minimax');
+        const estimates = async id => broker.get(
+            'SELECT estimate_low_seconds AS low, estimate_high_seconds AS high FROM video_jobs WHERE public_id = ?', [id]);
+        assert.deepEqual(await estimates(edit.id), { low: 270, high: 690 });
+        assert.deepEqual(await estimates(regular.id), { low: 1350, high: 1725 });
+
+        // Samples recorded before the kind column existed are classified by
+        // the job that completed at the same moment.
+        await broker.run('UPDATE video_jobs SET completed_at = ? WHERE public_id = ?', [now - 1000, edit.id]);
+        await broker.run('UPDATE video_jobs SET completed_at = ? WHERE public_id = ?', [now - 2000, regular.id]);
+        await broker.run('INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at, kind) VALUES(?,?,?,NULL)',
+            ['minimax', 111, now - 999]);
+        await broker.run('INSERT INTO video_runtime_samples(model, runtime_seconds, recorded_at, kind) VALUES(?,?,?,NULL)',
+            ['minimax', 222, now - 2000]);
+        await broker.stop();
+        broker = new VideoBroker(options);
+        await broker.start();
+        assert.deepEqual(
+            await broker.all('SELECT runtime_seconds, kind FROM video_runtime_samples WHERE runtime_seconds IN (111, 222) ORDER BY runtime_seconds'),
+            [{ runtime_seconds: 111, kind: 'edit' }, { runtime_seconds: 222, kind: 'generate' }],
+        );
+    } finally {
+        await broker.stop();
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
