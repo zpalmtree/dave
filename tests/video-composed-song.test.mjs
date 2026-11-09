@@ -138,6 +138,23 @@ test('a song request composes its soundtrack on the worker and then plans like a
         assert.equal(fresh.source_audio_path, null, 'A regenerate composes a new song.');
         assert.equal(fresh.source_audio_origin, null);
 
+        // A quiet regenerate (an operator retrying a fix) hides the job from its bot until it is ready.
+        const listed = async () => (await (await fetch(`${base}/v1/bots/2/jobs`,
+            { headers: { authorization: 'Bearer bot' } })).json()).jobs.map(job => job.id);
+        const regenerate = quiet => fetch(`${base}/v1/jobs/${id}/regenerate`, { method: 'POST',
+            headers: { authorization: 'Bearer bot', 'content-type': 'application/json' }, body: JSON.stringify(quiet ? { quiet } : {}) });
+        assert.ok((await listed()).includes(id));
+        await broker.run("UPDATE video_jobs SET status='failed' WHERE public_id=?", [id]);
+        assert.equal((await regenerate(true)).status, 200);
+        assert.ok(!(await listed()).includes(id), 'No progress edits while it retries.');
+        await broker.run("UPDATE video_jobs SET status='failed', notified_at=NULL WHERE public_id=?", [id]);
+        assert.ok(!(await listed()).includes(id), 'A quiet failure is never posted.');
+        await broker.run("UPDATE video_jobs SET status='ready' WHERE public_id=?", [id]);
+        assert.ok((await listed()).includes(id), 'A quiet success is delivered.');
+        assert.equal((await regenerate(false)).status, 200);
+        assert.equal((await row(id)).quiet_regenerate, 0);
+        assert.ok((await listed()).includes(id), 'A plain regenerate shows its progress again.');
+
         // A failed composition still renders the video, with each scene's own audio.
         await lease(id);
         assert.ok((await request(id, 'plan')).body.compose_song);
