@@ -10,7 +10,7 @@ import { VideoProviderHooks, geminiVideoUsage, videoRequestInputTokenBound } fro
  * laugh, a slug's waving glove and a cat's turn into profile all came through once the prompt
  * named each change at its time, where Viggle-Animate held one face throughout.
  */
-export const VIDEO_EDIT_REMAKE_PROMPT_VERSION = 2;
+export const VIDEO_EDIT_REMAKE_PROMPT_VERSION = 3;
 /**
  * Frames per second Gemini samples from the window. Its default of one frame a second saw four
  * frames of a 3.75 s seal clip and missed the tongue it stuck out for 0.8 s (b1b3ddd7); written
@@ -35,7 +35,17 @@ export type RemakePromptRequest = {
     replacementDescription: string;
     /** The target is a group whose every member becomes its own copy of the replacement. */
     group?: boolean;
+    /** The replacement keeps whatever the target wears on its head, as the painted frames show it. */
+    keepsHeadwear?: boolean;
 };
+
+/**
+ * The closing "no <the target's features>" line listed a8aa2d45's propeller helmet, which the
+ * painted frames kept on Meximutt because the user never asked to change it.
+ */
+export const REMAKE_HEADWEAR_NOTE = 'Anything the target wears on its head is kept: <Subject 1> wears it in the same way, '
+    + 'as the painted frames show. Describe it as part of <Subject 1> wherever it is visible, and never list it among the '
+    + 'features the replacement lacks.';
 
 /**
  * The instruction describes one replaced figure. A group target ("replace every bear", 3c8ba05b)
@@ -123,6 +133,7 @@ export async function writeRemakePrompt(request: RemakePromptRequest, hooks: Vid
         { text: JSON.stringify({ target: request.target, request: request.request.slice(0, 600),
             replacement_appearance: request.replacementDescription.slice(0, 1000) }) },
         ...(request.group ? [{ text: REMAKE_GROUP_NOTE }] : []),
+        ...(request.keepsHeadwear ? [{ text: REMAKE_HEADWEAR_NOTE }] : []),
         { text: `<Video 1>, the source window: ${frames} frames at 24 fps, ${stamp(frames)} long.${held}` },
         { inlineData: { mimeType: request.clip.mimeType, data: request.clip.bytes.toString('base64') },
             videoMetadata: { fps: REMAKE_PROMPT_VIDEO_FPS } },

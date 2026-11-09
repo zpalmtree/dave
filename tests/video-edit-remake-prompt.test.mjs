@@ -67,6 +67,14 @@ test('the prompt writer sends the window clip and pinned still to Gemini and val
         target: 'all dancing bears', request: 'meximutt', replacementDescription: 'a heavy-set man',
     });
     assert.ok(requests[2].contents[0].parts.some(part => /This target is a group: .*its own copy of <Subject 1>.*"Only these figures change"/.test(part.text || '')));
+    assert.ok(!requests[2].contents[0].parts.some(part => /never list it among the features/.test(part.text || '')));
+    // a8aa2d45: the user never asked to change the cat's propeller helmet, so the prompt must not ban it.
+    await writeRemakePrompt({
+        clip: { bytes: Buffer.from('clip'), mimeType: 'video/mp4' }, frames: 90, sourceFrames: 72, keepsHeadwear: true,
+        pictures: [{ image: { bytes: Buffer.from('still'), mimeType: 'image/png' }, frame: 44 }],
+        target: 'the orange cat flying wearing a propeller helmet', request: 'meximutt', replacementDescription: 'a heavy-set man',
+    });
+    assert.ok(requests[3].contents[0].parts.some(part => /wears it in the same way.*never list it among the features the replacement lacks/.test(part.text || '')));
     await assert.rejects(writeRemakePrompt({
         clip: { bytes: Buffer.from('clip'), mimeType: 'video/mp4' }, frames: 91, sourceFrames: 72,
         pictures: [{ image: { bytes: Buffer.from('still'), mimeType: 'image/png' }, frame: 44 }],
