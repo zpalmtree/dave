@@ -661,12 +661,31 @@ export interface VideoEditStillImage {
  * garment: listing hijabs and veils got a bareheaded politician's frame refused 4 of 4 times, while
  * this wording passed 4 of 4 and still kept the hijab in 4 of 4.
  *
+ * Headwear the target's own wording names belongs to the target and goes with it: "the person
+ * wearing a Guy Fawkes mask and black hat" (19b37af1) kept the hat over Sol Slug #2243's afro,
+ * and the motion review rejected every render for the hat left behind. The garment list stays
+ * in code; the prompt still names none.
+ *
  * A group target ("replace every bear") replaces each of its members with its own copy. Worded for
  * one replacement, 3c8ba05b's repaints changed one of four dancing bears, or drew one Meximutt and
  * erased the rest, in five of six draws, and the still review rejected each.
  */
+const NAMED_HEADWEAR = /\b(hats?|caps?|helmets?|hoods?|hoodies?|crowns?|tiaras?|beanies?|berets?|fedoras?|sombreros?|stetsons?|bowlers?|top ?hats?|turbans?|hijabs?|veils?|headscarf|headscarves|bandanas?|headbands?|headdress(es)?|headphones|headsets?|wigs?)\b/i;
+
+/** Whether the target's own wording names something it wears on its head. */
+export function videoEditTargetNamesHeadwear(target: string): boolean {
+    return NAMED_HEADWEAR.test(target);
+}
+
 export function videoEditStillPrompt(target: string, request: string, group = false): string {
     const named = /^(the|a|an|all|every|each|both|these|those) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
+    const headwear = videoEditTargetNamesHeadwear(target)
+        ? [group ? 'Everything each of them wears in Image 1, on its head too, is replaced along with it: each copy has'
+            : `Everything ${named} wears in Image 1, on its head too, is replaced along with it: the replacement has`,
+            'only the head, hair and clothing of Image 2, with nothing of the original figure left on it or behind it.']
+        : [group ? 'If one of them wears anything on its head in Image 1, its copy wears the same thing in the same way,'
+            : `If ${named} wears anything on its head in Image 1, the replacement wears the same thing in the same way,`,
+            'over its own hair and clothing.'];
     const place = group
         ? [`Replace ${named} with copies of the subject shown in Image 2, one copy for each of them, so the frame shows`,
             'exactly as many copies as Image 1 shows of them. Each copy takes exactly the place of the figure it replaces:',
@@ -681,9 +700,7 @@ export function videoEditStillPrompt(target: string, request: string, group = fa
         group ? 'Use Image 2 for every copy\'s identity, face, shape, proportions, clothing, colors and texture,'
             : 'Use Image 2 for the replacement\'s identity, face, shape, proportions, clothing, colors and texture,',
         'keeping its distinctive look instead of redesigning it.',
-        group ? 'If one of them wears anything on its head in Image 1, its copy wears the same thing in the same way,'
-            : `If ${named} wears anything on its head in Image 1, the replacement wears the same thing in the same way,`,
-        'over its own hair and clothing.',
+        ...headwear,
         'Keep everything else in Image 1 exactly as it is: the background, other subjects, lighting, colors,',
         'camera angle and framing.',
         'Output a single photographic frame with the same composition as Image 1, never a collage or side-by-side.',

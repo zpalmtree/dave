@@ -5581,7 +5581,8 @@ export class VideoBroker {
                 if (cached.sha256 === sha256 && cached.version === VIDEO_EDIT_REVIEW_VERSION) result = validateEditReview(cached);
             }
             result ||= validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
-                job.video_edit_target || 'the subject', reference, samples, 'motion', this.providerHooks(job), body.segment));
+                job.video_edit_target || 'the subject', reference, samples, 'motion', this.providerHooks(job), body.segment,
+                job.video_replacement_prompt || job.prompt || ''));
             writeFileSync(path, JSON.stringify({ ...result, sha256, version: VIDEO_EDIT_REVIEW_VERSION }, null, 2));
             writeJson(res, 200, result);
         } catch (error) { writeJson(res, 502, { error: sanitizeVideoWorkerText(String(error), 'Subject-edit review failed.', 500) }); }
@@ -5724,7 +5725,7 @@ export class VideoBroker {
                 if (isolated || still.provider !== 'openai') {
                     review = validateEditReview(await (this.options.videoEditReviewer || reviewVideoEdit)(
                         reviewTarget, reference, [{ source: { bytes: frame, mimeType }, edited: still }],
-                        'still', hooks, shot + round * 64));
+                        'still', hooks, shot + round * 64, job.video_replacement_prompt || job.prompt || ''));
                     writeFileSync(join(directory, `video-edit-still-review${suffix}${round ? `-${round + 1}` : ''}.json`),
                         JSON.stringify(review, null, 2));
                 }

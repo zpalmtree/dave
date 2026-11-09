@@ -1073,7 +1073,7 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
     const stillVerdicts = [];
     const reviewAttempts = [];
     const headCalls = [];
-    const reviewTargets = [];
+    const reviewTargets = [], reviewLooks = [];
     const repaintOptions = [];
     let refuseRedraw = false;
     const broker = new VideoBroker({
@@ -1097,8 +1097,9 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
             return { path, bytes: 11, mimeType: 'image/png' };
         },
         videoEditHeadLocator: async (_frame, _target, box) => (headCalls.push(box), { box: [0.6, 0.29, 0.68, 0.37], side: 'right' }),
-        videoEditReviewer: async (_target, _reference, _samples, phase, _hooks, attempt) => {
+        videoEditReviewer: async (_target, _reference, _samples, phase, _hooks, attempt, look) => {
             if (phase === 'still') reviewTargets.push(_target);
+            reviewLooks.push(look);
             reviewCalls++;
             if (phase === 'still') reviewAttempts.push(attempt);
             const accepted = phase === 'still' && stillVerdicts.length ? stillVerdicts.shift() : !rejectEdit;
@@ -1298,6 +1299,8 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
                 assert.equal(repaintOptions.at(-1).group, true);
                 assert.equal(repaintOptions.at(-1).headWording, undefined);
                 assert.equal(reviewTargets.at(-1), 'the man');
+                // The review learns the requested look, so a look it fixes outranks the source expression.
+                assert.match(reviewLooks.at(-1), /meximutt/i);
                 assert.equal(repaintOptions.at(-1).outfit, undefined, 'An uploaded reference has no character sheet.');
                 // The worker names the shot it repainted first; later shots are dressed like it.
                 const dressed = await still('frame', { 'x-video-edit-isolated': '1', 'x-video-edit-shot': '3',
