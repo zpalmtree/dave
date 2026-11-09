@@ -118,6 +118,14 @@ test('headwear named in the target is replaced with it', () => {
     }
 });
 
+test('an extreme close-up is repainted just as close', () => {
+    // a8aa2d45: the cat's blurred nose on the lens came back as a wide full-body view twice.
+    const box = [0, 0, 1, 0.956];
+    assert.match(isolatedEditSubject('the orange cat', box, undefined, false, true), /extreme close-up: .*never zoomed out/);
+    // Every isolated crop is tight, so a crop-filling box alone is not a close-up.
+    assert.doesNotMatch(isolatedEditSubject('the orange cat', box), /close-up/);
+});
+
 test('headwear goes with the target only when the user\'s own words give it away', () => {
     // a8aa2d45: the user said "the cat"; grounding added the propeller helmet that flies it.
     assert.equal(videoEditReplacesHeadwear('the cat', 'meximutt'), false);

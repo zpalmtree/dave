@@ -756,7 +756,7 @@ export function videoEditStillWithEffects(still: VideoKeyframeResult, effects: s
  * said only "the selected subject". The worker's tracked box names the target's place in the crop.
  */
 export function isolatedEditSubject(target: string, box?: [number, number, number, number], head?: string,
-    group = false): string {
+    group = false, closeUp = false): string {
     if (!box) return group ? 'the selected subjects in this tight source crop' : 'the selected subject in this tight source crop';
     const percent = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 100);
     const [left, top, right, bottom] = box.map(percent);
@@ -765,9 +765,17 @@ export function isolatedEditSubject(target: string, box?: [number, number, numbe
         return `the ${named} in the region from ${left}% to ${right}% of Image 1's width and ${top}% to ${bottom}% of its height`;
     }
     const named = target.trim().replace(/^(the|a|an) /i, '').slice(0, 160) || 'subject';
+    // a8aa2d45: a cat's blurred nose pressed against the lens filled the frame, and both editors
+    // drew a wide full-body view instead; the review rejected each. Say how close the camera is
+    // (the worker judges it against the whole frame: an isolated crop is always tight).
+    const near = closeUp
+        ? ' This is an extreme close-up: the figure is so close to the camera that it fills nearly all of Image 1,'
+            + ' with only part of it in view. Draw the replacement just as close, filling the frame the same way,'
+            + ' never zoomed out to show more of its body or the scene.'
+        : '';
     return `the ${named}: the one figure occupying the region from ${left}% to ${right}% of Image 1's width`
         + ` and ${top}% to ${bottom}% of its height${head ? `; ${head}, so the replacement's head and face go`
-            + ' exactly there, with its body and legs following Image 1\'s body' : ''}.`
+            + ' exactly there, with its body and legs following Image 1\'s body' : ''}.${near}`
         + ' Every other person in Image 1 stays exactly as they are';
 }
 
@@ -791,6 +799,8 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     subjectBox?: [number, number, number, number];
     /** Where the target's head is, worded for the editor; anchors which end of a tiny subject is which. */
     headWording?: string;
+    /** The target fills nearly the whole source frame: the repaint must stay just as close. */
+    closeUp?: boolean;
     /** The target is a group: each of its members gets its own copy of the replacement. */
     group?: boolean;
     /** Whether the target's headwear goes with it; by default, when the target wording names headwear. */
@@ -895,7 +905,7 @@ export async function createVideoEditStill(
         ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, undefined, true), request, true, headwear)
             + ' Image 1 is a tracked crop of the intended subjects, not the full scene. Replace every one of them; leave none of them unchanged and remove none of them. Preserve each figure\'s source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give each copy the facial expression of the figure it replaces: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. Dress every copy in Image 2\'s own clothing, not the clothing worn in Image 1. Fill the same crop. Where Image 1 shows a figure from behind, draw its copy from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
         : options.isolated
-        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, options.headWording), request, false, headwear)
+        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, options.headWording, false, options.closeUp), request, false, headwear)
             + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give the replacement Image 1\'s facial expression exactly: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. The animation keeps this expression, so Image 2\'s own expression gives way to Image 1\'s. Dress the replacement in Image 2\'s own clothing, not the clothing worn in Image 1, so the replacement looks the same in every shot of the clip. Fill the same crop; do not turn a profile into a front-facing portrait. When Image 1 shows the subject from behind, draw the replacement from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
         : videoEditStillPrompt(target, request, group, headwear)) + videoEditOutfitPrompt(options.outfit, group);
     const started = Date.now();

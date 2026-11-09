@@ -5817,6 +5817,7 @@ export class VideoBroker {
                         replacesHeadwear,
                         ...(outfit ? { outfit } : {}),
                         ...(isolated && subjectBox ? { subjectBox, ...(headWording ? { headWording } : {}) } : {}),
+                        ...(isolated && req.headers['x-video-edit-close-up'] === '1' ? { closeUp: true } : {}),
                         attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
                         ...(round ? { alternateOnly, deadline: budgetEnd - 60_000 } : {}) },
                 ), job.video_edit_effects || '');
