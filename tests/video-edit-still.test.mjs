@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createVideoEditStill, isolatedEditSubject, videoEditStillPrompt, videoEditTargetNamesHeadwear, videoEditStillWithEffects, withoutJpegApp11 } from '../dist/VideoKeyframeProvider.js';
+import { createVideoEditStill, isolatedEditSubject, videoEditReplacesHeadwear, videoEditStillPrompt, videoEditTargetNamesHeadwear, videoEditStillWithEffects, withoutJpegApp11 } from '../dist/VideoKeyframeProvider.js';
 import { parseSubjectBox } from '../dist/VideoBroker.js';
 import { parseVideoEditHead, videoEditHeadWording } from '../dist/VideoEditIntent.js';
 import { inflateSync } from 'node:zlib';
@@ -116,6 +116,17 @@ test('headwear named in the target is replaced with it', () => {
         assert.equal(videoEditTargetNamesHeadwear(plain), false, plain);
         assert.match(videoEditStillPrompt(plain, 'slug'), /wears the same thing in the same way/);
     }
+});
+
+test('headwear goes with the target only when the user\'s own words give it away', () => {
+    // a8aa2d45: the user said "the cat"; grounding added the propeller helmet that flies it.
+    assert.equal(videoEditReplacesHeadwear('the cat', 'meximutt'), false);
+    assert.equal(videoEditReplacesHeadwear('the guy in the hat', 'meximutt'), true);
+    // 19b37af1: Sol Slug's own gold crown takes the place of the man's black hat.
+    assert.equal(videoEditReplacesHeadwear('the masked man', 'slug with the gold crown and red royal cape'), true);
+    const grounded = 'the orange cat flying wearing a propeller helmet';
+    assert.match(videoEditStillPrompt(grounded, 'meximutt', false, false), /wears the same thing in the same way/);
+    assert.match(videoEditStillPrompt(grounded, 'meximutt'), /on its head too, is replaced along with it/);
 });
 
 const geminiImage = (bytes = frame.bytes, mimeType = 'image/png') => [200, {

@@ -664,7 +664,10 @@ export interface VideoEditStillImage {
  * Headwear the target's own wording names belongs to the target and goes with it: "the person
  * wearing a Guy Fawkes mask and black hat" (19b37af1) kept the hat over Sol Slug #2243's afro,
  * and the motion review rejected every render for the hat left behind. The garment list stays
- * in code; the prompt still names none.
+ * in code; the prompt still names none. That decision follows the user's words, not grounding's:
+ * "the cat" grounded to "the orange cat flying wearing a propeller helmet" (a8aa2d45), and the
+ * helmet that flies it went with the cat. The broker passes `replacesHeadwear` from the user's
+ * own target and replacement wording (`videoEditReplacesHeadwear`).
  *
  * A group target ("replace every bear") replaces each of its members with its own copy. Worded for
  * one replacement, 3c8ba05b's repaints changed one of four dancing bears, or drew one Meximutt and
@@ -677,9 +680,18 @@ export function videoEditTargetNamesHeadwear(target: string): boolean {
     return NAMED_HEADWEAR.test(target);
 }
 
-export function videoEditStillPrompt(target: string, request: string, group = false): string {
+/**
+ * Whether the user's own words give the target's headwear away: their target names it ("the guy in
+ * the hat"), or the replacement brings its own (Sol Slug's gold crown over 19b37af1's black hat).
+ */
+export function videoEditReplacesHeadwear(requestedTarget: string, request: string): boolean {
+    return NAMED_HEADWEAR.test(requestedTarget) || NAMED_HEADWEAR.test(request);
+}
+
+export function videoEditStillPrompt(target: string, request: string, group = false,
+    replacesHeadwear = videoEditTargetNamesHeadwear(target)): string {
     const named = /^(the|a|an|all|every|each|both|these|those) /i.test(target.trim()) ? target.trim() : `the ${target.trim()}`;
-    const headwear = videoEditTargetNamesHeadwear(target)
+    const headwear = replacesHeadwear
         ? [group ? 'Everything each of them wears in Image 1, on its head too, is replaced along with it: each copy has'
             : `Everything ${named} wears in Image 1, on its head too, is replaced along with it: the replacement has`,
             'only the head, hair and clothing of Image 2, with nothing of the original figure left on it or behind it.']
@@ -781,6 +793,8 @@ type VideoEditStillOptions = VideoFrontierCallOptions & {
     headWording?: string;
     /** The target is a group: each of its members gets its own copy of the replacement. */
     group?: boolean;
+    /** Whether the target's headwear goes with it; by default, when the target wording names headwear. */
+    replacesHeadwear?: boolean;
     /** Images that fix the replacement's whole outfit, so every shot of a clip dresses it alike. */
     outfit?: VideoEditOutfit;
     abortSignal?: AbortSignal;
@@ -876,13 +890,14 @@ export async function createVideoEditStill(
         onUsage: guard(options.onUsage), onAttempt: guard(options.onAttempt) };
     const group = options.group === true;
     const extras = videoEditOutfitImages(options.outfit);
+    const headwear = options.replacesHeadwear ?? videoEditTargetNamesHeadwear(target);
     const prompt = (options.isolated && group
-        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, undefined, true), request, true)
+        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, undefined, true), request, true, headwear)
             + ' Image 1 is a tracked crop of the intended subjects, not the full scene. Replace every one of them; leave none of them unchanged and remove none of them. Preserve each figure\'s source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give each copy the facial expression of the figure it replaces: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. Dress every copy in Image 2\'s own clothing, not the clothing worn in Image 1. Fill the same crop. Where Image 1 shows a figure from behind, draw its copy from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
         : options.isolated
-        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, options.headWording), request)
+        ? videoEditStillPrompt(isolatedEditSubject(target, options.subjectBox, options.headWording), request, false, headwear)
             + ' Image 1 is a tracked crop of the intended subject, not the full scene. Preserve its source silhouette, joint placement, head direction and current facial action. Treat Image 1 as the pose and expression guide, and Image 2 only as appearance. Give the replacement Image 1\'s facial expression exactly: the mouth as open as in Image 1, the same smile, laugh or grimace, teeth showing wherever Image 1 shows teeth, and the same eye openness. The animation keeps this expression, so Image 2\'s own expression gives way to Image 1\'s. Dress the replacement in Image 2\'s own clothing, not the clothing worn in Image 1, so the replacement looks the same in every shot of the clip. Fill the same crop; do not turn a profile into a front-facing portrait. When Image 1 shows the subject from behind, draw the replacement from behind too: the back of its head, its hair seen from the back, its build and the back of its clothing.'
-        : videoEditStillPrompt(target, request, group)) + videoEditOutfitPrompt(options.outfit, group);
+        : videoEditStillPrompt(target, request, group, headwear)) + videoEditOutfitPrompt(options.outfit, group);
     const started = Date.now();
     const deadline = Math.min(started + 270_000, options.deadline ?? Infinity);
     let failure: unknown = new Error('The replacement editors ran out of time.');

@@ -124,6 +124,7 @@ import {
     createFrontierVideoKeyframe,
     createVideoEditStill,
     createVideoIdentityRestoreStill,
+    videoEditReplacesHeadwear,
     VIDEO_EDIT_STILL_ATTEMPTS,
     VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
     videoEditStillWithEffects,
@@ -5585,6 +5586,20 @@ export class VideoBroker {
         }
     }
 
+    /**
+     * Whether the target's headwear goes with it. Grounding adds detail the user never asked to change
+     * ("the cat" became "the orange cat flying wearing a propeller helmet", a8aa2d45), so only the
+     * user's own target and replacement wording count; a job grounded without a record keeps the old rule.
+     */
+    private editReplacesHeadwear(job: JobRow): boolean {
+        let requested = job.video_edit_target || '';
+        try {
+            const grounding = JSON.parse(readFileSync(join(this.options.resultsDir, job.public_id, 'video-edit-grounding.json'), 'utf8'));
+            if (typeof grounding.requested_target === 'string') requested = grounding.requested_target;
+        } catch { /* No grounding record: judge the stored target. */ }
+        return videoEditReplacesHeadwear(requested, job.video_replacement_prompt || job.prompt || '');
+    }
+
     private editReference(job: JobRow): { bytes: Buffer; mimeType: string } {
         const directory = join(this.options.resultsDir, job.public_id);
         const path = job.source_image_path || join(directory, 'video-edit-worker-reference');
@@ -5682,8 +5697,10 @@ export class VideoBroker {
             const directory = join(this.options.resultsDir, publicId);
             const referencePath = join(directory, 'video-edit-reference.json');
             const description = existsSync(referencePath) ? String(JSON.parse(readFileSync(referencePath, 'utf8')).description || '') : '';
+            const keepsHeadwear = !this.editReplacesHeadwear(job);
             const sha256 = createHash('sha256').update(clip).update(still).update(JSON.stringify([body.frames, body.source_frames, body.pin, body.padding]))
-                .update(job.video_edit_target || '').update(description).update(job.video_edit_subjects === 'group' ? 'group' : '').digest('hex');
+                .update(job.video_edit_target || '').update(description).update(job.video_edit_subjects === 'group' ? 'group' : '')
+                .update(keepsHeadwear ? 'keeps-headwear' : '').digest('hex');
             const path = join(directory, `video-edit-remake-prompt-${body.segment}.json`);
             if (existsSync(path)) {
                 const cached = JSON.parse(readFileSync(path, 'utf8'));
@@ -5696,6 +5713,7 @@ export class VideoBroker {
                 padding: body.padding, pictures: [{ image: { bytes: still, mimeType: 'image/png' }, frame: body.pin }],
                 target: job.video_edit_target || 'the subject', request: job.prompt || '', replacementDescription: description,
                 ...(job.video_edit_subjects === 'group' ? { group: true } : {}),
+                ...(keepsHeadwear ? { keepsHeadwear } : {}),
             }, this.providerHooks(job), body.segment);
             mkdirSync(directory, { recursive: true });
             writeFileSync(path, JSON.stringify({ prompt, sha256, version: VIDEO_EDIT_REMAKE_PROMPT_VERSION }, null, 2));
@@ -5762,6 +5780,7 @@ export class VideoBroker {
                 ? storedVideoEditStill(directory, outfitShot) : null;
             const outfit = sheet || shotStill ? { ...(sheet ? { sheet } : {}), ...(shotStill ? { shot: shotStill } : {}) } : undefined;
             const reviewTarget = headWording ? `${target} (in Image 1, ${headWording})` : target;
+            const replacesHeadwear = this.editReplacesHeadwear(job);
             const extension = (still: VideoKeyframeResult) => still.mimeType === 'image/jpeg' ? 'jpg' : still.mimeType.split('/')[1];
             // The isolated worker waits eight minutes for this response.
             const budgetEnd = started + 420_000;
@@ -5773,6 +5792,7 @@ export class VideoBroker {
                     job.video_replacement_prompt || job.prompt,
                     // Usage events are keyed by attempt, so each shot and round reserves all editor attempts.
                     { serviceTier: configuredVideoOpenAIServiceTier(), ...hooks, isolated, ...(group ? { group } : {}),
+                        replacesHeadwear,
                         ...(outfit ? { outfit } : {}),
                         ...(isolated && subjectBox ? { subjectBox, ...(headWording ? { headWording } : {}) } : {}),
                         attemptOffset: (shot - 1) * VIDEO_EDIT_STILL_ATTEMPTS + round * VIDEO_EDIT_STILL_ROUND_ATTEMPTS,
