@@ -369,6 +369,8 @@ interface JobRow {
     render_seconds: number | null;
     delivered_at: number | null;
     notified_at: number | null;
+    /** A regenerate retried without posting: the bots see the job only once it is ready. */
+    quiet_regenerate?: number;
     planner_json: string | null;
     frontier_analysis_json: string | null;
     planner_model: string | null;
@@ -926,6 +928,7 @@ export class VideoBroker {
             ['recovery_json', 'TEXT'], ['recovery_version', 'INTEGER NOT NULL DEFAULT 0'],
             ['recovery_next_at', 'INTEGER'], ['delivery_message_id', 'TEXT'],
             ['delivery_revision', 'INTEGER NOT NULL DEFAULT 0'], ['delivered_revision', 'INTEGER NOT NULL DEFAULT 0'],
+            ['quiet_regenerate', 'INTEGER NOT NULL DEFAULT 0'],
             ['source_audio_path', 'TEXT'], ['source_audio_seconds', 'REAL'], ['source_audio_lyrics_json', 'TEXT'], ['source_audio_origin', 'TEXT'], ['source_excerpt_json', 'TEXT'],
             ['source_video_path', 'TEXT'], ['source_video_seconds', 'REAL'],
             ['video_edit_target', 'TEXT'], ['video_edit_effects', 'TEXT'], ['video_edit_subjects', 'TEXT'], ['video_edit_target_boxes', 'TEXT'], ['video_edit_mode', 'TEXT'], ['video_replacement_prompt', 'TEXT'], ['source_kind', 'TEXT'],
@@ -1396,6 +1399,7 @@ export class VideoBroker {
             const rows = await this.all<JobRow>(
                 `SELECT * FROM video_jobs WHERE origin_bot_id = ?
                  AND (status IN (${ACTIVE_SQL}) OR (status IN ('ready','failed','cancelled') AND notified_at IS NULL))
+                 AND (COALESCE(quiet_regenerate, 0) = 0 OR status = 'ready')
                  ORDER BY id ASC`,
                 [decodeURIComponent(botJobs[1])],
             );
@@ -1474,7 +1478,10 @@ export class VideoBroker {
                 return;
             }
             const guidance = typeof body.planner_guidance === 'string' ? body.planner_guidance.slice(0, VIDEO_PLANNER_GUIDANCE_MAX_CHARS) : row.planner_guidance;
-            await this.run(`UPDATE video_jobs SET status='queued', recovery_json=NULL, recovery_next_at=NULL,
+            // A quiet regenerate (an operator retrying a fix) shows the bots nothing until it is ready:
+            // no progress edits and no failure post, while a success is delivered as usual.
+            const quiet = body.quiet === true ? 1 : 0;
+            await this.run(`UPDATE video_jobs SET status='queued', recovery_json=NULL, recovery_next_at=NULL, quiet_regenerate=${quiet},
                 planner_json=NULL, frontier_analysis_json=NULL, planner_guidance=?, error=NULL,
                 source_audio_path=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_path END,
                 source_audio_seconds=CASE WHEN source_audio_origin='composed' THEN NULL ELSE source_audio_seconds END,
@@ -5677,8 +5684,9 @@ export class VideoBroker {
         let body: any;
         let clip: Buffer;
         let still: Buffer;
+        let extra: { pin: number; still: Buffer }[] = [];
         try {
-            body = await readJson(req, 24 * 1024 * 1024);
+            body = await readJson(req, 40 * 1024 * 1024);
             const base64 = (data: unknown, limit: number) => {
                 if (typeof data !== 'string' || !data.length || data.length > limit || !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
                     throw new Error('Invalid Remake window data.');
@@ -5692,6 +5700,17 @@ export class VideoBroker {
             still = base64(body.still, 8 * 1024 * 1024);
             if (clip.toString('latin1', 4, 8) !== 'ftyp') throw new Error('The Remake window must be an MP4 clip.');
             if (!still.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('The Remake still must be a PNG.');
+            // A keyframed window pins up to three more stills, each at its own frame of the window.
+            if (body.extra !== undefined) {
+                if (!Array.isArray(body.extra) || body.extra.length > 3 || !Number.isInteger(body.pin)) throw new Error('Invalid Remake keyframes.');
+                extra = body.extra.map((item: any) => {
+                    if (!Number.isInteger(item?.pin) || item.pin < 0 || item.pin >= body.frames) throw new Error('Invalid Remake keyframe pin.');
+                    const image = base64(item.still, 8 * 1024 * 1024);
+                    if (!image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('A Remake keyframe must be a PNG.');
+                    return { pin: item.pin, still: image };
+                });
+                if (new Set([body.pin, ...extra.map(item => item.pin)]).size !== extra.length + 1) throw new Error('Remake keyframes need distinct pins.');
+            }
         } catch (error) { writeJson(res, 400, { error: String(error) }); return; }
         try {
             const directory = join(this.options.resultsDir, publicId);
@@ -5700,7 +5719,8 @@ export class VideoBroker {
             const keepsHeadwear = !this.editReplacesHeadwear(job);
             const sha256 = createHash('sha256').update(clip).update(still).update(JSON.stringify([body.frames, body.source_frames, body.pin, body.padding]))
                 .update(job.video_edit_target || '').update(description).update(job.video_edit_subjects === 'group' ? 'group' : '')
-                .update(keepsHeadwear ? 'keeps-headwear' : '').digest('hex');
+                .update(keepsHeadwear ? 'keeps-headwear' : '')
+                .update(JSON.stringify(extra.map(item => [item.pin, createHash('sha256').update(item.still).digest('hex')]))).digest('hex');
             const path = join(directory, `video-edit-remake-prompt-${body.segment}.json`);
             if (existsSync(path)) {
                 const cached = JSON.parse(readFileSync(path, 'utf8'));
@@ -5710,7 +5730,9 @@ export class VideoBroker {
             }
             const prompt = await (this.options.videoEditRemakePrompter || writeRemakePrompt)({
                 clip: { bytes: clip, mimeType: 'video/mp4' }, frames: body.frames, sourceFrames: body.source_frames,
-                padding: body.padding, pictures: [{ image: { bytes: still, mimeType: 'image/png' }, frame: body.pin }],
+                padding: body.padding, pictures: [{ image: { bytes: still, mimeType: 'image/png' }, frame: body.pin },
+                    // <Picture N> is the node's ref_N: the main still first, then the keyframes as sent.
+                    ...extra.map(item => ({ image: { bytes: item.still, mimeType: 'image/png' }, frame: item.pin }))],
                 target: job.video_edit_target || 'the subject', request: job.prompt || '', replacementDescription: description,
                 ...(job.video_edit_subjects === 'group' ? { group: true } : {}),
                 ...(keepsHeadwear ? { keepsHeadwear } : {}),

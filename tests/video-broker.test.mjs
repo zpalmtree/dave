@@ -4464,6 +4464,17 @@ test('a leased isolated replacement gets a cached, validated Viggle-Remake promp
             assert.equal((await remake({ ...window, pin: null })).status, 200);
             assert.equal(prompts.length, 2);
             assert.equal(prompts[1].pictures[0].frame, null);
+            // A keyframed window pins its other regime stills, in the order the Remake node takes them.
+            const late = Buffer.concat([png, Buffer.from('late')]);
+            const keyed = { ...window, extra: [{ pin: 10, still: png.toString('base64') }, { pin: 80, still: late.toString('base64') }] };
+            assert.equal((await remake(keyed)).status, 200);
+            assert.equal(prompts.length, 3);
+            assert.deepEqual(prompts[2].pictures.map(picture => picture.frame), [44, 10, 80]);
+            assert.ok(prompts[2].pictures[2].image.bytes.equals(late));
+            assert.equal((await remake({ ...keyed, extra: [{ pin: 44, still: png.toString('base64') }] })).status, 400, 'Pins are distinct.');
+            assert.equal((await remake({ ...keyed, pin: null })).status, 400, 'Keyframes need a pinned main still.');
+            assert.equal((await remake({ ...keyed, extra: [{ pin: 90, still: png.toString('base64') }] })).status, 400);
+            assert.equal((await remake({ ...keyed, extra: Array(4).fill({ pin: 1, still: png.toString('base64') }) })).status, 400);
         } finally { socket.close(); }
     } finally { await broker.stop(); }
 });
