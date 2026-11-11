@@ -41,6 +41,31 @@ export type VideoEditSubjects = 'primary' | 'group';
 /** box_2d is [ymin, xmin, ymax, xmax], normalized to 0-1000 of the frame. */
 export interface VideoEditTargetBox { seconds: number; box_2d: [number, number, number, number] }
 
+/** A sampled time where grounding saw no target: the camera had left it (b3681832's keyboard shot). */
+export interface VideoEditTargetAbsence { seconds: number; absent: true }
+
+/**
+ * The sample times grounding returned no box for, when it boxed the target somewhere else.
+ * Grounding is told to leave out timestamps where the target is not visible; the worker keeps
+ * a shot whose every sample is absent as source footage instead of tracking whatever SAM finds
+ * there. A grounding with no boxes at all says nothing about where the target is missing.
+ */
+export function videoEditTargetAbsences(sampleTimes: number[], boxes: VideoEditTargetBox[]): VideoEditTargetAbsence[] {
+    if (!boxes.length) return [];
+    return sampleTimes.filter(seconds => !boxes.some(box => Math.abs(box.seconds - seconds) < 0.05))
+        .map(seconds => ({ seconds, absent: true as const }));
+}
+
+/** Absent sample times among stored target boxes. */
+export function parseVideoEditTargetAbsences(value: unknown): VideoEditTargetAbsence[] {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 20).flatMap(entry => {
+        const seconds = Number(entry?.seconds);
+        return entry?.absent === true && Number.isFinite(seconds) && seconds >= 0 && seconds <= 600
+            ? [{ seconds, absent: true as const }] : [];
+    });
+}
+
 /** Valid boxes only: a malformed box drops out instead of failing the grounding. */
 export function parseVideoEditTargetBoxes(value: unknown): VideoEditTargetBox[] {
     if (!Array.isArray(value)) return [];
@@ -160,7 +185,9 @@ export async function classifyVideoEditIntent(input: VideoEditIntentInput, hooks
 
 export function videoEditSampleTimes(duration: number): number[] {
     if (!Number.isFinite(duration) || duration < 0.5 || duration > 120) throw new Error('Invalid source video duration.');
-    return [0, 0.2, 0.4, 0.6, 0.8].map(fraction => Number((duration * fraction).toFixed(3)));
+    // Every tenth of the clip: samples that stopped at 80% never saw b3681832's last shot,
+    // a keyboard the camera turned to, so the worker could not tell the target had left.
+    return [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map(fraction => Number((duration * fraction).toFixed(3)));
 }
 
 export async function sampleVideoEditFrames(source: StoredVideoSourceClip): Promise<Array<{ seconds: number; data: Buffer }>> {

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseVideoEditTargetBoxes, validateVideoEditDecision, sampleVideoEditFrames, videoEditSampleTimes } from '../dist/VideoEditIntent.js';
+import { parseVideoEditTargetAbsences, parseVideoEditTargetBoxes, validateVideoEditDecision, sampleVideoEditFrames, videoEditSampleTimes, videoEditTargetAbsences } from '../dist/VideoEditIntent.js';
 import { resolveVideoEditRequest } from '../dist/VideoGeneration.js';
 import { ARGENMUTT, MEXIMUTT } from '../dist/VideoCharacters.js';
 
@@ -158,9 +158,22 @@ test('samples contain actual source frames across the timeline, including short 
         execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x96:rate=24:duration=0.5',
             '-c:v', 'libx264', path]);
         const frames = await sampleVideoEditFrames({ path, duration: 0.5, bytes: 100 });
-        assert.deepEqual(frames.map(f => f.seconds), [0, 0.1, 0.2, 0.3, 0.4]);
+        assert.deepEqual(frames.map(f => f.seconds), [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45]);
         assert.ok(frames.every(f => f.data[0] === 0xff && f.data[1] === 0xd8));
-        assert.notDeepEqual(frames[0].data, frames[4].data);
-        assert.deepEqual(videoEditSampleTimes(120), [0, 24, 48, 72, 96]);
+        assert.notDeepEqual(frames[0].data, frames[9].data);
+        // Samples reach 90% of the clip, so a last shot the target left is seen.
+        assert.deepEqual(videoEditSampleTimes(120), [0, 12, 24, 36, 48, 60, 72, 84, 96, 108]);
     } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('grounding samples without a box are passed on as absences only when something was boxed', () => {
+    // b3681832: the camera turned to a keyboard for the last shot; grounding boxed every sample but 24.452 s.
+    const times = videoEditSampleTimes(27.167);
+    const boxes = times.slice(0, 9).map(seconds => ({ seconds: Number((seconds + 0.01).toFixed(3)), box_2d: [0, 0, 1000, 1000] }));
+    assert.deepEqual(videoEditTargetAbsences(times, boxes), [{ seconds: 24.45, absent: true }]);
+    assert.deepEqual(videoEditTargetAbsences(times, []), []);
+    const stored = [...boxes, { seconds: 24.45, absent: true }];
+    assert.equal(parseVideoEditTargetBoxes(stored).length, 9);
+    assert.deepEqual(parseVideoEditTargetAbsences(stored), [{ seconds: 24.45, absent: true }]);
+    assert.deepEqual(parseVideoEditTargetAbsences([{ seconds: 'x', absent: true }, { seconds: 2, absent: 'yes' }, null]), []);
 });

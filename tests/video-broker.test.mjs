@@ -1194,7 +1194,11 @@ test(`replace edits ${version >= 8 ? 'use isolated rendering on' : 'wait for an 
 
             assert.equal(lease.job.video_edit_subjects, 'primary');
             // The grounded target boxes reach the worker, which picks the tracked person inside them.
-            assert.deepEqual(lease.job.video_edit_target_boxes, [{ seconds: 0, box_2d: [342, 281, 401, 463] }]);
+            assert.deepEqual(lease.job.video_edit_target_boxes[0], { seconds: 0, box_2d: [342, 281, 401, 463] });
+            // Every other sample time came back without a box: the worker reads those as absences.
+            const absences = lease.job.video_edit_target_boxes.slice(1);
+            assert.equal(absences.length, 9);
+            assert.ok(absences.every(entry => entry.absent === true && entry.seconds > 0 && !('box_2d' in entry)));
             const still = (body, headers = {}) => fetch(
                 `http://127.0.0.1:${broker.listeningPort()}/v1/worker/jobs/${job.id}/video-edit-still`, {
                     method: 'POST', body,
