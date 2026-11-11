@@ -1,7 +1,7 @@
 import { recoveryMusic } from './VideoMusic.js';
 import { recoveryKeyframeAspect } from './VideoCanvas.js';
 import { recoveryVideoProgress, recoveryCheckpointProgress, recoveryProgressContext } from './VideoProgress.js';
-import { groundVideoEditTarget, locateVideoEditHead, parseVideoEditTargetBoxes, videoEditHeadWording, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects, VideoEditTargetBox } from './VideoEditIntent.js';
+import { groundVideoEditTarget, locateVideoEditHead, parseVideoEditTargetAbsences, parseVideoEditTargetBoxes, videoEditHeadWording, validateVideoEditDecision, VideoEditMode, videoEditSampleTimes, VideoEditSubjects, videoEditTargetAbsences, VideoEditTargetAbsence, VideoEditTargetBox } from './VideoEditIntent.js';
 import { reviewVideoEdit, validateEditReview, VIDEO_EDIT_REVIEW_VERSION, EditReview, EditReviewSample } from './VideoEditReview.js';
 import { writeRemakePrompt, VIDEO_EDIT_REMAKE_PROMPT_VERSION } from './VideoEditRemakePrompt.js';
 import { describeVideoEditReference, validateVideoEditReference, VIDEO_EDIT_REFERENCE_VERSION } from './VideoEditReference.js';
@@ -577,11 +577,13 @@ export function storedVideoEditStill(directory: string, shot: number): { bytes: 
     return { bytes: readFileSync(found.path), mimeType: found.extension === 'jpg' ? 'image/jpeg' : `image/${found.extension}` };
 }
 
-function parseStoredTargetBoxes(value: string | null): VideoEditTargetBox[] | null {
+function parseStoredTargetBoxes(value: string | null): Array<VideoEditTargetBox | VideoEditTargetAbsence> | null {
     if (!value) return null;
     try {
-        const boxes = parseVideoEditTargetBoxes(JSON.parse(value));
-        return boxes.length ? boxes : null;
+        const stored = JSON.parse(value);
+        const boxes = parseVideoEditTargetBoxes(stored);
+        // Absent sample times go with the boxes; a worker that predates them skips entries without box_2d.
+        return boxes.length ? [...boxes, ...parseVideoEditTargetAbsences(stored)] : null;
     } catch { return null; }
 }
 
@@ -1948,7 +1950,7 @@ export class VideoBroker {
         let videoEditTarget = String(body.video_edit_target || '').trim();
         let videoEditEffects = '';
         let videoEditSubjects: VideoEditSubjects = 'primary';
-        let videoEditTargetBoxes: VideoEditTargetBox[] = [];
+        let videoEditTargetBoxes: Array<VideoEditTargetBox | VideoEditTargetAbsence> = [];
         if (body.video_edit_mode !== undefined && body.video_edit_mode !== null
             && (!['replace', 'add'].includes(body.video_edit_mode) || !videoEditTarget)) {
             return { status: 400, body: { error: 'Video edit mode must be replace or add, with a subject.' } };
@@ -2074,7 +2076,8 @@ export class VideoBroker {
                 videoEditTarget = grounding.target;
                 videoEditEffects = grounding.effects;
                 videoEditSubjects = grounding.subjects;
-                videoEditTargetBoxes = grounding.targetBoxes || [];
+                videoEditTargetBoxes = [...(grounding.targetBoxes || []),
+                    ...videoEditTargetAbsences(videoEditSampleTimes(sourceVideo.duration), grounding.targetBoxes || [])];
             } catch (error) {
                 rmSync(directory, { recursive: true, force: true });
                 await this.run("UPDATE video_submission_metrics SET outcome='rejected', completed_at=? WHERE public_id=?", [Date.now() / 1000, publicId]);
