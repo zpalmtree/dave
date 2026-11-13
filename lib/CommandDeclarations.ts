@@ -1064,25 +1064,30 @@ const sharedCommands: Command[] = [
         primaryCommand: {
             argsFormat: Args.Combined,
             implementation: handleWeather,
-            description: 'Retrieve the weather forecast for a region',
-            helpDescription: 'Retrieve the weather forecast for a region. Returns ' +
-                '5 days of forecasts, at 3 hour intervals.',
+            description: 'Get the current weather anywhere',
+            helpDescription: 'Get the current weather for a place. Type it however ' +
+                'you like: a city, neighbourhood, postcode, ZIP code, landmark, nickname ' +
+                'or coordinates. Typos and slang are understood.',
             examples: [
                 {
                     name: 'Get the weather in a city',
-                    value: 'weather Paris',
+                    value: 'weather paris',
                 },
                 {
-                    name: 'Get the weather in a specific country',
-                    value: 'Weather Paris, US',
+                    name: 'Pick between places with the same name',
+                    value: 'weather paris texas',
                 },
                 {
-                    name: 'Get the weather in a zip code',
-                    value: 'weather 10001, US',
+                    name: 'Get the weather in a ZIP code or post code',
+                    value: 'weather 10001',
                 },
                 {
-                    name: 'Get the weather in a post code',
-                    value: 'weather SW1, GB',
+                    name: 'Use a nickname or landmark',
+                    value: 'weather brum',
+                },
+                {
+                    name: 'Use coordinates',
+                    value: 'weather 51.5, -0.12',
                 },
             ],
         },
