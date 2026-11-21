@@ -97,6 +97,15 @@ function socketInbox(socket) {
     };
 }
 
+test('video failure policy requeues Gaming Mode preemptions without spending a retry', () => {
+    const preempted = 'Stopped to free the GPU for Gaming Mode.';
+    // Video edits report preemption as non-retryable, and repeats must not exhaust the job.
+    assert.equal(videoFailureDisposition(preempted, false, 0, 0, null), 'wait-gaming');
+    assert.equal(videoFailureDisposition(preempted, true, 2, 6, preempted), 'wait-gaming');
+    assert.equal(videoFailureDisposition('Gaming Mode preempted the job', false, 0, 0, null), 'wait-gaming');
+    assert.equal(videoFailureDisposition('Gaming Mode is active.', false, 0, 0, null), 'fail');
+});
+
 test('video failure policy waits on readiness and suppresses identical render retries', () => {
     assert.equal(
         videoFailureDisposition('Timed out waiting for ComfyUI readiness.', true, 0, 0, null),
