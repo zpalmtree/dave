@@ -514,7 +514,12 @@ function parseStoredFrontierAnalysis(value: string | null): Record<string, any> 
     }
 }
 
-export type VideoFailureDisposition = 'fail' | 'retry' | 'wait-readiness';
+export type VideoFailureDisposition = 'fail' | 'retry' | 'wait-readiness' | 'wait-gaming';
+
+/** gpuq stopped the job's GPU lease because Gaming Mode began; nothing about the job failed. */
+export function gamingModePreempted(error: string): boolean {
+    return /gaming mode/i.test(error) && /stopped to free the gpu|preempt/i.test(error);
+}
 
 /** The desktop has exhausted candidate validation, rather than lost a service. */
 export function localPlanningExhausted(error: string): boolean {
@@ -548,6 +553,9 @@ export function videoFailureDisposition(
     readinessRetries: number,
     previousError: string | null,
 ): VideoFailureDisposition {
+    // Auto Gaming Mode follows games, so a preemption is routine. The next lease
+    // holds in gpuq's queue until the game exits and costs no retry attempt.
+    if (gamingModePreempted(error)) return 'wait-gaming';
     if (!retryable || localPlanningExhausted(error)) return 'fail';
     const normalized = error.trim().toLowerCase().replace(/\s+/g, ' ');
     const readiness = /(?:gpuq|gpu reservation|comfyui|comfy).*(?:ready|readiness|start|respond|timeout|timed out)/.test(normalized)
@@ -4539,18 +4547,19 @@ export class VideoBroker {
                 const publicError = sanitizeVideoWorkerText(message.error, 'Worker failure', 2000);
                 if (row.recovery_version) {
                     const prior = row.recovery_json ? JSON.parse(row.recovery_json) : {};
-                    prior.waits = (prior.waits || 0) + 1;
+                    const gaming = gamingModePreempted(publicError) && !prior.terminal_error;
+                    if (!gaming) prior.waits = (prior.waits || 0) + 1;
                     prior.last_error = prior.terminal_error || publicError;
-                    const delay = Math.min(900, 30 * 2 ** Math.min(5, prior.waits - 1));
-                    const exhausted = recoveryLimitReached(prior) || message.retryable === false
-                        || localPlanningExhausted(publicError) || Boolean(prior.terminal_error);
+                    const delay = gaming ? 0 : Math.min(900, 30 * 2 ** Math.min(5, prior.waits - 1));
+                    const exhausted = !gaming && (recoveryLimitReached(prior) || message.retryable === false
+                        || localPlanningExhausted(publicError) || Boolean(prior.terminal_error));
                     await this.run(`UPDATE video_jobs SET status=?, stage=?,
                         recovery_json=?, recovery_next_at=?, worker_id=NULL, lease_token=NULL,
                         lease_expires_at=NULL, gpu_queue_state=NULL, progress=NULL, progress_scope=NULL,
                         segment_index=NULL, segment_count=NULL, segment_progress=NULL,
                         error=?, completed_at=?, updated_at=? WHERE public_id=?`,
                         [exhausted ? 'failed' : 'queued',
-                            exhausted ? 'Video recovery stopped' : 'Waiting to resume video recovery',
+                            exhausted ? 'Video recovery stopped' : gaming ? 'Waiting for Gaming Mode to end' : 'Waiting to resume video recovery',
                             JSON.stringify(prior), exhausted ? null : nowSeconds() + delay,
                             exhausted ? `Video recovery stopped after ${prior.waits} failed recovery ${prior.waits === 1 ? 'pass' : 'passes'} (separate from screenplay attempts). ${prior.last_error}` : null,
                             exhausted ? nowSeconds() : null, nowSeconds(), jobId]);
@@ -4608,7 +4617,9 @@ export class VideoBroker {
                                 ? 'Paused after GPU driver reset'
                                 : disposition === 'wait-readiness'
                                     ? 'Waiting for GPU/Comfy readiness'
-                                    : 'Retrying',
+                                    : disposition === 'wait-gaming'
+                                        ? 'Waiting for Gaming Mode to end'
+                                        : 'Retrying',
                             publicError,
                             nowSeconds(),
                             jobId,
