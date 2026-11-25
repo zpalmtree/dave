@@ -697,6 +697,20 @@ fixture showcase is <http://localhost:4348>, started with
 `node scripts/serve-edit-fallback-showcase.mjs`; desktop/mobile captures are in
 `docs/showcases/edit-fallback/`.
 
+## Retry a timed replacement after motion review
+
+When motion review rejects a segment with a prepared Viggle-Remake prompt, the
+desktop worker tries the same source window and stills with a second seed. If
+that fails motion review, the worker tries the two existing Viggle-Animate draws.
+Segments without a timed prompt render with Animate and can retry with a new seed.
+The worker re-renders only the segment blamed for the failure and delivers only
+after motion review accepts the result.
+
+The desktop change is recorded in `desktop/video-edit-remake-retry.patch`. Apply
+it from the desktop `video_gen` checkout with `git apply --check` followed by
+`git apply`, and reload the supervised worker while idle. The Windows worker
+regression exercises the retry order, segments without prompts, and exhaustion.
+
 ## Preserved black frames in motion review
 
 The `f8551b5a` replacement was rejected because its first review sample contained

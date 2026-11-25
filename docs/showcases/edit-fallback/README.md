@@ -16,14 +16,15 @@ Reviewed Playwright MCP captures: [desktop](desktop.png) at 1440px and
 [mobile](mobile.png) at 390px. Both include loading, primary success, fallback
 success, outage, empty output, both editors declining, unconfigured fallback,
 cancellation, usable imperfect stills, source recovery, failed source recovery,
-motion recovery, background-mask recovery, subject colour protection, continuous
+motion recovery, timed replacement retry and its completion, unavailable timed
+prompts, exhausted motion retries, background-mask recovery, subject colour protection, continuous
 fades, dark tracking recovery, neighboring-frame review, continuity rejection,
 failed animation tracking and wrong-identity rejection states. Neither has horizontal overflow.
 No task browser tabs remain open. The shared browser emitted a pre-existing wallet
 extension `ethereum` injection error; the page has no scripts or application errors.
 
-Captured from base revision `bf1f236` plus this change. The feature fingerprint in
-the screenshots is SHA-256 `3ab0aa6b9867` over `VideoKeyframeProvider.ts` and
+The original continuity capture used base revision `bf1f236`. Its feature
+fingerprint was SHA-256 `3ab0aa6b9867` over `VideoKeyframeProvider.ts` and
 `VideoBroker.ts`, then `VideoEditReview.ts`, `desktop/video-edit-recovery.patch`,
 `desktop/video_edit_source_recovery.py`, `desktop/video-edit-source-recovery.patch`
 and `desktop/video_edit_alignment.py`, then `desktop/video_edit_continuity.py`
@@ -88,3 +89,11 @@ switch. The fresh animation test stopped on replacement-mask alignment failure;
 no successful new render or delivery is claimed. Both updated captures were
 reviewed at desktop/mobile widths with all 20 fixtures and no horizontal overflow.
 All task-owned browser tabs were closed.
+
+The November 25 timed replacement update captures base revision `9b4e24d` with
+the worker retry patch (`242df3843d68` showcase fingerprint). The retry fixtures
+use the shared Discord status, completion, and failure formatters. Both captures
+show all 24 states. The Windows worker passed 78 tests, and the broker and editor
+review passed 60 tests. A replay of `fa465eae` produced a blink and laugh on the
+second Remake draw. The repaired clip used manual timing alignment and passed
+the standard motion review and a separate review of the expression changes.
