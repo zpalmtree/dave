@@ -1,0 +1,158 @@
+diff --git a/test_video_worker.py b/test_video_worker.py
+index 0095314..b4db42a 100644
+--- a/test_video_worker.py
++++ b/test_video_worker.py
+@@ -885,14 +885,15 @@ class PublicStageTests(unittest.TestCase):
+                 (work / 'reviews.json').write_text(json.dumps([f'review-{n:02d}.json' for n in range(1, 5)]))
+             return code
+         worker.run_reserved_command = run
+-        verdicts = {'review-01.json': [False, True], 'review-02.json': [True], 'review-03.json': [False, False, False]}
++        verdicts = {'review-01.json': [False, True], 'review-02.json': [False, True],
++                    'review-03.json': [False, False, False, False]}
+         reviewed = []
+         async def review(_job, evidence):
+             reviewed.append(evidence.name)
+             if not verdicts.get(evidence.name, [True]).pop(0):
+                 raise RuntimeError('Replacement failed its source-performance check: static')
+         worker.request_video_edit_review = mock.AsyncMock(side_effect=review)
+-        worker.prepare_remake_prompts = mock.AsyncMock(return_value=True)
++        worker.prepare_remake_prompts = mock.AsyncMock(return_value={2, 3})
+         with tempfile.TemporaryDirectory() as directory, \
+                 mock.patch.object(video_worker, 'SCRIPT_DIR', Path(directory)), \
+                 mock.patch.object(video_worker, 'LOG_DIR', Path(directory) / 'logs'), \
+@@ -900,14 +901,14 @@ class PublicStageTests(unittest.TestCase):
+                 mock.patch.dict(video_worker.os.environ, {'VIDEO_EDIT_CHARACTER_SWAP': '1'}):
+             asyncio.run(worker.run_job(job))
+         renders = [command for command in commands if '--viggle-render' in command]
+-        retries = [(command[command.index('--reseed-segments') + 1], command[-2:]) for command in renders[1:]]
+-        # Segment 1 takes Viggle-Animate once; segment 3 goes down its own ladder; 2 and 4 keep
+-        # their first renders and, once accepted, are not reviewed again.
+-        self.assertEqual(retries, [('1', ['--isolated-renderer', 'viggle']),
+-                                   ('3', ['--isolated-renderer', 'viggle']),
+-                                   ('3', ['--seed-offset', '104729'])])
+-        self.assertEqual(reviewed, ['review-01.json', 'review-01.json', 'review-02.json',
+-                                    'review-03.json', 'review-03.json', 'review-03.json'])
++        retries = [command[command.index('--reseed-segments') + 1:] for command in renders[1:]]
++        self.assertEqual(retries, [['1', '--isolated-renderer', 'viggle', '--seed-offset', '104729'],
++                                   ['2', '--isolated-renderer', 'remake', '--seed-offset', '104729'],
++                                   ['3', '--isolated-renderer', 'remake', '--seed-offset', '104729'],
++                                   ['3', '--isolated-renderer', 'viggle'],
++                                   ['3', '--isolated-renderer', 'viggle', '--seed-offset', '104729']])
++        self.assertEqual(reviewed, ['review-01.json', 'review-01.json', 'review-02.json', 'review-02.json',
++                                    'review-03.json', 'review-03.json', 'review-03.json', 'review-03.json'])
+         worker.finish_output.assert_not_awaited()
+         worker.fail_current.assert_awaited_once()
+ 
+diff --git a/video_worker.py b/video_worker.py
+index 2b37437..55dc6c0 100644
+--- a/video_worker.py
++++ b/video_worker.py
+@@ -2472,7 +2472,7 @@ class DesktopVideoWorker:
+                          else f"Repainting the replacement into {len(frames)} shots" if len(frames) > 1
+                          else "Repainting the replacement into a frame of the clip"})
+         limit = asyncio.Semaphore(VIDEO_EDIT_REPAINTS_AT_ONCE)
+-        remake = False
++        remake_segments: set[int] = set()
+ 
+         async def repaint(shot: int, frame: Path, outfit_shot: int | None = None) -> Path | Exception:
+             async with limit:
+@@ -2514,7 +2514,7 @@ class DesktopVideoWorker:
+             # The Remake prompts need no GPU either; they are written while admission is yielded.
+             if isolated and video_edit_remake_enabled() and not any(isinstance(result, Exception) for result in results):
+                 try:
+-                    remake = await self.prepare_remake_prompts(job, work, results, source_video)
++                    remake_segments = await self.prepare_remake_prompts(job, work, results, source_video)
+                 except Exception as exc:
+                     print(f"WARNING: Viggle-Remake prompts unavailable ({str(exc)[:300]}); using Viggle-Animate", flush=True)
+             if self.cancel_reason:
+@@ -2546,23 +2546,28 @@ class DesktopVideoWorker:
+         stills = [result for result in results if not isinstance(result, Exception)]
+         await self.send({"type": "event", "event": "progress", "job_id": job_id,
+                          "stage": "Animating the replacement from the source motion" if backend == "wan"
+-                         else "Animating the replacement with Viggle-Remake" if remake
++                         else "Animating the replacement with Viggle-Remake" if remake_segments
+                          else "Animating the replacement with Viggle-Animate"})
+         render_command = [
+             console_python_executable(), "-s", str(VIDEO_EDIT_GENERATOR), "--clip", str(source_video),
+             "--viggle-render", str(work), "--still", *map(str, stills), "--output", str(output),
+             "--error-file", str(error_file),
+-            *(["--isolated-renderer", "remake" if remake else backend, "--reference-description", reference_description]
++            *(["--isolated-renderer", "remake" if remake_segments else backend, "--reference-description", reference_description]
+               if isolated else []),
+         ]
+         code = await self.run_reserved_command(render_command)
+         self.add_span("worker", "video_edit_viggle", time.monotonic() - started)
+         if code == 0 and output.is_file():
+             if isolated:
+-                # A segment the review rejects gets the renders the Viggle-Animate path would have
+-                # made: after a Remake render, Viggle-Animate's first draw and then its reseed.
+-                ladder = ([["--isolated-renderer", "viggle"], ["--isolated-renderer", "viggle", "--seed-offset", "104729"]]
+-                          if remake else [["--seed-offset", "104729"]])
++                # Animate can hold a painted expression through a blink or laugh. Give a
++                # timed Remake window another draw before moving down to Animate.
++                reseed = ["--seed-offset", "104729"]
++                remake_retries = [["--isolated-renderer", "remake", *reseed],
++                                  ["--isolated-renderer", "viggle"],
++                                  ["--isolated-renderer", "viggle", *reseed]]
++                other_retries = [["--isolated-renderer", backend, *reseed]]
++                retries = {number: remake_retries if number in remake_segments else other_retries
++                           for number in range(1, len(state["segments"]) + 1)}
+                 attempts: dict[int, int] = {}
+                 accepted: set[int] = set()
+                 while True:
+@@ -2595,14 +2600,14 @@ class DesktopVideoWorker:
+                         region = {number for number in range(1, len(state["segments"]) + 1)
+                                   if (work / f"replacement-region-{number:02d}.json").is_file()}
+                         candidates = [number for number in blamed_segments(str(exc), state["segments"], current, region)
+-                                      if attempts.get(number, 0) < len(ladder)]
++                                      if attempts.get(number, 0) < len(retries[number])]
+                         if not candidates:
+                             raise
+                         rejected, current = current, candidates[0]
+                         tried = attempts.get(current, 0)
+                         attempts[current] = tried + 1
+                         accepted.discard(current)
+-                        retry = ladder[tried]
++                        retry = retries[current][tried]
+                         print(f"Motion review rejected segment {rejected}; re-rendering "
+                               f"{'it' if current == rejected else f'segment {current}, where it saw the fault,'} with "
+                               f"{' '.join(retry)}: {str(exc)[:300]}", flush=True)
+@@ -2620,8 +2625,8 @@ class DesktopVideoWorker:
+         return code
+ 
+     async def prepare_remake_prompts(self, job: dict[str, Any], work: Path, stills: list[Path],
+-                                     source_video: Path) -> bool:
+-        """Write each segment's Remake window and have the broker time its performance; True when any is ready."""
++                                     source_video: Path) -> set[int]:
++        """Write timed Remake prompts and return the segment numbers that are ready to render."""
+         await self.send({"type": "event", "event": "progress", "job_id": str(job["id"]),
+                          "stage": "Timing the source performance for Viggle-Remake"})
+         process = await asyncio.create_subprocess_exec(
+@@ -2634,20 +2639,21 @@ class DesktopVideoWorker:
+         windows = sorted((work / "remake").glob("segment-*.json"))
+         limit = asyncio.Semaphore(VIDEO_EDIT_REMAKE_PROMPTS_AT_ONCE)
+ 
+-        async def prompt(path: Path) -> bool:
++        async def prompt(path: Path) -> int | None:
+             async with limit:
+                 window = json.loads(path.read_text(encoding="utf-8"))
+                 try:
+                     text = await self.request_video_edit_remake_prompt(job, work / "remake", window)
+                 except Exception as exc:
+                     print(f"WARNING: no Viggle-Remake prompt for segment {window['segment']}: {str(exc)[:300]}", flush=True)
+-                    return False
++                    return None
+                 (work / "remake" / window["prompt"]).write_text(text, encoding="utf-8")
+-                return True
++                return int(window["segment"])
+ 
+-        ready = await asyncio.gather(*(prompt(path) for path in windows))
+-        print(f"Viggle-Remake prompts ready for {sum(ready)} of {len(windows)} segment window(s)", flush=True)
+-        return any(ready)
++        segments = await asyncio.gather(*(prompt(path) for path in windows))
++        ready = {segment for segment in segments if segment is not None}
++        print(f"Viggle-Remake prompts ready for {len(ready)} of {len(windows)} segment window(s)", flush=True)
++        return ready
+ 
+     async def broker_retrying(self, label: str, call):
+         """Repeat a broker request through a broker restart (8dd077c1: a deploy's 502 cost the
