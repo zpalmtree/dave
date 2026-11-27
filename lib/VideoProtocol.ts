@@ -199,6 +199,21 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelDefinition> = {
 
 export type VideoSourceKind = 'image' | 'video_frame' | 'preset' | 'preset_image' | 'preset_video_frame' | 'video_edit' | 'text';
 
+/** A delivered video as the gallery lists it; its media is the Discord delivery's attachment. */
+export interface VideoGalleryEntry {
+    id: string;
+    model: VideoModelId;
+    command_variant: string | null;
+    prompt: string;
+    planned_intent: string | null;
+    prompt_tease: string | null;
+    requester_id: string;
+    channel_id: string;
+    status_message_id: string;
+    delivery_message_id: string | null;
+    delivered_at: number | null;
+}
+
 export interface VideoJobView {
     delivery_message_id?: string | null;
     delivery_revision?: number;

@@ -127,6 +127,8 @@ import {
 
 import { VIDEO_CHARACTERS, VideoCharacter, videoCharacterCast } from './VideoCharacters.js';
 
+import { videoGalleryHandler } from './VideoGallery.js';
+
 import {
     handleQwenEdit,
     handleQwenImage,
@@ -278,6 +280,22 @@ const sharedCommands: Command[] = [
             ],
         },
         relatedCommands: ['minimax', 'minimaxfast', 'oalgo'],
+        commandGates: [discordOnlyGate, singleVideoResponderGate],
+    },
+    {
+        aliases: ['oalgos', 'oalgohistory', 'oalgogallery'],
+        discordOnly: true,
+        primaryCommand: {
+            argsFormat: Args.Combined,
+            implementation: videoGalleryHandler(),
+            description: 'Browse this server\'s past Oalgo videos in random order, with a download link for each. Add “mine”, a mention, or words to search the prompts.',
+            examples: [
+                { value: 'oalgos' },
+                { value: 'oalgos mine' },
+                { value: 'oalgos tacos' },
+            ],
+        },
+        relatedCommands: ['oalgo', 'videoqueue'],
         commandGates: [discordOnlyGate, singleVideoResponderGate],
     },
     {
