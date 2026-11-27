@@ -55,6 +55,7 @@ import {
     VIDEO_SOURCE_IMAGE_MAX_BYTES,
     VIDEO_SOURCE_IMAGE_MIME_TYPES,
     VIDEO_SOURCE_COMPOSITION_TIMEOUT_MS,
+    VideoGalleryEntry,
     VideoJobStatus,
     VideoJobView,
     VideoGeneratorModelId,
@@ -1423,6 +1424,10 @@ export class VideoBroker {
                 [decodeURIComponent(userJobs[1])],
             );
             writeJson(res, 200, { jobs: await this.views(rows), state: await this.brokerState() });
+            return;
+        }
+        if (url.pathname === '/v1/gallery' && req.method === 'GET') {
+            writeJson(res, 200, await this.gallery(url.searchParams));
             return;
         }
         if (url.pathname === '/v1/queue' && req.method === 'GET') {
@@ -6321,6 +6326,36 @@ export class VideoBroker {
         if (!job.lease_token) return true;
         const supplied = req.headers['x-video-lease'];
         return supplied === undefined || supplied === job.lease_token;
+    }
+
+    /**
+     * Delivered videos for one server, newest first. Media is not served here: the
+     * broker deletes results after a day, so bots play the Discord delivery instead.
+     */
+    private async gallery(params: URLSearchParams): Promise<{ videos: VideoGalleryEntry[] }> {
+        const guildId = params.get('guild_id');
+        const variants = (params.get('variants') || '').split(',').map(value => value.trim()).filter(Boolean).slice(0, 20);
+        if (!guildId || !variants.length) return { videos: [] };
+        const rows = await this.all<JobRow>(
+            `SELECT * FROM video_jobs
+             WHERE guild_id = ? AND status = 'delivered'
+             AND command_variant IN (${variants.map(() => '?').join(',')})
+             ORDER BY id DESC LIMIT 5000`,
+            [guildId, ...variants],
+        );
+        return { videos: rows.map(row => ({
+            id: row.public_id,
+            model: row.model,
+            command_variant: row.command_variant,
+            prompt: row.prompt,
+            planned_intent: plannedIntent(row),
+            prompt_tease: row.prompt_tease,
+            requester_id: row.requester_id,
+            channel_id: row.channel_id,
+            status_message_id: row.status_message_id,
+            delivery_message_id: row.delivery_message_id || null,
+            delivered_at: row.delivered_at ?? null,
+        })) };
     }
 
     private async cleanupFiles(): Promise<void> {

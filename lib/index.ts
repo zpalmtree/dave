@@ -46,6 +46,7 @@ import { externalBotReplyRestrictions } from './ExternalBotReplyRestrictions.js'
 import { startUproar } from './Uproar.js';
 import { exchangeService } from './Exchange.js';
 import { startVideoGenerationService } from './VideoGeneration.js';
+import { startVideoGallery } from './VideoGallery.js';
 import { startQwenImageService } from './QwenImage.js';
 
 async function handleRestrictedExternalBotReply(msg: Message): Promise<boolean> {
@@ -153,6 +154,7 @@ function createDiscordClient(db: sqlite3.Database, messageContent = true): { cli
 
         restoreTimers(db, client);
         startVideoGenerationService(client);
+        startVideoGallery(client);
         startQwenImageService(client);
         startGitHubCommitWatch(client);
         startCodexResetWatch(client);
